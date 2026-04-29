@@ -13,11 +13,32 @@ import OutreachPanel      from '@/components/skills/OutreachPanel';
 import ApplyAssistantPanel from '@/components/skills/ApplyAssistantPanel';
 import PrepInterviewPanel  from '@/components/skills/PrepInterviewPanel';
 import { motion } from 'framer-motion';
-import { 
-  ArrowLeft, Building2, MapPin, Calendar, 
-  Euro, ShieldCheck, ExternalLink, Sparkles, 
-  CheckCircle2, AlertCircle, Bookmark, Send
+import {
+  ArrowLeft, Building2, MapPin, Calendar,
+  Euro, ShieldCheck, ExternalLink, Sparkles,
+  CheckCircle2, AlertCircle, Bookmark, Send, Zap
 } from 'lucide-react';
+
+// ── Source badge colour map (mirrors JobCard.tsx) ───────────────────────
+const SOURCE_STYLES: Record<string, string> = {
+  'LinkedIn (Twin AI)': 'bg-blue-50 text-blue-700 border-blue-200',
+  'IrishJobs':          'bg-emerald-50 text-emerald-700 border-emerald-200',
+  'Jobs.ie':            'bg-teal-50 text-teal-700 border-teal-200',
+  'Reed':               'bg-red-50 text-red-700 border-red-200',
+  'Adzuna':             'bg-orange-50 text-orange-700 border-orange-200',
+  'Remotive':           'bg-purple-50 text-purple-700 border-purple-200',
+  'TheMuse':            'bg-pink-50 text-pink-700 border-pink-200',
+  'Jobicy':             'bg-yellow-50 text-yellow-700 border-yellow-200',
+};
+function getSourceStyle(s?: string) {
+  if (!s) return 'bg-slate-50 text-slate-500 border-slate-200';
+  const k = Object.keys(SOURCE_STYLES).find(k => s.toLowerCase().includes(k.toLowerCase()));
+  return k ? SOURCE_STYLES[k] : 'bg-slate-50 text-slate-500 border-slate-200';
+}
+function sourceLabel(s?: string) {
+  if (!s) return 'Job Board';
+  return s.replace(/ Careers$/i, '').trim();
+}
 
 export default function JobDetailPage() {
   const { id } = useParams<{ id: string }>();
@@ -71,7 +92,9 @@ export default function JobDetailPage() {
   if (!job) return (
     <div className="max-w-5xl mx-auto text-center py-20">
       <h2 className="text-2xl font-bold text-slate-900">Job not found</h2>
-      <Link to="/dashboard" className="text-brand-vibrant font-bold hover:underline mt-4 inline-block">Return to Dashboard</Link>
+      <Link to="/dashboard" className="text-brand-vibrant font-bold hover:underline mt-4 inline-block">
+        Return to Dashboard
+      </Link>
     </div>
   );
 
@@ -81,17 +104,22 @@ export default function JobDetailPage() {
 
   return (
     <div className="max-w-5xl mx-auto space-y-8 pb-20">
-      <Link to="/dashboard" className="inline-flex items-center gap-2 text-sm font-bold text-slate-400 hover:text-brand-vibrant transition-colors group">
+      <Link
+        to="/dashboard"
+        className="inline-flex items-center gap-2 text-sm font-bold text-slate-400 hover:text-brand-vibrant transition-colors group"
+      >
         <ArrowLeft size={16} className="group-hover:-translate-x-1 transition-transform" />
         BACK TO DASHBOARD
       </Link>
 
-      {/* ── Hero Header ─────────────────────────────────────────────────── */}
+      {/* ─── Hero Header ──────────────────────────────────────────────────────── */}
       <section className="glass-card p-8 md:p-10 relative overflow-hidden">
         <div className="absolute top-0 right-0 w-64 h-64 bg-brand-vibrant/5 blur-3xl rounded-full -mr-32 -mt-32" />
-        
+
         <div className="flex flex-col md:flex-row items-start justify-between gap-8 relative">
           <div className="flex-1 space-y-4">
+
+            {/* Company + Title */}
             <div className="flex items-center gap-3">
               <div className="w-14 h-14 bg-white border border-slate-100 rounded-2xl shadow-sm flex items-center justify-center text-slate-400">
                 <Building2 size={32} />
@@ -102,48 +130,118 @@ export default function JobDetailPage() {
               </div>
             </div>
 
-            <div className="flex flex-wrap gap-4 text-sm font-bold text-slate-500">
+            {/* Source badge + pre-match score */}
+            <div className="flex items-center gap-2 flex-wrap">
+              {job.sourceName && (
+                <span className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold border ${
+                  getSourceStyle(job.sourceName)
+                }`}>
+                  <ExternalLink size={11} />
+                  {sourceLabel(job.sourceName)}
+                </span>
+              )}
+              {job.preMatchScore != null && job.preMatchScore > 0 && (
+                <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold bg-brand-vibrant/5 text-brand-vibrant border border-brand-vibrant/20">
+                  <Zap size={11} />
+                  {job.preMatchScore}/100 relevance score
+                </span>
+              )}
+            </div>
+
+            {/* Meta pills */}
+            <div className="flex flex-wrap gap-3 text-sm font-bold text-slate-500">
               <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-slate-50 border border-slate-100">
-                <MapPin size={16} className="text-slate-400" />
+                <MapPin size={15} className="text-slate-400" />
                 {job.location || 'Remote'}
               </div>
               <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-slate-50 border border-slate-100">
-                <Calendar size={16} className="text-slate-400" />
+                <Calendar size={15} className="text-slate-400" />
                 {timeAgo(job.postedAt || '')}
               </div>
               <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-brand-vibrant/5 text-brand-vibrant border border-brand-vibrant/10">
-                <Euro size={16} />
+                <Euro size={15} />
                 {salary}
               </div>
-              <div className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full border ${job.sponsorship ? 'bg-emerald-50 text-emerald-600 border-emerald-100' : 'bg-rose-50 text-rose-600 border-rose-100'}`}>
-                <ShieldCheck size={16} />
+              <div className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full border ${
+                job.sponsorship
+                  ? 'bg-emerald-50 text-emerald-600 border-emerald-100'
+                  : 'bg-rose-50 text-rose-600 border-rose-100'
+              }`}>
+                <ShieldCheck size={15} />
                 {job.sponsorship ? 'Sponsorship OK' : 'No Sponsorship'}
               </div>
             </div>
+
+            {/* Gemini human summary */}
+            {job.humanSummary && (
+              <motion.p
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                className="text-sm text-slate-600 leading-relaxed bg-brand-vibrant/5 border border-brand-vibrant/10 rounded-xl px-4 py-3 italic"
+              >
+                “{job.humanSummary}”
+              </motion.p>
+            )}
           </div>
 
+          {/* Match circle + action buttons */}
           <div className="shrink-0 flex flex-col items-center gap-4">
             {job.matchPercent != null && (
               <div className="p-4 bg-white rounded-3xl shadow-premium border border-white">
                 <MatchCircle percent={job.matchPercent} size={90} />
-                <p className="text-[10px] font-black text-center text-slate-400 uppercase tracking-widest mt-2">Match Score</p>
+                <p className="text-[10px] font-black text-center text-slate-400 uppercase tracking-widest mt-2">
+                  AI Match Score
+                </p>
               </div>
             )}
-            <div className="flex gap-2">
-              <button onClick={saveToKanban} className="w-12 h-12 flex items-center justify-center rounded-2xl bg-white border border-slate-200 text-slate-400 hover:text-brand-vibrant hover:border-brand-vibrant/30 transition-all shadow-sm">
+
+            <div className="flex gap-2 w-full">
+              <button
+                onClick={saveToKanban}
+                className="w-12 h-12 flex items-center justify-center rounded-2xl bg-white border border-slate-200 text-slate-400 hover:text-brand-vibrant hover:border-brand-vibrant/30 transition-all shadow-sm"
+                title="Save to Kanban"
+              >
                 <Bookmark size={20} />
               </button>
-              <button onClick={markApplied} className="flex-1 px-6 h-12 flex items-center justify-center gap-2 rounded-2xl bg-brand-vibrant text-white font-bold text-sm shadow-glow hover:bg-brand-deep transition-all">
-                <Send size={18} />
-                Apply Now
-              </button>
+
+              {/* ✔ Direct link to original job posting — opens in new tab */}
+              {job.sourceUrl ? (
+                <a
+                  href={job.sourceUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="flex-1 px-5 h-12 flex items-center justify-center gap-2 rounded-2xl bg-brand-vibrant text-white font-bold text-sm shadow-glow hover:bg-brand-deep transition-all"
+                >
+                  <ExternalLink size={17} />
+                  Apply on {sourceLabel(job.sourceName)}
+                </a>
+              ) : (
+                <button
+                  onClick={markApplied}
+                  className="flex-1 px-5 h-12 flex items-center justify-center gap-2 rounded-2xl bg-brand-vibrant text-white font-bold text-sm shadow-glow hover:bg-brand-deep transition-all"
+                >
+                  <Send size={17} />
+                  Mark Applied
+                </button>
+              )}
             </div>
+
+            {/* If sourceUrl exists, show separate Mark Applied button below */}
+            {job.sourceUrl && (
+              <button
+                onClick={markApplied}
+                className="w-full h-10 flex items-center justify-center gap-2 rounded-2xl border border-slate-200 bg-white text-slate-500 hover:text-brand-vibrant hover:border-brand-vibrant/30 text-xs font-bold transition-all shadow-sm"
+              >
+                <Send size={14} />
+                I Applied — Move to Kanban
+              </button>
+            )}
           </div>
         </div>
       </section>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-        {/* Left Column: Intelligence Tools */}
+        {/* Left Column: Intelligence Tools + Skills */}
         <div className="lg:col-span-1 space-y-8">
           <section className="glass-card p-6">
             <div className="flex items-center gap-2 mb-6">
@@ -160,7 +258,6 @@ export default function JobDetailPage() {
             </div>
           </section>
 
-          {/* Skills Analysis */}
           {(job.matchedSkills?.length || job.unmatchedSkills?.length) ? (
             <section className="glass-card p-6">
               <div className="flex items-center gap-2 mb-6">
@@ -173,8 +270,7 @@ export default function JobDetailPage() {
                   <div className="flex flex-wrap gap-2">
                     {(job.matchedSkills || []).map(s => (
                       <span key={s} className="px-3 py-1 rounded-lg bg-emerald-50 text-emerald-700 text-xs font-bold border border-emerald-100 flex items-center gap-1">
-                        <CheckCircle2 size={12} />
-                        {s}
+                        <CheckCircle2 size={11} /> {s}
                       </span>
                     ))}
                   </div>
@@ -184,8 +280,7 @@ export default function JobDetailPage() {
                   <div className="flex flex-wrap gap-2">
                     {(job.unmatchedSkills || []).map(s => (
                       <span key={s} className="px-3 py-1 rounded-lg bg-rose-50 text-rose-700 text-xs font-bold border border-rose-100 flex items-center gap-1">
-                        <AlertCircle size={12} />
-                        {s}
+                        <AlertCircle size={11} /> {s}
                       </span>
                     ))}
                   </div>
@@ -195,26 +290,29 @@ export default function JobDetailPage() {
           ) : null}
         </div>
 
-        {/* Right Column: Content */}
+        {/* Right Column: Description + CV Tips */}
         <div className="lg:col-span-2 space-y-8">
           <section className="glass-card p-8">
             <div className="flex items-center justify-between mb-6">
               <h3 className="font-bold text-slate-900 uppercase tracking-wider text-sm">About the Role</h3>
+              {/* Source URL link — always visible at top of description */}
               {job.sourceUrl && (
-                <a href={job.sourceUrl} target="_blank" rel="noreferrer" className="text-xs font-bold text-brand-vibrant hover:underline flex items-center gap-1">
-                  Original Post
+                <a
+                  href={job.sourceUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="inline-flex items-center gap-1.5 text-xs font-bold text-brand-vibrant hover:underline"
+                >
+                  View Original Posting
                   <ExternalLink size={12} />
                 </a>
               )}
             </div>
-            <div className="prose prose-slate max-w-none">
-               <div className="text-slate-600 leading-relaxed whitespace-pre-wrap text-sm">
-                {job.description || 'No description available.'}
-              </div>
+            <div className="text-slate-600 leading-relaxed whitespace-pre-wrap text-sm">
+              {job.description || 'No description available.'}
             </div>
           </section>
 
-          {/* CV Tips */}
           {job.cvImprovementTips && job.cvImprovementTips.length > 0 && (
             <section className="glass-card p-8 border-l-4 border-l-brand-vibrant">
               <h3 className="font-bold text-slate-900 uppercase tracking-wider text-sm mb-6">CV Optimization Tips</h3>
@@ -233,7 +331,7 @@ export default function JobDetailPage() {
         </div>
       </div>
 
-      {/* Panels */}
+      {/* Slide-over Panels */}
       <EvaluationPanel     data={evalSkill.data}     open={evalSkill.open}     onClose={() => evalSkill.setOpen(false)} />
       <TailorCvPanel       data={tailorSkill.data}   open={tailorSkill.open}   onClose={() => tailorSkill.setOpen(false)} />
       <ResearchPanel       data={researchSkill.data} open={researchSkill.open} onClose={() => researchSkill.setOpen(false)} />
@@ -248,7 +346,7 @@ export default function JobDetailPage() {
 function timeAgo(iso: string): string {
   if (!iso) return 'Recent';
   const diff = (Date.now() - new Date(iso).getTime()) / 1000;
-  if (diff < 3600) return `${Math.round(diff / 60)}m ago`;
+  if (diff < 3600)  return `${Math.round(diff / 60)}m ago`;
   if (diff < 86400) return `${Math.round(diff / 3600)}h ago`;
   return `${Math.round(diff / 86400)}d ago`;
 }
