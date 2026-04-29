@@ -1,0 +1,158 @@
+package com.careerops.service;
+
+import com.careerops.dto.JobDtos.*;
+import com.careerops.exception.ApiException;
+import com.careerops.model.*;
+import com.careerops.repository.*;
+import com.fasterxml.jackson.databind.JsonNode;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.http.HttpStatus;
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
+
+import java.util.*;
+import java.util.stream.Collectors;
+
+/**
+ * Wires scrape -> dedup -> Gemini score -> top-N selection -> persist user_jobs.
+ * Honours per-user daily limits.
+ */
+@Service
+public class JobDeliveryService {
+    private static final Logger log = LoggerFactory.getLogger(JobDeliveryService.class);
+
+    private final JobScrapeService scrape;
+    private final DeduplicationService dedup;
+    private final GeminiService gemini;
+    private final SkillPromptLibrary prompts;
+    private final UserProfileRepository profiles;
+    private final UserJobRepository userJobs;
+    private final JobRepository jobs;
+    private final CvService cvService;
+    private final DailyLimitService limits;
+
+    @Value("${jobs.cron.daily.count:3}")
+    private int cronShare;
+
+    public JobDeliveryService(JobScrapeService scrape, DeduplicationService dedup, GeminiService gemini,
+                              SkillPromptLibrary prompts, UserProfileRepository profiles,
+                              UserJobRepository userJobs, JobRepository jobs, CvService cv,
+                              DailyLimitService limits) {
+        this.scrape = scrape; this.dedup = dedup; this.gemini = gemini; this.prompts = prompts;
+        this.profiles = profiles; this.userJobs = userJobs; this.jobs = jobs;
+        this.cvService = cv; this.limits = limits;
+    }
+
+    @Transactional
+    public FetchSummary deliver(UUID userId, int desiredCount) {
+        UserProfile p = profiles.findByUserId(userId)
+            .orElseThrow(() -> new ApiException(HttpStatus.BAD_REQUEST, "Complete onboarding first"));
+        if (Boolean.FALSE.equals(p.getOnboarded()))
+            throw new ApiException(HttpStatus.BAD_REQUEST, "Complete onboarding first");
+
+        int remaining = limits.remaining(userId);
+        if (remaining <= 0)
+            throw new ApiException(HttpStatus.TOO_MANY_REQUESTS,
+                "Daily limit reached. Resets at midnight.");
+        int target = Math.min(desiredCount, remaining);
+
+        List<Job> raw = scrape.fetchRaw(p);
+        List<Job> deduped = dedup.dedupAndPersist(userId, raw);
+        log.info("User {} dedup pool size: {}", userId, deduped.size());
+
+        String cvText = cvService.activeCvText(userId);
+        List<Scored> scored = new ArrayList<>();
+        int budget = Math.min(deduped.size(), 25); // cap Gemini calls per fetch
+
+        for (int i = 0; i < budget; i++) {
+            Job j = deduped.get(i);
+            JsonNode out = scoreOne(j, p, cvText);
+            int match = out.path("matchPercent").asInt(0);
+            if (match >= (p.getMinMatchPercent() == null ? 60 : p.getMinMatchPercent())) {
+                scored.add(new Scored(j, out, match));
+            }
+        }
+
+        // De-dup by company, sort, top-N
+        Set<String> companies = new HashSet<>();
+        scored.sort(Comparator.comparingInt(Scored::match).reversed());
+        List<Scored> top = scored.stream()
+            .filter(s -> companies.add(s.job().getCompany().toLowerCase()))
+            .limit(target)
+            .collect(Collectors.toList());
+
+        for (Scored s : top) {
+            UserJob existing = userJobs.findByUserIdAndJobId(userId, s.job().getId()).orElse(null);
+            if (existing != null) continue;
+            UserJob uj = UserJob.builder()
+                .userId(userId).jobId(s.job().getId())
+                .matchPercent(s.match()).aiScore(s.json().path("overallScore").asInt(s.match()))
+                .matchedSkills(toArr(s.json().path("matchedSkills")))
+                .unmatchedSkills(toArr(s.json().path("unmatchedSkills")))
+                .cvImprovementTips(toArr(s.json().path("cvImprovementTips")))
+                .humanSummary(s.json().path("humanSummary").asText(null))
+                .verdict(s.json().path("verdict").asText(null))
+                .scoreBreakdown(s.json())
+                .build();
+            userJobs.save(uj);
+        }
+
+        if (!top.isEmpty()) {
+            dedup.markSeen(userId, top.stream().map(Scored::job).toList());
+            limits.increment(userId, top.size());
+        }
+        return new FetchSummary(top.size(), limits.getCount(userId), limits.max(), limits.remaining(userId));
+    }
+
+    public int cronShare() { return cronShare; }
+
+    private JsonNode scoreOne(Job j, UserProfile p, String cv) {
+        String user = String.format("""
+            USER:
+            - Target roles: %s
+            - Tech stack: %s
+            - Sectors: %s
+            - Location: %s
+            - Salary band: %s-%s EUR
+            - Sponsorship required: %s
+            - Min match threshold: %s%%
+
+            CV:
+            %s
+
+            JOB:
+            Title: %s | Company: %s | Location: %s
+            Salary: %s-%s | Sponsorship: %s
+            Description:
+            %s
+            """,
+            arr(p.getTargetRoles()), arr(p.getTechStack()), arr(p.getSectors()),
+            p.getLocation(), p.getSalaryMin(), p.getSalaryMax(),
+            p.getSponsorshipRequired(), p.getMinMatchPercent(),
+            trim(cv, 6000),
+            j.getTitle(), j.getCompany(), j.getLocation(),
+            j.getSalaryMin(), j.getSalaryMax(), j.getSponsorship(),
+            trim(j.getDescription(), 4000)
+        );
+        return gemini.generateJson(prompts.prompt("evaluate"), user);
+    }
+
+    private static String[] toArr(JsonNode n) {
+        if (n == null || !n.isArray()) return new String[0];
+        List<String> out = new ArrayList<>();
+        n.forEach(x -> out.add(x.asText()));
+        return out.toArray(new String[0]);
+    }
+
+    private static String arr(String[] a) {
+        return a == null ? "[]" : Arrays.stream(a).collect(Collectors.joining(", ", "[", "]"));
+    }
+    private static String trim(String s, int max) {
+        if (s == null) return "";
+        return s.length() <= max ? s : s.substring(0, max) + "...[truncated]";
+    }
+
+    private record Scored(Job job, JsonNode json, int match) {}
+}
