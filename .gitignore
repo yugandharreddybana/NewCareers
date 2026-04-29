@@ -82,3 +82,10 @@ bin/
 
 # Vite
 dist/
+
+# ── SECURITY: Never commit real credentials ────────────────────────────────
+# Use application.example.properties as the template.
+# Copy it to application.properties and fill in real values locally.
+backend/src/main/resources/application.properties
+middleware/.env
+frontend/.env
