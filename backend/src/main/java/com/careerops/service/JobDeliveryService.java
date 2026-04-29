@@ -16,8 +16,11 @@ import java.util.*;
 import java.util.stream.Collectors;
 
 /**
- * Wires scrape -> dedup -> Gemini score -> top-N selection -> persist user_jobs.
- * Honours per-user daily limits.
+ * Wires scrape -> dedup -> JobMatchingService pre-rank -> Gemini score -> top-N -> persist.
+ *
+ * JobMatchingService does a fast, free keyword-based pre-filter so that
+ * Gemini only evaluates the most relevant candidates, reducing API cost
+ * and improving result quality.
  */
 @Service
 public class JobDeliveryService {
@@ -32,17 +35,20 @@ public class JobDeliveryService {
     private final JobRepository jobs;
     private final CvService cvService;
     private final DailyLimitService limits;
+    private final JobMatchingService matcher;
 
     @Value("${jobs.cron.daily.count:3}")
     private int cronShare;
 
-    public JobDeliveryService(JobScrapeService scrape, DeduplicationService dedup, GeminiService gemini,
-                              SkillPromptLibrary prompts, UserProfileRepository profiles,
-                              UserJobRepository userJobs, JobRepository jobs, CvService cv,
-                              DailyLimitService limits) {
-        this.scrape = scrape; this.dedup = dedup; this.gemini = gemini; this.prompts = prompts;
-        this.profiles = profiles; this.userJobs = userJobs; this.jobs = jobs;
-        this.cvService = cv; this.limits = limits;
+    public JobDeliveryService(JobScrapeService scrape, DeduplicationService dedup,
+                              GeminiService gemini, SkillPromptLibrary prompts,
+                              UserProfileRepository profiles, UserJobRepository userJobs,
+                              JobRepository jobs, CvService cv, DailyLimitService limits,
+                              JobMatchingService matcher) {
+        this.scrape = scrape; this.dedup = dedup; this.gemini = gemini;
+        this.prompts = prompts; this.profiles = profiles; this.userJobs = userJobs;
+        this.jobs = jobs; this.cvService = cv; this.limits = limits;
+        this.matcher = matcher;
     }
 
     @Transactional
@@ -54,20 +60,27 @@ public class JobDeliveryService {
 
         int remaining = limits.remaining(userId);
         if (remaining <= 0)
-            throw new ApiException(HttpStatus.TOO_MANY_REQUESTS,
-                "Daily limit reached. Resets at midnight.");
+            throw new ApiException(HttpStatus.TOO_MANY_REQUESTS, "Daily limit reached. Resets at midnight.");
         int target = Math.min(desiredCount, remaining);
 
+        // 1. Scrape all sources
         List<Job> raw = scrape.fetchRaw(p);
+
+        // 2. Dedup globally
         List<Job> deduped = dedup.dedupAndPersist(userId, raw);
         log.info("User {} dedup pool size: {}", userId, deduped.size());
 
+        // 3. Pre-rank cheaply with JobMatchingService — pick best 25 for Gemini
+        //    This avoids sending irrelevant jobs to Gemini (saves tokens + money)
+        List<Job> preRanked = matcher.topN(deduped, p, 25)
+            .stream().map(JobMatchingService.ScoredJob::job).toList();
+        log.info("User {} pre-ranked pool for Gemini: {}", userId, preRanked.size());
+
+        // 4. Gemini deep-scores the pre-ranked pool
         String cvText = cvService.activeCvText(userId);
         List<Scored> scored = new ArrayList<>();
-        int budget = Math.min(deduped.size(), 25); // cap Gemini calls per fetch
 
-        for (int i = 0; i < budget; i++) {
-            Job j = deduped.get(i);
+        for (Job j : preRanked) {
             JsonNode out = scoreOne(j, p, cvText);
             int match = out.path("matchPercent").asInt(0);
             if (match >= (p.getMinMatchPercent() == null ? 60 : p.getMinMatchPercent())) {
@@ -75,7 +88,7 @@ public class JobDeliveryService {
             }
         }
 
-        // De-dup by company, sort, top-N
+        // 5. De-dup by company, sort by Gemini score, take top-N
         Set<String> companies = new HashSet<>();
         scored.sort(Comparator.comparingInt(Scored::match).reversed());
         List<Scored> top = scored.stream()
@@ -83,12 +96,14 @@ public class JobDeliveryService {
             .limit(target)
             .collect(Collectors.toList());
 
+        // 6. Persist to user_jobs
         for (Scored s : top) {
             UserJob existing = userJobs.findByUserIdAndJobId(userId, s.job().getId()).orElse(null);
             if (existing != null) continue;
             UserJob uj = UserJob.builder()
                 .userId(userId).jobId(s.job().getId())
-                .matchPercent(s.match()).aiScore(s.json().path("overallScore").asInt(s.match()))
+                .matchPercent(s.match())
+                .aiScore(s.json().path("overallScore").asInt(s.match()))
                 .matchedSkills(toArr(s.json().path("matchedSkills")))
                 .unmatchedSkills(toArr(s.json().path("unmatchedSkills")))
                 .cvImprovementTips(toArr(s.json().path("cvImprovementTips")))
@@ -145,7 +160,6 @@ public class JobDeliveryService {
         n.forEach(x -> out.add(x.asText()));
         return out.toArray(new String[0]);
     }
-
     private static String arr(String[] a) {
         return a == null ? "[]" : Arrays.stream(a).collect(Collectors.joining(", ", "[", "]"));
     }
