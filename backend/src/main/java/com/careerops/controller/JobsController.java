@@ -10,8 +10,10 @@ import com.careerops.service.DailyLimitService;
 import com.careerops.service.JobDeliveryService;
 import com.careerops.util.AuthUtil;
 import org.springframework.http.HttpStatus;
+import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.bind.annotation.*;
 
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -21,15 +23,16 @@ import java.util.UUID;
 public class JobsController {
 
     private final UserJobRepository userJobs;
-    private final JobRepository jobs;
+    private final JobRepository     jobs;
     private final JobDeliveryService delivery;
-    private final DailyLimitService limits;
+    private final DailyLimitService  limits;
 
     public JobsController(UserJobRepository u, JobRepository j, JobDeliveryService d, DailyLimitService l) {
         this.userJobs = u; this.jobs = j; this.delivery = d; this.limits = l;
     }
 
     @GetMapping
+    @Transactional(readOnly = true)
     public Map<String,Object> list() {
         UUID uid = AuthUtil.currentUserId();
         List<JobCardResponse> cards = userJobs.findByUserIdOrderByDeliveredAtDesc(uid).stream()
@@ -53,6 +56,7 @@ public class JobsController {
     }
 
     @GetMapping("/{userJobId}")
+    @Transactional(readOnly = true)
     public JobDetailResponse detail(@PathVariable UUID userJobId) {
         UUID uid = AuthUtil.currentUserId();
         UserJob uj = userJobs.findByIdAndUserId(userJobId, uid)
@@ -75,34 +79,37 @@ public class JobsController {
     }
 
     @GetMapping("/limits")
+    @Transactional(readOnly = true)
     public Map<String,Integer> limits() {
         UUID uid = AuthUtil.currentUserId();
         return Map.of(
-            "dailyCount", limits.getCount(uid),
-            "dailyLimit", limits.max(),
-            "remaining", limits.remaining(uid)
+            "dailyCount",  limits.getCount(uid),
+            "dailyLimit",  limits.max(),
+            "remaining",   limits.remaining(uid)
         );
     }
 
     /**
      * GET /jobs/stats
-     * Returns aggregated application stats for the current user:
-     * total matched, applied, interview, offer counts and average match %.
+     * Returns aggregated application stats for the current user.
+     * Uses two optimised JPQL aggregation queries instead of N individual counts.
      */
     @GetMapping("/stats")
+    @Transactional(readOnly = true)
     public Map<String,Object> stats() {
         UUID uid = AuthUtil.currentUserId();
-        long total      = userJobs.countByUserId(uid);
-        long applied    = userJobs.countByUserIdAndKanbanColumn(uid, "Applied");
-        long interviews = userJobs.countByUserIdAndKanbanColumn(uid, "Interview");
-        long offers     = userJobs.countByUserIdAndKanbanColumn(uid, "Offer");
 
-        // Compute average match % across all user jobs
-        double avgMatch = userJobs.findByUserIdOrderByDeliveredAtDesc(uid).stream()
-            .filter(uj -> uj.getMatchPercent() != null)
-            .mapToInt(uj -> uj.getMatchPercent())
-            .average()
-            .orElse(0.0);
+        // Single GROUP BY query — replaces 3 separate countBy calls
+        Map<String, Long> byColumn = new HashMap<>();
+        for (Object[] row : userJobs.countByColumnForUser(uid)) {
+            byColumn.put((String) row[0], (Long) row[1]);
+        }
+
+        long total      = byColumn.values().stream().mapToLong(Long::longValue).sum();
+        long applied    = byColumn.getOrDefault("Applied",   0L);
+        long interviews = byColumn.getOrDefault("Interview", 0L);
+        long offers     = byColumn.getOrDefault("Offer",     0L);
+        double avgMatch = userJobs.avgMatchPercentForUser(uid);
 
         return Map.of(
             "total",      total,

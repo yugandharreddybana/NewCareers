@@ -16,7 +16,7 @@ import java.util.stream.Collectors;
  * Score breakdown (100 points max):
  *   40 pts – tech stack keyword overlap (title + description)
  *   25 pts – role title match (exact = 25, partial = 15)
- *   15 pts – location match (Ireland / Dublin / Remote)
+ *   15 pts – location match (Ireland / Dublin / Remote / Hybrid / IE / UK)
  *   10 pts – salary range compatibility
  *   10 pts – recency bonus (today=10, 3 days=7, week=4)
  */
@@ -24,6 +24,13 @@ import java.util.stream.Collectors;
 public class JobMatchingService {
 
     public record ScoredJob(Job job, int score, List<String> matchedTerms, List<String> reasons) {}
+
+    // Location terms that earn full 15-pt location score
+    private static final List<String> LOCATION_MATCH_TERMS = List.of(
+        "dublin", "ireland", "remote", "hybrid", "worldwide", "anywhere",
+        "global", " ie ", "/ie", "(ie)", "uk", "london", "belfast",
+        "work from home", "wfh", "fully remote"
+    );
 
     /** Score all jobs and return sorted top-N. */
     public List<ScoredJob> topN(List<Job> jobs, UserProfile profile, int n) {
@@ -82,12 +89,20 @@ public class JobMatchingService {
         }
 
         // ── 3. Location (15 pts) ──────────────────────────────────────────────
-        String loc = (job.getLocation() == null ? "" : job.getLocation()).toLowerCase();
-        if (loc.contains("dublin") || loc.contains("ireland") || loc.contains("remote")) {
+        String loc = " " + (job.getLocation() == null ? "" : job.getLocation()).toLowerCase() + " ";
+        boolean locationMatch = LOCATION_MATCH_TERMS.stream().anyMatch(loc::contains);
+        if (locationMatch) {
             points += 15;
-            reasons.add("Ireland/Dublin/Remote location");
-        } else if (loc.isBlank() || loc.contains("unknown")) {
-            points += 5;
+            reasons.add("Location compatible");
+        } else if (loc.isBlank() || loc.contains("unknown") || loc.contains("not specified")) {
+            points += 5;  // neutral — don't penalise unlisted location
+        }
+        // If the user's own location is set, boost exact match
+        if (profile.getLocation() != null && !profile.getLocation().isBlank()) {
+            if (loc.contains(profile.getLocation().toLowerCase())) {
+                points += 5;
+                reasons.add("Exact location match");
+            }
         }
 
         // ── 4. Salary (10 pts) ────────────────────────────────────────────────

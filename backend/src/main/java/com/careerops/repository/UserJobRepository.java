@@ -18,4 +18,18 @@ public interface UserJobRepository extends JpaRepository<UserJob, UUID> {
 
     long countByUserId(UUID userId);
     long countByUserIdAndKanbanColumn(UUID userId, String column);
+
+    /**
+     * Returns each distinct kanbanColumn + count in one query.
+     * Each Object[] row is [kanbanColumn (String), count (Long)].
+     */
+    @Query("SELECT uj.kanbanColumn, COUNT(uj) FROM UserJob uj WHERE uj.userId = :uid GROUP BY uj.kanbanColumn")
+    List<Object[]> countByColumnForUser(@Param("uid") UUID userId);
+
+    /**
+     * Average match% for the user in a single aggregation query.
+     * Returns 0.0 when no rows exist.
+     */
+    @Query("SELECT COALESCE(AVG(uj.matchPercent), 0.0) FROM UserJob uj WHERE uj.userId = :uid AND uj.matchPercent IS NOT NULL")
+    double avgMatchPercentForUser(@Param("uid") UUID userId);
 }

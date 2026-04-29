@@ -4,19 +4,20 @@ import com.careerops.model.Job;
 import com.careerops.model.SeenJob;
 import com.careerops.repository.JobRepository;
 import com.careerops.repository.SeenJobRepository;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
-import java.util.ArrayList;
-import java.util.HashSet;
-import java.util.List;
-import java.util.Set;
-import java.util.UUID;
+import java.time.Instant;
+import java.time.temporal.ChronoUnit;
+import java.util.*;
 
 @Service
 public class DeduplicationService {
+    private static final Logger log = LoggerFactory.getLogger(DeduplicationService.class);
 
-    private final JobRepository jobs;
+    private final JobRepository     jobs;
     private final SeenJobRepository seen;
 
     public DeduplicationService(JobRepository jobs, SeenJobRepository seen) {
@@ -44,5 +45,21 @@ public class DeduplicationService {
                 seen.save(SeenJob.builder().userId(userId).fingerprint(j.getFingerprint()).build());
             }
         }
+    }
+
+    /**
+     * Deletes seen_job records older than {@code keepDays} days.
+     * Prevents the seen_jobs table from growing unboundedly.
+     * Called by the daily cron before job delivery.
+     *
+     * @param keepDays how many days of seen history to retain (default: 60)
+     * @return number of rows deleted
+     */
+    @Transactional
+    public int pruneOldSeenJobs(int keepDays) {
+        Instant cutoff = Instant.now().minus(keepDays, ChronoUnit.DAYS);
+        int deleted = seen.deleteBySeenAtBefore(cutoff);
+        if (deleted > 0) log.info("Pruned {} old seen_jobs rows (older than {} days)", deleted, keepDays);
+        return deleted;
     }
 }
