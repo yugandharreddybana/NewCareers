@@ -83,4 +83,33 @@ public class JobsController {
             "remaining", limits.remaining(uid)
         );
     }
+
+    /**
+     * GET /jobs/stats
+     * Returns aggregated application stats for the current user:
+     * total matched, applied, interview, offer counts and average match %.
+     */
+    @GetMapping("/stats")
+    public Map<String,Object> stats() {
+        UUID uid = AuthUtil.currentUserId();
+        long total      = userJobs.countByUserId(uid);
+        long applied    = userJobs.countByUserIdAndKanbanColumn(uid, "Applied");
+        long interviews = userJobs.countByUserIdAndKanbanColumn(uid, "Interview");
+        long offers     = userJobs.countByUserIdAndKanbanColumn(uid, "Offer");
+
+        // Compute average match % across all user jobs
+        double avgMatch = userJobs.findByUserIdOrderByDeliveredAtDesc(uid).stream()
+            .filter(uj -> uj.getMatchPercent() != null)
+            .mapToInt(uj -> uj.getMatchPercent())
+            .average()
+            .orElse(0.0);
+
+        return Map.of(
+            "total",      total,
+            "applied",    applied,
+            "interviews", interviews,
+            "offers",     offers,
+            "avgMatch",   Math.round(avgMatch * 10.0) / 10.0
+        );
+    }
 }

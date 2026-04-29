@@ -5,12 +5,14 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Service;
 import org.springframework.web.reactive.function.client.WebClient;
 
 import java.time.Duration;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.CompletableFuture;
 
 @Service
 public class GeminiService {
@@ -29,7 +31,7 @@ public class GeminiService {
         this.key = key; this.model = model;
     }
 
-    /** Single-turn call returning the raw text from Gemini. */
+    /** Single-turn synchronous call returning the raw text from Gemini. */
     public String generate(String systemPrompt, String userPrompt) {
         if (key == null || key.isBlank() || key.startsWith("YOUR_")) {
             log.warn("Gemini key missing — returning stub");
@@ -55,6 +57,23 @@ public class GeminiService {
             log.warn("Gemini call failed: {}", e.getMessage());
             return "{\"error\":\"" + e.getMessage().replace("\"","'") + "\"}";
         }
+    }
+
+    /**
+     * Async variant — runs on Spring's async executor so calling threads are
+     * not blocked. Use this when scoring multiple jobs in a fetch batch.
+     *
+     * Requires @EnableAsync on CareerOpsApplication (or any @Configuration class).
+     */
+    @Async
+    public CompletableFuture<String> generateAsync(String systemPrompt, String userPrompt) {
+        return CompletableFuture.completedFuture(generate(systemPrompt, userPrompt));
+    }
+
+    /** Async variant that resolves directly to a parsed JsonNode. */
+    @Async
+    public CompletableFuture<JsonNode> generateJsonAsync(String systemPrompt, String userPrompt) {
+        return CompletableFuture.completedFuture(generateJson(systemPrompt, userPrompt));
     }
 
     /** Convenience parse to JsonNode. Falls back to text-wrapped node on parse failure. */

@@ -12,15 +12,20 @@ public class CronJobService {
 
     private final JobDeliveryService delivery;
     private final UserProfileRepository profiles;
+    private final JobDigestService digest;
 
-    public CronJobService(JobDeliveryService d, UserProfileRepository p) {
-        this.delivery = d; this.profiles = p;
+    public CronJobService(JobDeliveryService d,
+                          UserProfileRepository p,
+                          JobDigestService digest) {
+        this.delivery = d;
+        this.profiles = p;
+        this.digest   = digest;
     }
 
-    /** 08:00 every day — deliver the cron share (default 3 jobs/user). */
+    /** 08:00 every day — deliver the daily job batch (default 3 jobs/user). */
     @Scheduled(cron = "0 0 8 * * *", zone = "Europe/Dublin")
     public void dailyJobRefresh() {
-        log.info("Daily cron firing");
+        log.info("Daily job delivery cron firing");
         int share = delivery.cronShare();
         for (var p : profiles.findAllByOnboardedTrue()) {
             try {
@@ -28,6 +33,20 @@ public class CronJobService {
             } catch (Exception e) {
                 log.warn("cron deliver failed for {}: {}", p.getUserId(), e.getMessage());
             }
+        }
+    }
+
+    /**
+     * 09:05 every day — send daily digest emails after delivery has finished.
+     * Runs 65 minutes after the delivery cron to ensure all jobs are scored.
+     */
+    @Scheduled(cron = "0 5 9 * * *", zone = "Europe/Dublin")
+    public void dailyDigestEmail() {
+        log.info("Daily digest email cron firing");
+        try {
+            digest.sendDigestsForAllUsers();
+        } catch (Exception e) {
+            log.warn("Digest cron failed: {}", e.getMessage());
         }
     }
 }
