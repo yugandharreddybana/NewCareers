@@ -71,6 +71,7 @@ CREATE TABLE IF NOT EXISTS career_operations.user_jobs (
     job_id UUID REFERENCES career_operations.jobs(id) ON DELETE CASCADE,
     ai_score INTEGER,
     match_percent INTEGER,
+    pre_match_score INTEGER DEFAULT 0,   -- fast keyword pre-score (JobMatchingService)
     matched_skills TEXT[],
     unmatched_skills TEXT[],
     cv_improvement_tips TEXT[],
@@ -134,6 +135,54 @@ CREATE TABLE IF NOT EXISTS career_operations.password_resets (
     used BOOLEAN DEFAULT false,
     created_at TIMESTAMPTZ DEFAULT now()
 );
+
+-- Irish tech companies registry
+-- Mirrors JsoupCompanySource; can be managed via admin UI in future.
+CREATE TABLE IF NOT EXISTS career_operations.irish_companies (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    name TEXT UNIQUE NOT NULL,
+    careers_url TEXT NOT NULL,
+    category TEXT,
+    active BOOLEAN DEFAULT true,
+    added_at TIMESTAMPTZ DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS idx_irish_companies_active
+    ON career_operations.irish_companies(active);
+
+-- Seed key companies
+INSERT INTO career_operations.irish_companies (name, careers_url, category) VALUES
+  ('Google',       'https://careers.google.com/jobs/results/?location=Dublin', 'Big Tech'),
+  ('Meta',         'https://www.metacareers.com/jobs?offices[0]=Dublin', 'Big Tech'),
+  ('Microsoft',    'https://jobs.microsoft.com/en-us/search?location=Dublin', 'Big Tech'),
+  ('Stripe',       'https://stripe.com/jobs/search?office=dublin', 'Fintech'),
+  ('HubSpot',      'https://www.hubspot.com/careers/jobs', 'SaaS'),
+  ('Intercom',     'https://boards.greenhouse.io/intercom', 'Irish Scale-up'),
+  ('Fenergo',      'https://fenergo.com/careers/', 'Fintech'),
+  ('Wayflyer',     'https://www.wayflyer.com/careers', 'Fintech'),
+  ('NearForm',     'https://nearform.com/careers/', 'Consultancy'),
+  ('Version 1',    'https://www.version1.com/careers/current-vacancies/', 'Consultancy'),
+  ('Teamwork',     'https://www.teamwork.com/careers/', 'Irish Scale-up'),
+  ('AMCS Group',   'https://amcsgroup.com/careers/', 'Irish Scale-up'),
+  ('Flipdish',     'https://www.flipdish.com/careers/', 'Irish Scale-up'),
+  ('Ekco',         'https://www.ekco.io/careers/', 'Managed Services'),
+  ('Revolut',      'https://www.revolut.com/en-IE/careers/', 'Fintech'),
+  ('CrowdStrike',  'https://crowdstrike.wd5.myworkdayjobs.com/crowdstrikecareers/jobs?Location_Country=IRL', 'Cybersecurity'),
+  ('PayPal',       'https://careers.pypl.com/home/', 'IDA-Backed'),
+  ('Mastercard',   'https://careers.mastercard.com/us/en/search-results?keywords=&location=Dublin', 'IDA-Backed'),
+  ('Accenture',    'https://www.accenture.com/ie-en/careers/jobsearch', 'Consultancy'),
+  ('Deloitte',     'https://apply.deloitte.com/careers/SearchJobs/', 'Consultancy'),
+  ('IBM',          'https://www.ibm.com/employment/search-jobs/?country=Ireland', 'IDA-Backed'),
+  ('SAP',          'https://jobs.sap.com/search/?q=&location=Dublin', 'IDA-Backed'),
+  ('Salesforce',   'https://salesforce.wd12.myworkdayjobs.com/Salesforce/jobs?Location_Country=IRL', 'Big Tech'),
+  ('Cloudflare',   'https://www.cloudflare.com/careers/jobs/?location=Dublin', 'SaaS'),
+  ('MongoDB',      'https://www.mongodb.com/company/careers/departments', 'SaaS'),
+  ('Coinbase',     'https://www.coinbase.com/careers/positions', 'Fintech'),
+  ('AIB',          'https://aib.ie/careers', 'Financial Services'),
+  ('Bank of Ireland', 'https://careers.bankofireland.com/en/jobs/', 'Financial Services'),
+  ('Vodafone Ireland', 'https://careers.vodafone.ie/search/', 'Telecoms'),
+  ('Eir',          'https://eir.ie/careers/', 'Telecoms')
+ON CONFLICT (name) DO NOTHING;
 
 -- RLS
 ALTER TABLE career_operations.user_profiles ENABLE ROW LEVEL SECURITY;
