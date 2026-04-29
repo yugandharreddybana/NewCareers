@@ -45,7 +45,8 @@ public class JobsController {
                     uj.getMatchPercent(), uj.getVerdict(),
                     uj.getHumanSummary(), j.getSourceName(),
                     j.getPostedAt(), uj.getDeliveredAt(),
-                    uj.getKanbanColumn(), uj.getStatus(), j.getSourceUrl()
+                    uj.getKanbanColumn(), uj.getStatus(), j.getSourceUrl(),
+                    uj.getMatchedSkills(), uj.getUnmatchedSkills()
                 );
             }).filter(java.util.Objects::nonNull).toList();
         return Map.of(

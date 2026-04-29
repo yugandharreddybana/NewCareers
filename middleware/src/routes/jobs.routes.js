@@ -20,6 +20,15 @@ router.get('/limits', async (req, res, next) => {
   } catch (e) { next(e); }
 });
 
+// Explicit /stats route MUST come before /:userJobId to avoid the wildcard
+// capturing the string "stats" and relying on Spring's literal-path priority.
+router.get('/stats', async (req, res, next) => {
+  try {
+    const r = await forward({ path: '/jobs/stats', userId: req.userId });
+    bubble(r, res);
+  } catch (e) { next(e); }
+});
+
 router.post('/fetch', fetchLimiter, async (req, res, next) => {
   try {
     const count = Math.max(1, Math.min(10, Number(req.query.count) || 5));

@@ -88,11 +88,11 @@ export default function Dashboard() {
     .filter(j => j.kanbanColumn === 'Discovered' || j.kanbanColumn === 'Saved')
     .slice(0, 9);
 
-  // ── CV Skills gap banner: aggregate top missing skills ───────────
+  // ── CV Skills gap banner: aggregate top missing skills across all jobs ───
   const missingSkillsMap = useMemo(() => {
     const map: Record<string, number> = {};
     for (const j of allJobs) {
-      for (const s of (j as any).unmatchedSkills || []) {
+      for (const s of j.unmatchedSkills || []) {
         map[s] = (map[s] || 0) + 1;
       }
     }
