@@ -31,23 +31,24 @@ export interface JobCard {
   currency?: string;
   sponsorship?: boolean;
   matchPercent?: number;
+  preMatchScore?: number;     // fast keyword pre-score (0-100)
   verdict?: string;
+  humanSummary?: string;      // 1-line Gemini plain-English summary
+  sourceName?: string;        // e.g. "LinkedIn (Twin AI)", "IrishJobs", "Reed"
+  sourceUrl?: string;         // direct link to the original job posting
   postedAt?: string;
   deliveredAt?: string;
   kanbanColumn: string;
   status: string;
-  sourceUrl?: string;
 }
 
 export interface JobDetail extends JobCard {
   description?: string;
-  sourceName?: string;
   sector?: string;
   aiScore?: number;
   matchedSkills?: string[];
   unmatchedSkills?: string[];
   cvImprovementTips?: string[];
-  humanSummary?: string;
 }
 
 export interface JobsListResponse {
