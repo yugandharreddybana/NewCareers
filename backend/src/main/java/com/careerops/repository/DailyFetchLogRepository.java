@@ -8,4 +8,5 @@ import java.util.UUID;
 
 public interface DailyFetchLogRepository extends JpaRepository<DailyFetchLog, DailyFetchLog.PK> {
     Optional<DailyFetchLog> findByUserIdAndFetchDate(UUID userId, LocalDate date);
+    void deleteByFetchDateBefore(LocalDate date);
 }

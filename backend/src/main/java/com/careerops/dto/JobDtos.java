@@ -7,7 +7,9 @@ public class JobDtos {
     public record JobCardResponse(
         UUID userJobId, UUID jobId, String title, String company, String location,
         Integer salaryMin, Integer salaryMax, String currency, Boolean sponsorship,
-        Integer matchPercent, String verdict, Instant postedAt, Instant deliveredAt,
+        Integer matchPercent, String verdict,
+        String humanSummary, String sourceName,
+        Instant postedAt, Instant deliveredAt,
         String kanbanColumn, String status, String sourceUrl
     ) {}
 

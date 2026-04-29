@@ -43,6 +43,7 @@ public class JobsController {
                     uj.getId(), j.getId(), j.getTitle(), j.getCompany(), j.getLocation(),
                     j.getSalaryMin(), j.getSalaryMax(), j.getCurrency(), j.getSponsorship(),
                     uj.getMatchPercent(), uj.getVerdict(),
+                    uj.getHumanSummary(), j.getSourceName(),
                     j.getPostedAt(), uj.getDeliveredAt(),
                     uj.getKanbanColumn(), uj.getStatus(), j.getSourceUrl()
                 );
@@ -99,7 +100,6 @@ public class JobsController {
     public Map<String,Object> stats() {
         UUID uid = AuthUtil.currentUserId();
 
-        // Single GROUP BY query — replaces 3 separate countBy calls
         Map<String, Long> byColumn = new HashMap<>();
         for (Object[] row : userJobs.countByColumnForUser(uid)) {
             byColumn.put((String) row[0], (Long) row[1]);
