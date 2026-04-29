@@ -44,10 +44,12 @@ export const profileApi = {
 
 // Jobs
 export const jobsApi = {
-  list:    () => api.get('/jobs').then(r => r.data),
-  detail:  (id: string) => api.get(`/jobs/${id}`).then(r => r.data),
-  fetch:   (count = 5) => api.post('/jobs/fetch', null, { params: { count } }).then(r => r.data),
-  limits:  () => api.get('/jobs/limits').then(r => r.data),
+  list:   () => api.get('/jobs').then(r => r.data),
+  detail: (id: string) => api.get(`/jobs/${id}`).then(r => r.data),
+  fetch:  (count = 5) => api.post('/jobs/fetch', null, { params: { count } }).then(r => r.data),
+  limits: () => api.get('/jobs/limits').then(r => r.data),
+  /** Aggregated stats: total, applied, interviews, offers, avgMatch */
+  stats:  () => api.get('/jobs/stats').then(r => r.data),
 };
 
 // Kanban
