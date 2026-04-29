@@ -18,24 +18,31 @@ public class JobScrapeService {
 
     private final List<JobSource> sources;
 
-    public JobScrapeService(AdzunaSource a, ReedSource r, RemotiveSource rm, TheMuseSource tm,
-                            JobicySource jb, RssSource rs, JsoupCompanySource js) {
-        this.sources = List.of(rm, tm, jb, rs, js, r, a); // free first, budgeted last
+    public JobScrapeService(IrishJobsSource irish, JobsIeSource jobsIe,
+                            JsoupCompanySource companies,
+                            RemotiveSource rm, TheMuseSource tm,
+                            JobicySource jb, RssSource rs,
+                            ReedSource r, AdzunaSource a,
+                            TwinAiSource twin) {
+        // Order: free/scraper sources first, budgeted API sources next, Twin AI last
+        this.sources = List.of(irish, jobsIe, companies, rm, tm, jb, rs, r, a, twin);
     }
 
     public List<Job> fetchRaw(UserProfile profile) {
         List<Job> out = new ArrayList<>();
         for (JobSource s : sources) {
-            if (!s.hasBudget()) { log.info("Skipping {} (budget)", s.name()); continue; }
+            if (!s.hasBudget()) { log.info("Skipping '{}' (budget/disabled)", s.name()); continue; }
             try {
                 List<Job> got = s.fetch(profile);
-                log.info("Source {} returned {} jobs", s.name(), got.size());
+                log.info("Source '{}' returned {} jobs", s.name(), got.size());
                 out.addAll(got);
             } catch (Exception e) {
-                log.warn("Source {} failed: {}", s.name(), e.getMessage());
+                log.warn("Source '{}' failed: {}", s.name(), e.getMessage());
             }
         }
-        return applyFreshness(out, profile);
+        List<Job> fresh = applyFreshness(out, profile);
+        log.info("Total after freshness filter: {}/{}", fresh.size(), out.size());
+        return fresh;
     }
 
     private List<Job> applyFreshness(List<Job> jobs, UserProfile profile) {
