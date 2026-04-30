@@ -1,141 +1,283 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import toast from 'react-hot-toast';
-import AuthLayout from '@/components/ui/AuthLayout';
-import TagInput from '@/components/ui/TagInput';
-import { profileApi } from '@/services/api';
 import { useAuth } from '@/context/AuthContext';
+import { motion, AnimatePresence } from 'framer-motion';
+import { Zap, MapPin, Code2, Briefcase, DollarSign, ArrowRight, ArrowLeft, Check } from 'lucide-react';
+import Button from '@/components/ui/Button';
+import Input from '@/components/ui/Input';
+import { cn } from '@/lib/utils';
+import toast from 'react-hot-toast';
 
-const SECTORS = ['IT','Healthcare','Finance','Legal','Creative','Other'];
-
-export default function Onboarding() {
-  const [step, setStep] = useState(1);
-  const [targetRoles, setTargetRoles] = useState<string[]>([]);
-  const [sectors, setSectors] = useState<string[]>(['IT']);
-  const [techStack, setTechStack] = useState<string[]>([]);
-  const [location, setLocation] = useState('Dublin');
-  const [salaryMin, setSalaryMin] = useState(50000);
-  const [salaryMax, setSalaryMax] = useState(110000);
-  const [sponsorship, setSponsorship] = useState(false);
-  const [freshness, setFreshness] = useState(96);
-  const [minMatch, setMinMatch] = useState(60);
-  const [cvFile, setCvFile] = useState<File | null>(null);
-  const [busy, setBusy] = useState(false);
-
-  const { user, setUser } = useAuth();
-  const nav = useNavigate();
-
-  async function saveStep(next: number) {
-    setBusy(true);
-    try {
-      await profileApi.update({
-        targetRoles, sectors, techStack, location,
-        salaryMin, salaryMax, sponsorshipRequired: sponsorship,
-        freshnessHours: freshness, minMatchPercent: minMatch
-      });
-      setStep(next);
-    } catch (e: any) { toast.error(e.normalizedMessage || 'Failed'); }
-    finally { setBusy(false); }
-  }
-
-  async function finish() {
-    setBusy(true);
-    try {
-      if (cvFile) await profileApi.uploadCv(cvFile);
-      await profileApi.update({ onboarded: true });
-      if (user) setUser({ ...user, onboarded: true });
-      toast.success('All set — fetching your first jobs…');
-      nav('/dashboard', { replace: true });
-    } catch (e: any) { toast.error(e.normalizedMessage || 'Failed'); }
-    finally { setBusy(false); }
-  }
-
-  return (
-    <AuthLayout title={`Step ${step} of 3`} subtitle={titles[step-1]}>
-      <div className="h-1.5 bg-slate-100 rounded-full overflow-hidden mb-5">
-        <div className="h-full bg-ink-900" style={{ width: `${(step/3)*100}%` }} />
-      </div>
-
-      {step === 1 && (
-        <div className="space-y-3">
-          <div><label className="text-sm">Target roles</label>
-            <TagInput value={targetRoles} onChange={setTargetRoles}
-              placeholder="e.g. Software Engineer, Full-stack Developer" /></div>
-          <div><label className="text-sm">Sectors</label>
-            <div className="flex flex-wrap gap-2 mt-1">
-              {SECTORS.map(s => (
-                <button key={s} type="button"
-                  className={`chip ${sectors.includes(s) ? 'bg-ink-900 text-white' : 'bg-slate-100 text-slate-700'}`}
-                  onClick={() => setSectors(sectors.includes(s) ? sectors.filter(x=>x!==s) : [...sectors, s])}>
-                  {s}
-                </button>
-              ))}
-            </div></div>
-          <button className="btn btn-primary w-full" disabled={busy || targetRoles.length === 0} onClick={() => saveStep(2)}>Continue</button>
-        </div>
-      )}
-
-      {step === 2 && (
-        <div className="space-y-4">
-          <div><label className="text-sm">Tech stack</label>
-            <TagInput value={techStack} onChange={setTechStack} placeholder="e.g. React, Node.js, Java" /></div>
-          <div><label className="text-sm">Location preference</label>
-            <select className="input mt-1" value={location} onChange={e=>setLocation(e.target.value)}>
-              <option>Dublin</option><option>Remote</option><option>Hybrid</option><option>Other Ireland</option>
-            </select></div>
-          <div><label className="text-sm">Salary range (EUR)</label>
-            <div className="flex items-center gap-3 mt-1">
-              <input type="number" min={0} step={5000} className="input" value={salaryMin} onChange={e=>setSalaryMin(+e.target.value)} />
-              <span className="text-slate-400">to</span>
-              <input type="number" min={0} step={5000} className="input" value={salaryMax} onChange={e=>setSalaryMax(+e.target.value)} />
-            </div></div>
-          <div className="flex items-center gap-3">
-            <label className="text-sm">Sponsorship needed</label>
-            <button type="button"
-              onClick={() => setSponsorship(s => !s)}
-              className={`btn ${sponsorship ? 'btn-accent' : 'btn-secondary'}`}>{sponsorship ? 'Yes' : 'No'}</button>
-          </div>
-          <div><label className="text-sm">Freshness</label>
-            <div className="flex gap-2 mt-1">
-              {[24,48,72,96].map(h => (
-                <button key={h} type="button"
-                  className={`btn ${freshness===h ? 'btn-primary' : 'btn-secondary'}`}
-                  onClick={() => setFreshness(h)}>{h}h</button>
-              ))}
-            </div></div>
-          <div><label className="text-sm">Minimum match: <b>{minMatch}%</b></label>
-            <input type="range" min={50} max={90} value={minMatch}
-              onChange={e=>setMinMatch(+e.target.value)} className="w-full" /></div>
-          <div className="flex gap-2">
-            <button className="btn btn-secondary flex-1" onClick={() => setStep(1)}>Back</button>
-            <button className="btn btn-primary flex-1" disabled={busy} onClick={() => saveStep(3)}>Continue</button>
-          </div>
-        </div>
-      )}
-
-      {step === 3 && (
-        <div className="space-y-4">
-          <div className="border border-dashed border-slate-300 rounded-xl p-6 text-center">
-            <input type="file" accept=".pdf,.docx" className="hidden" id="cv"
-              onChange={e => setCvFile(e.target.files?.[0] || null)} />
-            <label htmlFor="cv" className="cursor-pointer">
-              <div className="font-medium">Drop your CV here or click to upload</div>
-              <div className="text-xs text-slate-500 mt-1">PDF or DOCX, up to 5MB</div>
-              {cvFile && <div className="mt-3 text-sm text-emerald-600">{cvFile.name}</div>}
-            </label>
-          </div>
-          <div className="flex gap-2">
-            <button className="btn btn-secondary flex-1" onClick={() => setStep(2)}>Back</button>
-            <button className="btn btn-primary flex-1" disabled={busy || !cvFile} onClick={finish}>{busy ? 'Finishing…' : 'Finish setup'}</button>
-          </div>
-        </div>
-      )}
-    </AuthLayout>
-  );
+interface OnboardingData {
+  location:   string;
+  role:       string;
+  skills:     string[];
+  experience: string;
+  salaryMin:  string;
 }
 
-const titles = [
-  'Tell us what roles you want',
-  'Set your preferences',
-  'Upload your CV'
+const EXPERIENCE_OPTIONS = [
+  { value: 'junior',   label: 'Junior',   sub: '0–2 years' },
+  { value: 'mid',      label: 'Mid',      sub: '2–5 years' },
+  { value: 'senior',   label: 'Senior',   sub: '5+ years' },
+  { value: 'lead',     label: 'Lead',     sub: 'Team lead / Principal' },
 ];
+
+const STEPS = [
+  { id: 'location',   icon: MapPin,     title: 'Where are you based?',     desc: 'We\'ll prioritise jobs in your area.' },
+  { id: 'role',       icon: Briefcase,  title: 'What role are you targeting?', desc: 'e.g. Full Stack Developer, Data Analyst' },
+  { id: 'skills',     icon: Code2,      title: 'Your top skills',          desc: 'Add your strongest skills for better matches.' },
+  { id: 'experience', icon: Zap,        title: 'Experience level',         desc: 'Helps us match you to the right seniority.' },
+  { id: 'salary',     icon: DollarSign, title: 'Salary expectation',       desc: 'We\'ll filter out roles below your target.' },
+];
+
+export default function Onboarding() {
+  const { user, updateProfile } = useAuth();
+  const nav = useNavigate();
+  const [step, setStep] = useState(0);
+  const [saving, setSaving] = useState(false);
+  const [skillInput, setSkillInput] = useState('');
+  const [data, setData] = useState<OnboardingData>({
+    location:   '',
+    role:       '',
+    skills:     [],
+    experience: '',
+    salaryMin:  '',
+  });
+
+  const totalSteps = STEPS.length;
+  const progress = ((step) / (totalSteps - 1)) * 100;
+  const currentStep = STEPS[step];
+  const StepIcon = currentStep.icon;
+
+  const addSkill = () => {
+    const s = skillInput.trim();
+    if (s && !data.skills.includes(s)) {
+      setData((d) => ({ ...d, skills: [...d.skills, s] }));
+    }
+    setSkillInput('');
+  };
+
+  const removeSkill = (skill: string) =>
+    setData((d) => ({ ...d, skills: d.skills.filter((sk) => sk !== skill) }));
+
+  const canAdvance = (): boolean => {
+    switch (currentStep.id) {
+      case 'location':   return !!data.location.trim();
+      case 'role':       return !!data.role.trim();
+      case 'skills':     return data.skills.length > 0;
+      case 'experience': return !!data.experience;
+      case 'salary':     return true;
+      default:           return true;
+    }
+  };
+
+  const handleFinish = async () => {
+    setSaving(true);
+    try {
+      await updateProfile({
+        location:            data.location,
+        targetRole:          data.role,
+        skills:              data.skills,
+        experienceLevel:     data.experience,
+        desiredSalaryMin:    data.salaryMin ? Number(data.salaryMin) : undefined,
+        onboardingCompleted: true,
+      });
+      nav('/dashboard');
+    } catch {
+      toast.error('Could not save profile, please try again');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div className="min-h-screen bg-surface-2 flex flex-col">
+      {/* Header */}
+      <header className="h-14 px-6 flex items-center justify-between border-b border-border bg-surface">
+        <div className="flex items-center gap-2">
+          <div className="w-7 h-7 bg-brand rounded-lg flex items-center justify-center">
+            <Zap size={13} className="text-white" fill="white" />
+          </div>
+          <span className="font-bold text-sm">Career<span className="text-brand">Ops</span></span>
+        </div>
+        <span className="text-xs text-text-muted font-medium">
+          Step {step + 1} of {totalSteps}
+        </span>
+      </header>
+
+      {/* Progress bar */}
+      <div className="h-1 bg-surface-3">
+        <motion.div
+          className="h-full bg-brand rounded-full"
+          initial={false}
+          animate={{ width: `${progress}%` }}
+          transition={{ duration: 0.4, ease: 'easeInOut' }}
+        />
+      </div>
+
+      {/* Main */}
+      <div className="flex-1 flex items-center justify-center px-4 py-12">
+        <div className="w-full max-w-md">
+          {/* Step indicators */}
+          <div className="flex items-center justify-center gap-2 mb-10">
+            {STEPS.map((s, i) => (
+              <div
+                key={s.id}
+                className={cn(
+                  'transition-all duration-300 rounded-full',
+                  i < step  ? 'w-6 h-6 bg-brand flex items-center justify-center' :
+                  i === step ? 'w-6 h-2 bg-brand' :
+                               'w-2 h-2 bg-surface-3'
+                )}
+              >
+                {i < step && <Check size={12} className="text-white" />}
+              </div>
+            ))}
+          </div>
+
+          <AnimatePresence mode="wait">
+            <motion.div
+              key={step}
+              initial={{ opacity: 0, x: 20 }}
+              animate={{ opacity: 1, x: 0 }}
+              exit={{ opacity: 0, x: -20 }}
+              transition={{ duration: 0.2, ease: 'easeOut' }}
+              className="space-y-6"
+            >
+              {/* Step header */}
+              <div className="space-y-2">
+                <div className="w-12 h-12 rounded-2xl bg-brand-50 border border-brand-100 flex items-center justify-center">
+                  <StepIcon size={22} className="text-brand" />
+                </div>
+                <h2 className="text-xl font-bold text-text-primary">{currentStep.title}</h2>
+                <p className="text-sm text-text-muted">{currentStep.desc}</p>
+              </div>
+
+              {/* Step content */}
+              {currentStep.id === 'location' && (
+                <Input
+                  placeholder="Dublin, Ireland"
+                  value={data.location}
+                  onChange={(e) => setData((d) => ({ ...d, location: e.target.value }))}
+                  inputSize="lg"
+                  autoFocus
+                />
+              )}
+
+              {currentStep.id === 'role' && (
+                <Input
+                  placeholder="Full Stack Developer"
+                  value={data.role}
+                  onChange={(e) => setData((d) => ({ ...d, role: e.target.value }))}
+                  inputSize="lg"
+                  autoFocus
+                />
+              )}
+
+              {currentStep.id === 'skills' && (
+                <div className="space-y-3">
+                  <div className="flex gap-2">
+                    <input
+                      className="input flex-1"
+                      placeholder="e.g. React, TypeScript"
+                      value={skillInput}
+                      onChange={(e) => setSkillInput(e.target.value)}
+                      onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); addSkill(); } }}
+                    />
+                    <Button variant="brand-subtle" size="md" onClick={addSkill} type="button">Add</Button>
+                  </div>
+                  {data.skills.length > 0 && (
+                    <div className="flex flex-wrap gap-2">
+                      {data.skills.map((sk) => (
+                        <span
+                          key={sk}
+                          className="chip-primary flex items-center gap-1.5 cursor-pointer hover:bg-danger-50 hover:text-danger-600 hover:border-danger-100 transition-colors"
+                          onClick={() => removeSkill(sk)}
+                        >
+                          {sk} ×
+                        </span>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {currentStep.id === 'experience' && (
+                <div className="grid grid-cols-2 gap-3">
+                  {EXPERIENCE_OPTIONS.map((opt) => (
+                    <button
+                      key={opt.value}
+                      type="button"
+                      onClick={() => setData((d) => ({ ...d, experience: opt.value }))}
+                      className={cn(
+                        'p-4 rounded-xl border-2 text-left transition-all duration-150',
+                        data.experience === opt.value
+                          ? 'border-brand bg-brand-50 text-brand'
+                          : 'border-border bg-surface text-text-secondary hover:border-brand-200 hover:bg-brand-50/50'
+                      )}
+                    >
+                      <p className="font-semibold text-sm">{opt.label}</p>
+                      <p className="text-xs text-text-muted mt-0.5">{opt.sub}</p>
+                    </button>
+                  ))}
+                </div>
+              )}
+
+              {currentStep.id === 'salary' && (
+                <div className="space-y-2">
+                  <Input
+                    label="Minimum annual salary (€)"
+                    type="number"
+                    placeholder="50000"
+                    value={data.salaryMin}
+                    onChange={(e) => setData((d) => ({ ...d, salaryMin: e.target.value }))}
+                    hint="Leave blank to see all salaries"
+                    inputSize="lg"
+                    autoFocus
+                  />
+                </div>
+              )}
+
+              {/* Navigation */}
+              <div className="flex items-center justify-between pt-2">
+                {step > 0 ? (
+                  <Button
+                    variant="ghost"
+                    size="md"
+                    leftIcon={<ArrowLeft size={15} />}
+                    onClick={() => setStep((s) => s - 1)}
+                  >
+                    Back
+                  </Button>
+                ) : <div />}
+
+                {step < totalSteps - 1 ? (
+                  <Button
+                    variant="primary"
+                    size="md"
+                    rightIcon={<ArrowRight size={15} />}
+                    disabled={!canAdvance()}
+                    onClick={() => setStep((s) => s + 1)}
+                  >
+                    Continue
+                  </Button>
+                ) : (
+                  <Button
+                    variant="primary"
+                    size="md"
+                    loading={saving}
+                    rightIcon={<Check size={15} />}
+                    onClick={handleFinish}
+                  >
+                    Finish setup
+                  </Button>
+                )}
+              </div>
+            </motion.div>
+          </AnimatePresence>
+        </div>
+      </div>
+    </div>
+  );
+}
