@@ -86,10 +86,8 @@ public class JobDeliveryService {
         }
 
         // 4. Parallel Gemini deep-scoring
-        //    Fires all CompletableFutures concurrently then collects back on this thread
-        //    (still inside the @Transactional boundary — DB saves happen after .join())
         String cvText       = cvService.activeCvText(userId);
-        String systemPrompt = prompts.prompt("evaluate");
+        String systemPrompt = prompts.buildFullSystemPrompt("evaluate");
         int    minPct       = p.getMinMatchPercent() == null ? 60 : p.getMinMatchPercent();
 
         List<CompletableFuture<Scored>> futures = preRanked.stream()
@@ -101,7 +99,6 @@ public class JobDeliveryService {
                 }))
             .toList();
 
-        // Block until ALL futures complete (still on the transaction thread)
         CompletableFuture.allOf(futures.toArray(new CompletableFuture[0])).join();
 
         List<Scored> scored = futures.stream()
@@ -143,7 +140,6 @@ public class JobDeliveryService {
 
     public int cronShare() { return cronShare; }
 
-    // ── Prompt builder (extracted from inline scoreOne) ────────────────────
     private String buildPrompt(Job j, UserProfile p, String cv) {
         return String.format("""
             USER:
@@ -174,7 +170,6 @@ public class JobDeliveryService {
         );
     }
 
-    // ── Helpers ────────────────────────────────────────────────────────────
     private ObjectNode emptyJson() { return mapper.createObjectNode(); }
 
     private static String[] toArr(JsonNode n) {
