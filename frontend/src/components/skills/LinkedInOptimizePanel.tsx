@@ -1,124 +1,111 @@
-import { useState } from 'react';
+import React, { useState } from 'react';
 import { Copy, CheckCircle2 } from 'lucide-react';
-import toast from 'react-hot-toast';
 
-interface HeadlineResult {
-  current?: string;
-  rewritten?: string;
-  charCount?: number;
-}
-
-interface AboutResult {
-  current?: string;
-  rewritten?: string;
-}
-
-interface ExperienceBullet {
-  role?: string;
-  original?: string;
-  rewritten?: string;
-}
-
-interface LinkedInOptimizeResult {
-  headline?:          HeadlineResult;
-  about?:             AboutResult;
+interface HeadlineSection { current?: string; rewritten: string; charCount?: number; }
+interface AboutSection { current?: string; rewritten: string; }
+interface ExperienceBullet { role: string; original: string; rewritten: string; }
+interface LinkedInOptimizeOutput {
+  headline?: HeadlineSection;
+  about?: AboutSection;
   experienceBullets?: ExperienceBullet[];
-  keywordsAdded?:     string[];
+  keywordsAdded?: string[];
 }
 
-interface Props {
-  result: unknown;
-}
+interface Props { data: LinkedInOptimizeOutput; }
 
-function BeforeAfterCard({
-  label, current, rewritten, charCount
-}: { label: string; current?: string; rewritten?: string; charCount?: number }) {
-  const [copied, setCopied] = useState(false);
-
-  const handleCopy = async () => {
-    if (!rewritten) return;
-    await navigator.clipboard.writeText(rewritten).catch(() => {});
-    toast.success(`${label} copied!`);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2500);
-  };
-
+function CopyBtn({ text }: { text: string }) {
+  const [c, setC] = useState(false);
   return (
-    <div className="bg-white border border-slate-200 rounded-xl p-5 shadow-sm space-y-4">
-      <div className="flex items-center justify-between">
-        <p className="text-xs font-black text-slate-500 uppercase tracking-widest">{label}</p>
-        {charCount != null && (
-          <span className={`text-xs font-bold px-2 py-0.5 rounded-full ${
-            charCount <= 120 ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
-                             : 'bg-amber-50 text-amber-700 border border-amber-200'
-          }`}>
-            {charCount} chars
-          </span>
-        )}
+    <button
+      onClick={() => {
+        navigator.clipboard.writeText(text);
+        setC(true);
+        setTimeout(() => setC(false), 2000);
+      }}
+      className="inline-flex items-center gap-1 px-2.5 py-1 text-xs rounded-lg bg-white border border-slate-200 text-slate-500 hover:text-indigo-600 hover:border-indigo-300 transition-all font-medium"
+    >
+      {c ? <CheckCircle2 size={11} className="text-emerald-500" /> : <Copy size={11} />}
+      {c ? 'Copied' : 'Copy'}
+    </button>
+  );
+}
+
+interface BeforeAfterProps {
+  label: string;
+  before?: string;
+  after: string;
+  note?: string;
+}
+
+function BeforeAfter({ label, before, after, note }: BeforeAfterProps) {
+  return (
+    <div className="border border-slate-200 rounded-xl overflow-hidden">
+      <div className="px-4 py-2.5 bg-slate-50 border-b border-slate-200 flex items-center justify-between">
+        <span className="text-xs font-semibold text-slate-700">{label}</span>
+        {note && <span className="text-xs text-slate-400">{note}</span>}
       </div>
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-        <div className="rounded-lg bg-slate-50 border border-slate-200 p-3">
-          <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-2">Before</p>
-          <p className="text-sm text-slate-500 leading-relaxed">{current || 'Not provided'}</p>
+      <div className="grid grid-cols-2 divide-x divide-slate-100">
+        <div className="p-3">
+          <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wide mb-1.5">Before</p>
+          <p className="text-xs text-slate-400 leading-snug line-through decoration-slate-300">
+            {before || '(empty)'}
+          </p>
         </div>
-        <div className="rounded-lg bg-indigo-50 border border-indigo-200 p-3 relative">
-          <p className="text-[10px] font-bold text-indigo-400 uppercase tracking-wider mb-2">After</p>
-          <p className="text-sm text-indigo-900 leading-relaxed">{rewritten || '—'}</p>
-          <button
-            onClick={handleCopy}
-            className="absolute top-2 right-2 w-6 h-6 flex items-center justify-center rounded-md text-indigo-400 hover:text-indigo-700 hover:bg-indigo-100 transition-colors"
-          >
-            {copied ? <CheckCircle2 size={12} className="text-emerald-500" /> : <Copy size={12} />}
-          </button>
+        <div className="p-3 bg-emerald-50/40">
+          <p className="text-[10px] font-bold text-emerald-600 uppercase tracking-wide mb-1.5">After ✨</p>
+          <p className="text-xs text-slate-800 leading-snug font-medium">{after}</p>
         </div>
+      </div>
+      <div className="px-4 py-2 border-t border-slate-100 bg-white flex justify-end">
+        <CopyBtn text={after} />
       </div>
     </div>
   );
 }
 
-export default function LinkedInOptimizePanel({ result }: Props) {
-  const data = result as LinkedInOptimizeResult;
-
+export function LinkedInOptimizePanel({ data }: Props) {
   return (
-    <div className="space-y-5">
+    <div className="space-y-4">
+      {/* Headline */}
       {data.headline && (
-        <BeforeAfterCard
+        <BeforeAfter
           label="Headline"
-          current={data.headline.current}
-          rewritten={data.headline.rewritten}
-          charCount={data.headline.charCount ?? data.headline.rewritten?.length}
+          before={data.headline.current}
+          after={data.headline.rewritten}
+          note={data.headline.charCount != null ? `${data.headline.charCount}/120 chars` : undefined}
         />
       )}
 
+      {/* About */}
       {data.about && (
-        <BeforeAfterCard
+        <BeforeAfter
           label="About Section"
-          current={data.about.current}
-          rewritten={data.about.rewritten}
+          before={data.about.current}
+          after={data.about.rewritten}
         />
       )}
 
-      {data.experienceBullets && data.experienceBullets.length > 0 && (
-        <div className="bg-white border border-slate-200 rounded-xl p-5 shadow-sm space-y-4">
-          <p className="text-xs font-black text-slate-400 uppercase tracking-widest">Experience Bullet Rewrites</p>
-          {data.experienceBullets.map((b, i) => (
-            <BeforeAfterCard
-              key={i}
-              label={b.role || `Experience ${i + 1}`}
-              current={b.original}
-              rewritten={b.rewritten}
-            />
-          ))}
-        </div>
-      )}
+      {/* Experience bullets */}
+      {data.experienceBullets?.map((b, i) => (
+        <BeforeAfter
+          key={i}
+          label={`Experience — ${b.role}`}
+          before={b.original}
+          after={b.rewritten}
+        />
+      ))}
 
-      {data.keywordsAdded && data.keywordsAdded.length > 0 && (
-        <div className="bg-white border border-slate-200 rounded-xl p-4 shadow-sm">
-          <p className="text-xs font-black text-slate-400 uppercase tracking-widest mb-3">Keywords Added</p>
-          <div className="flex flex-wrap gap-2">
-            {data.keywordsAdded.map((kw) => (
-              <span key={kw} className="px-2.5 py-1 rounded-lg bg-indigo-50 text-indigo-700 text-xs font-bold border border-indigo-200">
-                {kw}
+      {/* Keywords added */}
+      {(data.keywordsAdded?.length ?? 0) > 0 && (
+        <div>
+          <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-2">🔑 Keywords Added</p>
+          <div className="flex flex-wrap gap-1.5">
+            {data.keywordsAdded!.map((k, i) => (
+              <span
+                key={i}
+                className="px-2.5 py-0.5 rounded-full bg-indigo-50 border border-indigo-200 text-indigo-700 text-xs font-semibold"
+              >
+                {k}
               </span>
             ))}
           </div>

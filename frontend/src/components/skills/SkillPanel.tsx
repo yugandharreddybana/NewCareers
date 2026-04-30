@@ -1,6 +1,11 @@
 import React from 'react';
 import { skillsApi } from '../../services/skillsApi';
 import { ProfileCompletenessAlert } from './ProfileCompletenessAlert';
+import { CoverLetterPanel } from './CoverLetterPanel';
+import { SalaryNegotiationPanel } from './SalaryNegotiationPanel';
+import { CultureFitPanel } from './CultureFitPanel';
+import { LinkedInOptimizePanel } from './LinkedInOptimizePanel';
+import { SkillsGapPlanPanel } from './SkillsGapPlanPanel';
 import type { SkillState } from '../../types/skills';
 
 interface Props {
@@ -11,20 +16,14 @@ interface Props {
   data:           Record<string, unknown> | null;
   error:          string | null;
   missingFields:  string[];
-  isActive:       boolean;  // is this the skill currently loading
+  isActive:       boolean;
   onRun:          () => void;
   onDismissAlert: () => void;
 }
 
 /**
- * Generic skill panel used for all 9 skills on the JobDetail page.
- * Renders:
- *   - idle        → "Run [Skill]" button
- *   - loading     → spinner (only if this skill is active)
- *   - done        → output data + Download PDF button
- *   - error       → error message + retry button
- *   - profile_incomplete → ProfileCompletenessAlert
- *   - waiting_answer     → "Waiting for your answer..." state
+ * Smart skill panel — routes to a dedicated rich UI for Phase 2 skills,
+ * falls back to the generic renderer for all Phase 1 skills.
  */
 export function SkillPanel({
   skillName,
@@ -57,7 +56,6 @@ export function SkillPanel({
       <div className="flex items-center justify-between">
         <h3 className="text-sm font-semibold text-gray-900 dark:text-white">{label}</h3>
         <div className="flex items-center gap-2">
-          {/* Download PDF — only when done */}
           {state === 'done' && data && (
             <button
               onClick={handleDownload}
@@ -70,8 +68,6 @@ export function SkillPanel({
               {downloading ? 'Generating...' : 'PDF'}
             </button>
           )}
-
-          {/* Run button */}
           <button
             onClick={onRun}
             disabled={showLoading || state === 'waiting_answer'}
@@ -90,7 +86,7 @@ export function SkillPanel({
         </div>
       </div>
 
-      {/* Profile incomplete alert */}
+      {/* Profile incomplete */}
       {isActive && state === 'profile_incomplete' && (
         <ProfileCompletenessAlert
           missingFields={missingFields}
@@ -116,7 +112,7 @@ export function SkillPanel({
         </div>
       )}
 
-      {/* Result output */}
+      {/* Result output — Phase 2 skills get dedicated rich panels */}
       {state === 'done' && data && (
         <SkillOutput data={data} skillName={skillName} />
       )}
@@ -124,7 +120,7 @@ export function SkillPanel({
   );
 }
 
-/** Renders skill output data. Handles both plain text and structured JSON. */
+/** Dispatches to a dedicated rich panel for Phase 2 skills; generic renderer otherwise. */
 function SkillOutput({
   data,
   skillName,
@@ -132,7 +128,23 @@ function SkillOutput({
   data: Record<string, unknown>;
   skillName: string;
 }) {
-  // Plain text output (Claude returned text, not JSON)
+  // Phase 2 rich panels
+  switch (skillName) {
+    case 'cover-letter':
+      return <CoverLetterPanel data={data as any} />;
+    case 'salary-negotiation':
+      return <SalaryNegotiationPanel data={data as any} />;
+    case 'culture-fit':
+      return <CultureFitPanel data={data as any} />;
+    case 'linkedin-optimize':
+      return <LinkedInOptimizePanel data={data as any} />;
+    case 'skills-gap-plan':
+      return <SkillsGapPlanPanel data={data as any} />;
+    default:
+      break;
+  }
+
+  // Plain text fallback
   if ('text' in data && typeof data.text === 'string') {
     return (
       <div className="prose prose-sm dark:prose-invert max-w-none">
@@ -143,7 +155,7 @@ function SkillOutput({
     );
   }
 
-  // Structured JSON output
+  // Generic structured JSON renderer (Phase 1 skills)
   return (
     <div className="space-y-3">
       {Object.entries(data).map(([key, value]) => (
