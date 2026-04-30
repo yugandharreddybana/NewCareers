@@ -1,0 +1,128 @@
+package com.careerops.service.skills;
+
+import com.careerops.dto.SkillRunResponse;
+import com.careerops.model.SkillRun;
+import com.careerops.repository.SkillRunRepository;
+import com.fasterxml.jackson.databind.JsonNode;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
+
+import java.time.Instant;
+import java.time.temporal.ChronoUnit;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
+import java.util.UUID;
+import java.util.function.Function;
+import java.util.stream.Collectors;
+
+/**
+ * Dispatches Phase 2 skill execution to the correct SkillHandler.
+ *
+ * Phase 2 skills bypass the Claude agentic tool loop and instead use
+ * ClaudeDirectService via their dedicated handlers — faster, cheaper,
+ * and fully deterministic structured output.
+ *
+ * All 5 Phase 2 handlers are auto-discovered via Spring's List<SkillHandler> injection.
+ */
+@Service
+public class SkillHandlerRegistry {
+
+    private static final Logger log = LoggerFactory.getLogger(SkillHandlerRegistry.class);
+
+    /** Phase 2 skill names — all routed through this registry */
+    public static final Set<String> PHASE2_SKILLS = Set.of(
+        "salary-negotiation",
+        "culture-fit",
+        "linkedin-optimize",
+        "cover-letter",
+        "skills-gap-plan"
+    );
+
+    /** Cache TTL in days for Phase 2 skills */
+    private static final Map<String, Integer> CACHE_TTL_DAYS = Map.of(
+        "salary-negotiation",  1,
+        "culture-fit",         3,
+        "linkedin-optimize",   3,
+        "cover-letter",        7,
+        "skills-gap-plan",     3
+    );
+
+    private final Map<String, SkillHandler> handlers;
+    private final SkillRunRepository        skillRuns;
+
+    public SkillHandlerRegistry(List<SkillHandler> handlerList, SkillRunRepository skillRuns) {
+        this.handlers  = handlerList.stream()
+                .collect(Collectors.toMap(SkillHandler::skillName, Function.identity()));
+        this.skillRuns = skillRuns;
+        log.info("SkillHandlerRegistry: registered {} Phase 2 handlers: {}",
+                this.handlers.size(), this.handlers.keySet());
+    }
+
+    /**
+     * Returns true if the given skill name is a Phase 2 skill handled by this registry.
+     */
+    public boolean handles(String skillName) {
+        return PHASE2_SKILLS.contains(skillName);
+    }
+
+    /**
+     * Executes the skill:
+     *   1. Check cache (TTL-based)
+     *   2. Dispatch to handler
+     *   3. Persist result as SkillRun
+     *   4. Return SkillRunResponse
+     */
+    @Transactional
+    public SkillRunResponse execute(String skillName, UUID userId, UUID userJobId) {
+        log.info("SkillHandlerRegistry.execute: skill={}, userId={}, userJobId={}",
+                skillName, userId, userJobId);
+
+        // Cache check
+        if (userJobId != null) {
+            var cached = skillRuns.findValidCachedRun(userId, userJobId, skillName);
+            if (cached.isPresent()) {
+                log.debug("Cache hit for Phase 2 skill={}, userId={}", skillName, userId);
+                return SkillRunResponse.result(skillName, cached.get().getOutput());
+            }
+        }
+
+        SkillHandler handler = handlers.get(skillName);
+        if (handler == null) {
+            log.error("No handler registered for skill: {}", skillName);
+            return SkillRunResponse.error(skillName,
+                    "Skill '" + skillName + "' is not available. Please contact support.");
+        }
+
+        JsonNode output;
+        try {
+            output = handler.execute(userId, userJobId);
+        } catch (Exception e) {
+            log.error("Handler execution failed for skill={}, userId={}: {}",
+                    skillName, userId, e.getMessage(), e);
+            return SkillRunResponse.error(skillName,
+                    "Skill execution failed. Please try again. (" + e.getMessage() + ")");
+        }
+
+        // Check if Claude returned an error node
+        if (output.has("error") && output.size() == 1) {
+            return SkillRunResponse.error(skillName, output.path("error").asText());
+        }
+
+        // Persist
+        int ttlDays = CACHE_TTL_DAYS.getOrDefault(skillName, 3);
+        SkillRun run = new SkillRun();
+        run.setUserId(userId);
+        run.setUserJobId(userJobId);
+        run.setSkill(skillName);
+        run.setOutput(output);
+        run.setStatus("done");
+        run.setExpiresAt(Instant.now().plus(ttlDays, ChronoUnit.DAYS));
+        skillRuns.save(run);
+
+        log.info("Phase 2 skill={} completed and persisted for userId={}", skillName, userId);
+        return SkillRunResponse.result(skillName, output);
+    }
+}
