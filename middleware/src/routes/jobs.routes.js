@@ -6,6 +6,8 @@ import { fetchLimiter } from '../middleware/rateLimiter.js';
 const router = express.Router();
 router.use(authGuard);
 
+// ── Existing routes (Phase 1 — unchanged) ──────────────────────────────────────────
+
 router.get('/', async (req, res, next) => {
   try {
     const r = await forward({ path: '/jobs', userId: req.userId });
@@ -20,8 +22,7 @@ router.get('/limits', async (req, res, next) => {
   } catch (e) { next(e); }
 });
 
-// Explicit /stats route MUST come before /:userJobId to avoid the wildcard
-// capturing the string "stats" and relying on Spring's literal-path priority.
+// /stats must come before /:userJobId to prevent wildcard capture
 router.get('/stats', async (req, res, next) => {
   try {
     const r = await forward({ path: '/jobs/stats', userId: req.userId });
@@ -39,6 +40,43 @@ router.post('/fetch', fetchLimiter, async (req, res, next) => {
     bubble(r, res);
   } catch (e) { next(e); }
 });
+
+// ── Section 7 — Task 73: GET /api/jobs/recommended ─────────────────────────
+// Must be declared BEFORE /:userJobId so the literal string
+// "recommended" is not swallowed by the param wildcard.
+
+router.get('/recommended', async (req, res, next) => {
+  try {
+    const r = await forward({ path: '/jobs/recommended', userId: req.userId });
+    bubble(r, res);
+  } catch (e) { next(e); }
+});
+
+// ── Section 7 — Task 74: GET /api/jobs/search ────────────────────────────
+// Forwards query params: q, location, minSalary, maxSalary,
+// sponsorship, remote, page, size  — all optional.
+
+router.get('/search', async (req, res, next) => {
+  try {
+    // Sanitise and whitelist params before forwarding to Java
+    const allowed = ['q', 'location', 'minSalary', 'maxSalary',
+                     'sponsorship', 'remote', 'page', 'size'];
+    const params = {};
+    for (const key of allowed) {
+      if (req.query[key] !== undefined && req.query[key] !== '') {
+        params[key] = req.query[key];
+      }
+    }
+    const r = await forward({
+      path: '/jobs/search',
+      userId: req.userId,
+      params,
+    });
+    bubble(r, res);
+  } catch (e) { next(e); }
+});
+
+// ── Wildcard detail route — MUST stay last ─────────────────────────────────
 
 router.get('/:userJobId', async (req, res, next) => {
   try {
