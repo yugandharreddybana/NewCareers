@@ -17,8 +17,8 @@ interface Ctx {
   loading: boolean;
   setUser: (u: User | null) => void;
   signOut: () => Promise<void>;
-  signIn: (email: string, password: string) => Promise<void>;
-  signUp: (name: string, email: string, password: string) => Promise<void>;
+  signIn: (email: string, password: string) => Promise<User>;
+  signUp: (name: string, email: string, password: string) => Promise<User>;
   updateProfile: (data: UpdateProfilePayload) => Promise<void>;
 }
 
@@ -35,21 +35,25 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     else localStorage.removeItem('co_user');
   }, [user]);
 
-  const signIn = async (email: string, password: string) => {
+  const signIn = async (email: string, password: string): Promise<User> => {
     setLoading(true);
     try {
       const { user: u } = await authApi.login({ email, password });
       setUser(u);
+      return u;
     } finally {
       setLoading(false);
     }
   };
 
-  const signUp = async (name: string, email: string, password: string) => {
+  const signUp = async (name: string, email: string, password: string): Promise<User> => {
     setLoading(true);
     try {
-      const { user: u } = await authApi.signup({ name, email, password });
+      // Derive a username from the email local-part (e.g. jane.smith@... → jane.smith)
+      const username = email.split('@')[0].toLowerCase().replace(/[^a-z0-9._-]/g, '');
+      const { user: u } = await authApi.signup({ name, username, email, password });
       setUser(u);
+      return u;
     } finally {
       setLoading(false);
     }
