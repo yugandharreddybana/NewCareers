@@ -32,7 +32,7 @@ export const authApi = {
 // Profile
 export const profileApi = {
   get:    () => api.get('/profile').then(r => r.data),
-  update: (b: any) => api.put('/profile', b).then(r => r.data),
+  update: (b: object) => api.put('/profile', b).then(r => r.data),
   uploadCv: (file: File) => {
     const fd = new FormData();
     fd.append('file', file);
@@ -48,7 +48,6 @@ export const jobsApi = {
   detail: (id: string) => api.get(`/jobs/${id}`).then(r => r.data),
   fetch:  (count = 5) => api.post('/jobs/fetch', null, { params: { count } }).then(r => r.data),
   limits: () => api.get('/jobs/limits').then(r => r.data),
-  /** Aggregated stats: total, applied, interviews, offers, avgMatch */
   stats:  () => api.get('/jobs/stats').then(r => r.data),
 };
 
@@ -62,17 +61,85 @@ export const kanbanApi = {
   }
 };
 
-// Skills
+/**
+ * Skills API — all 9 skills unified under /skills/start
+ * Old per-skill methods kept for backward compatibility during migration.
+ * New code should import from services/skillsApi.ts instead.
+ */
 export const skillsApi = {
-  evaluate:      (userJobId: string) => api.post('/skills/evaluate', { userJobId }).then(r => r.data),
-  tailorResume:  (userJobId: string) => api.post('/skills/tailor-resume', { userJobId }).then(r => r.data),
-  research:      (userJobId: string) => api.post('/skills/research', { userJobId }).then(r => r.data),
-  outreach:      (userJobId: string, channel = 'linkedin', tone = 'professional') =>
-    api.post('/skills/outreach', { userJobId, channel, tone }).then(r => r.data),
-  apply:         (userJobId: string, step = 'all') => api.post('/skills/apply', { userJobId, step }).then(r => r.data),
-  prepInterview: (userJobId: string) => api.post('/skills/prep-interview', { userJobId }).then(r => r.data),
-  compare:       (userJobIds: string[]) => api.post('/skills/compare', { userJobIds }).then(r => r.data),
-  triage:        () => api.post('/skills/triage').then(r => r.data),
-  last:          (userJobId: string, skill: string) =>
-    api.get('/skills/last', { params: { userJobId, skill } }).then(r => r.data),
+  // ── NEW unified endpoints (use these) ─────────────────────────
+  start: (req: object) =>
+    api.post('/skills/start', req, { timeout: 180_000 }).then(r => r.data),
+
+  reply: (req: { conversationId: string; answer: string }) =>
+    api.post('/skills/conversation/reply', req, { timeout: 180_000 }).then(r => r.data),
+
+  runAll: (userJobId: string) =>
+    api.post(`/skills/run-all/${userJobId}`, null, { timeout: 600_000 }).then(r => r.data),
+
+  getLastRun: (userJobId: string, skill: string) =>
+    api.get(`/skills/last-run/${userJobId}/${skill}`).then(r => r.data),
+
+  // ── PDF downloads ──────────────────────────────────────────
+  downloadSkillPdf: (userJobId: string, skillName: string) =>
+    api.get(`/skills/pdf/${userJobId}/${skillName}`, { responseType: 'blob', timeout: 60_000 })
+      .then(r => {
+        const url  = window.URL.createObjectURL(r.data);
+        const link = document.createElement('a');
+        link.href = url; link.download = `${skillName}-report.pdf`;
+        document.body.appendChild(link); link.click();
+        document.body.removeChild(link);
+        window.URL.revokeObjectURL(url);
+      }),
+
+  downloadAllPdf: (userJobId: string) =>
+    api.get(`/skills/pdf/${userJobId}/all`, { responseType: 'blob', timeout: 120_000 })
+      .then(r => {
+        const url  = window.URL.createObjectURL(r.data);
+        const link = document.createElement('a');
+        link.href = url; link.download = 'careerops-complete-pack.pdf';
+        document.body.appendChild(link); link.click();
+        document.body.removeChild(link);
+        window.URL.revokeObjectURL(url);
+      }),
+
+  downloadResumePdf: (userJobId: string) =>
+    api.get(`/skills/pdf/${userJobId}/resume`, { responseType: 'blob', timeout: 60_000 })
+      .then(r => {
+        const url  = window.URL.createObjectURL(r.data);
+        const link = document.createElement('a');
+        link.href = url; link.download = 'tailored-resume.pdf';
+        document.body.appendChild(link); link.click();
+        document.body.removeChild(link);
+        window.URL.revokeObjectURL(url);
+      }),
+
+  // ── Legacy aliases (kept for backward compat — will be removed in Phase 2) ──
+  /** @deprecated Use skillsApi.start({ skillName: 'evaluate', userJobId }) */
+  evaluate:      (userJobId: string) =>
+    api.post('/skills/start', { skillName: 'evaluate', userJobId }, { timeout: 180_000 }).then(r => r.data),
+  /** @deprecated Use skillsApi.start({ skillName: 'tailor-resume', userJobId }) */
+  tailorResume:  (userJobId: string) =>
+    api.post('/skills/start', { skillName: 'tailor-resume', userJobId }, { timeout: 180_000 }).then(r => r.data),
+  /** @deprecated */
+  research:      (userJobId: string) =>
+    api.post('/skills/start', { skillName: 'research', userJobId }, { timeout: 180_000 }).then(r => r.data),
+  /** @deprecated */
+  outreach: (userJobId: string, channel = 'linkedin', tone = 'professional') =>
+    api.post('/skills/start', { skillName: 'outreach', userJobId, channel, tone }, { timeout: 180_000 }).then(r => r.data),
+  /** @deprecated */
+  apply: (userJobId: string, step = 'all') =>
+    api.post('/skills/start', { skillName: 'apply', userJobId, step }, { timeout: 180_000 }).then(r => r.data),
+  /** @deprecated */
+  prepInterview: (userJobId: string) =>
+    api.post('/skills/start', { skillName: 'prep-interview', userJobId }, { timeout: 180_000 }).then(r => r.data),
+  /** @deprecated */
+  compare: (userJobIds: string[]) =>
+    api.post('/skills/start', { skillName: 'compare', compareJobIds: userJobIds }, { timeout: 180_000 }).then(r => r.data),
+  /** @deprecated */
+  triage: () =>
+    api.post('/skills/start', { skillName: 'triage' }, { timeout: 180_000 }).then(r => r.data),
+  /** @deprecated */
+  last: (userJobId: string, skill: string) =>
+    api.get(`/skills/last-run/${userJobId}/${skill}`).then(r => r.data),
 };
