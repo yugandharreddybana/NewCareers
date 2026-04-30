@@ -1,48 +1,47 @@
--- Phase 1: Skill Conversations table
--- Stores paused Claude agentic skill runs awaiting user input via ask_user tool.
--- A row is created when Claude calls ask_user mid-skill and deleted after 30 min or on completion.
-
+-- ============================================================
+-- V5: skill_conversations
+-- Stores paused Claude agentic conversations when ask_user fires.
+-- Each row is one "waiting for user answer" state.
+-- ============================================================
 CREATE TABLE IF NOT EXISTS career_operations.skill_conversations (
     id           UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
     user_id      UUID        NOT NULL,
-    user_job_id  UUID,
+    user_job_id  UUID,                                          -- null for triage / compare
     skill        TEXT        NOT NULL,
-
-    -- Full Claude messages array (system + user + assistant turns) needed to resume.
-    -- Never exposed via API directly.
+    -- Full Claude messages array snapshot (role/content pairs)
+    -- Stored as JSONB so we can resume the exact conversation
     messages     JSONB       NOT NULL DEFAULT '[]'::jsonb,
-
+    -- Status lifecycle: pending_answer → completed | expired | error
     status       TEXT        NOT NULL DEFAULT 'pending_answer'
-                             CHECK (status IN ('pending_answer', 'completed', 'error')),
-
-    -- The question Claude asked the user via the ask_user tool.
+                             CHECK (status IN ('pending_answer','completed','expired','error')),
+    -- The exact question Claude asked via ask_user tool
     question     TEXT,
-
-    -- The Claude tool_use_id for the pending ask_user call.
-    -- Required to correctly resume the conversation by appending a tool_result.
+    -- Claude's tool_use_id for the ask_user call (required to send tool_result back)
     tool_use_id  TEXT,
-
-    -- Conversations expire 30 minutes after creation if not answered.
-    expires_at   TIMESTAMPTZ,
-
+    -- Conversation expires after 30 min of inactivity (configurable)
+    expires_at   TIMESTAMPTZ NOT NULL DEFAULT (now() + INTERVAL '30 minutes'),
     created_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at   TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
--- Fast lookup for pending conversations per user
+-- Fast lookup: find pending conversation for a user
 CREATE INDEX IF NOT EXISTS idx_skill_conv_user_status
-    ON career_operations.skill_conversations(user_id, status);
+    ON career_operations.skill_conversations (user_id, status);
 
--- Efficient cleanup of expired conversations by the cleanup cron job
+-- Cleanup index: find expired rows efficiently
 CREATE INDEX IF NOT EXISTS idx_skill_conv_expires
-    ON career_operations.skill_conversations(expires_at)
-    WHERE expires_at IS NOT NULL;
+    ON career_operations.skill_conversations (expires_at)
+    WHERE status = 'pending_answer';
 
-COMMENT ON TABLE  career_operations.skill_conversations IS
-    'Paused Claude agentic skill runs awaiting user input. Rows expire after 30 minutes.';
+-- Ensure only ONE pending conversation per user+skill at a time
+-- (prevents double-clicking skill button from creating duplicate states)
+CREATE UNIQUE INDEX IF NOT EXISTS idx_skill_conv_unique_pending
+    ON career_operations.skill_conversations (user_id, skill, user_job_id)
+    WHERE status = 'pending_answer';
+
+COMMENT ON TABLE career_operations.skill_conversations IS
+    'Paused Claude agentic conversations waiting for user input via ask_user tool';
 COMMENT ON COLUMN career_operations.skill_conversations.messages IS
-    'Full Claude Messages API conversation history array stored as JSONB. Used to resume exactly where Claude paused.';
+    'Full Claude API messages array — role+content pairs serialised as JSONB for exact resumption';
 COMMENT ON COLUMN career_operations.skill_conversations.tool_use_id IS
-    'Claude tool_use_id of the pending ask_user call. Must be included in the tool_result when resuming.';
-COMMENT ON COLUMN career_operations.skill_conversations.expires_at IS
-    'Conversation becomes invalid after this timestamp. Set to now() + 30 minutes on creation.';
+    'Claude tool_use_id for the pending ask_user call — used to send tool_result on resumption';
