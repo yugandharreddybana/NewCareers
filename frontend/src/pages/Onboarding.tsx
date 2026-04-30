@@ -24,15 +24,15 @@ const EXPERIENCE_OPTIONS = [
 ];
 
 const STEPS = [
-  { id: 'location',   icon: MapPin,     title: 'Where are you based?',     desc: 'We\'ll prioritise jobs in your area.' },
-  { id: 'role',       icon: Briefcase,  title: 'What role are you targeting?', desc: 'e.g. Full Stack Developer, Data Analyst' },
-  { id: 'skills',     icon: Code2,      title: 'Your top skills',          desc: 'Add your strongest skills for better matches.' },
-  { id: 'experience', icon: Zap,        title: 'Experience level',         desc: 'Helps us match you to the right seniority.' },
-  { id: 'salary',     icon: DollarSign, title: 'Salary expectation',       desc: 'We\'ll filter out roles below your target.' },
+  { id: 'location',   icon: MapPin,     title: 'Where are you based?',         desc: "We'll prioritise jobs in your area." },
+  { id: 'role',       icon: Briefcase,  title: 'What role are you targeting?',  desc: 'e.g. Full Stack Developer, Data Analyst' },
+  { id: 'skills',     icon: Code2,      title: 'Your top skills',               desc: 'Add your strongest skills for better matches.' },
+  { id: 'experience', icon: Zap,        title: 'Experience level',              desc: 'Helps us match you to the right seniority.' },
+  { id: 'salary',     icon: DollarSign, title: 'Salary expectation',            desc: "We'll filter out roles below your target." },
 ];
 
 export default function Onboarding() {
-  const { user, updateProfile } = useAuth();
+  const { updateProfile } = useAuth();
   const nav = useNavigate();
   const [step, setStep] = useState(0);
   const [saving, setSaving] = useState(false);
@@ -92,24 +92,26 @@ export default function Onboarding() {
   };
 
   return (
-    <div className="min-h-screen bg-surface-2 flex flex-col">
+    <div className="min-h-screen bg-[#f8f9fc] flex flex-col">
       {/* Header */}
-      <header className="h-14 px-6 flex items-center justify-between border-b border-border bg-surface">
+      <header className="h-14 px-6 flex items-center justify-between border-b border-border bg-white">
         <div className="flex items-center gap-2">
-          <div className="w-7 h-7 bg-brand rounded-lg flex items-center justify-center">
+          <div className="w-7 h-7 bg-brand-500 rounded-lg flex items-center justify-center shadow-brand">
             <Zap size={13} className="text-white" fill="white" />
           </div>
-          <span className="font-bold text-sm">Career<span className="text-brand">Ops</span></span>
+          <span className="font-bold text-sm text-text-primary font-display">
+            Career<span className="text-brand-500">Ops</span>
+          </span>
         </div>
-        <span className="text-xs text-text-muted font-medium">
+        <span className="text-xs text-text-tertiary font-medium">
           Step {step + 1} of {totalSteps}
         </span>
       </header>
 
       {/* Progress bar */}
-      <div className="h-1 bg-surface-3">
+      <div className="h-1 bg-slate-100">
         <motion.div
-          className="h-full bg-brand rounded-full"
+          className="h-full bg-brand-500 rounded-full"
           initial={false}
           animate={{ width: `${progress}%` }}
           transition={{ duration: 0.4, ease: 'easeInOut' }}
@@ -126,9 +128,9 @@ export default function Onboarding() {
                 key={s.id}
                 className={cn(
                   'transition-all duration-300 rounded-full',
-                  i < step  ? 'w-6 h-6 bg-brand flex items-center justify-center' :
-                  i === step ? 'w-6 h-2 bg-brand' :
-                               'w-2 h-2 bg-surface-3'
+                  i < step  ? 'w-6 h-6 bg-brand-500 flex items-center justify-center' :
+                  i === step ? 'w-6 h-2 bg-brand-500' :
+                               'w-2 h-2 bg-slate-200'
                 )}
               >
                 {i < step && <Check size={12} className="text-white" />}
@@ -148,10 +150,10 @@ export default function Onboarding() {
               {/* Step header */}
               <div className="space-y-2">
                 <div className="w-12 h-12 rounded-2xl bg-brand-50 border border-brand-100 flex items-center justify-center">
-                  <StepIcon size={22} className="text-brand" />
+                  <StepIcon size={22} className="text-brand-500" />
                 </div>
                 <h2 className="text-xl font-bold text-text-primary">{currentStep.title}</h2>
-                <p className="text-sm text-text-muted">{currentStep.desc}</p>
+                <p className="text-sm text-text-secondary">{currentStep.desc}</p>
               </div>
 
               {/* Step content */}
@@ -160,7 +162,6 @@ export default function Onboarding() {
                   placeholder="Dublin, Ireland"
                   value={data.location}
                   onChange={(e) => setData((d) => ({ ...d, location: e.target.value }))}
-                  inputSize="lg"
                   autoFocus
                 />
               )}
@@ -170,7 +171,6 @@ export default function Onboarding() {
                   placeholder="Full Stack Developer"
                   value={data.role}
                   onChange={(e) => setData((d) => ({ ...d, role: e.target.value }))}
-                  inputSize="lg"
                   autoFocus
                 />
               )}
@@ -179,20 +179,20 @@ export default function Onboarding() {
                 <div className="space-y-3">
                   <div className="flex gap-2">
                     <input
-                      className="input flex-1"
+                      className="flex-1 h-10 px-3.5 rounded-lg border border-border bg-white text-sm text-text-primary placeholder:text-text-tertiary outline-none focus:ring-2 focus:ring-brand-500/20 focus:border-brand-500 transition-all"
                       placeholder="e.g. React, TypeScript"
                       value={skillInput}
                       onChange={(e) => setSkillInput(e.target.value)}
                       onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); addSkill(); } }}
                     />
-                    <Button variant="brand-subtle" size="md" onClick={addSkill} type="button">Add</Button>
+                    <Button variant="outline" size="md" onClick={addSkill} type="button">Add</Button>
                   </div>
                   {data.skills.length > 0 && (
                     <div className="flex flex-wrap gap-2">
                       {data.skills.map((sk) => (
                         <span
                           key={sk}
-                          className="chip-primary flex items-center gap-1.5 cursor-pointer hover:bg-danger-50 hover:text-danger-600 hover:border-danger-100 transition-colors"
+                          className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-medium bg-brand-50 text-brand-600 border border-brand-200 cursor-pointer hover:bg-danger-50 hover:text-danger-600 hover:border-danger-100 transition-colors"
                           onClick={() => removeSkill(sk)}
                         >
                           {sk} ×
@@ -213,30 +213,27 @@ export default function Onboarding() {
                       className={cn(
                         'p-4 rounded-xl border-2 text-left transition-all duration-150',
                         data.experience === opt.value
-                          ? 'border-brand bg-brand-50 text-brand'
-                          : 'border-border bg-surface text-text-secondary hover:border-brand-200 hover:bg-brand-50/50'
+                          ? 'border-brand-500 bg-brand-50 text-brand-600'
+                          : 'border-border bg-white text-text-secondary hover:border-brand-200 hover:bg-brand-50/50'
                       )}
                     >
                       <p className="font-semibold text-sm">{opt.label}</p>
-                      <p className="text-xs text-text-muted mt-0.5">{opt.sub}</p>
+                      <p className="text-xs text-text-tertiary mt-0.5">{opt.sub}</p>
                     </button>
                   ))}
                 </div>
               )}
 
               {currentStep.id === 'salary' && (
-                <div className="space-y-2">
-                  <Input
-                    label="Minimum annual salary (€)"
-                    type="number"
-                    placeholder="50000"
-                    value={data.salaryMin}
-                    onChange={(e) => setData((d) => ({ ...d, salaryMin: e.target.value }))}
-                    hint="Leave blank to see all salaries"
-                    inputSize="lg"
-                    autoFocus
-                  />
-                </div>
+                <Input
+                  label="Minimum annual salary (€)"
+                  type="number"
+                  placeholder="50000"
+                  value={data.salaryMin}
+                  onChange={(e) => setData((d) => ({ ...d, salaryMin: e.target.value }))}
+                  hint="Leave blank to see all salaries"
+                  autoFocus
+                />
               )}
 
               {/* Navigation */}
