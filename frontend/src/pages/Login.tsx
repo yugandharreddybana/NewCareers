@@ -1,39 +1,31 @@
-import { useState, type FormEvent } from 'react';
+import { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useAuth } from '@/context/AuthContext';
-import AuthLayout from '@/components/ui/AuthLayout';
-import Input from '@/components/ui/Input';
-import Button from '@/components/ui/Button';
+import { AuthLayout } from '@/components/ui/AuthLayout';
+import { Input }      from '@/components/ui';
+import { Button }     from '@/components/ui';
 import { Eye, EyeOff, Mail, Lock } from 'lucide-react';
-import toast from 'react-hot-toast';
 
 export default function Login() {
   const { signIn } = useAuth();
   const nav = useNavigate();
-  const [email, setEmail]       = useState('');
-  const [password, setPassword] = useState('');
-  const [showPw, setShowPw]     = useState(false);
-  const [loading, setLoading]   = useState(false);
-  const [errors, setErrors]     = useState<{ email?: string; password?: string }>({});
+  const [form, setForm]     = useState({ email: '', password: '' });
+  const [showPw, setShowPw] = useState(false);
+  const [loading, setLoading] = useState(false);
+  const [error, setError]   = useState('');
 
-  const validate = () => {
-    const e: typeof errors = {};
-    if (!email)    e.email    = 'Email is required';
-    else if (!/\S+@\S+\.\S+/.test(email)) e.email = 'Enter a valid email';
-    if (!password) e.password = 'Password is required';
-    setErrors(e);
-    return Object.keys(e).length === 0;
-  };
+  const set = (k: string) => (e: React.ChangeEvent<HTMLInputElement>) =>
+    setForm(f => ({ ...f, [k]: e.target.value }));
 
-  const handleSubmit = async (e: FormEvent) => {
+  const submit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!validate()) return;
+    setError('');
     setLoading(true);
     try {
-      await signIn(email, password);
+      await signIn(form.email, form.password);
       nav('/dashboard');
-    } catch (err: any) {
-      toast.error(err?.message ?? 'Invalid email or password');
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : 'Invalid email or password');
     } finally {
       setLoading(false);
     }
@@ -43,69 +35,58 @@ export default function Login() {
     <AuthLayout
       title="Welcome back"
       subtitle="Sign in to your CareerOps account"
+      footer={
+        <>
+          Don’t have an account?{' '}
+          <Link to="/signup" className="font-semibold text-brand-500 hover:text-brand-600 transition-colors">
+            Create one free
+          </Link>
+        </>
+      }
     >
-      <form onSubmit={handleSubmit} noValidate className="space-y-4">
+      <form onSubmit={submit} className="space-y-4">
+        {error && (
+          <div className="flex items-center gap-2.5 px-4 py-3 rounded-lg bg-danger-50 border border-danger-100 text-danger-600 text-sm">
+            {error}
+          </div>
+        )}
+
         <Input
           label="Email address"
           type="email"
-          placeholder="you@example.com"
-          value={email}
-          onChange={(e) => { setEmail(e.target.value); setErrors((p) => ({ ...p, email: undefined })); }}
-          error={errors.email}
-          leftIcon={<Mail size={15} />}
           autoComplete="email"
-          autoFocus
+          placeholder="you@example.com"
+          value={form.email}
+          onChange={set('email')}
+          required
+          leftIcon={<Mail size={15} />}
         />
+
         <Input
           label="Password"
           type={showPw ? 'text' : 'password'}
-          placeholder="Your password"
-          value={password}
-          onChange={(e) => { setPassword(e.target.value); setErrors((p) => ({ ...p, password: undefined })); }}
-          error={errors.password}
+          autoComplete="current-password"
+          placeholder="••••••••"
+          value={form.password}
+          onChange={set('password')}
+          required
           leftIcon={<Lock size={15} />}
           rightIcon={
-            <button
-              type="button"
-              onClick={() => setShowPw((v) => !v)}
-              className="text-text-muted hover:text-text-primary transition-colors"
-              tabIndex={-1}
-            >
+            <button type="button" onClick={() => setShowPw(v => !v)} className="focus-ring rounded">
               {showPw ? <EyeOff size={15} /> : <Eye size={15} />}
             </button>
           }
-          autoComplete="current-password"
         />
 
-        <div className="flex items-center justify-between">
-          <label className="flex items-center gap-2 text-sm text-text-secondary cursor-pointer select-none">
-            <input type="checkbox" className="w-4 h-4 rounded border-border text-brand" />
-            Remember me
-          </label>
-          <Link
-            to="/forgot-password"
-            className="text-sm text-brand font-medium hover:underline"
-          >
+        <div className="flex justify-end -mt-1">
+          <Link to="/forgot-password" className="text-xs text-text-secondary hover:text-brand-500 transition-colors font-medium">
             Forgot password?
           </Link>
         </div>
 
-        <Button
-          type="submit"
-          variant="primary"
-          size="lg"
-          loading={loading}
-          className="w-full"
-        >
+        <Button type="submit" variant="primary" size="lg" loading={loading} className="w-full mt-1">
           Sign in
         </Button>
-
-        <p className="text-center text-sm text-text-muted">
-          Don't have an account?{' '}
-          <Link to="/signup" className="text-brand font-semibold hover:underline">
-            Create one free
-          </Link>
-        </p>
       </form>
     </AuthLayout>
   );
