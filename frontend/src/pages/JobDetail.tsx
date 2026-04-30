@@ -1,25 +1,40 @@
 import { useCallback, useEffect, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import toast from 'react-hot-toast';
-import { jobsApi, kanbanApi, skillsApi } from '@/services/api';
+import { jobsApi, kanbanApi } from '@/services/api';
 import { JobDetail as JD } from '@/types';
 import MatchCircle from '@/components/ui/MatchCircle';
-import SkillButton from '@/components/skills/SkillButton';
-import { useSkill } from '@/components/skills/useSkill';
-import EvaluationPanel    from '@/components/skills/EvaluationPanel';
-import TailorCvPanel      from '@/components/skills/TailorCvPanel';
-import ResearchPanel      from '@/components/skills/ResearchPanel';
-import OutreachPanel      from '@/components/skills/OutreachPanel';
-import ApplyAssistantPanel from '@/components/skills/ApplyAssistantPanel';
-import PrepInterviewPanel  from '@/components/skills/PrepInterviewPanel';
+import { useSkill } from '@/hooks/useSkill';
+import SkillPanel          from '@/components/skills/SkillPanel';
+import SkillQuestionModal  from '@/components/skills/SkillQuestionModal';
+import RunAllSkillsButton  from '@/components/skills/RunAllSkillsButton';
+import ProfileCompletenessAlert from '@/components/skills/ProfileCompletenessAlert';
 import { motion } from 'framer-motion';
 import {
   ArrowLeft, Building2, MapPin, Calendar,
   Euro, ShieldCheck, ExternalLink, Sparkles,
-  CheckCircle2, AlertCircle, Bookmark, Send, Zap
+  CheckCircle2, AlertCircle, Bookmark, Send, Zap,
+  FileDown
 } from 'lucide-react';
 
-// ── Source badge colour map (mirrors JobCard.tsx) ───────────────────────
+// ─────────────────────────────────────────────────────────────────────────────
+// All 9 skills in order
+// ─────────────────────────────────────────────────────────────────────────────
+const ALL_SKILLS = [
+  { name: 'evaluate',       label: 'Full Evaluation' },
+  { name: 'tailor-resume',  label: 'Tailor My CV' },
+  { name: 'research',       label: 'Research Company' },
+  { name: 'outreach',       label: 'Draft Outreach' },
+  { name: 'apply',          label: 'Apply Assistant' },
+  { name: 'prep-interview', label: 'Prep Interview' },
+  { name: 'compare',        label: 'Compare Jobs' },
+  { name: 'triage',         label: 'Quick Triage' },
+  { name: 'scan',           label: 'CV Scan' },
+] as const;
+
+type SkillName = typeof ALL_SKILLS[number]['name'];
+
+// ─── Source badge colour map (mirrors JobCard.tsx) ───────────────────────────
 const SOURCE_STYLES: Record<string, string> = {
   'LinkedIn (Twin AI)': 'bg-blue-50 text-blue-700 border-blue-200',
   'IrishJobs':          'bg-emerald-50 text-emerald-700 border-emerald-200',
@@ -40,10 +55,65 @@ function sourceLabel(s?: string) {
   return s.replace(/ Careers$/i, '').trim();
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Skill button — reused inline, keeps Intelligence Kit compact
+// ─────────────────────────────────────────────────────────────────────────────
+interface SkillBtnProps {
+  label: string;
+  status: string;
+  hasResult: boolean;
+  onClick: () => void;
+  onOpen: () => void;
+}
+function SkillBtn({ label, status, hasResult, onClick, onOpen }: SkillBtnProps) {
+  const isLoading = status === 'loading';
+  const isDone    = status === 'done';
+  const isPending = status === 'pending_answer';
+  const isError   = status === 'error';
+
+  return (
+    <div className="flex items-center gap-2">
+      <button
+        onClick={isDone && hasResult ? onOpen : onClick}
+        disabled={isLoading || isPending}
+        className={[
+          'flex-1 flex items-center justify-between px-4 h-10 rounded-xl text-sm font-bold transition-all border',
+          isLoading || isPending ? 'opacity-60 cursor-not-allowed bg-slate-50 border-slate-200 text-slate-400'
+          : isDone  ? 'bg-brand-vibrant/10 border-brand-vibrant/30 text-brand-vibrant hover:bg-brand-vibrant/20'
+          : isError ? 'bg-rose-50 border-rose-200 text-rose-600 hover:bg-rose-100'
+          :           'bg-white border-slate-200 text-slate-600 hover:border-brand-vibrant/30 hover:text-brand-vibrant',
+        ].join(' ')}
+      >
+        <span>{label}</span>
+        <span className="text-xs">
+          {isLoading  ? '⏳' :
+           isPending  ? '💬' :
+           isDone     ? '✅' :
+           isError    ? '⚠️' : '▶'}
+        </span>
+      </button>
+      {isDone && hasResult && (
+        <button
+          onClick={onClick}
+          title="Re-run skill"
+          className="w-8 h-8 flex items-center justify-center rounded-xl border border-slate-200 bg-white text-slate-400 hover:text-brand-vibrant hover:border-brand-vibrant/30 text-xs transition-all"
+        >
+          ↺
+        </button>
+      )}
+    </div>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Main page component
+// ─────────────────────────────────────────────────────────────────────────────
 export default function JobDetailPage() {
   const { id } = useParams<{ id: string }>();
-  const [job, setJob] = useState<JD | null>(null);
+  const [job, setJob]       = useState<JD | null>(null);
   const [loading, setLoading] = useState(true);
+  // Which skill panel is currently open in the slide-over
+  const [openSkill, setOpenSkill] = useState<SkillName | null>(null);
   const nav = useNavigate();
 
   useEffect(() => {
@@ -54,13 +124,55 @@ export default function JobDetailPage() {
       .finally(() => setLoading(false));
   }, [id]);
 
-  const evalSkill    = useSkill(useCallback(() => skillsApi.evaluate(id!),      [id]));
-  const tailorSkill  = useSkill(useCallback(() => skillsApi.tailorResume(id!),  [id]));
-  const researchSkill= useSkill(useCallback(() => skillsApi.research(id!),      [id]));
-  const outreachSkill= useSkill(useCallback(() => skillsApi.outreach(id!),      [id]));
-  const applySkill   = useSkill(useCallback(() => skillsApi.apply(id!),         [id]));
-  const prepSkill    = useSkill(useCallback(() => skillsApi.prepInterview(id!), [id]));
+  // ── One hook per skill ──────────────────────────────────────────────────
+  const evaluate     = useSkill('evaluate',       id ?? '');
+  const tailorResume = useSkill('tailor-resume',  id ?? '');
+  const research     = useSkill('research',       id ?? '');
+  const outreach     = useSkill('outreach',       id ?? '');
+  const apply        = useSkill('apply',          id ?? '');
+  const prepInterview = useSkill('prep-interview', id ?? '');
+  const compare      = useSkill('compare',        id ?? '');
+  const triage       = useSkill('triage',         id ?? '');
+  const scan         = useSkill('scan',           id ?? '');
 
+  const skillHooks: Record<SkillName, ReturnType<typeof useSkill>> = {
+    'evaluate':       evaluate,
+    'tailor-resume':  tailorResume,
+    'research':       research,
+    'outreach':       outreach,
+    'apply':          apply,
+    'prep-interview': prepInterview,
+    'compare':        compare,
+    'triage':         triage,
+    'scan':           scan,
+  };
+
+  // The ONE skill that currently has a pending question (at most one at a time)
+  const pendingConv = ALL_SKILLS
+    .map(s => ({ ...s, hook: skillHooks[s.name] }))
+    .find(s => s.hook.state.status === 'pending_answer');
+
+  // ── PDF download helper ─────────────────────────────────────────────────
+  async function downloadPdf(type: 'all' | 'resume' | SkillName) {
+    if (!id) return;
+    try {
+      const url = `/api/skills/pdf/${id}/${type}`;
+      const res = await fetch(url, { credentials: 'include' });
+      if (!res.ok) throw new Error(await res.text());
+      const blob = await res.blob();
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = type === 'all' ? 'careerops-complete-pack.pdf'
+                 : type === 'resume' ? 'tailored-resume.pdf'
+                 : `${type}-report.pdf`;
+      a.click();
+      URL.revokeObjectURL(a.href);
+    } catch (e: any) {
+      toast.error(e.message || 'PDF download failed');
+    }
+  }
+
+  // ── Kanban helpers ──────────────────────────────────────────────────────
   async function saveToKanban() {
     if (!id) return;
     try {
@@ -78,6 +190,7 @@ export default function JobDetailPage() {
     } catch (e: any) { toast.error(e.normalizedMessage || 'Failed'); }
   }
 
+  // ── Loading skeleton ────────────────────────────────────────────────────
   if (loading) return (
     <div className="max-w-5xl mx-auto space-y-8 animate-pulse">
       <div className="h-4 w-32 bg-slate-200 rounded" />
@@ -99,8 +212,10 @@ export default function JobDetailPage() {
   );
 
   const salary = job.salaryMin && job.salaryMax
-    ? `€${(job.salaryMin/1000).toFixed(0)}k – €${(job.salaryMax/1000).toFixed(0)}k`
-    : job.salaryMin ? `€${(job.salaryMin/1000).toFixed(0)}k+` : 'Negotiable';
+    ? `€${(job.salaryMin / 1000).toFixed(0)}k – €${(job.salaryMax / 1000).toFixed(0)}k`
+    : job.salaryMin ? `€${(job.salaryMin / 1000).toFixed(0)}k+` : 'Negotiable';
+
+  const anySkillDone = ALL_SKILLS.some(s => skillHooks[s.name].state.status === 'done');
 
   return (
     <div className="max-w-5xl mx-auto space-y-8 pb-20">
@@ -112,7 +227,10 @@ export default function JobDetailPage() {
         BACK TO DASHBOARD
       </Link>
 
-      {/* ─── Hero Header ──────────────────────────────────────────────────────── */}
+      {/* ── Profile completeness warning ──────────────────────────────────── */}
+      <ProfileCompletenessAlert />
+
+      {/* ── Hero Header ────────────────────────────────────────────────────── */}
       <section className="glass-card p-8 md:p-10 relative overflow-hidden">
         <div className="absolute top-0 right-0 w-64 h-64 bg-brand-vibrant/5 blur-3xl rounded-full -mr-32 -mt-32" />
 
@@ -133,9 +251,7 @@ export default function JobDetailPage() {
             {/* Source badge + pre-match score */}
             <div className="flex items-center gap-2 flex-wrap">
               {job.sourceName && (
-                <span className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold border ${
-                  getSourceStyle(job.sourceName)
-                }`}>
+                <span className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold border ${getSourceStyle(job.sourceName)}`}>
                   <ExternalLink size={11} />
                   {sourceLabel(job.sourceName)}
                 </span>
@@ -179,7 +295,7 @@ export default function JobDetailPage() {
                 animate={{ opacity: 1 }}
                 className="text-sm text-slate-600 leading-relaxed bg-brand-vibrant/5 border border-brand-vibrant/10 rounded-xl px-4 py-3 italic"
               >
-                “{job.humanSummary}”
+                "{job.humanSummary}"
               </motion.p>
             )}
           </div>
@@ -204,7 +320,6 @@ export default function JobDetailPage() {
                 <Bookmark size={20} />
               </button>
 
-              {/* ✔ Direct link to original job posting — opens in new tab */}
               {job.sourceUrl ? (
                 <a
                   href={job.sourceUrl}
@@ -226,7 +341,6 @@ export default function JobDetailPage() {
               )}
             </div>
 
-            {/* If sourceUrl exists, show separate Mark Applied button below */}
             {job.sourceUrl && (
               <button
                 onClick={markApplied}
@@ -241,32 +355,68 @@ export default function JobDetailPage() {
       </section>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-        {/* Left Column: Intelligence Tools + Skills */}
-        <div className="lg:col-span-1 space-y-8">
-          <section className="glass-card p-6">
-            <div className="flex items-center gap-2 mb-6">
+        {/* ── Left Column: Intelligence Kit ──────────────────────────────── */}
+        <div className="lg:col-span-1 space-y-6">
+
+          {/* Run All + PDF downloads */}
+          <section className="glass-card p-6 space-y-4">
+            <div className="flex items-center gap-2">
               <Sparkles className="text-brand-vibrant" size={20} />
               <h3 className="font-bold text-slate-900 uppercase tracking-wider text-sm">Intelligence Kit</h3>
             </div>
-            <div className="flex flex-col gap-3">
-              <SkillButton label="Full Evaluation"  state={evalSkill.state}     onClick={evalSkill.run} />
-              <SkillButton label="Tailor My CV"     state={tailorSkill.state}   onClick={tailorSkill.run} />
-              <SkillButton label="Research Company" state={researchSkill.state} onClick={researchSkill.run} />
-              <SkillButton label="Draft Outreach"   state={outreachSkill.state} onClick={outreachSkill.run} />
-              <SkillButton label="Apply Assistant"  state={applySkill.state}    onClick={applySkill.run} />
-              <SkillButton label="Prep Interview"   state={prepSkill.state}     onClick={prepSkill.run} />
+
+            {/* Run All button — fires all 9 skills in one backend call */}
+            <RunAllSkillsButton
+              userJobId={id!}
+              onComplete={() =>
+                toast.success('All 9 skills completed! Results ready below.')
+              }
+            />
+
+            {/* Individual skill buttons */}
+            <div className="flex flex-col gap-2 pt-1">
+              {ALL_SKILLS.map(({ name, label }) => (
+                <SkillBtn
+                  key={name}
+                  label={label}
+                  status={skillHooks[name].state.status}
+                  hasResult={!!skillHooks[name].state.result}
+                  onClick={() => skillHooks[name].run()}
+                  onOpen={() => setOpenSkill(name)}
+                />
+              ))}
             </div>
+
+            {/* PDF downloads — only visible once at least one skill has run */}
+            {anySkillDone && (
+              <div className="border-t border-slate-100 pt-4 space-y-2">
+                <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Download Reports</p>
+                <button
+                  onClick={() => downloadPdf('all')}
+                  className="w-full flex items-center justify-center gap-2 h-9 rounded-xl border border-brand-vibrant/30 text-brand-vibrant bg-brand-vibrant/5 hover:bg-brand-vibrant/10 text-xs font-bold transition-all"
+                >
+                  <FileDown size={14} /> Complete Career Pack (PDF)
+                </button>
+                <button
+                  onClick={() => downloadPdf('resume')}
+                  className="w-full flex items-center justify-center gap-2 h-9 rounded-xl border border-slate-200 text-slate-500 bg-white hover:border-brand-vibrant/30 hover:text-brand-vibrant text-xs font-bold transition-all"
+                >
+                  <FileDown size={14} /> Tailored Resume Only (PDF)
+                </button>
+              </div>
+            )}
           </section>
 
+          {/* Skills gap analysis (from Gemini delivery) */}
           {(job.matchedSkills?.length || job.unmatchedSkills?.length) ? (
             <section className="glass-card p-6">
-              <div className="flex items-center gap-2 mb-6">
+              <div className="flex items-center gap-2 mb-5">
                 <CheckCircle2 className="text-emerald-500" size={20} />
-                <h3 className="font-bold text-slate-900 uppercase tracking-wider text-sm">Skills Gap Analysis</h3>
+                <h3 className="font-bold text-slate-900 uppercase tracking-wider text-sm">Skills Gap</h3>
               </div>
-              <div className="space-y-6">
+              <div className="space-y-5">
                 <div>
-                  <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-3">Strong Matches</p>
+                  <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2">Strong Matches</p>
                   <div className="flex flex-wrap gap-2">
                     {(job.matchedSkills || []).map(s => (
                       <span key={s} className="px-3 py-1 rounded-lg bg-emerald-50 text-emerald-700 text-xs font-bold border border-emerald-100 flex items-center gap-1">
@@ -276,7 +426,7 @@ export default function JobDetailPage() {
                   </div>
                 </div>
                 <div>
-                  <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-3">Potential Gaps</p>
+                  <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2">Potential Gaps</p>
                   <div className="flex flex-wrap gap-2">
                     {(job.unmatchedSkills || []).map(s => (
                       <span key={s} className="px-3 py-1 rounded-lg bg-rose-50 text-rose-700 text-xs font-bold border border-rose-100 flex items-center gap-1">
@@ -290,12 +440,11 @@ export default function JobDetailPage() {
           ) : null}
         </div>
 
-        {/* Right Column: Description + CV Tips */}
+        {/* ── Right Column: Description + CV Tips + Skill Results ──────────── */}
         <div className="lg:col-span-2 space-y-8">
           <section className="glass-card p-8">
             <div className="flex items-center justify-between mb-6">
               <h3 className="font-bold text-slate-900 uppercase tracking-wider text-sm">About the Role</h3>
-              {/* Source URL link — always visible at top of description */}
               {job.sourceUrl && (
                 <a
                   href={job.sourceUrl}
@@ -328,17 +477,45 @@ export default function JobDetailPage() {
               </div>
             </section>
           )}
+
+          {/* ── Completed skill results — rendered inline ───────────────── */}
+          {ALL_SKILLS.filter(s => skillHooks[s.name].state.status === 'done').map(({ name, label }) => (
+            <SkillPanel
+              key={name}
+              skillName={name}
+              label={label}
+              result={skillHooks[name].state.result}
+              userJobId={id!}
+              onDownloadPdf={() => downloadPdf(name)}
+            />
+          ))}
         </div>
       </div>
 
-      {/* Slide-over Panels */}
-      <EvaluationPanel     data={evalSkill.data}     open={evalSkill.open}     onClose={() => evalSkill.setOpen(false)} />
-      <TailorCvPanel       data={tailorSkill.data}   open={tailorSkill.open}   onClose={() => tailorSkill.setOpen(false)} />
-      <ResearchPanel       data={researchSkill.data} open={researchSkill.open} onClose={() => researchSkill.setOpen(false)} />
-      <OutreachPanel       data={outreachSkill.data} open={outreachSkill.open} onClose={() => outreachSkill.setOpen(false)} />
-      <ApplyAssistantPanel data={applySkill.data}    open={applySkill.open}    onClose={() => applySkill.setOpen(false)}
-        userJobId={id!} onApplied={() => nav('/kanban')} />
-      <PrepInterviewPanel  data={prepSkill.data}     open={prepSkill.open}     onClose={() => prepSkill.setOpen(false)} />
+      {/* ── Slide-over: individual skill detail view ──────────────────────── */}
+      {openSkill && (
+        <SkillPanel
+          skillName={openSkill}
+          label={ALL_SKILLS.find(s => s.name === openSkill)?.label ?? ''}
+          result={skillHooks[openSkill].state.result}
+          userJobId={id!}
+          slideOver
+          open
+          onClose={() => setOpenSkill(null)}
+          onDownloadPdf={() => downloadPdf(openSkill)}
+        />
+      )}
+
+      {/* ── Conversation modal — fires when Claude asks a question ────────── */}
+      {pendingConv && (
+        <SkillQuestionModal
+          open
+          skillLabel={pendingConv.label}
+          question={pendingConv.hook.state.question!}
+          onAnswer={(answer) => pendingConv.hook.reply(answer)}
+          onClose={() => pendingConv.hook.reset()}
+        />
+      )}
     </div>
   );
 }
