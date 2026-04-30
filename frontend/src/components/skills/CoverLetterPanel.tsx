@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Copy, CheckCircle2, FileText } from 'lucide-react';
+import { Copy, CheckCircle2, FileText, FileDown } from 'lucide-react';
 
 interface CoverLetterOutput {
   letter: string;
@@ -10,9 +10,10 @@ interface CoverLetterOutput {
 
 interface Props {
   data: CoverLetterOutput;
+  onDownloadPdf?: () => void;
 }
 
-export function CoverLetterPanel({ data }: Props) {
+export function CoverLetterPanel({ data, onDownloadPdf }: Props) {
   const [copied, setCopied] = useState(false);
 
   const copyLetter = () => {
@@ -35,13 +36,28 @@ export function CoverLetterPanel({ data }: Props) {
             🎯 {data.toneIndicator}
           </span>
         )}
-        <button
-          onClick={copyLetter}
-          className="ml-auto inline-flex items-center gap-1.5 px-3 py-1 rounded-lg bg-white border border-slate-200 text-slate-600 hover:text-indigo-600 hover:border-indigo-300 text-xs font-semibold transition-all"
-        >
-          {copied ? <CheckCircle2 size={12} className="text-emerald-500" /> : <Copy size={12} />}
-          {copied ? 'Copied!' : 'Copy Letter'}
-        </button>
+
+        <div className="ml-auto flex items-center gap-2">
+          {/* Copy button */}
+          <button
+            onClick={copyLetter}
+            className="inline-flex items-center gap-1.5 px-3 py-1 rounded-lg bg-white border border-slate-200 text-slate-600 hover:text-indigo-600 hover:border-indigo-300 text-xs font-semibold transition-all"
+          >
+            {copied ? <CheckCircle2 size={12} className="text-emerald-500" /> : <Copy size={12} />}
+            {copied ? 'Copied!' : 'Copy Letter'}
+          </button>
+
+          {/* PDF download button */}
+          {onDownloadPdf && (
+            <button
+              onClick={onDownloadPdf}
+              className="inline-flex items-center gap-1.5 px-3 py-1 rounded-lg bg-indigo-600 text-white hover:bg-indigo-700 text-xs font-semibold transition-all shadow-sm"
+            >
+              <FileDown size={12} />
+              Download PDF
+            </button>
+          )}
+        </div>
       </div>
 
       {/* Letter body */}
