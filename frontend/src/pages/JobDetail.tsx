@@ -17,24 +17,31 @@ import {
 } from 'lucide-react';
 
 // ─────────────────────────────────────────────────────────────────────────────
-// All 9 skills — Phase 2 Section 4 will extend this to 14
+// All 14 skills — 9 Phase 1 + 5 Phase 2
 // ─────────────────────────────────────────────────────────────────────────────
 const ALL_SKILLS = [
-  { name: 'evaluate',       label: 'Full Evaluation' },
-  { name: 'tailor-resume',  label: 'Tailor My CV' },
-  { name: 'research',       label: 'Research Company' },
-  { name: 'outreach',       label: 'Draft Outreach' },
-  { name: 'apply',          label: 'Apply Assistant' },
-  { name: 'prep-interview', label: 'Prep Interview' },
-  { name: 'compare',        label: 'Compare Jobs' },
-  { name: 'triage',         label: 'Quick Triage' },
-  { name: 'scan',           label: 'CV Scan' },
+  // Phase 1
+  { name: 'evaluate',            label: 'Full Evaluation' },
+  { name: 'tailor-resume',       label: 'Tailor My CV' },
+  { name: 'research',            label: 'Research Company' },
+  { name: 'outreach',            label: 'Draft Outreach' },
+  { name: 'apply',               label: 'Apply Assistant' },
+  { name: 'prep-interview',      label: 'Prep Interview' },
+  { name: 'compare',             label: 'Compare Jobs' },
+  { name: 'triage',              label: 'Quick Triage' },
+  { name: 'scan',                label: 'CV Scan' },
+  // Phase 2
+  { name: 'salary-negotiation',  label: 'Salary Negotiation' },
+  { name: 'culture-fit',         label: 'Culture Fit' },
+  { name: 'linkedin-optimize',   label: 'LinkedIn Optimise' },
+  { name: 'cover-letter',        label: 'Cover Letter' },
+  { name: 'skills-gap-plan',     label: 'Skills Gap Plan' },
 ] as const;
 
 type SkillName = typeof ALL_SKILLS[number]['name'];
 type Tab = 'overview' | 'ai-tools' | 'apply';
 
-// ── Source badge helpers ────────────────────────────────────────────────────────────
+// ── Source badge helpers ────────────────────────────────────────────────────
 const SOURCE_STYLES: Record<string, string> = {
   'LinkedIn (Twin AI)': 'bg-blue-50 text-blue-700 border-blue-200',
   'IrishJobs':          'bg-emerald-50 text-emerald-700 border-emerald-200',
@@ -53,7 +60,7 @@ function sourceLabel(s?: string) {
   return s.replace(/ Careers$/i, '').trim();
 }
 
-// ── Company initials avatar (same as JobCard) ──────────────────────────────────────
+// ── Company initials avatar ────────────────────────────────────────────────
 const AVATAR_COLORS = [
   'bg-blue-100 text-blue-700', 'bg-purple-100 text-purple-700',
   'bg-rose-100 text-rose-700', 'bg-amber-100 text-amber-700',
@@ -68,7 +75,7 @@ function avatarColor(c: string) {
   return AVATAR_COLORS[Math.abs(h) % AVATAR_COLORS.length];
 }
 
-// ── Skill button ──────────────────────────────────────────────────────────────────────────
+// ── Skill button ───────────────────────────────────────────────────────────
 interface SkillBtnProps {
   label: string;
   status: string;
@@ -133,27 +140,41 @@ export default function JobDetailPage() {
       .finally(() => setLoading(false));
   }, [id]);
 
-  // ── One hook per skill ───────────────────────────────────────────────────────────
-  const evaluate      = useSkill('evaluate',       id ?? '');
-  const tailorResume  = useSkill('tailor-resume',  id ?? '');
-  const research      = useSkill('research',       id ?? '');
-  const outreach      = useSkill('outreach',       id ?? '');
-  const applySkill    = useSkill('apply',          id ?? '');
-  const prepInterview = useSkill('prep-interview', id ?? '');
-  const compare       = useSkill('compare',        id ?? '');
-  const triage        = useSkill('triage',         id ?? '');
-  const scan          = useSkill('scan',           id ?? '');
+  // ── Phase 1 skill hooks ────────────────────────────────────────────────────
+  const evaluate      = useSkill('evaluate',           id ?? '');
+  const tailorResume  = useSkill('tailor-resume',      id ?? '');
+  const research      = useSkill('research',           id ?? '');
+  const outreach      = useSkill('outreach',           id ?? '');
+  const applySkill    = useSkill('apply',              id ?? '');
+  const prepInterview = useSkill('prep-interview',     id ?? '');
+  const compare       = useSkill('compare',            id ?? '');
+  const triage        = useSkill('triage',             id ?? '');
+  const scan          = useSkill('scan',               id ?? '');
+
+  // ── Phase 2 skill hooks ────────────────────────────────────────────────────
+  const salaryNeg     = useSkill('salary-negotiation', id ?? '');
+  const cultureFit    = useSkill('culture-fit',        id ?? '');
+  const linkedinOpt   = useSkill('linkedin-optimize',  id ?? '');
+  const coverLetter   = useSkill('cover-letter',       id ?? '');
+  const skillsGap     = useSkill('skills-gap-plan',    id ?? '');
 
   const skillHooks: Record<SkillName, ReturnType<typeof useSkill>> = {
-    'evaluate':       evaluate,
-    'tailor-resume':  tailorResume,
-    'research':       research,
-    'outreach':       outreach,
-    'apply':          applySkill,
-    'prep-interview': prepInterview,
-    'compare':        compare,
-    'triage':         triage,
-    'scan':           scan,
+    // Phase 1
+    'evaluate':           evaluate,
+    'tailor-resume':      tailorResume,
+    'research':           research,
+    'outreach':           outreach,
+    'apply':              applySkill,
+    'prep-interview':     prepInterview,
+    'compare':            compare,
+    'triage':             triage,
+    'scan':               scan,
+    // Phase 2
+    'salary-negotiation': salaryNeg,
+    'culture-fit':        cultureFit,
+    'linkedin-optimize':  linkedinOpt,
+    'cover-letter':       coverLetter,
+    'skills-gap-plan':    skillsGap,
   };
 
   const pendingConv = ALL_SKILLS
@@ -163,7 +184,7 @@ export default function JobDetailPage() {
   const anySkillDone = ALL_SKILLS.some(s => skillHooks[s.name].state.status === 'done');
   const doneCount    = ALL_SKILLS.filter(s => skillHooks[s.name].state.status === 'done').length;
 
-  // ── PDF download ────────────────────────────────────────────────────────────────────
+  // ── PDF download ───────────────────────────────────────────────────────────
   async function downloadPdf(type: 'all' | 'resume' | SkillName) {
     if (!id) return;
     try {
@@ -172,8 +193,8 @@ export default function JobDetailPage() {
       const blob = await res.blob();
       const a = document.createElement('a');
       a.href = URL.createObjectURL(blob);
-      a.download = type === 'all' ? 'careerops-complete-pack.pdf'
-        : type === 'resume'       ? 'tailored-resume.pdf'
+      a.download = type === 'all'    ? 'careerops-complete-pack.pdf'
+        : type === 'resume'          ? 'tailored-resume.pdf'
         : `${type}-report.pdf`;
       a.click();
       URL.revokeObjectURL(a.href);
@@ -182,7 +203,7 @@ export default function JobDetailPage() {
     }
   }
 
-  // ── Kanban helpers ────────────────────────────────────────────────────────────────────
+  // ── Kanban helpers ─────────────────────────────────────────────────────────
   async function saveToKanban() {
     if (!id) return;
     try {
@@ -200,7 +221,7 @@ export default function JobDetailPage() {
     } catch (e: any) { toast.error(e.normalizedMessage || 'Failed'); }
   }
 
-  // ── Loading skeleton ─────────────────────────────────────────────────────────────────
+  // ── Loading skeleton ───────────────────────────────────────────────────────
   if (loading) return (
     <div className="max-w-6xl mx-auto px-4 sm:px-6 space-y-5 animate-pulse pt-2">
       <div className="h-3 w-48 bg-slate-200 rounded" />
@@ -246,14 +267,11 @@ export default function JobDetailPage() {
         <span className="text-slate-500 font-semibold truncate max-w-[120px]">{job.company}</span>
       </nav>
 
-      {/* Profile completeness warning */}
       <ProfileCompletenessAlert />
 
       {/* ── Hero header ── */}
       <section className="bg-white border border-slate-200 rounded-2xl p-6 md:p-8 mb-6 shadow-sm">
         <div className="flex flex-col md:flex-row items-start gap-6">
-
-          {/* Company avatar + job info */}
           <div className="flex items-start gap-4 flex-1 min-w-0">
             <div className={`w-14 h-14 shrink-0 rounded-2xl flex items-center justify-center text-lg font-bold ${avatarColor(job.company)}`}>
               {companyInitials(job.company) || <Building2 size={24} />}
@@ -261,8 +279,6 @@ export default function JobDetailPage() {
             <div className="min-w-0 flex-1">
               <h1 className="text-2xl font-extrabold text-slate-900 leading-tight">{job.title}</h1>
               <p className="text-base font-semibold text-slate-500 mt-0.5">{job.company}</p>
-
-              {/* Source + relevance badges */}
               <div className="flex items-center gap-2 flex-wrap mt-2">
                 {job.sourceName && (
                   <span className={`inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-bold border ${getSourceStyle(job.sourceName)}`}>
@@ -275,8 +291,6 @@ export default function JobDetailPage() {
                   </span>
                 )}
               </div>
-
-              {/* Meta chips */}
               <div className="flex flex-wrap gap-2 mt-3 text-xs font-semibold">
                 <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-slate-50 border border-slate-200 text-slate-500">
                   <MapPin size={11} />{job.location || 'Remote'}
@@ -296,17 +310,13 @@ export default function JobDetailPage() {
                   {job.sponsorship ? 'Sponsorship OK' : 'No Sponsorship'}
                 </span>
               </div>
-
-              {/* Gemini summary */}
               {job.humanSummary && (
                 <p className="mt-3 text-sm text-slate-600 italic bg-slate-50 border border-slate-200 rounded-xl px-4 py-2.5 leading-relaxed">
-                  “{job.humanSummary}”
+                  "{job.humanSummary}"
                 </p>
               )}
             </div>
           </div>
-
-          {/* Match score + quick actions */}
           <div className="flex flex-row md:flex-col items-center gap-3 shrink-0">
             {job.matchPercent != null && (
               <div className="bg-slate-50 border border-slate-200 rounded-2xl px-5 py-3 flex flex-col items-center">
@@ -380,7 +390,6 @@ export default function JobDetailPage() {
             exit={{ opacity: 0, y: -8 }} transition={{ duration: 0.18 }}
             className="space-y-6"
           >
-            {/* Skills gap */}
             {(job.matchedSkills?.length || job.unmatchedSkills?.length) ? (
               <section className="bg-white border border-slate-200 rounded-2xl p-6 shadow-sm">
                 <h3 className="font-bold text-slate-900 text-sm uppercase tracking-wider mb-5 flex items-center gap-2">
@@ -411,7 +420,6 @@ export default function JobDetailPage() {
               </section>
             ) : null}
 
-            {/* Job description */}
             <section className="bg-white border border-slate-200 rounded-2xl p-6 md:p-8 shadow-sm">
               <div className="flex items-center justify-between mb-5">
                 <h3 className="font-bold text-slate-900 text-sm uppercase tracking-wider">About the Role</h3>
@@ -427,7 +435,6 @@ export default function JobDetailPage() {
               </div>
             </section>
 
-            {/* CV tips */}
             {job.cvImprovementTips && job.cvImprovementTips.length > 0 && (
               <section className="bg-white border border-slate-200 border-l-4 border-l-emerald-500 rounded-2xl p-6 md:p-8 shadow-sm">
                 <h3 className="font-bold text-slate-900 text-sm uppercase tracking-wider mb-5">CV Optimisation Tips</h3>
@@ -442,13 +449,12 @@ export default function JobDetailPage() {
               </section>
             )}
 
-            {/* CTA to AI Tools */}
             {!anySkillDone && (
               <div className="bg-slate-900 rounded-2xl p-6 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
                 <div>
                   <p className="font-bold text-white">Run AI analysis on this job</p>
                   <p className="text-sm text-slate-400 mt-0.5">
-                    9 career intelligence tools — evaluate your fit, tailor your CV, research the company.
+                    14 career intelligence tools — evaluate your fit, tailor your CV, negotiate salary, write your cover letter and more.
                   </p>
                 </div>
                 <button
@@ -474,16 +480,33 @@ export default function JobDetailPage() {
               <div className="bg-white border border-slate-200 rounded-2xl p-4 shadow-sm space-y-3">
                 <div className="flex items-center gap-2 pb-1 border-b border-slate-100">
                   <Sparkles className="text-emerald-500" size={15} />
-                  <h3 className="font-bold text-slate-900 text-xs uppercase tracking-wider">Intelligence Kit</h3>
+                  <h3 className="font-bold text-slate-900 text-xs uppercase tracking-wider">Intelligence Kit — 14 Skills</h3>
                 </div>
 
                 <RunAllSkillsButton
                   userJobId={id!}
-                  onComplete={() => toast.success('All 9 skills completed!')}
+                  onComplete={() => toast.success('All 14 skills completed!')}
                 />
 
+                {/* Phase 1 group */}
+                <p className="text-[9px] font-black text-slate-300 uppercase tracking-widest px-1">Core Skills</p>
                 <div className="flex flex-col gap-1.5">
-                  {ALL_SKILLS.map(({ name, label }) => (
+                  {ALL_SKILLS.slice(0, 9).map(({ name, label }) => (
+                    <SkillBtn
+                      key={name}
+                      label={label}
+                      status={skillHooks[name].state.status}
+                      hasResult={!!skillHooks[name].state.result}
+                      onClick={() => skillHooks[name].run()}
+                      onOpen={() => setOpenSkill(name)}
+                    />
+                  ))}
+                </div>
+
+                {/* Phase 2 group */}
+                <p className="text-[9px] font-black text-indigo-400 uppercase tracking-widest px-1 pt-1">Career Intelligence</p>
+                <div className="flex flex-col gap-1.5">
+                  {ALL_SKILLS.slice(9).map(({ name, label }) => (
                     <SkillBtn
                       key={name}
                       label={label}
