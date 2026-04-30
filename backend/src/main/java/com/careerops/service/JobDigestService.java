@@ -1,7 +1,6 @@
 package com.careerops.service;
 
 import com.careerops.model.Job;
-import com.careerops.model.UserJob;
 import com.careerops.repository.JobRepository;
 import com.careerops.repository.UserJobRepository;
 import com.careerops.repository.UserProfileRepository;
@@ -33,9 +32,7 @@ public class JobDigestService {
     @Value("${app.base-url:http://localhost:5173}")
     private String appBaseUrl;
 
-    /** Minimum match % for a job to appear in the digest. */
     private static final int DIGEST_MIN_MATCH = 70;
-    /** Maximum number of jobs to include per digest. */
     private static final int DIGEST_MAX_JOBS  = 5;
 
     public JobDigestService(UserProfileRepository profiles,
@@ -50,10 +47,6 @@ public class JobDigestService {
         this.email    = email;
     }
 
-    /**
-     * Sends digest emails for all onboarded users.
-     * Only includes jobs delivered in the past 24 hours with match% >= DIGEST_MIN_MATCH.
-     */
     public void sendDigestsForAllUsers() {
         Instant since = Instant.now().minus(24, ChronoUnit.HOURS);
 
