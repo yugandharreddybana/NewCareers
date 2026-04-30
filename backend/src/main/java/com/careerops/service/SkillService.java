@@ -4,6 +4,7 @@ import com.careerops.dto.RunAllSkillsResponse;
 import com.careerops.dto.SkillRunResponse;
 import com.careerops.dto.SkillStartRequest;
 import com.careerops.model.AgentResult;
+import com.careerops.model.Notification;
 import com.careerops.model.SkillConversation;
 import com.careerops.model.SkillRun;
 import com.careerops.repository.SkillConversationRepository;
@@ -13,6 +14,8 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
+import jakarta.persistence.EntityManager;
+import jakarta.persistence.PersistenceContext;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
@@ -41,6 +44,14 @@ import java.util.*;
  * Flow (Phase 2):
  *   1. Validate profile completeness
  *   2. Delegate entirely to SkillHandlerRegistry (cache check + handler + persist)
+ *
+ * Section 8 — Task 88:
+ *   On a successful Done result (Phase 1 only, since Phase 2 returns before
+ *   reaching handleAgentResult), fires:
+ *     - sendSkillCompleteEmail(userId, skillDisplayName, jobTitle)
+ *     - notificationService.create(..., SKILL_COMPLETE, ...)
+ *   Both are non-fatal: wrapped in try/catch so a notification failure
+ *   never rolls back the skill save.
  */
 @Service
 public class SkillService {
@@ -54,6 +65,16 @@ public class SkillService {
         "prep-interview", 3
     );
 
+    /** Human-readable display names for the Phase 1 skills shown in notifications/emails. */
+    private static final Map<String, String> SKILL_DISPLAY_NAMES = Map.of(
+        "evaluate",       "CV Evaluation",
+        "research",       "Company Research",
+        "prep-interview", "Interview Prep"
+    );
+
+    @PersistenceContext
+    private EntityManager em;
+
     private final ClaudeAgentService          claude;
     private final SkillPromptLibrary          prompts;
     private final ProfileValidator            validator;
@@ -61,6 +82,8 @@ public class SkillService {
     private final SkillConversationRepository conversations;
     private final SkillHandlerRegistry        registry;
     private final ObjectMapper                mapper;
+    private final ResendEmailService          emailService;        // Section 8 — Task 88
+    private final NotificationService         notificationService; // Section 8 — Task 88
 
     @Value("${skill.conversation.expire.minutes:30}")
     private int conversationExpireMinutes;
@@ -72,14 +95,18 @@ public class SkillService {
             SkillRunRepository skillRuns,
             SkillConversationRepository conversations,
             SkillHandlerRegistry registry,
-            ObjectMapper mapper) {
-        this.claude        = claude;
-        this.prompts       = prompts;
-        this.validator     = validator;
-        this.skillRuns     = skillRuns;
-        this.conversations = conversations;
-        this.registry      = registry;
-        this.mapper        = mapper;
+            ObjectMapper mapper,
+            ResendEmailService emailService,
+            NotificationService notificationService) {
+        this.claude               = claude;
+        this.prompts              = prompts;
+        this.validator            = validator;
+        this.skillRuns            = skillRuns;
+        this.conversations        = conversations;
+        this.registry             = registry;
+        this.mapper               = mapper;
+        this.emailService         = emailService;
+        this.notificationService  = notificationService;
     }
 
     // ================================================================
@@ -245,6 +272,11 @@ public class SkillService {
                 skillRuns.save(run);
 
                 log.info("Skill {} completed and saved for userId={}", skill, userId);
+
+                // Section 8 — Task 88: fire skill-complete email + in-app notification.
+                // Non-fatal: any failure here must never roll back the skill save.
+                triggerSkillCompleteEvents(skill, userId, userJobId);
+
                 yield SkillRunResponse.result(skill, output);
             }
 
@@ -274,6 +306,67 @@ public class SkillService {
                 yield SkillRunResponse.error(skill, err.message());
             }
         };
+    }
+
+    /**
+     * Fires after a Phase 1 skill successfully completes (AgentResult.Done).
+     *
+     * Sends:
+     *   1. Transactional email via ResendEmailService.sendSkillCompleteEmail()
+     *   2. In-app SKILL_COMPLETE notification via NotificationService.create()
+     *
+     * Completely non-fatal — wrapped in try/catch so failures here never
+     * affect the skill save or the HTTP response.
+     */
+    private void triggerSkillCompleteEvents(String skill, UUID userId, UUID userJobId) {
+        try {
+            String displayName = SKILL_DISPLAY_NAMES.getOrDefault(
+                    skill,
+                    Character.toUpperCase(skill.charAt(0)) + skill.substring(1)
+            );
+            String jobTitle = fetchJobTitle(userJobId);
+
+            // Email (Task 88)
+            emailService.sendSkillCompleteEmail(userId, displayName, jobTitle);
+
+            // In-app notification
+            Map<String, Object> meta = new LinkedHashMap<>();
+            meta.put("skill", skill);
+            meta.put("skillDisplayName", displayName);
+            if (userJobId != null) meta.put("userJobId", userJobId.toString());
+
+            notificationService.create(
+                    userId,
+                    Notification.TYPE_SKILL_COMPLETE,
+                    "✨ " + displayName + " complete",
+                    displayName + " finished for \"" + jobTitle + "\". View the results in your job detail page.",
+                    meta
+            );
+        } catch (Exception e) {
+            log.warn("triggerSkillCompleteEvents non-fatal failure for skill={}, userId={}: {}",
+                     skill, userId, e.getMessage());
+        }
+    }
+
+    /**
+     * Fetches the job title for a given userJobId.
+     * Returns a safe fallback string if the query fails or userJobId is null.
+     */
+    private String fetchJobTitle(UUID userJobId) {
+        if (userJobId == null) return "your application";
+        try {
+            String title = (String) em.createNativeQuery("""
+                    SELECT j.title
+                    FROM   career_operations.jobs j
+                    JOIN   career_operations.user_jobs uj ON uj.job_id = j.id
+                    WHERE  uj.id = :id
+                    """)
+                    .setParameter("id", userJobId)
+                    .getSingleResult();
+            return title != null ? title : "your application";
+        } catch (Exception e) {
+            return "your application";
+        }
     }
 
     private ArrayNode buildInitialMessages(SkillStartRequest req, UUID userId) {
@@ -309,7 +402,6 @@ public class SkillService {
             return mapper.createObjectNode().put("text", "No output generated.");
         }
         String trimmed = text.trim();
-        // Strip markdown code fences if present
         if (trimmed.startsWith("```")) {
             int firstNewline = trimmed.indexOf('\n');
             int lastFence    = trimmed.lastIndexOf("```");
@@ -321,9 +413,7 @@ public class SkillService {
         int jsonEnd   = trimmed.lastIndexOf('}');
         if (jsonStart >= 0 && jsonEnd > jsonStart) {
             String jsonPart = trimmed.substring(jsonStart, jsonEnd + 1);
-            try {
-                return mapper.readTree(jsonPart);
-            } catch (Exception ignored) {}
+            try { return mapper.readTree(jsonPart); } catch (Exception ignored) {}
         }
         ObjectNode wrap = mapper.createObjectNode();
         wrap.put("text", text);
