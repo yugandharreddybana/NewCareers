@@ -2,7 +2,8 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import toast from 'react-hot-toast';
 import { useAuth } from '@/context/AuthContext';
 import { jobsApi, skillsApi } from '@/services/api';
-import { JobCard, JobsListResponse, Stats } from '@/types';
+import { analyticsApi, AnalyticsSummary } from '@/services/analyticsApi';
+import { JobCard, JobsListResponse } from '@/types';
 import JobCardUI from '@/components/ui/JobCard';
 import SkillButton from '@/components/skills/SkillButton';
 import { useSkill } from '@/components/skills/useSkill';
@@ -10,7 +11,7 @@ import ComparePanel from '@/components/skills/ComparePanel';
 import TriagePanel from '@/components/skills/TriagePanel';
 import {
   RotateCw, Search, SlidersHorizontal, X,
-  Target, Zap, AlertTriangle, Building2,
+  Target, Zap, AlertTriangle, Building2, Send, TrendingUp,
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 
@@ -23,9 +24,12 @@ const SOURCE_OPTIONS = [
 export default function Dashboard() {
   const { user } = useAuth();
   const [data,     setData]     = useState<JobsListResponse | null>(null);
-  const [stats,    setStats]    = useState<Stats | null>(null);
   const [loading,  setLoading]  = useState(true);
   const [fetching, setFetching] = useState(false);
+
+  // Analytics stats (real data from analytics API)
+  const [analyticsStats, setAnalyticsStats] = useState<AnalyticsSummary | null>(null);
+  const [statsLoading,   setStatsLoading]   = useState(true);
 
   // Filters
   const [search,      setSearch]      = useState('');
@@ -43,9 +47,8 @@ export default function Dashboard() {
 
   async function load() {
     try {
-      const [res, s] = await Promise.all([jobsApi.list(), jobsApi.stats()]);
+      const res = await jobsApi.list();
       setData(res);
-      setStats(s);
     } catch (e: any) {
       toast.error(e.normalizedMessage || 'Failed to load jobs');
     } finally {
@@ -53,7 +56,21 @@ export default function Dashboard() {
     }
   }
 
-  useEffect(() => { load(); }, []);
+  async function loadAnalytics() {
+    try {
+      const summary = await analyticsApi.getSummary();
+      setAnalyticsStats(summary);
+    } catch {
+      // Analytics failure should never block the dashboard
+    } finally {
+      setStatsLoading(false);
+    }
+  }
+
+  useEffect(() => {
+    load();
+    loadAnalytics();
+  }, []);
 
   async function getMore() {
     if (!data || data.remaining <= 0) return;
@@ -111,7 +128,6 @@ export default function Dashboard() {
         </div>
 
         <div className="flex items-center gap-2 shrink-0">
-          {/* AI skill buttons — kept from Phase 1 */}
           <SkillButton
             label="Compare"
             icon={<Target size={15} className="mr-1.5" />}
@@ -126,7 +142,6 @@ export default function Dashboard() {
             onClick={triageSkill.run}
             className="!rounded-xl !h-9 !text-xs"
           />
-          {/* Scan For New Jobs — the primary green CTA */}
           <button
             onClick={getMore}
             disabled={fetching || (data ? data.remaining <= 0 : false)}
@@ -164,7 +179,7 @@ export default function Dashboard() {
         )}
       </AnimatePresence>
 
-      {/* ── Top Targeted Matches section ── */}
+      {/* ── Top Targeted Matches ── */}
       <section>
         <div className="flex items-center justify-between mb-4">
           <h2 className="text-base font-semibold text-slate-800">Top Targeted Matches</h2>
@@ -176,7 +191,7 @@ export default function Dashboard() {
         </div>
         <div className="h-px bg-slate-200 mb-5" />
 
-        {/* ── Filter bar ── */}
+        {/* Filter bar */}
         <div className="flex flex-col gap-3 mb-6">
           <div className="flex gap-2 items-center">
             <div className="relative flex-1">
@@ -295,7 +310,6 @@ export default function Dashboard() {
           </div>
         )}
 
-        {/* Load more */}
         {data && data.remaining > 0 && topJobs.length > 0 && (
           <div className="flex justify-center mt-8">
             <button
@@ -309,43 +323,65 @@ export default function Dashboard() {
         )}
       </section>
 
-      {/* ── Market Pulse ── */}
+      {/* ── Market Pulse — powered by real analytics data ── */}
       <section>
         <div className="bg-white border border-slate-200 rounded-2xl overflow-hidden">
-          {/* Card header */}
           <div className="flex items-center gap-2 px-6 pt-5 pb-4 border-b border-slate-100">
-            <div className="w-7 h-7 rounded-lg bg-emerald-100 flex items-center justify-center">
-              <Building2 size={14} className="text-emerald-600" />
+            <div className="w-7 h-7 rounded-lg bg-indigo-100 flex items-center justify-center">
+              <TrendingUp size={14} className="text-indigo-600" />
             </div>
-            <h3 className="font-semibold text-slate-800">Market Pulse</h3>
+            <h3 className="font-semibold text-slate-800">Your Progress This Week</h3>
           </div>
 
-          {/* Three stats columns */}
           <div className="grid grid-cols-1 md:grid-cols-3 divide-y md:divide-y-0 md:divide-x divide-slate-100">
-            {/* Sourced jobs */}
+            {/* Skills run this week */}
             <div className="px-6 py-5 space-y-1">
-              <p className="text-3xl font-black text-slate-900">{stats?.total ?? 0}</p>
-              <p className="text-[11px] font-bold text-slate-400 uppercase tracking-widest">Sourced Jobs</p>
+              {statsLoading ? (
+                <div className="h-9 w-20 bg-slate-100 rounded animate-pulse mb-1" />
+              ) : (
+                <p className="text-3xl font-black text-slate-900">
+                  {analyticsStats?.skillsRunThisWeek ?? 0}
+                </p>
+              )}
+              <p className="text-[11px] font-bold text-slate-400 uppercase tracking-widest flex items-center gap-1.5">
+                <Zap size={11} /> Skills Run This Week
+              </p>
               <p className="text-xs text-slate-400 leading-relaxed">
-                Total high-match roles curated into your pipeline historically.
+                AI career tools used against jobs in your pipeline.
               </p>
             </div>
 
-            {/* Active region */}
+            {/* Applications submitted */}
             <div className="px-6 py-5 space-y-1">
-              <p className="text-3xl font-black text-slate-900">Ireland</p>
-              <p className="text-[11px] font-bold text-slate-400 uppercase tracking-widest">Active Region</p>
+              {statsLoading ? (
+                <div className="h-9 w-16 bg-slate-100 rounded animate-pulse mb-1" />
+              ) : (
+                <p className="text-3xl font-black text-slate-900">
+                  {analyticsStats?.applicationsSubmitted ?? 0}
+                </p>
+              )}
+              <p className="text-[11px] font-bold text-slate-400 uppercase tracking-widest flex items-center gap-1.5">
+                <Send size={11} /> Applications Submitted
+              </p>
               <p className="text-xs text-slate-400 leading-relaxed">
-                Scanning jobs filtered for local and EMEA distributed zones.
+                Jobs moved to Applied, Interview or Offer stage.
               </p>
             </div>
 
-            {/* Engine status */}
+            {/* Avg match % */}
             <div className="px-6 py-5 space-y-1">
-              <p className="text-3xl font-black text-emerald-500">Live</p>
-              <p className="text-[11px] font-bold text-slate-400 uppercase tracking-widest">Engine Status</p>
+              {statsLoading ? (
+                <div className="h-9 w-20 bg-slate-100 rounded animate-pulse mb-1" />
+              ) : (
+                <p className="text-3xl font-black text-emerald-500">
+                  {analyticsStats?.avgMatchPercent ?? 0}%
+                </p>
+              )}
+              <p className="text-[11px] font-bold text-slate-400 uppercase tracking-widest flex items-center gap-1.5">
+                <Target size={11} /> Avg Match Score
+              </p>
               <p className="text-xs text-slate-400 leading-relaxed">
-                Your profile, CV, and preferences are fully indexed for scraping.
+                Average AI match quality across your full pipeline.
               </p>
             </div>
           </div>

@@ -1,9 +1,10 @@
 import { NavLink } from 'react-router-dom';
-import { LayoutDashboard, Kanban, User } from 'lucide-react';
+import { LayoutDashboard, Kanban, User, TrendingUp } from 'lucide-react';
 
 const NAV = [
   { to: '/dashboard',  label: 'Dashboard',    icon: LayoutDashboard },
   { to: '/kanban',     label: 'Applications',  icon: Kanban },
+  { to: '/analytics',  label: 'Analytics',    icon: TrendingUp },
   { to: '/profile',    label: 'Profile',       icon: User },
 ];
 

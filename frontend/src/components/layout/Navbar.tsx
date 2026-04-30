@@ -1,10 +1,11 @@
 import { NavLink, useNavigate } from 'react-router-dom';
 import { useAuth } from '@/context/AuthContext';
-import { LayoutDashboard, Kanban, User, LogOut, Zap } from 'lucide-react';
+import { LayoutDashboard, Kanban, User, LogOut, Zap, TrendingUp } from 'lucide-react';
 
 const NAV_LINKS = [
   { to: '/dashboard', label: 'Dashboard',   icon: LayoutDashboard },
   { to: '/kanban',    label: 'Applications', icon: Kanban },
+  { to: '/analytics', label: 'Analytics',   icon: TrendingUp },
   { to: '/profile',   label: 'Profile',      icon: User },
 ];
 

@@ -8,6 +8,7 @@ import Dashboard      from '@/pages/Dashboard';
 import JobDetail      from '@/pages/JobDetail';
 import Kanban         from '@/pages/Kanban';
 import Profile        from '@/pages/Profile';
+import Analytics      from '@/pages/Analytics';
 import AppShell       from '@/components/layout/AppShell';
 
 function Protected({ children }: { children: JSX.Element }) {
@@ -31,6 +32,7 @@ export default function App() {
         <Route path="/jobs/:id"  element={<JobDetail />} />
         <Route path="/kanban"    element={<Kanban />} />
         <Route path="/profile"   element={<Profile />} />
+        <Route path="/analytics" element={<Analytics />} />
       </Route>
 
       <Route path="*" element={<Navigate to="/dashboard" replace />} />
