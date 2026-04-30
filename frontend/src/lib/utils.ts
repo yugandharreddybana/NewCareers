@@ -2,25 +2,14 @@ import { type ClassValue, clsx } from 'clsx';
 import { twMerge } from 'tailwind-merge';
 
 /**
- * Merges Tailwind classes safely, resolving conflicts.
- * Use this everywhere instead of raw template strings.
+ * Merge Tailwind CSS classes safely.
+ * Combines clsx (conditional classes) + tailwind-merge (deduplication).
  */
-export function cn(...inputs: ClassValue[]): string {
+export function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
 }
 
-/**
- * Converts a number to a compact label: 1200 → "1.2k"
- */
-export function compact(n: number): string {
-  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}m`;
-  if (n >= 1_000)     return `${(n / 1_000).toFixed(1)}k`;
-  return String(n);
-}
-
-/**
- * Human-readable relative time: "2h ago", "3d ago"
- */
+/** Format a date string as "X time ago" */
 export function timeAgo(iso: string): string {
   if (!iso) return 'Recently';
   const diff = (Date.now() - new Date(iso).getTime()) / 1000;
@@ -31,59 +20,34 @@ export function timeAgo(iso: string): string {
   return new Date(iso).toLocaleDateString('en-IE', { day: 'numeric', month: 'short' });
 }
 
-/**
- * Returns a greeting based on the current hour.
- */
-export function greeting(): string {
-  const h = new Date().getHours();
-  if (h < 12) return 'Good morning';
-  if (h < 17) return 'Good afternoon';
-  if (h < 21) return 'Good evening';
-  return 'Good night';
+/** Capitalise first letter of every word */
+export function titleCase(s: string): string {
+  return s.replace(/\w\S*/g, w => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase());
 }
 
-/**
- * Clamps a number between min and max.
- */
+/** Format salary number: 75000 → "€75k" */
+export function formatSalary(n?: number | null): string {
+  if (!n) return '';
+  return n >= 1000 ? `€${Math.round(n / 1000)}k` : `€${n}`;
+}
+
+/** Clamp a number between min and max */
 export function clamp(n: number, min: number, max: number): number {
   return Math.min(Math.max(n, min), max);
 }
 
-/**
- * Colour for match score — red → amber → green
- */
-export function matchColour(score: number): string {
-  if (score >= 80) return 'text-success-600';
-  if (score >= 60) return 'text-warning-600';
-  return 'text-danger-600';
+/** Get colour class for match % score */
+export function matchColor(pct?: number | null): string {
+  if (!pct) return 'text-text-muted';
+  if (pct >= 80) return 'text-success';
+  if (pct >= 60) return 'text-warning';
+  return 'text-danger';
 }
 
-export function matchBg(score: number): string {
-  if (score >= 80) return 'bg-success-500';
-  if (score >= 60) return 'bg-warning-500';
-  return 'bg-danger-500';
-}
-
-/**
- * Truncates a string to `n` chars with ellipsis.
- */
-export function truncate(s: string, n: number): string {
-  return s.length > n ? s.slice(0, n - 1) + '…' : s;
-}
-
-/**
- * Formats salary values into a readable string.
- */
-export function salaryLabel(min?: number, max?: number): string {
-  if (min && max) return `€${(min/1000).toFixed(0)}k – €${(max/1000).toFixed(0)}k`;
-  if (min)        return `€${(min/1000).toFixed(0)}k+`;
-  if (max)        return `Up to €${(max/1000).toFixed(0)}k`;
-  return 'Salary not listed';
-}
-
-/**
- * Capitalises the first letter of a string.
- */
-export function capitalise(s: string): string {
-  return s.charAt(0).toUpperCase() + s.slice(1);
+/** Get bg colour class for match % score */
+export function matchBg(pct?: number | null): string {
+  if (!pct) return 'bg-slate-100';
+  if (pct >= 80) return 'bg-success-light border-success-border';
+  if (pct >= 60) return 'bg-warning-light border-warning-border';
+  return 'bg-danger-light border-danger-border';
 }

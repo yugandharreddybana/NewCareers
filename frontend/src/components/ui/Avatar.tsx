@@ -1,46 +1,68 @@
-import * as RadixAvatar from '@radix-ui/react-avatar';
 import { cn } from '@/lib/utils';
 
-interface AvatarProps {
-  src?: string;
-  name?: string;
-  size?: 'xs' | 'sm' | 'md' | 'lg' | 'xl';
-  className?: string;
-  online?: boolean;
-}
-
-const sizeMap = {
-  xs: 'w-6 h-6 text-[10px]',
-  sm: 'w-8 h-8 text-xs',
-  md: 'w-9 h-9 text-sm',
-  lg: 'w-11 h-11 text-base',
-  xl: 'w-14 h-14 text-lg',
+const SIZE_CLASSES = {
+  xs: 'w-6  h-6  text-xs',
+  sm: 'w-8  h-8  text-sm',
+  md: 'w-10 h-10 text-base',
+  lg: 'w-12 h-12 text-lg',
+  xl: 'w-16 h-16 text-xl',
 };
 
-export default function Avatar({ src, name, size = 'md', className, online }: AvatarProps) {
-  const initials = name
-    ? name.split(' ').map((n) => n[0]).slice(0, 2).join('').toUpperCase()
-    : '?';
+// Deterministic pleasant colour from name
+const PALETTE = [
+  'bg-violet-100 text-violet-700',
+  'bg-blue-100   text-blue-700',
+  'bg-emerald-100 text-emerald-700',
+  'bg-amber-100  text-amber-700',
+  'bg-rose-100   text-rose-700',
+  'bg-cyan-100   text-cyan-700',
+  'bg-fuchsia-100 text-fuchsia-700',
+  'bg-indigo-100 text-indigo-700',
+];
 
+function getInitials(name?: string): string {
+  if (!name) return '?';
+  const parts = name.trim().split(/\s+/);
+  return parts.length === 1
+    ? parts[0][0].toUpperCase()
+    : (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
+}
+
+function getColor(name?: string): string {
+  if (!name) return PALETTE[0];
+  const sum = name.split('').reduce((a, c) => a + c.charCodeAt(0), 0);
+  return PALETTE[sum % PALETTE.length];
+}
+
+export interface AvatarProps {
+  name?:      string;
+  src?:       string;
+  size?:      keyof typeof SIZE_CLASSES;
+  className?: string;
+}
+
+export function Avatar({ name, src, size = 'md', className }: AvatarProps) {
+  if (src) {
+    return (
+      <img
+        src={src}
+        alt={name ?? 'Avatar'}
+        className={cn('rounded-full object-cover shrink-0', SIZE_CLASSES[size], className)}
+      />
+    );
+  }
   return (
-    <div className="relative inline-flex">
-      <RadixAvatar.Root
-        className={cn(
-          'rounded-full overflow-hidden border border-border flex-shrink-0 flex items-center justify-center',
-          sizeMap[size],
-          className,
-        )}
-      >
-        <RadixAvatar.Image src={src} alt={name} className="w-full h-full object-cover" />
-        <RadixAvatar.Fallback
-          className="w-full h-full flex items-center justify-center font-bold bg-brand-50 text-brand"
-        >
-          {initials}
-        </RadixAvatar.Fallback>
-      </RadixAvatar.Root>
-      {online && (
-        <span className="absolute bottom-0 right-0 w-2.5 h-2.5 rounded-full bg-success-500 border-2 border-surface" />
+    <div
+      className={cn(
+        'rounded-full flex items-center justify-center font-semibold shrink-0 select-none',
+        SIZE_CLASSES[size],
+        getColor(name),
+        className
       )}
+    >
+      {getInitials(name)}
     </div>
   );
 }
+
+export default Avatar;

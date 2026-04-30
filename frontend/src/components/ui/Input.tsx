@@ -1,33 +1,29 @@
-import { forwardRef, type InputHTMLAttributes } from 'react';
+import { forwardRef } from 'react';
 import { cn } from '@/lib/utils';
 
-export interface InputProps extends InputHTMLAttributes<HTMLInputElement> {
-  label?: string;
-  hint?: string;
-  error?: string;
-  leftIcon?: React.ReactNode;
+export interface InputProps extends React.InputHTMLAttributes<HTMLInputElement> {
+  label?:     string;
+  error?:     string;
+  hint?:      string;
+  leftIcon?:  React.ReactNode;
   rightIcon?: React.ReactNode;
-  inputSize?: 'sm' | 'md' | 'lg';
+  required?:  boolean;
 }
 
 const Input = forwardRef<HTMLInputElement, InputProps>(
-  ({ className, label, hint, error, leftIcon, rightIcon, inputSize = 'md', id, ...props }, ref) => {
+  ({ className, label, error, hint, leftIcon, rightIcon, id, required, ...props }, ref) => {
     const inputId = id ?? label?.toLowerCase().replace(/\s+/g, '-');
-
-    const heightClass = inputSize === 'sm' ? 'h-8 text-xs' : inputSize === 'lg' ? 'h-11 text-base' : 'h-10 text-sm';
-    const paddingLeft = leftIcon  ? 'pl-9'   : 'pl-3.5';
-    const paddingRight= rightIcon ? 'pr-9'   : 'pr-3.5';
-
     return (
-      <div className="w-full">
+      <div className="flex flex-col gap-1.5">
         {label && (
-          <label htmlFor={inputId} className="block text-sm font-semibold text-text-primary mb-1.5">
+          <label htmlFor={inputId} className="text-sm font-medium text-text-primary">
             {label}
+            {required && <span className="text-danger ml-0.5">*</span>}
           </label>
         )}
         <div className="relative">
           {leftIcon && (
-            <span className="absolute left-3 top-1/2 -translate-y-1/2 text-text-muted pointer-events-none">
+            <span className="absolute left-3 top-1/2 -translate-y-1/2 text-text-muted flex">
               {leftIcon}
             </span>
           )}
@@ -35,32 +31,32 @@ const Input = forwardRef<HTMLInputElement, InputProps>(
             ref={ref}
             id={inputId}
             className={cn(
-              'w-full rounded-xl border bg-surface text-text-primary placeholder:text-text-muted',
-              'transition-all duration-150 outline-none',
-              'focus:border-brand focus:ring-2 focus:ring-brand/15',
-              'disabled:bg-surface-3 disabled:text-text-muted disabled:cursor-not-allowed',
+              'w-full h-10 px-3 rounded-lg border bg-white text-text-primary',
+              'placeholder:text-text-muted text-base transition-all duration-150',
+              'focus:outline-none focus:ring-2 focus:ring-brand/20 focus:border-brand',
+              'hover:border-border-strong',
+              'disabled:opacity-50 disabled:cursor-not-allowed disabled:bg-bg-subtle',
               error
-                ? 'border-danger-500 focus:border-danger-500 focus:ring-danger-500/15'
-                : 'border-border hover:border-border-strong',
-              heightClass,
-              paddingLeft,
-              paddingRight,
-              className,
+                ? 'border-danger focus:ring-danger/20 focus:border-danger'
+                : 'border-border',
+              leftIcon  && 'pl-9',
+              rightIcon && 'pr-9',
+              className
             )}
             {...props}
           />
           {rightIcon && (
-            <span className="absolute right-3 top-1/2 -translate-y-1/2 text-text-muted">
+            <span className="absolute right-3 top-1/2 -translate-y-1/2 text-text-muted flex">
               {rightIcon}
             </span>
           )}
         </div>
-        {error && <p className="mt-1 text-xs text-danger-600 font-medium">{error}</p>}
-        {hint && !error && <p className="mt-1 text-xs text-text-muted">{hint}</p>}
+        {error  && <p className="text-xs text-danger font-medium flex items-center gap-1">⚠ {error}</p>}
+        {!error && hint && <p className="text-xs text-text-muted">{hint}</p>}
       </div>
     );
   }
 );
-Input.displayName = 'Input';
 
+Input.displayName = 'Input';
 export default Input;
