@@ -1,264 +1,352 @@
 package com.careerops.service;
 
-import com.careerops.exception.ApiException;
-import com.careerops.model.*;
-import com.careerops.repository.*;
+import com.careerops.dto.RunAllSkillsResponse;
+import com.careerops.dto.SkillRunResponse;
+import com.careerops.dto.SkillStartRequest;
+import com.careerops.model.AgentResult;
+import com.careerops.model.SkillConversation;
+import com.careerops.model.SkillRun;
+import com.careerops.repository.SkillConversationRepository;
+import com.careerops.repository.SkillRunRepository;
+import com.careerops.repository.UserJobRepository;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import org.springframework.http.HttpStatus;
+import com.fasterxml.jackson.databind.node.ArrayNode;
+import com.fasterxml.jackson.databind.node.ObjectNode;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.time.Instant;
+import java.time.temporal.ChronoUnit;
 import java.util.*;
-import java.util.stream.Collectors;
 
 /**
- * Implementation of every visible skill button. Each method:
- *   1. Checks SkillRun cache — returns instantly if a run exists for this job+skill
- *   2. Loads skill prompt + user/job/CV context
- *   3. Calls Gemini
- *   4. Persists a SkillRun for caching/audit
- *   5. Returns structured JSON to the controller
+ * Orchestrates all 9 CareerOps skills.
+ *
+ * Flow:
+ *   1. Validate profile completeness (ProfileValidator)
+ *   2. Check TTL cache (SkillRunRepository)
+ *   3. Build system prompt (SkillPromptLibrary)
+ *   4. Run Claude agentic loop (ClaudeAgentService)
+ *   5. Handle result: Done | NeedsAnswer | Error
+ *   6. Save SkillRun with appropriate TTL
+ *
+ * Zero Gemini calls remain in this service.
+ * All AI generation goes through ClaudeAgentService.
  */
 @Service
 public class SkillService {
 
-    private final SkillPromptLibrary   prompts;
-    private final GeminiService        gemini;
-    private final UserProfileRepository profiles;
-    private final UserJobRepository    userJobs;
-    private final JobRepository        jobs;
-    private final SkillRunRepository   runs;
-    private final CvService            cvService;
-    private final ObjectMapper         mapper = new ObjectMapper();
+    private static final Logger log = LoggerFactory.getLogger(SkillService.class);
 
-    public SkillService(SkillPromptLibrary prompts, GeminiService gemini,
-                        UserProfileRepository profiles, UserJobRepository userJobs,
-                        JobRepository jobs, SkillRunRepository runs, CvService cv) {
-        this.prompts = prompts; this.gemini = gemini;
-        this.profiles = profiles; this.userJobs = userJobs;
-        this.jobs = jobs; this.runs = runs; this.cvService = cv;
+    // TTL in days per skill. Null = no cache (always fresh).
+    private static final Map<String, Integer> CACHE_TTL_DAYS = Map.of(
+        "evaluate",      7,
+        "research",      1,
+        "prep-interview", 3
+    );
+
+    private final ClaudeAgentService           claude;
+    private final SkillPromptLibrary           prompts;
+    private final ProfileValidator             validator;
+    private final SkillRunRepository           skillRuns;
+    private final SkillConversationRepository  conversations;
+    private final UserJobRepository            userJobs;
+    private final ObjectMapper                 mapper;
+
+    @Value("${skill.conversation.expire.minutes:30}")
+    private int conversationExpireMinutes;
+
+    public SkillService(
+            ClaudeAgentService claude,
+            SkillPromptLibrary prompts,
+            ProfileValidator validator,
+            SkillRunRepository skillRuns,
+            SkillConversationRepository conversations,
+            UserJobRepository userJobs,
+            ObjectMapper mapper) {
+        this.claude        = claude;
+        this.prompts       = prompts;
+        this.validator     = validator;
+        this.skillRuns     = skillRuns;
+        this.conversations = conversations;
+        this.userJobs      = userJobs;
+        this.mapper        = mapper;
     }
 
-    @Transactional
-    public JsonNode evaluate(UUID userId, UUID userJobId) {
-        JsonNode cached = getCached(userId, userJobId, "evaluate");
-        if (cached != null) return cached;
-
-        UserJob uj = ujOr404(userId, userJobId);
-        Job job = jobs.findById(uj.getJobId()).orElseThrow();
-        UserProfile p = profiles.findByUserId(userId).orElseThrow();
-        String cv = cvService.activeCvText(userId);
-        String user = buildEvalPrompt(p, job, cv);
-        return persistAndReturn(userId, userJobId, "evaluate",
-            mapper.createObjectNode().put("user", user),
-            gemini.generateJson(prompts.prompt("evaluate"), user));
-    }
-
-    @Transactional
-    public JsonNode tailorResume(UUID userId, UUID userJobId) {
-        JsonNode cached = getCached(userId, userJobId, "tailor-resume");
-        if (cached != null) return cached;
-
-        UserJob uj = ujOr404(userId, userJobId);
-        Job job = jobs.findById(uj.getJobId()).orElseThrow();
-        String cv = cvService.activeCvText(userId);
-        String user = String.format("""
-            ORIGINAL CV:
-            %s
-
-            TARGET JOB:
-            Title: %s @ %s
-            Description:
-            %s
-            """, trim(cv, 8000), job.getTitle(), job.getCompany(), trim(job.getDescription(), 8000));
-        return persistAndReturn(userId, userJobId, "tailor-resume",
-            mapper.createObjectNode().put("input", "cv+jd"),
-            gemini.generateJson(prompts.prompt("tailor-resume"), user));
-    }
-
-    @Transactional
-    public JsonNode researchCompany(UUID userId, UUID userJobId) {
-        JsonNode cached = getCached(userId, userJobId, "research");
-        if (cached != null) return cached;
-
-        UserJob uj = ujOr404(userId, userJobId);
-        Job job = jobs.findById(uj.getJobId()).orElseThrow();
-        String user = "COMPANY: " + job.getCompany() + "\nROLE: " + job.getTitle()
-            + "\nLOCATION: " + job.getLocation();
-        return persistAndReturn(userId, userJobId, "research",
-            mapper.createObjectNode().put("company", job.getCompany()),
-            gemini.generateJson(prompts.prompt("research"), user));
-    }
-
-    @Transactional
-    public JsonNode draftOutreach(UUID userId, UUID userJobId, String channel, String tone) {
-        // Outreach is channel+tone-specific — use composite cache key
-        String skillKey = "outreach-" + channel + "-" + tone;
-        JsonNode cached = getCached(userId, userJobId, skillKey);
-        if (cached != null) return cached;
-
-        UserJob uj = ujOr404(userId, userJobId);
-        Job job = jobs.findById(uj.getJobId()).orElseThrow();
-        UserProfile p = profiles.findByUserId(userId).orElseThrow();
-        String user = String.format("""
-            CHANNEL: %s
-            TONE: %s
-            CANDIDATE: roles=%s, stack=%s
-            ROLE: %s @ %s — %s
-            """, channel, tone, arr(p.getTargetRoles()), arr(p.getTechStack()),
-            job.getTitle(), job.getCompany(), job.getLocation());
-        return persistAndReturn(userId, userJobId, skillKey,
-            mapper.createObjectNode().put("channel", channel),
-            gemini.generateJson(prompts.prompt("outreach"), user));
-    }
-
-    @Transactional
-    public JsonNode applyAssistant(UUID userId, UUID userJobId, String step) {
-        String skillKey = "apply-" + (step == null ? "all" : step);
-        JsonNode cached = getCached(userId, userJobId, skillKey);
-        if (cached != null) return cached;
-
-        UserJob uj = ujOr404(userId, userJobId);
-        Job job = jobs.findById(uj.getJobId()).orElseThrow();
-        String cv = cvService.activeCvText(userId);
-        String user = String.format("""
-            STEP: %s
-            JOB: %s @ %s
-            DESCRIPTION:
-            %s
-
-            CV:
-            %s
-            """, step == null ? "all" : step, job.getTitle(), job.getCompany(),
-            trim(job.getDescription(), 6000), trim(cv, 6000));
-        return persistAndReturn(userId, userJobId, skillKey,
-            mapper.createObjectNode().put("step", step),
-            gemini.generateJson(prompts.prompt("apply"), user));
-    }
-
-    @Transactional
-    public JsonNode prepInterview(UUID userId, UUID userJobId) {
-        JsonNode cached = getCached(userId, userJobId, "prep-interview");
-        if (cached != null) return cached;
-
-        UserJob uj = ujOr404(userId, userJobId);
-        Job job = jobs.findById(uj.getJobId()).orElseThrow();
-        UserProfile p = profiles.findByUserId(userId).orElseThrow();
-        String user = "Prepare interview kit for " + job.getTitle() + " @ " + job.getCompany()
-            + ".\nCandidate stack: " + arr(p.getTechStack())
-            + "\nJD:\n" + trim(job.getDescription(), 6000);
-        return persistAndReturn(userId, userJobId, "prep-interview",
-            mapper.createObjectNode().put("kind", "kit"),
-            gemini.generateJson(prompts.prompt("prep-interview"), user));
-    }
-
-    @Transactional
-    public JsonNode compare(UUID userId, List<UUID> userJobIds) {
-        if (userJobIds == null || userJobIds.size() < 2)
-            throw new ApiException(HttpStatus.BAD_REQUEST, "Select at least 2 jobs");
-        StringBuilder sb = new StringBuilder("Compare these jobs for the candidate:\n\n");
-        int n = 1;
-        for (UUID id : userJobIds) {
-            UserJob uj = ujOr404(userId, id);
-            Job j = jobs.findById(uj.getJobId()).orElseThrow();
-            sb.append("Job ").append(n++).append(": ").append(j.getTitle()).append(" @ ").append(j.getCompany())
-              .append(" | Match: ").append(uj.getMatchPercent()).append("%")
-              .append(" | Salary: ").append(j.getSalaryMin()).append("-").append(j.getSalaryMax())
-              .append(" | Location: ").append(j.getLocation()).append("\n")
-              .append(trim(j.getDescription(), 1500)).append("\n\n");
-        }
-        // compare is always fresh (different job combos)
-        return persistAndReturn(userId, null, "compare",
-            mapper.createObjectNode().put("count", userJobIds.size()),
-            gemini.generateJson(prompts.prompt("compare"), sb.toString()));
-    }
-
-    @Transactional
-    public JsonNode triage(UUID userId) {
-        var all = userJobs.findByUserIdOrderByDeliveredAtDesc(userId);
-        if (all.isEmpty()) return mapper.createObjectNode().put("ranked", "[]");
-        StringBuilder sb = new StringBuilder("Re-rank these jobs and give a one-line verdict each:\n\n");
-        for (UserJob uj : all) {
-            Job j = jobs.findById(uj.getJobId()).orElse(null);
-            if (j == null) continue;
-            sb.append("- id=").append(uj.getId())
-              .append(" | ").append(j.getTitle()).append(" @ ").append(j.getCompany())
-              .append(" | match=").append(uj.getMatchPercent()).append("\n");
-        }
-        // triage is always fresh (queue may have changed)
-        return persistAndReturn(userId, null, "triage",
-            mapper.createObjectNode().put("count", all.size()),
-            gemini.generateJson(prompts.prompt("triage"), sb.toString()));
-    }
-
-    @Transactional(readOnly = true)
-    public JsonNode lastRun(UUID userId, UUID userJobId, String skill) {
-        return runs.findFirstByUserIdAndUserJobIdAndSkillOrderByCreatedAtDesc(userId, userJobId, skill)
-            .map(SkillRun::getOutput).orElse(null);
-    }
-
-    /* ---------- helpers ---------- */
+    // ================================================================
+    // START A SKILL
+    // ================================================================
 
     /**
-     * Returns the most recent cached output for a skill, or null if not cached.
-     * Prevents duplicate Gemini calls when the user re-opens the same skill panel.
+     * Start or resume a skill run.
+     * Handles profile validation, TTL cache, and Claude invocation.
      */
-    private JsonNode getCached(UUID userId, UUID userJobId, String skill) {
-        if (userJobId == null) return null;
-        return runs.findFirstByUserIdAndUserJobIdAndSkillOrderByCreatedAtDesc(userId, userJobId, skill)
-            .map(SkillRun::getOutput)
-            .orElse(null);
-    }
+    @Transactional
+    public SkillRunResponse startSkill(SkillStartRequest req, UUID userId) {
+        String skill     = req.skillName();
+        UUID   userJobId = req.userJobId();
 
-    private UserJob ujOr404(UUID userId, UUID userJobId) {
-        return userJobs.findByIdAndUserId(userJobId, userId)
-            .orElseThrow(() -> new ApiException(HttpStatus.NOT_FOUND, "User-job not found"));
-    }
+        log.info("startSkill: skill={}, userId={}, userJobId={}", skill, userId, userJobId);
 
-    private JsonNode persistAndReturn(UUID userId, UUID userJobId, String skill, JsonNode input, JsonNode output) {
-        runs.save(SkillRun.builder()
-            .userId(userId).userJobId(userJobId).skill(skill)
-            .input(input).output(output).build());
-        return output;
-    }
+        // ── 1. Profile validation ─────────────────────────────────────────────
+        List<String> missing = validator.validateForSkill(userId, skill);
+        if (!missing.isEmpty()) {
+            log.debug("Profile incomplete for skill={}: {}", skill, missing);
+            return SkillRunResponse.profileIncomplete(skill, missing);
+        }
 
-    private String buildEvalPrompt(UserProfile p, Job job, String cv) {
-        return String.format("""
-            USER PROFILE:
-            - Target roles: %s
-            - Tech stack: %s
-            - Sectors: %s
-            - Location: %s
-            - Salary: %s-%s
-            - Sponsorship required: %s
-            - Min match: %s%%
+        // ── 2. TTL cache check ────────────────────────────────────────────────
+        if (userJobId != null && CACHE_TTL_DAYS.containsKey(skill)) {
+            Optional<SkillRun> cached = skillRuns.findValidCachedRun(userId, userJobId, skill);
+            if (cached.isPresent()) {
+                log.debug("Cache hit for skill={}, userId={}", skill, userId);
+                return SkillRunResponse.result(skill, cached.get().getOutput());
+            }
+        }
 
-            CV:
-            %s
+        // ── 3. Build initial message ──────────────────────────────────────────
+        String systemPrompt = prompts.buildFullSystemPrompt(skill);
+        ArrayNode messages  = buildInitialMessages(req, userId);
 
-            JOB:
-            Title: %s | Company: %s | Location: %s
-            Salary: %s-%s | Sponsorship: %s
-            Description:
-            %s
-            """,
-            arr(p.getTargetRoles()), arr(p.getTechStack()), arr(p.getSectors()),
-            p.getLocation(), p.getSalaryMin(), p.getSalaryMax(),
-            p.getSponsorshipRequired(), p.getMinMatchPercent(),
-            trim(cv, 8000),
-            job.getTitle(), job.getCompany(), job.getLocation(),
-            job.getSalaryMin(), job.getSalaryMax(), job.getSponsorship(),
-            trim(job.getDescription(), 8000)
+        // ── 4. Run Claude ──────────────────────────────────────────────────
+        return handleAgentResult(
+                claude.run(systemPrompt, messages, userId, userJobId),
+                skill, userId, userJobId, messages
         );
     }
 
-    private static String trim(String s, int max) {
-        if (s == null) return "";
-        return s.length() <= max ? s : s.substring(0, max) + "...[truncated]";
+    // ================================================================
+    // RESUME A PAUSED CONVERSATION
+    // ================================================================
+
+    /**
+     * Resume a paused skill run after the user answers Claude's question.
+     */
+    @Transactional
+    public SkillRunResponse resumeConversation(UUID conversationId, String answer, UUID userId) {
+        log.info("resumeConversation: id={}, userId={}", conversationId, userId);
+
+        // Secure fetch: always scoped to userId
+        SkillConversation conv = conversations.findByIdAndUserId(conversationId, userId)
+                .orElse(null);
+
+        if (conv == null) {
+            return SkillRunResponse.error("unknown", "Conversation not found.");
+        }
+
+        if (conv.getExpiresAt().isBefore(Instant.now())) {
+            conv.setStatus("expired");
+            conversations.save(conv);
+            return SkillRunResponse.error(conv.getSkill(),
+                    "This conversation has expired. Please start the skill again.");
+        }
+
+        // Restore message history from DB
+        ArrayNode history = (ArrayNode) conv.getMessages();
+
+        // Append the tool_result for the ask_user call
+        ObjectNode toolResultMsg = mapper.createObjectNode();
+        toolResultMsg.put("role", "user");
+        ArrayNode toolResultContent = mapper.createArrayNode();
+        ObjectNode toolResult = mapper.createObjectNode();
+        toolResult.put("type",        "tool_result");
+        toolResult.put("tool_use_id", conv.getToolUseId());
+        toolResult.put("content",     answer.isBlank() ? "[User skipped this question]" : answer);
+        toolResultContent.add(toolResult);
+        toolResultMsg.set("content", toolResultContent);
+        history.add(toolResultMsg);
+
+        // Resume Claude from where it paused
+        String systemPrompt = prompts.buildFullSystemPrompt(conv.getSkill());
+        AgentResult result  = claude.run(systemPrompt, history, userId, conv.getUserJobId());
+
+        // Mark conversation as completed regardless of result
+        conv.setStatus("completed");
+        conversations.save(conv);
+
+        return handleAgentResult(result, conv.getSkill(), userId, conv.getUserJobId(), history);
     }
 
-    private static String arr(String[] a) {
-        return a == null ? "[]" : Arrays.stream(a).collect(Collectors.joining(", ", "[", "]"));
+    // ================================================================
+    // RUN ALL SKILLS
+    // ================================================================
+
+    /**
+     * Run all 9 skills for a given job sequentially.
+     * Individual failures do NOT stop the rest.
+     */
+    @Transactional
+    public RunAllSkillsResponse runAllSkills(UUID userId, UUID userJobId) {
+        log.info("runAllSkills: userId={}, userJobId={}", userId, userJobId);
+
+        Map<String, SkillRunResponse> results = new LinkedHashMap<>();
+        int succeeded = 0, failed = 0, pendingAnswers = 0;
+
+        for (String skill : SkillPromptLibrary.ALL_SKILLS) {
+            try {
+                SkillStartRequest req = new SkillStartRequest(
+                        skill, userJobId, null, null, null, null, null);
+                SkillRunResponse r = startSkill(req, userId);
+                results.put(skill, r);
+
+                switch (r.type()) {
+                    case RESULT             -> succeeded++;
+                    case QUESTION           -> pendingAnswers++;
+                    case PROFILE_INCOMPLETE -> failed++;
+                    case ERROR              -> failed++;
+                }
+            } catch (Exception e) {
+                log.error("runAllSkills: skill={} failed unexpectedly: {}", skill, e.getMessage(), e);
+                results.put(skill, SkillRunResponse.error(skill, "Skill failed unexpectedly. Please try individually."));
+                failed++;
+            }
+        }
+
+        return new RunAllSkillsResponse(
+                SkillPromptLibrary.ALL_SKILLS.size(),
+                succeeded, failed, pendingAnswers, results);
+    }
+
+    // ================================================================
+    // GET LAST RUN (no re-execution)
+    // ================================================================
+
+    public SkillRunResponse getLastRun(UUID userId, UUID userJobId, String skillName) {
+        return skillRuns
+                .findFirstByUserIdAndUserJobIdAndSkillOrderByCreatedAtDesc(userId, userJobId, skillName)
+                .map(sr -> SkillRunResponse.result(skillName, sr.getOutput()))
+                .orElse(SkillRunResponse.error(skillName, "No previous run found. Run the skill first."));
+    }
+
+    // ================================================================
+    // PRIVATE HELPERS
+    // ================================================================
+
+    /**
+     * Handle the 3 possible AgentResult types uniformly.
+     */
+    private SkillRunResponse handleAgentResult(
+            AgentResult result,
+            String skill,
+            UUID userId,
+            UUID userJobId,
+            ArrayNode messages) {
+
+        return switch (result) {
+
+            case AgentResult.Done done -> {
+                // Parse Claude's text output as JSON (or wrap in a text node)
+                JsonNode output = parseOutput(done.text());
+
+                // Save SkillRun with TTL
+                SkillRun run = SkillRun.builder()
+                        .userId(userId)
+                        .userJobId(userJobId)
+                        .skill(skill)
+                        .input(mapper.createObjectNode()) // input context saved separately if needed
+                        .output(output)
+                        .expiresAt(computeExpiry(skill))
+                        .build();
+                skillRuns.save(run);
+
+                log.info("Skill {} completed and saved for userId={}", skill, userId);
+                yield SkillRunResponse.result(skill, output);
+            }
+
+            case AgentResult.NeedsAnswer needs -> {
+                // Save paused conversation to DB for resumption within TTL
+                // Delete any existing pending conversation for this skill+job first
+                conversations.findByUserIdAndSkillAndUserJobIdAndStatus(
+                        userId, skill, userJobId, "pending_answer")
+                    .ifPresent(conversations::delete);
+
+                SkillConversation conv = new SkillConversation();
+                conv.setUserId(userId);
+                conv.setUserJobId(userJobId);
+                conv.setSkill(skill);
+                conv.setMessages(needs.messages());
+                conv.setToolUseId(needs.toolUseId());
+                conv.setQuestion(needs.question());
+                conv.setStatus("pending_answer");
+                conv.setExpiresAt(Instant.now().plus(conversationExpireMinutes, ChronoUnit.MINUTES));
+                SkillConversation saved = conversations.save(conv);
+
+                log.info("Skill {} paused for userId={}, waiting for answer", skill, userId);
+                yield SkillRunResponse.question(saved.getId(), needs.question(), skill);
+            }
+
+            case AgentResult.Error err -> {
+                log.warn("Skill {} error for userId={}: {}", skill, userId, err.message());
+                yield SkillRunResponse.error(skill, err.message());
+            }
+        };
+    }
+
+    /**
+     * Build the initial user message for a skill run.
+     * Includes skill-specific context (channel, tone, compareJobIds, etc.)
+     */
+    private ArrayNode buildInitialMessages(SkillStartRequest req, UUID userId) {
+        ArrayNode messages = mapper.createArrayNode();
+        ObjectNode userMsg = mapper.createObjectNode();
+        userMsg.put("role", "user");
+
+        StringBuilder content = new StringBuilder();
+        content.append("Please run the ").append(req.skillName()).append(" skill for me.\n");
+
+        if (req.channel() != null)  content.append("Channel: ").append(req.channel()).append("\n");
+        if (req.tone() != null)     content.append("Tone: ").append(req.tone()).append("\n");
+        if (req.step() != null)     content.append("Step: ").append(req.step()).append("\n");
+        if (req.scanTarget() != null) content.append("Scan target: ").append(req.scanTarget()).append("\n");
+
+        if (req.compareJobIds() != null && !req.compareJobIds().isEmpty()) {
+            content.append("Compare these job IDs: ");
+            content.append(String.join(", ",
+                    req.compareJobIds().stream().map(UUID::toString).toList()));
+            content.append("\n");
+        }
+
+        content.append("\nStart by calling read_profile, read_resume, and read_job to gather context before generating output.");
+
+        userMsg.put("content", content.toString());
+        messages.add(userMsg);
+        return messages;
+    }
+
+    /**
+     * Try to parse Claude's text output as JSON.
+     * If it fails, wrap it in a {\"text\": \"...\"} node so the frontend always gets valid JSON.
+     */
+    private JsonNode parseOutput(String text) {
+        if (text == null || text.isBlank()) {
+            return mapper.createObjectNode().put("text", "No output generated.");
+        }
+        // Try to find JSON block in the text (Claude sometimes wraps JSON in markdown)
+        String trimmed = text.trim();
+        int jsonStart = trimmed.indexOf('{');
+        int jsonEnd   = trimmed.lastIndexOf('}');
+        if (jsonStart >= 0 && jsonEnd > jsonStart) {
+            String jsonPart = trimmed.substring(jsonStart, jsonEnd + 1);
+            try {
+                return mapper.readTree(jsonPart);
+            } catch (Exception ignored) {}
+        }
+        // Not parseable as JSON — return as text node
+        ObjectNode wrap = mapper.createObjectNode();
+        wrap.put("text", text);
+        return wrap;
+    }
+
+    /**
+     * Compute expiry timestamp for a skill run.
+     * Returns null for skills with no cache TTL.
+     */
+    private Instant computeExpiry(String skill) {
+        Integer days = CACHE_TTL_DAYS.get(skill);
+        return days != null ? Instant.now().plus(days, ChronoUnit.DAYS) : null;
     }
 }
