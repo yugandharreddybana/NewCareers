@@ -1,62 +1,62 @@
-import { forwardRef } from 'react';
+import { forwardRef, type InputHTMLAttributes, type ReactNode, useId } from 'react';
 import { cn } from '@/lib/utils';
 
-export interface InputProps extends React.InputHTMLAttributes<HTMLInputElement> {
-  label?:     string;
-  error?:     string;
-  hint?:      string;
-  leftIcon?:  React.ReactNode;
-  rightIcon?: React.ReactNode;
-  required?:  boolean;
+interface InputProps extends InputHTMLAttributes<HTMLInputElement> {
+  label?:            string;
+  error?:            string;
+  hint?:             string;
+  leftIcon?:         ReactNode;
+  rightIcon?:        ReactNode;
+  wrapperClassName?: string;
 }
 
-const Input = forwardRef<HTMLInputElement, InputProps>(
-  ({ className, label, error, hint, leftIcon, rightIcon, id, required, ...props }, ref) => {
-    const inputId = id ?? label?.toLowerCase().replace(/\s+/g, '-');
+export const Input = forwardRef<HTMLInputElement, InputProps>(
+  ({ label, error, hint, leftIcon, rightIcon, wrapperClassName, className, id: externalId, ...props }, ref) => {
+    const generatedId = useId();
+    const id = externalId ?? generatedId;
     return (
-      <div className="flex flex-col gap-1.5">
+      <div className={cn('flex flex-col gap-1.5', wrapperClassName)}>
         {label && (
-          <label htmlFor={inputId} className="text-sm font-medium text-text-primary">
+          <label htmlFor={id} className="text-sm font-medium text-text-primary">
             {label}
-            {required && <span className="text-danger ml-0.5">*</span>}
+            {props.required && <span className="text-danger-500 ml-0.5">*</span>}
           </label>
         )}
-        <div className="relative">
+        <div className="relative flex items-center">
           {leftIcon && (
-            <span className="absolute left-3 top-1/2 -translate-y-1/2 text-text-muted flex">
+            <span className="absolute left-3 text-text-tertiary pointer-events-none flex items-center">
               {leftIcon}
             </span>
           )}
           <input
             ref={ref}
-            id={inputId}
+            id={id}
             className={cn(
-              'w-full h-10 px-3 rounded-lg border bg-white text-text-primary',
-              'placeholder:text-text-muted text-base transition-all duration-150',
-              'focus:outline-none focus:ring-2 focus:ring-brand/20 focus:border-brand',
-              'hover:border-border-strong',
-              'disabled:opacity-50 disabled:cursor-not-allowed disabled:bg-bg-subtle',
-              error
-                ? 'border-danger focus:ring-danger/20 focus:border-danger'
-                : 'border-border',
-              leftIcon  && 'pl-9',
-              rightIcon && 'pr-9',
-              className
+              'w-full h-10 px-3.5 rounded-lg border bg-white text-sm text-text-primary',
+              'placeholder:text-text-tertiary outline-none transition-all duration-150',
+              'focus:ring-2 focus:ring-brand-500/20 focus:border-brand-500',
+              'disabled:opacity-50 disabled:cursor-not-allowed disabled:bg-surface-raised',
+              error ? 'border-danger-500 focus:ring-danger-500/20 focus:border-danger-500' : 'border-border',
+              leftIcon  && 'pl-10',
+              rightIcon && 'pr-10',
+              className,
             )}
             {...props}
           />
           {rightIcon && (
-            <span className="absolute right-3 top-1/2 -translate-y-1/2 text-text-muted flex">
+            <span className="absolute right-3 text-text-tertiary flex items-center">
               {rightIcon}
             </span>
           )}
         </div>
-        {error  && <p className="text-xs text-danger font-medium flex items-center gap-1">⚠ {error}</p>}
-        {!error && hint && <p className="text-xs text-text-muted">{hint}</p>}
+        {(error || hint) && (
+          <p className={cn('text-xs', error ? 'text-danger-500' : 'text-text-tertiary')}>
+            {error ?? hint}
+          </p>
+        )}
       </div>
     );
   }
 );
-
 Input.displayName = 'Input';
 export default Input;

@@ -1,54 +1,58 @@
 import { cn } from '@/lib/utils';
 
-export interface SkeletonProps extends React.HTMLAttributes<HTMLDivElement> {
-  width?:  string | number;
-  height?: string | number;
-  circle?: boolean;
-}
+type Rounded = 'sm' | 'md' | 'lg' | 'xl' | 'full';
+const roundedMap: Record<Rounded, string> = {
+  sm: 'rounded', md: 'rounded-lg', lg: 'rounded-xl', xl: 'rounded-2xl', full: 'rounded-full',
+};
 
-export function Skeleton({ className, width, height, circle, style, ...props }: SkeletonProps) {
-  return (
-    <div
-      className={cn('skeleton animate-pulse', circle ? 'rounded-full' : 'rounded-lg', className)}
-      style={{ width, height, ...style }}
-      {...props}
-    />
-  );
+export function Skeleton({ className, rounded = 'md' }: { className?: string; rounded?: Rounded }) {
+  return <div className={cn('shimmer', roundedMap[rounded], className)} />;
 }
 
 export function JobCardSkeleton() {
   return (
-    <div className="bg-white border border-border rounded-xl p-5 space-y-4">
-      <div className="flex items-start gap-3">
-        <Skeleton width={44} height={44} circle />
-        <div className="flex-1 space-y-2">
-          <Skeleton height={16} className="w-3/4" />
-          <Skeleton height={13} className="w-1/2" />
+    <div className="card p-5 space-y-4">
+      <div className="flex items-start justify-between">
+        <div className="flex items-center gap-3">
+          <Skeleton className="w-11 h-11" rounded="lg" />
+          <div className="space-y-2">
+            <Skeleton className="h-4 w-44" />
+            <Skeleton className="h-3 w-28" />
+          </div>
         </div>
-        <Skeleton width={52} height={24} className="rounded-full" />
+        <Skeleton className="w-12 h-12" rounded="full" />
       </div>
       <div className="flex gap-2">
-        <Skeleton height={22} className="w-20 rounded-full" />
-        <Skeleton height={22} className="w-16 rounded-full" />
-        <Skeleton height={22} className="w-24 rounded-full" />
+        <Skeleton className="h-5 w-20" rounded="full" />
+        <Skeleton className="h-5 w-16" rounded="full" />
+        <Skeleton className="h-5 w-24" rounded="full" />
       </div>
-      <Skeleton height={5} className="w-full rounded-full" />
+      <Skeleton className="h-1.5 w-full" rounded="full" />
     </div>
   );
 }
 
 export function SkillPanelSkeleton() {
   return (
-    <div className="bg-white border border-border rounded-xl p-6 space-y-4">
-      <Skeleton height={18} className="w-1/3" />
+    <div className="card p-6 space-y-4">
+      <Skeleton className="h-5 w-40" />
       <div className="space-y-2">
-        <Skeleton height={13} className="w-full" />
-        <Skeleton height={13} className="w-5/6" />
-        <Skeleton height={13} className="w-4/6" />
+        <Skeleton className="h-3 w-full" />
+        <Skeleton className="h-3 w-5/6" />
+        <Skeleton className="h-3 w-4/6" />
       </div>
-      <div className="flex gap-3 pt-1">
-        <Skeleton height={36} className="flex-1 rounded-xl" />
-        <Skeleton height={36} className="flex-1 rounded-xl" />
+    </div>
+  );
+}
+
+export function KanbanCardSkeleton() {
+  return (
+    <div className="card p-4 space-y-3">
+      <Skeleton className="h-4 w-36" />
+      <Skeleton className="h-3 w-24" />
+      <div className="flex gap-1.5">
+        <Skeleton className="h-4 w-14" rounded="full" />
+        <Skeleton className="h-4 w-14" rounded="full" />
       </div>
     </div>
   );
@@ -57,10 +61,11 @@ export function SkillPanelSkeleton() {
 export function StatRowSkeleton() {
   return (
     <div className="grid grid-cols-3 gap-4">
-      {[0, 1, 2].map(i => (
-        <div key={i} className="bg-white border border-border rounded-xl p-4 space-y-2">
-          <Skeleton height={12} className="w-2/3" />
-          <Skeleton height={28} className="w-1/2" />
+      {[0,1,2].map(i => (
+        <div key={i} className="card p-5 space-y-3">
+          <Skeleton className="h-3 w-20" />
+          <Skeleton className="h-7 w-14" />
+          <Skeleton className="h-2 w-24" rounded="full" />
         </div>
       ))}
     </div>

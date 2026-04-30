@@ -1,69 +1,71 @@
+import { type HTMLAttributes, type ReactNode } from 'react';
 import { cn } from '@/lib/utils';
-import { cva, type VariantProps } from 'class-variance-authority';
 
-const cardVariants = cva(
-  'bg-white rounded-xl transition-all duration-150',
-  {
-    variants: {
-      variant: {
-        flat:     'border border-border',
-        raised:   'border border-border shadow-sm',
-        elevated: 'border border-border shadow-md',
-        brand:    'border border-brand-200 bg-brand-light',
-        ghost:    'bg-transparent',
-      },
-      padding: {
-        none: '',
-        sm:   'p-4',
-        md:   'p-5',
-        lg:   'p-6',
-        xl:   'p-8',
-      },
-      hoverable: {
-        true:  'cursor-pointer hover:shadow-md hover:-translate-y-px',
-        false: '',
-      },
-    },
-    defaultVariants: {
-      variant:   'raised',
-      padding:   'lg',
-      hoverable: false,
-    },
-  }
-);
+type Variant = 'default' | 'elevated' | 'bordered' | 'flat' | 'ghost';
+type Padding = 'none' | 'sm' | 'md' | 'lg' | 'xl';
 
-export interface CardProps
-  extends React.HTMLAttributes<HTMLDivElement>,
-    VariantProps<typeof cardVariants> {}
+interface CardProps extends HTMLAttributes<HTMLDivElement> {
+  variant?:     Variant;
+  padding?:     Padding;
+  interactive?: boolean;
+  children?:    ReactNode;
+  asChild?:     boolean;
+}
 
-export function Card({ className, variant, padding, hoverable, ...props }: CardProps) {
+const variants: Record<Variant, string> = {
+  default:  'bg-white border border-border shadow-card',
+  elevated: 'bg-white border border-border shadow-lg',
+  bordered: 'bg-white border-2 border-border',
+  flat:     'bg-surface-raised border border-border',
+  ghost:    'bg-transparent',
+};
+
+const paddings: Record<Padding, string> = {
+  none: '',
+  sm:   'p-4',
+  md:   'p-5',
+  lg:   'p-6',
+  xl:   'p-8',
+};
+
+export function Card({ variant = 'default', padding = 'none', interactive, children, className, ...props }: CardProps) {
   return (
-    <div className={cn(cardVariants({ variant, padding, hoverable }), className)} {...props} />
+    <div
+      className={cn(
+        'rounded-xl',
+        variants[variant],
+        paddings[padding],
+        interactive && [
+          'cursor-pointer transition-all duration-200',
+          'hover:shadow-card-hover hover:-translate-y-0.5',
+          'active:translate-y-0 active:shadow-card',
+        ],
+        className,
+      )}
+      {...props}
+    >
+      {children}
+    </div>
   );
 }
 
-export function CardHeader({ className, ...props }: React.HTMLAttributes<HTMLDivElement>) {
-  return <div className={cn('flex items-center justify-between mb-5', className)} {...props} />;
-}
-
-export function CardTitle({ className, ...props }: React.HTMLAttributes<HTMLHeadingElement>) {
-  return <h3 className={cn('text-lg font-semibold text-text-primary leading-tight', className)} {...props} />;
-}
-
-export function CardDescription({ className, ...props }: React.HTMLAttributes<HTMLParagraphElement>) {
-  return <p className={cn('text-sm text-text-muted mt-0.5', className)} {...props} />;
-}
-
-export function CardContent({ className, ...props }: React.HTMLAttributes<HTMLDivElement>) {
-  return <div className={cn('', className)} {...props} />;
-}
-
-export function CardFooter({ className, ...props }: React.HTMLAttributes<HTMLDivElement>) {
+export function CardHeader({ className, children, ...props }: HTMLAttributes<HTMLDivElement>) {
   return (
-    <div
-      className={cn('mt-5 pt-4 border-t border-border flex items-center gap-3', className)}
-      {...props}
-    />
+    <div className={cn('px-6 pt-6 pb-0', className)} {...props}>{children}</div>
+  );
+}
+
+export function CardContent({ className, children, ...props }: HTMLAttributes<HTMLDivElement>) {
+  return (
+    <div className={cn('px-6 py-5', className)} {...props}>{children}</div>
+  );
+}
+
+export function CardFooter({ className, children, ...props }: HTMLAttributes<HTMLDivElement>) {
+  return (
+    <div className={cn('px-6 py-4 border-t border-border bg-surface-raised/60 rounded-b-xl', className)} {...props}>
+      {children}
+    </div>
   );
 }
 

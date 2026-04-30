@@ -1,15 +1,24 @@
+import { type HTMLAttributes } from 'react';
 import { cn } from '@/lib/utils';
 
-const SIZE_CLASSES = {
-  xs: 'w-6  h-6  text-xs',
-  sm: 'w-8  h-8  text-sm',
-  md: 'w-10 h-10 text-base',
-  lg: 'w-12 h-12 text-lg',
-  xl: 'w-16 h-16 text-xl',
+type Size = 'xs' | 'sm' | 'md' | 'lg' | 'xl';
+
+interface AvatarProps extends HTMLAttributes<HTMLDivElement> {
+  name?:    string;
+  src?:     string;
+  size?:    Size;
+  online?:  boolean;
+}
+
+const sizeMap: Record<Size, { wrap: string; text: string; dot: string }> = {
+  xs: { wrap: 'w-6  h-6',  text: 'text-[10px]', dot: 'w-1.5 h-1.5 ring-1' },
+  sm: { wrap: 'w-8  h-8',  text: 'text-xs',     dot: 'w-2   h-2   ring-1' },
+  md: { wrap: 'w-9  h-9',  text: 'text-sm',     dot: 'w-2.5 h-2.5 ring-2' },
+  lg: { wrap: 'w-11 h-11', text: 'text-base',   dot: 'w-3   h-3   ring-2' },
+  xl: { wrap: 'w-14 h-14', text: 'text-lg',     dot: 'w-3.5 h-3.5 ring-2' },
 };
 
-// Deterministic pleasant colour from name
-const PALETTE = [
+const palette = [
   'bg-violet-100 text-violet-700',
   'bg-blue-100   text-blue-700',
   'bg-emerald-100 text-emerald-700',
@@ -17,52 +26,33 @@ const PALETTE = [
   'bg-rose-100   text-rose-700',
   'bg-cyan-100   text-cyan-700',
   'bg-fuchsia-100 text-fuchsia-700',
-  'bg-indigo-100 text-indigo-700',
+  'bg-orange-100 text-orange-700',
 ];
 
-function getInitials(name?: string): string {
+function color(name?: string) {
+  if (!name) return 'bg-slate-100 text-slate-500';
+  return palette[name.charCodeAt(0) % palette.length];
+}
+
+function initials(name?: string) {
   if (!name) return '?';
-  const parts = name.trim().split(/\s+/);
-  return parts.length === 1
-    ? parts[0][0].toUpperCase()
-    : (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
+  return name.split(' ').map(n => n[0]).slice(0, 2).join('').toUpperCase();
 }
 
-function getColor(name?: string): string {
-  if (!name) return PALETTE[0];
-  const sum = name.split('').reduce((a, c) => a + c.charCodeAt(0), 0);
-  return PALETTE[sum % PALETTE.length];
-}
-
-export interface AvatarProps {
-  name?:      string;
-  src?:       string;
-  size?:      keyof typeof SIZE_CLASSES;
-  className?: string;
-}
-
-export function Avatar({ name, src, size = 'md', className }: AvatarProps) {
-  if (src) {
-    return (
-      <img
-        src={src}
-        alt={name ?? 'Avatar'}
-        className={cn('rounded-full object-cover shrink-0', SIZE_CLASSES[size], className)}
-      />
-    );
-  }
+export function Avatar({ name, src, size = 'md', online, className, ...props }: AvatarProps) {
+  const s = sizeMap[size];
   return (
-    <div
-      className={cn(
-        'rounded-full flex items-center justify-center font-semibold shrink-0 select-none',
-        SIZE_CLASSES[size],
-        getColor(name),
-        className
+    <div className={cn('relative inline-flex shrink-0', className)} {...props}>
+      <div className={cn('rounded-full overflow-hidden flex items-center justify-center font-semibold select-none', s.wrap, !src && color(name))}>
+        {src
+          ? <img src={src} alt={name ?? 'avatar'} className="w-full h-full object-cover" />
+          : <span className={s.text}>{initials(name)}</span>
+        }
+      </div>
+      {online !== undefined && (
+        <span className={cn('absolute bottom-0 right-0 rounded-full ring-white', s.dot, online ? 'bg-success-500' : 'bg-slate-300')} />
       )}
-    >
-      {getInitials(name)}
     </div>
   );
 }
-
 export default Avatar;
