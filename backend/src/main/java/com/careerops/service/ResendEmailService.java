@@ -53,7 +53,6 @@ public class ResendEmailService {
             return;
         }
         if (jobs.isEmpty()) return;
-
         String html = buildDigestHtml(userName, jobs, appBaseUrl);
         send(to,
             jobs.size() + " new AI-matched job" + (jobs.size() == 1 ? "" : "s") + " found for you today \uD83D\uDE80",
@@ -71,56 +70,35 @@ public class ResendEmailService {
     ) {}
 
     // ────────────────────────────────────────────────────────────────────────
-    // Section 8 — Task 88
-    // Skill-complete transactional email
-    // Sent when a long-running AI skill (e.g. CV analysis, interview prep)
-    // finishes processing for a specific job.
+    // Section 8 — Task 88 : Skill-complete transactional email
     // ────────────────────────────────────────────────────────────────────────
 
-    /**
-     * @param userId    User who ran the skill.
-     * @param skillName Human-readable skill name, e.g. "CV Tailoring".
-     * @param jobTitle  Job the skill was run against, e.g. "Senior Java Engineer".
-     */
     public void sendSkillCompleteEmail(UUID userId, String skillName, String jobTitle) {
         UserContact contact = resolveContact(userId);
         if (contact == null) return;
-
         if (isDevMode()) {
             log.info("[DEV] Skill-complete email for {} — skill='{}' job='{}'",
                      contact.email(), skillName, jobTitle);
             return;
         }
-
-        String subject = "✨ " + skillName + " is ready for “" + jobTitle + "”";
-        String html    = buildSkillCompleteHtml(contact.firstName(), skillName, jobTitle);
-        send(contact.email(), subject, html);
+        String subject = "✨ " + skillName + " is ready for \u201c" + jobTitle + "\u201d";
+        send(contact.email(), subject, buildSkillCompleteHtml(contact.firstName(), skillName, jobTitle));
     }
 
     // ────────────────────────────────────────────────────────────────────────
-    // Section 8 — Task 89
-    // Interview reminder transactional email
-    // Triggered when the user moves a Kanban card to the Interview column.
+    // Section 8 — Task 89 : Interview-reminder transactional email
     // ────────────────────────────────────────────────────────────────────────
 
-    /**
-     * @param userId      User who moved the card.
-     * @param jobTitle    Title of the job being interviewed for.
-     * @param companyName Company running the interview.
-     */
     public void sendInterviewReminderEmail(UUID userId, String jobTitle, String companyName) {
         UserContact contact = resolveContact(userId);
         if (contact == null) return;
-
         if (isDevMode()) {
             log.info("[DEV] Interview reminder for {} — job='{}' company='{}'",
                      contact.email(), jobTitle, companyName);
             return;
         }
-
         String subject = "\uD83D\uDCCB Interview stage: " + jobTitle + " @ " + companyName;
-        String html    = buildInterviewReminderHtml(contact.firstName(), jobTitle, companyName);
-        send(contact.email(), subject, html);
+        send(contact.email(), subject, buildInterviewReminderHtml(contact.firstName(), jobTitle, companyName));
     }
 
     // ────────────────────────────────────────────────────────────────────────
@@ -131,7 +109,11 @@ public class ResendEmailService {
         return key == null || key.isBlank() || key.startsWith("YOUR_");
     }
 
-    private void send(String to, String subject, String html) {
+    /**
+     * Package-private (not private) so WeeklyDigestService in the same package
+     * can call it directly to send arbitrary HTML emails.
+     */
+    void send(String to, String subject, String html) {
         try {
             client.post().uri("/emails")
                 .header("Authorization", "Bearer " + key)
@@ -148,10 +130,6 @@ public class ResendEmailService {
         }
     }
 
-    /**
-     * Resolves email + first_name for a userId from the users table.
-     * Returns null if the user cannot be found (e.g. deleted account).
-     */
     private UserContact resolveContact(UUID userId) {
         try {
             Object[] row = (Object[]) em.createNativeQuery(
@@ -174,7 +152,7 @@ public class ResendEmailService {
     private record UserContact(String email, String firstName) {}
 
     // ────────────────────────────────────────────────────────────────────────
-    // HTML builders — inline CSS, max-width 600px, consistent brand colours
+    // HTML builders
     // ────────────────────────────────────────────────────────────────────────
 
     private String buildSkillCompleteHtml(String name, String skillName, String jobTitle) {
@@ -189,9 +167,7 @@ public class ResendEmailService {
             "<h2 style='margin:0 0 4px;font-size:18px;color:#1e293b'>" + skillName + "</h2>" +
             "<p style='margin:0;font-size:14px;color:#64748b'>for <strong>" + jobTitle + "</strong></p>" +
             "</div>" +
-            "<p style='font-size:14px;color:#475569;margin:20px 0'>" +
-            "Your AI analysis has finished. Head to your dashboard to review the insights and tailor your application." +
-            "</p>" +
+            "<p style='font-size:14px;color:#475569;margin:20px 0'>Your AI analysis has finished. Head to your dashboard to review the insights and tailor your application.</p>" +
             "<p style='text-align:center;color:#94a3b8;font-size:12px;margin-top:24px'>CareerOps &mdash; AI-powered job search</p>" +
             "</div></div>";
     }
@@ -199,8 +175,8 @@ public class ResendEmailService {
     private String buildInterviewReminderHtml(String name, String jobTitle, String companyName) {
         return "<div style='font-family:Inter,sans-serif;max-width:600px;margin:0 auto;color:#1e293b'>" +
             "<div style='background:linear-gradient(135deg,#6366f1,#3b82f6);padding:32px 24px;border-radius:16px 16px 0 0'>" +
-            "<h1 style='color:#fff;margin:0;font-size:22px'>\uD83C\uDF1F You\'ve moved to Interview!</h1>" +
-            "<p style='color:rgba(255,255,255,0.85);margin:8px 0 0'>Great work, " + name + ". Here\'s what to prepare next.</p>" +
+            "<h1 style='color:#fff;margin:0;font-size:22px'>\uD83C\uDF1F You've moved to Interview!</h1>" +
+            "<p style='color:rgba(255,255,255,0.85);margin:8px 0 0'>Great work, " + name + ". Here's what to prepare next.</p>" +
             "</div>" +
             "<div style='background:#f8fafc;padding:28px 24px;border-radius:0 0 16px 16px'>" +
             "<div style='background:#fff;border-radius:12px;padding:20px;border:1px solid #e2e8f0;border-left:4px solid #6366f1'>" +
@@ -215,8 +191,7 @@ public class ResendEmailService {
             "<li>Research " + companyName + "&rsquo;s recent news and culture</li>" +
             "<li>Review the job description against your matched skills</li>" +
             "<li>Prepare 3 strong STAR-format examples</li>" +
-            "</ul>" +
-            "</div>" +
+            "</ul></div>" +
             "<p style='text-align:center;color:#94a3b8;font-size:12px;margin-top:24px'>CareerOps &mdash; AI-powered job search</p>" +
             "</div></div>";
     }
@@ -227,32 +202,24 @@ public class ResendEmailService {
         sb.append("<div style='background:linear-gradient(135deg,#6366f1,#8b5cf6);padding:32px 24px;border-radius:16px 16px 0 0'>");
         sb.append("<h1 style='color:#fff;margin:0;font-size:24px'>\uD83D\uDE80 Your Daily Job Digest</h1>");
         sb.append("<p style='color:rgba(255,255,255,0.8);margin:8px 0 0'>Hey ").append(name).append(", here are today's top AI-matched roles</p>");
-        sb.append("</div>");
-        sb.append("<div style='background:#f8fafc;padding:24px;border-radius:0 0 16px 16px'>");
-
+        sb.append("</div><div style='background:#f8fafc;padding:24px;border-radius:0 0 16px 16px'>");
         for (DigestJob j : jobs) {
-            String matchColor = j.matchPercent() >= 80 ? "#10b981" : j.matchPercent() >= 60 ? "#f59e0b" : "#64748b";
+            String mc = j.matchPercent() >= 80 ? "#10b981" : j.matchPercent() >= 60 ? "#f59e0b" : "#64748b";
             sb.append("<div style='background:#fff;border-radius:12px;padding:20px;margin-bottom:16px;border:1px solid #e2e8f0'>");
-            sb.append("<div style='display:flex;justify-content:space-between;align-items:flex-start'>");
-            sb.append("<div>");
+            sb.append("<div style='display:flex;justify-content:space-between;align-items:flex-start'><div>");
             sb.append("<h3 style='margin:0;font-size:16px'>").append(j.title()).append("</h3>");
             sb.append("<p style='margin:4px 0 0;color:#64748b;font-size:14px'>").append(j.company());
             if (j.location() != null) sb.append(" &bull; ").append(j.location());
-            sb.append("</p></div>");
-            sb.append("<span style='background:").append(matchColor).append(";color:#fff;font-weight:700;font-size:13px;padding:4px 10px;border-radius:20px'>");
+            sb.append("</p></div><span style='background:").append(mc).append(";color:#fff;font-weight:700;font-size:13px;padding:4px 10px;border-radius:20px'>");
             sb.append(j.matchPercent()).append("% match</span></div>");
-            if (j.humanSummary() != null && !j.humanSummary().isBlank()) {
+            if (j.humanSummary() != null && !j.humanSummary().isBlank())
                 sb.append("<p style='margin:12px 0 0;font-size:13px;color:#475569;font-style:italic'>&ldquo;").append(j.humanSummary()).append("&rdquo;</p>");
-            }
             sb.append("<div style='margin-top:16px;display:flex;gap:8px'>");
-            sb.append("<a href='").append(base).append("/jobs/").append(j.userJobId()).append("' ");
-            sb.append("style='background:#6366f1;color:#fff;padding:8px 16px;border-radius:8px;text-decoration:none;font-size:13px;font-weight:600'>View AI Analysis</a>");
-            if (j.sourceUrl() != null) {
+            sb.append("<a href='").append(base).append("/jobs/").append(j.userJobId()).append("' style='background:#6366f1;color:#fff;padding:8px 16px;border-radius:8px;text-decoration:none;font-size:13px;font-weight:600'>View AI Analysis</a>");
+            if (j.sourceUrl() != null)
                 sb.append("<a href='").append(j.sourceUrl()).append("' style='background:#f1f5f9;color:#1e293b;padding:8px 16px;border-radius:8px;text-decoration:none;font-size:13px;font-weight:600'>Apply Now &rarr;</a>");
-            }
             sb.append("</div></div>");
         }
-
         sb.append("<p style='text-align:center;color:#94a3b8;font-size:12px;margin-top:24px'>");
         sb.append("<a href='").append(base).append("/dashboard' style='color:#6366f1'>Open Dashboard</a>");
         sb.append(" &bull; <a href='").append(base).append("/profile' style='color:#6366f1'>Update Preferences</a>");
