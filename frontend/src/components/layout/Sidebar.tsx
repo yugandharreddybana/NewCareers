@@ -1,74 +1,99 @@
 import { NavLink, Link, useNavigate } from 'react-router-dom';
 import { useAuth } from '@/context/AuthContext';
 import {
-  LayoutDashboard, Kanban as KanbanIcon, User, LogOut,
-  ChevronLeft, ChevronRight, Briefcase, HelpCircle, Settings
+  LayoutDashboard, Kanban as KanbanIcon, User,
+  LogOut, ChevronLeft, ChevronRight, HelpCircle,
+  Bell, Zap,
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { cn } from '@/lib/utils';
-import { Avatar } from '@/components/ui/Avatar';
-import { Tooltip } from '@/components/ui/Tooltip';
+import Avatar from '@/components/ui/Avatar';
+import Tooltip from '@/components/ui/Tooltip';
+import { useState } from 'react';
 
 interface SidebarProps {
   collapsed: boolean;
   onToggle: () => void;
+  onHelpOpen: () => void;
 }
 
 const NAV_ITEMS = [
   { to: '/dashboard', icon: LayoutDashboard, label: 'Dashboard' },
-  { to: '/kanban',    icon: KanbanIcon,      label: 'Kanban' },
-  { to: '/profile',   icon: User,            label: 'Profile' },
+  { to: '/kanban',    icon: KanbanIcon,       label: 'Kanban' },
+  { to: '/profile',  icon: User,             label: 'Profile' },
 ];
 
-export default function Sidebar({ collapsed, onToggle }: SidebarProps) {
+export default function Sidebar({ collapsed, onToggle, onHelpOpen }: SidebarProps) {
   const { user, signOut } = useAuth();
   const nav = useNavigate();
+
+  const handleSignOut = async () => {
+    await signOut();
+    nav('/login');
+  };
 
   return (
     <motion.aside
       initial={false}
       animate={{ width: collapsed ? 64 : 240 }}
-      transition={{ type: 'spring', stiffness: 400, damping: 35 }}
-      className="relative flex flex-col h-full bg-white border-r border-border shrink-0 z-30"
+      transition={{ type: 'spring', stiffness: 300, damping: 30 }}
+      className="hidden md:flex fixed left-0 top-0 bottom-0 z-30 flex-col bg-surface border-r border-border overflow-hidden"
     >
       {/* Logo */}
       <div className={cn(
-        'flex items-center h-[60px] px-4 border-b border-border shrink-0',
-        collapsed ? 'justify-center' : 'gap-3'
+        'flex items-center h-14 px-4 border-b border-border flex-shrink-0',
+        collapsed ? 'justify-center' : 'justify-between'
       )}>
-        <Link to="/dashboard" className="flex items-center gap-2.5 group shrink-0">
-          <div className="w-8 h-8 rounded-lg bg-brand flex items-center justify-center shadow-glow-sm shrink-0 group-hover:scale-105 transition-transform">
-            <Briefcase size={15} className="text-white" strokeWidth={2.5} />
-          </div>
-          <AnimatePresence>
-            {!collapsed && (
-              <motion.span
-                initial={{ opacity: 0, width: 0 }}
-                animate={{ opacity: 1, width: 'auto' }}
-                exit={{ opacity: 0, width: 0 }}
-                transition={{ duration: 0.15 }}
-                className="font-display font-bold text-base text-text-primary overflow-hidden whitespace-nowrap"
-              >
-                NewCareers
-              </motion.span>
-            )}
-          </AnimatePresence>
-        </Link>
+        {!collapsed && (
+          <Link to="/dashboard" className="flex items-center gap-2.5 group">
+            <div className="w-7 h-7 bg-brand rounded-lg flex items-center justify-center shadow-brand-lg flex-shrink-0">
+              <Zap size={14} className="text-white" fill="white" />
+            </div>
+            <span className="font-bold text-sm tracking-tight text-text-primary">
+              Career<span className="text-brand">Ops</span>
+            </span>
+          </Link>
+        )}
+        {collapsed && (
+          <Link to="/dashboard">
+            <div className="w-7 h-7 bg-brand rounded-lg flex items-center justify-center shadow-brand-lg">
+              <Zap size={14} className="text-white" fill="white" />
+            </div>
+          </Link>
+        )}
+        <button
+          onClick={onToggle}
+          className={cn(
+            'w-6 h-6 flex items-center justify-center rounded-md text-text-muted hover:text-text-primary hover:bg-surface-3 transition-colors flex-shrink-0',
+            collapsed && 'absolute -right-3 top-[54px] bg-surface border border-border shadow-sm w-6 h-6 rounded-full z-10'
+          )}
+        >
+          {collapsed
+            ? <ChevronRight size={12} />
+            : <ChevronLeft size={12} />
+          }
+        </button>
       </div>
 
-      {/* Nav */}
-      <nav className="flex-1 overflow-y-auto py-3 px-2 space-y-1">
-        {!collapsed && (
-          <p className="section-title px-2 mb-2">Navigation</p>
-        )}
+      {/* Nav section label */}
+      {!collapsed && (
+        <div className="px-4 pt-5 pb-1">
+          <span className="text-[10px] font-bold text-text-muted uppercase tracking-widest">Navigation</span>
+        </div>
+      )}
+
+      {/* Nav items */}
+      <nav className="flex-1 px-2 py-2 space-y-0.5 overflow-y-auto scrollbar-none">
         {NAV_ITEMS.map(({ to, icon: Icon, label }) => (
           collapsed ? (
             <Tooltip key={to} content={label} side="right">
               <NavLink
                 to={to}
                 className={({ isActive }) => cn(
-                  'sidebar-item justify-center px-0 h-10',
-                  isActive && 'sidebar-item-active'
+                  'flex items-center justify-center w-10 h-10 rounded-xl mx-auto transition-all duration-150',
+                  isActive
+                    ? 'bg-brand-50 text-brand'
+                    : 'text-text-muted hover:bg-surface-3 hover:text-text-primary'
                 )}
               >
                 <Icon size={18} />
@@ -79,69 +104,87 @@ export default function Sidebar({ collapsed, onToggle }: SidebarProps) {
               key={to}
               to={to}
               className={({ isActive }) => cn(
-                'sidebar-item',
-                isActive && 'sidebar-item-active'
+                'relative flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium transition-all duration-150 group',
+                isActive
+                  ? 'bg-brand-50 text-brand font-semibold'
+                  : 'text-text-secondary hover:bg-surface-3 hover:text-text-primary'
               )}
             >
-              <Icon size={18} />
-              <span>{label}</span>
+              {({ isActive }) => (
+                <>
+                  {isActive && (
+                    <motion.div
+                      layoutId="sidebar-active"
+                      className="absolute inset-0 bg-brand-50 rounded-xl -z-10"
+                      transition={{ type: 'spring', stiffness: 400, damping: 35 }}
+                    />
+                  )}
+                  <Icon size={17} />
+                  <span>{label}</span>
+                  {isActive && (
+                    <span className="ml-auto w-1.5 h-1.5 rounded-full bg-brand" />
+                  )}
+                </>
+              )}
             </NavLink>
           )
         ))}
       </nav>
 
-      {/* Bottom: Help + User */}
-      <div className="px-2 pb-3 space-y-1 border-t border-border pt-3">
+      {/* Bottom section */}
+      <div className="px-2 py-3 border-t border-border space-y-0.5 flex-shrink-0">
         {collapsed ? (
-          <Tooltip content="Help" side="right">
-            <button className="sidebar-item w-full justify-center px-0 h-10">
-              <HelpCircle size={18} />
-            </button>
-          </Tooltip>
+          <>
+            <Tooltip content="Help" side="right">
+              <button
+                onClick={onHelpOpen}
+                className="flex items-center justify-center w-10 h-10 rounded-xl mx-auto text-text-muted hover:bg-surface-3 hover:text-text-primary transition-colors"
+              >
+                <HelpCircle size={17} />
+              </button>
+            </Tooltip>
+            <Tooltip content="Sign out" side="right">
+              <button
+                onClick={handleSignOut}
+                className="flex items-center justify-center w-10 h-10 rounded-xl mx-auto text-danger-500 hover:bg-danger-50 transition-colors"
+              >
+                <LogOut size={17} />
+              </button>
+            </Tooltip>
+          </>
         ) : (
-          <button className="sidebar-item w-full">
-            <HelpCircle size={18} />
-            <span>Help & Support</span>
-          </button>
+          <>
+            <button
+              onClick={onHelpOpen}
+              className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium text-text-secondary hover:bg-surface-3 hover:text-text-primary transition-colors"
+            >
+              <HelpCircle size={17} />
+              <span>Help & FAQ</span>
+            </button>
+            <button
+              onClick={handleSignOut}
+              className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium text-danger-500 hover:bg-danger-50 transition-colors"
+            >
+              <LogOut size={17} />
+              <span>Sign out</span>
+            </button>
+          </>
         )}
 
-        {/* User row */}
+        {/* User avatar */}
         <div className={cn(
-          'flex items-center gap-2.5 px-2 py-2 rounded-lg hover:bg-ink-50 transition-colors cursor-pointer group',
-          collapsed && 'justify-center px-0'
+          'mt-2 pt-2 border-t border-border flex items-center gap-2.5',
+          collapsed ? 'justify-center' : 'px-1'
         )}>
-          <Avatar name={user?.name} size="sm" />
-          <AnimatePresence>
-            {!collapsed && (
-              <motion.div
-                initial={{ opacity: 0, width: 0 }}
-                animate={{ opacity: 1, width: 'auto' }}
-                exit={{ opacity: 0, width: 0 }}
-                className="flex-1 min-w-0 overflow-hidden"
-              >
-                <p className="text-xs font-semibold text-text-primary truncate">{user?.name}</p>
-                <p className="text-2xs text-text-tertiary truncate">{user?.email}</p>
-              </motion.div>
-            )}
-          </AnimatePresence>
+          <Avatar src={user?.avatarUrl} name={user?.name} size="sm" online />
           {!collapsed && (
-            <button
-              onClick={async () => { await signOut(); nav('/login'); }}
-              className="opacity-0 group-hover:opacity-100 transition-opacity text-text-tertiary hover:text-danger-500 ml-auto shrink-0"
-            >
-              <LogOut size={14} />
-            </button>
+            <div className="min-w-0 flex-1">
+              <p className="text-xs font-semibold text-text-primary truncate">{user?.name}</p>
+              <p className="text-[10px] text-text-muted truncate">{user?.email}</p>
+            </div>
           )}
         </div>
       </div>
-
-      {/* Collapse toggle */}
-      <button
-        onClick={onToggle}
-        className="absolute -right-3 top-1/2 -translate-y-1/2 w-6 h-6 bg-white border border-border rounded-full flex items-center justify-center shadow-sm hover:bg-ink-50 transition-colors z-40"
-      >
-        {collapsed ? <ChevronRight size={12} /> : <ChevronLeft size={12} />}
-      </button>
     </motion.aside>
   );
 }

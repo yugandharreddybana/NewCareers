@@ -1,46 +1,64 @@
 import { Outlet } from 'react-router-dom';
+import { useAuth } from '@/context/AuthContext';
 import { useState } from 'react';
 import { motion } from 'framer-motion';
-import Sidebar from './Sidebar';
-import TopBar from './TopBar';
-import BottomNav from './BottomNav';
+import { cn } from '@/lib/utils';
 import { TooltipProvider } from '@/components/ui/Tooltip';
+import Sidebar from '@/components/layout/Sidebar';
+import TopBar from '@/components/layout/TopBar';
+import BottomNav from '@/components/layout/BottomNav';
+import HelpDrawer from '@/components/layout/HelpDrawer';
 
 export default function AppShell() {
-  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  const [collapsed, setCollapsed]   = useState(false);
+  const [helpOpen, setHelpOpen]     = useState(false);
+
+  const sidebarWidth = collapsed ? 64 : 240;
 
   return (
     <TooltipProvider>
-      <div className="flex h-screen overflow-hidden bg-surface-subtle">
+      <div className="min-h-screen bg-surface-2">
         {/* Sidebar — desktop only */}
-        <div className="hidden md:flex flex-col">
-          <Sidebar
-            collapsed={sidebarCollapsed}
-            onToggle={() => setSidebarCollapsed(v => !v)}
-          />
-        </div>
+        <Sidebar
+          collapsed={collapsed}
+          onToggle={() => setCollapsed((c) => !c)}
+          onHelpOpen={() => setHelpOpen(true)}
+        />
 
-        {/* Main column */}
-        <div className="flex flex-col flex-1 min-w-0 overflow-hidden">
-          <TopBar sidebarCollapsed={sidebarCollapsed} />
+        {/* Top bar */}
+        <TopBar sidebarCollapsed={collapsed} />
 
-          <main className="flex-1 overflow-y-auto">
+        {/* Main content area */}
+        <motion.main
+          initial={false}
+          animate={{ marginLeft: sidebarWidth }}
+          transition={{ type: 'spring', stiffness: 300, damping: 30 }}
+          className="hidden md:block min-h-screen pt-14"
+        >
+          <div className="max-w-7xl mx-auto px-6 py-8">
             <motion.div
-              key={location.pathname}
-              initial={{ opacity: 0, y: 8 }}
+              initial={{ opacity: 0, y: 12 }}
               animate={{ opacity: 1, y: 0 }}
-              transition={{ duration: 0.2, ease: [0.16, 1, 0.3, 1] }}
-              className="h-full"
+              transition={{ duration: 0.2, ease: 'easeOut' }}
+              key={typeof window !== 'undefined' ? window.location.pathname : 'page'}
             >
-              <div className="max-w-[1200px] mx-auto px-6 py-6 pb-24 md:pb-6">
-                <Outlet />
-              </div>
+              <Outlet />
             </motion.div>
-          </main>
-        </div>
+          </div>
+        </motion.main>
+
+        {/* Mobile main — no sidebar margin */}
+        <main className="md:hidden min-h-screen pt-14 pb-20">
+          <div className="px-4 py-6">
+            <Outlet />
+          </div>
+        </main>
 
         {/* Mobile bottom nav */}
         <BottomNav />
+
+        {/* Help drawer */}
+        <HelpDrawer open={helpOpen} onClose={() => setHelpOpen(false)} />
       </div>
     </TooltipProvider>
   );
