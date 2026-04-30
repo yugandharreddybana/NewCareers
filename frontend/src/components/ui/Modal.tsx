@@ -1,17 +1,16 @@
-import { useEffect, useCallback } from 'react';
-import { createPortal } from 'react-dom';
-import { motion, AnimatePresence } from 'framer-motion';
+import * as Dialog from '@radix-ui/react-dialog';
 import { X } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { type ReactNode } from 'react';
 
-export interface ModalProps {
+interface ModalProps {
   open: boolean;
   onClose: () => void;
   title?: string;
   description?: string;
-  children: React.ReactNode;
+  children: ReactNode;
   size?: 'sm' | 'md' | 'lg' | 'xl' | 'full';
-  showClose?: boolean;
+  hideClose?: boolean;
   className?: string;
 }
 
@@ -20,74 +19,51 @@ const sizeMap = {
   md:   'max-w-md',
   lg:   'max-w-lg',
   xl:   'max-w-2xl',
-  full: 'max-w-4xl',
+  full: 'max-w-5xl w-full mx-4',
 };
 
 export default function Modal({
-  open, onClose, title, description, children,
-  size = 'md', showClose = true, className,
+  open, onClose, title, description, children, size = 'md', hideClose, className,
 }: ModalProps) {
-  const handleKey = useCallback((e: KeyboardEvent) => {
-    if (e.key === 'Escape') onClose();
-  }, [onClose]);
-
-  useEffect(() => {
-    if (open) {
-      document.addEventListener('keydown', handleKey);
-      document.body.style.overflow = 'hidden';
-    }
-    return () => {
-      document.removeEventListener('keydown', handleKey);
-      document.body.style.overflow = '';
-    };
-  }, [open, handleKey]);
-
-  return createPortal(
-    <AnimatePresence>
-      {open && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-          {/* Backdrop */}
-          <motion.div
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            transition={{ duration: 0.15 }}
-            className="absolute inset-0 bg-ink-900/50 backdrop-blur-sm"
-            onClick={onClose}
-          />
-          {/* Panel */}
-          <motion.div
-            initial={{ opacity: 0, scale: 0.96, y: 8 }}
-            animate={{ opacity: 1, scale: 1, y: 0 }}
-            exit={{ opacity: 0, scale: 0.96, y: 8 }}
-            transition={{ type: 'spring', stiffness: 400, damping: 30 }}
-            className={cn(
-              'relative z-10 w-full bg-white rounded-2xl shadow-2xl border border-border',
-              sizeMap[size],
-              className
-            )}
-          >
-            {(title || showClose) && (
-              <div className="flex items-center justify-between px-6 pt-5 pb-4 border-b border-border">
-                <div>
-                  {title && <h2 className="text-base font-semibold text-text-primary">{title}</h2>}
-                  {description && <p className="text-sm text-text-secondary mt-0.5">{description}</p>}
-                </div>
-                {showClose && (
-                  <button
-                    onClick={onClose}
-                    className="w-8 h-8 flex items-center justify-center rounded-lg text-text-tertiary hover:text-text-primary hover:bg-ink-100 transition-colors ml-4"
-                  >
-                    <X size={16} />
-                  </button>
-                )}
-              </div>
-            )}
-            <div className="px-6 py-5">{children}</div>
-          </motion.div>
-        </div>
-      )}
-    </AnimatePresence>,
-    document.body
+  return (
+    <Dialog.Root open={open} onOpenChange={(o) => { if (!o) onClose(); }}>
+      <Dialog.Portal>
+        <Dialog.Overlay
+          className="fixed inset-0 z-50 bg-black/40 backdrop-blur-sm animate-fade-in"
+        />
+        <Dialog.Content
+          className={cn(
+            'fixed left-1/2 top-1/2 z-50 w-full -translate-x-1/2 -translate-y-1/2',
+            'bg-surface rounded-2xl shadow-2xl border border-border',
+            'animate-scale-in focus:outline-none',
+            sizeMap[size],
+            className,
+          )}
+          aria-describedby={description ? 'modal-desc' : undefined}
+        >
+          {(title || !hideClose) && (
+            <div className="flex items-center justify-between px-6 py-4 border-b border-border">
+              {title && (
+                <Dialog.Title className="text-base font-bold text-text-primary">
+                  {title}
+                </Dialog.Title>
+              )}
+              {description && (
+                <Dialog.Description id="modal-desc" className="sr-only">{description}</Dialog.Description>
+              )}
+              {!hideClose && (
+                <button
+                  onClick={onClose}
+                  className="ml-auto w-8 h-8 flex items-center justify-center rounded-lg text-text-muted hover:text-text-primary hover:bg-surface-3 transition-colors"
+                >
+                  <X size={16} />
+                </button>
+              )}
+            </div>
+          )}
+          <div>{children}</div>
+        </Dialog.Content>
+      </Dialog.Portal>
+    </Dialog.Root>
   );
 }

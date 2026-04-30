@@ -2,29 +2,25 @@ import { type ClassValue, clsx } from 'clsx';
 import { twMerge } from 'tailwind-merge';
 
 /**
- * Merge Tailwind classes safely, resolving conflicts.
- * Use this instead of raw `clsx` for all component class composition.
+ * Merges Tailwind classes safely, resolving conflicts.
+ * Use this everywhere instead of raw template strings.
  */
-export function cn(...inputs: ClassValue[]) {
+export function cn(...inputs: ClassValue[]): string {
   return twMerge(clsx(inputs));
 }
 
-/** Format a number as a compact string (1200 → 1.2k) */
-export function formatCompact(n: number): string {
-  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
-  if (n >= 1_000)     return `${(n / 1_000).toFixed(n >= 10_000 ? 0 : 1)}k`;
+/**
+ * Converts a number to a compact label: 1200 → "1.2k"
+ */
+export function compact(n: number): string {
+  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}m`;
+  if (n >= 1_000)     return `${(n / 1_000).toFixed(1)}k`;
   return String(n);
 }
 
-/** Format salary numbers → '€65k – €85k' */
-export function formatSalary(min?: number, max?: number): string {
-  if (min && max) return `€${(min / 1000).toFixed(0)}k – €${(max / 1000).toFixed(0)}k`;
-  if (min)        return `€${(min / 1000).toFixed(0)}k+`;
-  if (max)        return `Up to €${(max / 1000).toFixed(0)}k`;
-  return 'Negotiable';
-}
-
-/** Time-ago (ISO string → '2h ago') */
+/**
+ * Human-readable relative time: "2h ago", "3d ago"
+ */
 export function timeAgo(iso: string): string {
   if (!iso) return 'Recently';
   const diff = (Date.now() - new Date(iso).getTime()) / 1000;
@@ -35,21 +31,59 @@ export function timeAgo(iso: string): string {
   return new Date(iso).toLocaleDateString('en-IE', { day: 'numeric', month: 'short' });
 }
 
-/** Greeting based on time of day */
+/**
+ * Returns a greeting based on the current hour.
+ */
 export function greeting(): string {
   const h = new Date().getHours();
   if (h < 12) return 'Good morning';
   if (h < 17) return 'Good afternoon';
-  return 'Good evening';
+  if (h < 21) return 'Good evening';
+  return 'Good night';
 }
 
-/** Get user initials from name */
-export function initials(name?: string): string {
-  if (!name) return 'U';
-  return name.split(' ').map(p => p[0]).join('').slice(0, 2).toUpperCase();
-}
-
-/** Clamp a number between min and max */
+/**
+ * Clamps a number between min and max.
+ */
 export function clamp(n: number, min: number, max: number): number {
   return Math.min(Math.max(n, min), max);
+}
+
+/**
+ * Colour for match score — red → amber → green
+ */
+export function matchColour(score: number): string {
+  if (score >= 80) return 'text-success-600';
+  if (score >= 60) return 'text-warning-600';
+  return 'text-danger-600';
+}
+
+export function matchBg(score: number): string {
+  if (score >= 80) return 'bg-success-500';
+  if (score >= 60) return 'bg-warning-500';
+  return 'bg-danger-500';
+}
+
+/**
+ * Truncates a string to `n` chars with ellipsis.
+ */
+export function truncate(s: string, n: number): string {
+  return s.length > n ? s.slice(0, n - 1) + '…' : s;
+}
+
+/**
+ * Formats salary values into a readable string.
+ */
+export function salaryLabel(min?: number, max?: number): string {
+  if (min && max) return `€${(min/1000).toFixed(0)}k – €${(max/1000).toFixed(0)}k`;
+  if (min)        return `€${(min/1000).toFixed(0)}k+`;
+  if (max)        return `Up to €${(max/1000).toFixed(0)}k`;
+  return 'Salary not listed';
+}
+
+/**
+ * Capitalises the first letter of a string.
+ */
+export function capitalise(s: string): string {
+  return s.charAt(0).toUpperCase() + s.slice(1);
 }

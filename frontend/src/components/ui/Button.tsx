@@ -1,35 +1,32 @@
-import { forwardRef } from 'react';
+import { forwardRef, type ButtonHTMLAttributes } from 'react';
 import { cva, type VariantProps } from 'class-variance-authority';
-import { Loader2 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
 const buttonVariants = cva(
-  // base
-  'inline-flex items-center justify-center gap-2 font-semibold rounded-lg ' +
-  'transition-all duration-150 select-none whitespace-nowrap ' +
-  'disabled:opacity-50 disabled:cursor-not-allowed ' +
-  'active:scale-[0.97] focus-visible:outline-none focus-visible:ring-2 ' +
-  'focus-visible:ring-brand focus-visible:ring-offset-2',
+  // Base styles
+  'inline-flex items-center justify-center gap-2 font-semibold transition-all duration-150 ' +
+  'disabled:opacity-50 disabled:pointer-events-none active:scale-[0.98] select-none whitespace-nowrap ' +
+  'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/40 focus-visible:ring-offset-1',
   {
     variants: {
       variant: {
-        primary:    'bg-brand text-white shadow-sm hover:bg-brand-700 hover:shadow-glow-sm',
-        secondary:  'bg-white border border-border text-text-secondary shadow-xs hover:border-border-strong hover:text-text-primary hover:bg-ink-50',
-        ghost:      'text-text-secondary hover:bg-ink-100 hover:text-text-primary',
-        danger:     'bg-danger text-white shadow-xs hover:bg-danger-600',
-        'brand-soft': 'bg-brand-100 text-brand-700 hover:bg-brand-200',
-        link:       'text-brand underline-offset-4 hover:underline p-0 h-auto',
-        outline:    'border border-brand text-brand hover:bg-brand-50',
+        primary:   'bg-brand text-white shadow-sm hover:bg-brand-700',
+        secondary: 'bg-surface text-text-primary border border-border shadow-xs hover:bg-surface-3 hover:border-border-strong',
+        ghost:     'text-text-secondary hover:bg-surface-3 hover:text-text-primary',
+        danger:    'bg-danger-50 text-danger-600 border border-danger-100 hover:bg-danger-100',
+        'brand-subtle': 'bg-brand-50 text-brand border border-brand-100 hover:bg-brand-100',
+        link:      'text-brand underline-offset-4 hover:underline p-0 h-auto',
+        outline:   'border border-brand text-brand bg-transparent hover:bg-brand-50',
       },
       size: {
-        xs:  'text-xs px-2.5 h-7 rounded-md',
-        sm:  'text-xs px-3 h-8',
-        md:  'text-sm px-4 h-9',
-        lg:  'text-sm px-5 h-11',
-        xl:  'text-base px-6 h-12',
-        icon: 'h-9 w-9 p-0',
-        'icon-sm': 'h-8 w-8 p-0',
-        'icon-lg': 'h-11 w-11 p-0',
+        xs:   'text-xs  h-7  px-2.5 rounded-lg',
+        sm:   'text-sm  h-8  px-3   rounded-lg',
+        md:   'text-sm  h-9  px-4   rounded-xl',
+        lg:   'text-base h-10 px-5  rounded-xl',
+        xl:   'text-base h-11 px-6  rounded-xl',
+        icon: 'h-9  w-9  rounded-xl',
+        'icon-sm': 'h-8 w-8 rounded-lg',
+        'icon-lg': 'h-10 w-10 rounded-xl',
       },
     },
     defaultVariants: {
@@ -40,7 +37,7 @@ const buttonVariants = cva(
 );
 
 export interface ButtonProps
-  extends React.ButtonHTMLAttributes<HTMLButtonElement>,
+  extends ButtonHTMLAttributes<HTMLButtonElement>,
     VariantProps<typeof buttonVariants> {
   loading?: boolean;
   leftIcon?: React.ReactNode;
@@ -57,12 +54,14 @@ const Button = forwardRef<HTMLButtonElement, ButtonProps>(
         {...props}
       >
         {loading ? (
-          <Loader2 size={14} className="animate-spin" />
-        ) : leftIcon ? (
-          <span className="shrink-0">{leftIcon}</span>
-        ) : null}
-        {children && <span>{children}</span>}
-        {!loading && rightIcon && <span className="shrink-0">{rightIcon}</span>}
+          <svg className="animate-spin h-4 w-4" viewBox="0 0 24 24" fill="none">
+            <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+            <path className="opacity-75" fill="currentColor"
+              d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+          </svg>
+        ) : leftIcon}
+        {children}
+        {!loading && rightIcon}
       </button>
     );
   }
