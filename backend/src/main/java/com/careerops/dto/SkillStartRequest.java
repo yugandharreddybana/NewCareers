@@ -1,49 +1,39 @@
 package com.careerops.dto;
 
 import jakarta.validation.constraints.NotBlank;
-import lombok.Data;
-
 import java.util.List;
 import java.util.UUID;
 
 /**
  * Request body for POST /api/skills/start
- *
- * skillName is always required. All other fields are skill-specific:
- *   outreach:  channel + tone
- *   apply:     step (null = full application)
- *   compare:   compareJobIds (2–5 UUIDs)
- *   triage:    no extra params needed
- *   scan:      companyName
- *
- * userJobId is required for all job-level skills.
- * It is null for triage (operates on the user's full queue).
+ * Used to kick off any of the 9 career-ops skills.
  */
-@Data
-public class SkillStartRequest {
+public record SkillStartRequest(
 
+    /** One of: evaluate, tailor-resume, apply, outreach, research,
+     *  prep-interview, compare, triage, scan */
     @NotBlank(message = "skillName is required")
-    private String skillName;
+    String skillName,
 
-    /** Target UserJob. Null only for triage. */
-    private UUID userJobId;
+    /** The UserJob row this skill run is for. Null for triage (queue-wide). */
+    UUID userJobId,
 
-    // ── outreach params ──────────────────────────────────────────────────────
-    /** "linkedin" | "email" | "follow-up" */
-    private String channel;
+    // ── Outreach-specific ──────────────────────────────────────────────────
+    /** linkedin | email | follow-up  (outreach skill only) */
+    String channel,
 
-    /** "professional" | "conversational" | "direct" */
-    private String tone;
+    /** professional | conversational | direct  (outreach skill only) */
+    String tone,
 
-    // ── apply params ─────────────────────────────────────────────────────────
-    /** Which step of the application form to help with. Null = full application. */
-    private String step;
+    // ── Apply-specific ─────────────────────────────────────────────────────
+    /** null = run all steps, or specific step name  (apply skill only) */
+    String step,
 
-    // ── compare params ───────────────────────────────────────────────────────
-    /** 2–5 UserJob IDs to compare side by side. */
-    private List<UUID> compareJobIds;
+    // ── Compare-specific ──────────────────────────────────────────────────
+    /** List of UserJob IDs to compare (compare skill only, min 2) */
+    List<UUID> compareJobIds,
 
-    // ── scan params ──────────────────────────────────────────────────────────
-    /** Company name or careers URL to scan. "all" = scan the user's watchlist. */
-    private String companyTarget;
-}
+    // ── Scan-specific ─────────────────────────────────────────────────────
+    /** Company name or careers URL to scan  (scan skill only) */
+    String scanTarget
+) {}

@@ -6,7 +6,7 @@ import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 import org.springframework.stereotype.Repository;
 
-import java.time.Instant;
+import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 
@@ -15,43 +15,36 @@ public interface SkillRunRepository extends JpaRepository<SkillRun, UUID> {
 
     /**
      * TTL-aware cache lookup.
-     *
-     * Returns the most recent SkillRun for this user+job+skill combination IF:
-     *   - expiresAt is NULL (never expires), OR
-     *   - expiresAt is in the future (cache is still valid)
-     *
-     * This is the ONLY cache lookup method that should be used in SkillService.
-     * It prevents serving stale cached results after the TTL has passed.
+     * Returns the most recent run that is either not expired (expires_at IS NULL or in future).
+     * Secure: always scoped to userId + userJobId.
      */
     @Query("""
         SELECT sr FROM SkillRun sr
-        WHERE sr.userId    = :userId
+        WHERE sr.userId = :userId
           AND sr.userJobId = :userJobId
-          AND sr.skill     = :skill
-          AND (sr.expiresAt IS NULL OR sr.expiresAt > :now)
+          AND sr.skill = :skill
+          AND (sr.expiresAt IS NULL OR sr.expiresAt > CURRENT_TIMESTAMP)
         ORDER BY sr.createdAt DESC
         LIMIT 1
         """)
-    Optional<SkillRun> findValidCache(
-        @Param("userId")    UUID    userId,
-        @Param("userJobId") UUID    userJobId,
-        @Param("skill")     String  skill,
-        @Param("now")       Instant now
-    );
+    Optional<SkillRun> findValidCachedRun(
+            @Param("userId") UUID userId,
+            @Param("userJobId") UUID userJobId,
+            @Param("skill") String skill);
 
     /**
-     * Fetch the most recent run regardless of TTL.
-     * Used for PDF download (we always serve the latest, even if "stale" for re-run purposes).
+     * Get most recent run regardless of expiry — used for display on reload.
      */
     Optional<SkillRun> findFirstByUserIdAndUserJobIdAndSkillOrderByCreatedAtDesc(
-        UUID userId, UUID userJobId, String skill
-    );
+            UUID userId, UUID userJobId, String skill);
 
     /**
-     * Fetch the most recent run for queue-level skills (triage/compare) where userJobId is null.
-     * Scoped to userId only.
+     * Get all runs for a job — used for run-all status + PDF generation.
      */
-    Optional<SkillRun> findFirstByUserIdAndSkillOrderByCreatedAtDesc(
-        UUID userId, String skill
-    );
+    List<SkillRun> findByUserIdAndUserJobIdOrderByCreatedAtDesc(UUID userId, UUID userJobId);
+
+    /**
+     * Check if a skill has ever been run for this job (for PDF download availability).
+     */
+    boolean existsByUserIdAndUserJobIdAndSkill(UUID userId, UUID userJobId, String skill);
 }

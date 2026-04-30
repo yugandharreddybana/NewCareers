@@ -1,37 +1,27 @@
 package com.careerops.dto;
 
-import lombok.Builder;
-import lombok.Data;
-
 import java.util.Map;
 
 /**
  * Response for POST /api/skills/run-all/{userJobId}
  *
- * Contains the result of running all 9 skills in sequence.
- * Individual skill failures do NOT abort the rest — each skill
- * result is independent and may be RESULT, QUESTION, PROFILE_INCOMPLETE, or ERROR.
- *
- * The frontend renders each skill panel independently based on its type.
- * The "Download All PDF" button is enabled once succeeded > 0.
+ * Returns a map of skillName -> SkillRunResponse.
+ * Individual skill failures do NOT fail the whole run-all.
+ * Each skill either has a RESULT, QUESTION, or ERROR.
  */
-@Data
-@Builder
-public class RunAllSkillsResponse {
+public record RunAllSkillsResponse(
+    /** Total skills attempted */
+    int total,
 
-    /**
-     * Map of skill name → its SkillRunResponse.
-     * Keys: evaluate, tailor-resume, apply, outreach, research,
-     *       prep-interview, compare, triage, scan
-     */
-    private Map<String, SkillRunResponse> skills;
+    /** How many completed successfully */
+    int succeeded,
 
-    /** Number of skills that completed successfully (type = RESULT). */
-    private int succeeded;
+    /** How many failed (errors) */
+    int failed,
 
-    /** Number of skills that failed (type = ERROR) or need user input (type = QUESTION). */
-    private int failed;
+    /** How many are waiting for user answers (QUESTION type) */
+    int pendingAnswers,
 
-    /** Total number of skills attempted (always 9 for run-all). */
-    private int total;
-}
+    /** Per-skill results keyed by skill name */
+    Map<String, SkillRunResponse> results
+) {}

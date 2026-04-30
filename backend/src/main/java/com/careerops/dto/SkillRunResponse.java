@@ -1,95 +1,66 @@
 package com.careerops.dto;
 
-import com.fasterxml.jackson.annotation.JsonInclude;
 import com.fasterxml.jackson.databind.JsonNode;
-import lombok.Builder;
-import lombok.Data;
-
 import java.util.List;
 import java.util.UUID;
 
 /**
- * Unified response envelope for all skill endpoints.
+ * Unified response envelope for ALL skill endpoints.
  *
- * The frontend inspects `type` to decide what to render:
- *   RESULT           → show the skill output panel
- *   QUESTION         → show SkillQuestionModal with the question
- *   PROFILE_INCOMPLETE → show ProfileCompletenessAlert with missing fields
- *   ERROR            → show inline error message, no modal
- *
- * All fields except `type` and `skill` are nullable (JsonInclude.NON_NULL
- * ensures they are omitted from JSON when null, keeping responses lean).
+ * The frontend always receives this type and branches on `type`:
+ *   RESULT            → render skill output panel
+ *   QUESTION          → show SkillQuestionModal
+ *   PROFILE_INCOMPLETE → show ProfileCompletenessAlert
+ *   ERROR             → show error state in skill panel
  */
-@Data
-@Builder
-@JsonInclude(JsonInclude.Include.NON_NULL)
-public class SkillRunResponse {
+public record SkillRunResponse(
 
-    public enum Type {
-        RESULT,
-        QUESTION,
-        PROFILE_INCOMPLETE,
-        ERROR
+    Type     type,
+
+    // ── RESULT fields ──────────────────────────────────────────────────────
+    /** Structured skill output. Present when type = RESULT. */
+    JsonNode data,
+
+    /** Skill name that produced this result (for frontend routing to correct panel) */
+    String   skillName,
+
+    // ── QUESTION fields ────────────────────────────────────────────────────
+    /** Conversation ID to send back with the answer. Present when type = QUESTION. */
+    UUID     conversationId,
+
+    /** The exact question Claude asked. Present when type = QUESTION. */
+    String   question,
+
+    // ── PROFILE_INCOMPLETE fields ──────────────────────────────────────────
+    /** Human-readable list of missing profile fields. Present when type = PROFILE_INCOMPLETE. */
+    List<String> missingFields,
+
+    // ── ERROR fields ───────────────────────────────────────────────────────
+    /** User-safe error message. Present when type = ERROR. */
+    String   errorMessage
+
+) {
+    public enum Type { RESULT, QUESTION, PROFILE_INCOMPLETE, ERROR }
+
+    // ── Factory methods ───────────────────────────────────────────────────
+
+    public static SkillRunResponse result(String skillName, JsonNode data) {
+        return new SkillRunResponse(Type.RESULT, data, skillName,
+                null, null, null, null);
     }
 
-    private Type   type;
-    private String skill;
-
-    // ── RESULT fields ────────────────────────────────────────────────────────
-    /** Structured output from Claude. Schema depends on the skill. */
-    private JsonNode data;
-
-    /**
-     * Set only by tailor-resume. Supabase path for the generated resume file.
-     * Used by the frontend to construct the PDF download URL.
-     */
-    private String resumeFilename;
-
-    // ── QUESTION fields ──────────────────────────────────────────────────────
-    /** ID of the saved SkillConversation. Sent back in ConversationReplyRequest. */
-    private UUID conversationId;
-
-    /** The exact question Claude asked. Displayed verbatim in SkillQuestionModal. */
-    private String question;
-
-    // ── PROFILE_INCOMPLETE fields ─────────────────────────────────────────────
-    /**
-     * Human-readable list of missing profile fields.
-     * e.g. ["Upload your CV", "Set at least one target role", "Add your name"]
-     */
-    private List<String> missingFields;
-
-    // ── ERROR field ───────────────────────────────────────────────────────────
-    /** User-safe error message. Never contains stack traces or internal details. */
-    private String error;
-
-    // ── Factory methods ───────────────────────────────────────────────────────
-
-    public static SkillRunResponse result(String skill, JsonNode data) {
-        return SkillRunResponse.builder()
-                .type(Type.RESULT).skill(skill).data(data).build();
+    public static SkillRunResponse question(UUID conversationId, String question, String skillName) {
+        return new SkillRunResponse(Type.QUESTION, null, skillName,
+                conversationId, question, null, null);
     }
 
-    public static SkillRunResponse resultWithResume(String skill, JsonNode data, String resumeFilename) {
-        return SkillRunResponse.builder()
-                .type(Type.RESULT).skill(skill).data(data)
-                .resumeFilename(resumeFilename).build();
+    public static SkillRunResponse profileIncomplete(String skillName, List<String> missing) {
+        return new SkillRunResponse(Type.PROFILE_INCOMPLETE, null, skillName,
+                null, null, missing, null);
     }
 
-    public static SkillRunResponse question(String skill, UUID conversationId, String question) {
-        return SkillRunResponse.builder()
-                .type(Type.QUESTION).skill(skill)
-                .conversationId(conversationId).question(question).build();
-    }
-
-    public static SkillRunResponse profileIncomplete(String skill, List<String> missingFields) {
-        return SkillRunResponse.builder()
-                .type(Type.PROFILE_INCOMPLETE).skill(skill)
-                .missingFields(missingFields).build();
-    }
-
-    public static SkillRunResponse error(String skill, String message) {
-        return SkillRunResponse.builder()
-                .type(Type.ERROR).skill(skill).error(message).build();
+    public static SkillRunResponse error(String skillName, String message) {
+        return new SkillRunResponse(Type.ERROR, null, skillName,
+                null, null, null, message);
     }
 }

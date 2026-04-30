@@ -17,24 +17,33 @@ import java.util.UUID;
 public interface SkillConversationRepository extends JpaRepository<SkillConversation, UUID> {
 
     /**
-     * Fetch a conversation by ID, scoped to the requesting user.
-     * ALWAYS use this overload — never fetch by ID alone (prevents cross-user access).
+     * Secure fetch — always includes userId to prevent cross-user access.
      */
     Optional<SkillConversation> findByIdAndUserId(UUID id, UUID userId);
 
-    /** List all conversations for a user with a given status. Used for diagnostics. */
+    /**
+     * Find all pending conversations for a user (should rarely be more than a few).
+     */
     List<SkillConversation> findByUserIdAndStatus(UUID userId, String status);
 
-    /** Find all conversations that have passed their expiry time (for cleanup job). */
-    List<SkillConversation> findAllByExpiresAtBefore(Instant now);
+    /**
+     * Find pending conversation for a specific user+skill+job combo.
+     * Used to detect if a skill is already mid-conversation before starting a new one.
+     */
+    Optional<SkillConversation> findByUserIdAndSkillAndUserJobIdAndStatus(
+            UUID userId, String skill, UUID userJobId, String status);
 
     /**
-     * Delete all expired conversations in a single query.
-     * Called every 15 minutes by SkillConversationCleanupJob.
-     * Returns count of deleted rows (logged at DEBUG level).
+     * Find all expired pending conversations for cleanup.
+     */
+    @Query("SELECT sc FROM SkillConversation sc WHERE sc.expiresAt < :now AND sc.status = 'pending_answer'")
+    List<SkillConversation> findAllExpired(@Param("now") Instant now);
+
+    /**
+     * Bulk delete expired conversations — called by cleanup cron.
      */
     @Modifying
     @Transactional
-    @Query("DELETE FROM SkillConversation sc WHERE sc.expiresAt < :now")
-    int deleteByExpiresAtBefore(@Param("now") Instant now);
+    @Query("DELETE FROM SkillConversation sc WHERE sc.expiresAt < :now AND sc.status = 'pending_answer'")
+    int deleteAllExpired(@Param("now") Instant now);
 }
