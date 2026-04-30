@@ -9,22 +9,24 @@ import JobDetail from '@/pages/JobDetail';
 import Kanban from '@/pages/Kanban';
 import Profile from '@/pages/Profile';
 import AppShell from '@/components/layout/AppShell';
+import DevModeBanner from '@/components/ui/DevModeBanner';
 
 /**
  * When VITE_DEV_BYPASS_GUARDS=true (set in .env.development), the Protected
  * wrapper is a no-op and every page is accessible without logging in or
  * completing onboarding. This is purely a dev-time convenience — the variable
  * is never present in production builds, so guards are always active there.
+ * A visible DevModeBanner is rendered at the bottom of the screen as a reminder.
  */
 const DEV_BYPASS = import.meta.env.VITE_DEV_BYPASS_GUARDS === 'true';
 
 function Protected({ children }: { children: JSX.Element }) {
   const { user } = useAuth();
 
-  // ── Dev bypass ─────────────────────────────────────────────────────────────
+  // ── Dev bypass ────────────────────────────────────────────────────────────
   if (DEV_BYPASS) return children;
 
-  // ── Production guards ──────────────────────────────────────────────────────
+  // ── Production guards ─────────────────────────────────────────────────────
   if (!user) return <Navigate to="/login" replace />;
   if (!user.onboarded && window.location.pathname !== '/onboarding')
     return <Navigate to="/onboarding" replace />;
@@ -34,20 +36,25 @@ function Protected({ children }: { children: JSX.Element }) {
 
 export default function App() {
   return (
-    <Routes>
-      <Route path="/login"           element={<Login />} />
-      <Route path="/signup"          element={<Signup />} />
-      <Route path="/forgot-password" element={<ForgotPassword />} />
-      <Route path="/onboarding"      element={<Protected><Onboarding /></Protected>} />
+    <>
+      <Routes>
+        <Route path="/login"           element={<Login />} />
+        <Route path="/signup"          element={<Signup />} />
+        <Route path="/forgot-password" element={<ForgotPassword />} />
+        <Route path="/onboarding"      element={<Protected><Onboarding /></Protected>} />
 
-      <Route element={<Protected><AppShell /></Protected>}>
-        <Route path="/dashboard" element={<Dashboard />} />
-        <Route path="/jobs/:id"  element={<JobDetail />} />
-        <Route path="/kanban"    element={<Kanban />} />
-        <Route path="/profile"   element={<Profile />} />
-      </Route>
+        <Route element={<Protected><AppShell /></Protected>}>
+          <Route path="/dashboard" element={<Dashboard />} />
+          <Route path="/jobs/:id"  element={<JobDetail />} />
+          <Route path="/kanban"    element={<Kanban />} />
+          <Route path="/profile"   element={<Profile />} />
+        </Route>
 
-      <Route path="*" element={<Navigate to="/dashboard" replace />} />
-    </Routes>
+        <Route path="*" element={<Navigate to="/dashboard" replace />} />
+      </Routes>
+
+      {/* Sticky dev-mode reminder — only visible when VITE_DEV_BYPASS_GUARDS=true */}
+      <DevModeBanner />
+    </>
   );
 }
