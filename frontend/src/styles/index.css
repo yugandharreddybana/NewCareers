@@ -2,100 +2,140 @@
 @tailwind components;
 @tailwind utilities;
 
-@import url('https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&family=Inter:wght@400;500;600&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Inter:ital,opsz,wght@0,14..32,300;0,14..32,400;0,14..32,500;0,14..32,600;0,14..32,700;0,14..32,800;1,14..32,400&family=Outfit:wght@600;700;800&display=swap');
 
+/* ── CSS Custom Properties ────────────────────────────────────────────── */
 :root {
-  --brand-primary: #6366f1;
-  --brand-secondary: #f43f5e;
-  --glass-bg: rgba(255, 255, 255, 0.7);
-  --glass-border: rgba(255, 255, 255, 0.2);
+  --brand:          #6366f1;
+  --brand-deep:     #4f46e5;
+  --brand-light:    #818cf8;
+  --brand-pale:     #eef2ff;
+  --bg-app:         #f8f9fc;
+  --bg-surface:     #ffffff;
+  --bg-raised:      #f8f9fc;
+  --border:         #e2e8f0;
+  --border-strong:  #cbd5e1;
+  --text-primary:   #0f172a;
+  --text-secondary: #475569;
+  --text-tertiary:  #94a3b8;
+  --sidebar-width:  240px;
+  --topbar-height:  60px;
+  --radius:         0.75rem;
 }
 
-html, body, #root { 
-  height: 100%; 
-  margin: 0;
-  padding: 0;
-}
+/* ── Base Reset ─────────────────────────────────────────────────────────── */
+*, *::before, *::after { box-sizing: border-box; }
+html, body, #root { height: 100%; margin: 0; padding: 0; }
 
 body {
-  font-family: 'Outfit', 'Inter', system-ui, sans-serif;
-  background-color: #f8fafc;
-  background-image: 
-    radial-gradient(at 0% 0%, hsla(253,100%,95%,1) 0, transparent 50%), 
-    radial-gradient(at 50% 0%, hsla(225,100%,96%,1) 0, transparent 50%), 
-    radial-gradient(at 100% 0%, hsla(339,100%,95%,1) 0, transparent 50%);
-  background-attachment: fixed;
-  color: #0f172a;
+  font-family: 'Inter', system-ui, -apple-system, sans-serif;
+  background-color: var(--bg-app);
+  color: var(--text-primary);
   -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
+  font-feature-settings: 'cv11', 'ss01';
 }
 
+/* ── Selection ──────────────────────────────────────────────────────────── */
+::selection { background-color: #eef2ff; color: #4338ca; }
+
+/* ── Scrollbar ──────────────────────────────────────────────────────────── */
+::-webkit-scrollbar { width: 6px; height: 6px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: #e2e8f0; border-radius: 999px; }
+::-webkit-scrollbar-thumb:hover { background: #cbd5e1; }
+
+/* ── Component Layer ─────────────────────────────────────────────────────── */
 @layer components {
+
+  /* ── Cards ── */
+  .card {
+    @apply bg-white border border-border rounded-xl shadow-card;
+  }
+  .card-hover {
+    @apply hover:shadow-card-hover hover:-translate-y-0.5 transition-all duration-200;
+  }
+  .card-interactive {
+    @apply card card-hover cursor-pointer;
+  }
+  /* Legacy glass-card → now resolves to clean card */
   .glass-card {
-    @apply bg-white/70 backdrop-blur-md border border-white/20 shadow-glass rounded-2xl transition-all duration-300;
+    @apply bg-white border border-border rounded-2xl shadow-card;
   }
-  
   .glass-card-hover {
-    @apply hover:bg-white/80 hover:shadow-premium hover:-translate-y-1;
+    @apply hover:shadow-card-hover hover:-translate-y-0.5 transition-all duration-200;
   }
 
-  .btn { 
-    @apply inline-flex items-center justify-center gap-2 px-5 py-2.5 rounded-xl font-semibold transition-all duration-300 disabled:opacity-50 disabled:cursor-not-allowed active:scale-95; 
+  /* ── Form inputs ── */
+  .input {
+    @apply w-full h-10 px-3.5 rounded-lg border border-border bg-white text-sm text-text-primary;
+    @apply placeholder:text-text-tertiary outline-none transition-all duration-150;
+    @apply focus:ring-2 focus:ring-brand-500/20 focus:border-brand-500;
+    @apply disabled:opacity-50 disabled:cursor-not-allowed disabled:bg-surface-raised;
   }
-  
-  .btn-primary { 
-    @apply bg-brand-vibrant text-white shadow-glow hover:bg-brand-deep hover:shadow-premium; 
-  }
-  
-  .btn-secondary { 
-    @apply bg-white/50 backdrop-blur-sm border border-slate-200 text-slate-800 hover:bg-white hover:border-brand-vibrant; 
-  }
-  
-  .btn-ghost { 
-    @apply text-slate-600 hover:bg-brand-vibrant/10 hover:text-brand-vibrant; 
+  .input-error {
+    @apply border-danger-500 focus:ring-danger-500/20 focus:border-danger-500;
   }
 
-  .input { 
-    @apply w-full px-4 py-3 rounded-xl border border-slate-200 bg-white/50 backdrop-blur-sm outline-none transition-all focus:ring-2 focus:ring-brand-vibrant/20 focus:border-brand-vibrant focus:bg-white; 
+  /* ── Buttons (legacy classes kept) ── */
+  .btn {
+    @apply inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-lg font-semibold text-sm;
+    @apply transition-all duration-150 disabled:opacity-50 disabled:cursor-not-allowed active:scale-[0.98] select-none;
+  }
+  .btn-primary  { @apply btn bg-brand-500 text-white hover:bg-brand-600 shadow-brand; }
+  .btn-secondary{ @apply btn bg-white border border-border text-text-primary hover:bg-surface-raised; }
+  .btn-ghost    { @apply btn text-text-secondary hover:bg-surface-overlay hover:text-text-primary; }
+
+  /* ── Chips / Badges (legacy) ── */
+  .chip         { @apply inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-semibold tracking-wide border; }
+  .chip-primary { @apply chip bg-brand-50 text-brand-600 border-brand-200; }
+  .chip-success { @apply chip bg-success-50 text-success-600 border-success-100; }
+  .chip-danger  { @apply chip bg-danger-50 text-danger-600 border-danger-100; }
+  .chip-warning { @apply chip bg-warning-50 text-warning-600 border-warning-100; }
+
+  /* ── Skeleton shimmer ── */
+  .skeleton {
+    @apply bg-slate-100 rounded animate-pulse;
+  }
+  .shimmer {
+    background: linear-gradient(90deg, #f1f5f9 25%, #e2e8f0 50%, #f1f5f9 75%);
+    background-size: 800px 100%;
+    animation: shimmer 1.8s ease-in-out infinite;
   }
 
-  .card { 
-    @apply glass-card p-6; 
+  /* ── Page layout helpers ── */
+  .page-container { @apply max-w-6xl mx-auto px-6 py-8; }
+  .section-label  { @apply text-2xs font-bold uppercase tracking-widest text-text-tertiary; }
+
+  /* ── Gradient text (kept for brand use) ── */
+  .gradient-text {
+    @apply bg-clip-text text-transparent bg-gradient-to-r from-brand-500 to-brand-400;
   }
 
-  .chip { 
-    @apply inline-flex items-center px-3 py-1 rounded-full text-xs font-semibold tracking-wide uppercase; 
+  /* ── Divider ── */
+  .divider { @apply border-t border-border; }
+
+  /* ── Focus ring helper ── */
+  .focus-ring {
+    @apply focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-400/50 focus-visible:ring-offset-1;
   }
-  
-  .chip-primary { @apply chip bg-brand-vibrant/10 text-brand-vibrant border border-brand-vibrant/20; }
-  .chip-success { @apply chip bg-emerald-50 text-emerald-600 border border-emerald-100; }
-  .chip-danger { @apply chip bg-rose-50 text-rose-600 border border-rose-100; }
 }
 
-/* Custom Scrollbar */
-::-webkit-scrollbar {
-  width: 8px;
-}
-::-webkit-scrollbar-track {
-  background: transparent;
-}
-::-webkit-scrollbar-thumb {
-  @apply bg-slate-200 rounded-full hover:bg-slate-300 transition-colors;
-}
-
-/* Animations */
+/* ── Animation helpers ──────────────────────────────────────────────────── */
 .animate-enter {
-  animation: slideUp 0.6s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+  animation: slideUp 0.25s cubic-bezier(0.16, 1, 0.3, 1) both;
 }
-
-.delay-1 { animation-delay: 0.1s; }
-.delay-2 { animation-delay: 0.2s; }
-.delay-3 { animation-delay: 0.3s; }
+.delay-1 { animation-delay: 60ms; }
+.delay-2 { animation-delay: 120ms; }
+.delay-3 { animation-delay: 180ms; }
+.delay-4 { animation-delay: 240ms; }
 
 @keyframes slideUp {
-  from { opacity: 0; transform: translateY(20px); }
-  to { opacity: 1; transform: translateY(0); }
+  from { opacity: 0; transform: translateY(10px); }
+  to   { opacity: 1; transform: translateY(0); }
 }
-
-.gradient-text {
-  @apply bg-clip-text text-transparent bg-gradient-to-r from-brand-vibrant to-brand-deep;
+@keyframes shimmer {
+  0%   { background-position: -400px 0; }
+  100% { background-position:  400px 0; }
 }

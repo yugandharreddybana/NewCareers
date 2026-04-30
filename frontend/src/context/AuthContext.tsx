@@ -1,12 +1,25 @@
 import { createContext, useContext, useEffect, useState, ReactNode } from 'react';
 import { User } from '@/types';
-import { authApi } from '@/services/api';
+import { authApi, profileApi } from '@/services/api';
+
+interface UpdateProfilePayload {
+  location?: string;
+  targetRole?: string;
+  skills?: string[];
+  experienceLevel?: string;
+  desiredSalaryMin?: number;
+  onboardingCompleted?: boolean;
+  [key: string]: unknown;
+}
 
 interface Ctx {
   user: User | null;
   loading: boolean;
   setUser: (u: User | null) => void;
   signOut: () => Promise<void>;
+  signIn: (email: string, password: string) => Promise<User>;
+  signUp: (name: string, email: string, password: string) => Promise<User>;
+  updateProfile: (data: UpdateProfilePayload) => Promise<void>;
 }
 
 const AuthCtx = createContext<Ctx | null>(null);
@@ -22,6 +35,30 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     else localStorage.removeItem('co_user');
   }, [user]);
 
+  const signIn = async (email: string, password: string): Promise<User> => {
+    setLoading(true);
+    try {
+      const { user: u } = await authApi.login({ email, password });
+      setUser(u);
+      return u;
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const signUp = async (name: string, email: string, password: string): Promise<User> => {
+    setLoading(true);
+    try {
+      // Derive a username from the email local-part (e.g. jane.smith@... → jane.smith)
+      const username = email.split('@')[0].toLowerCase().replace(/[^a-z0-9._-]/g, '');
+      const { user: u } = await authApi.signup({ name, username, email, password });
+      setUser(u);
+      return u;
+    } finally {
+      setLoading(false);
+    }
+  };
+
   const signOut = async () => {
     setLoading(true);
     try { await authApi.logout(); } finally {
@@ -30,7 +67,18 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   };
 
-  return <AuthCtx.Provider value={{ user, loading, setUser, signOut }}>{children}</AuthCtx.Provider>;
+  const updateProfile = async (data: UpdateProfilePayload) => {
+    await profileApi.update(data);
+    if (data.onboardingCompleted && user) {
+      setUser({ ...user, onboarded: true });
+    }
+  };
+
+  return (
+    <AuthCtx.Provider value={{ user, loading, setUser, signOut, signIn, signUp, updateProfile }}>
+      {children}
+    </AuthCtx.Provider>
+  );
 }
 
 export function useAuth() {

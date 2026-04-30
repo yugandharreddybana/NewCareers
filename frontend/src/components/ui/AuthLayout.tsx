@@ -1,61 +1,106 @@
-import { ReactNode } from 'react';
+import { type ReactNode } from 'react';
+import { Sparkles, ArrowRight } from 'lucide-react';
 import { Link } from 'react-router-dom';
-import { Sparkles } from 'lucide-react';
 import { motion } from 'framer-motion';
 
-export default function AuthLayout({ title, subtitle, children, footer }: {
-  title: string; subtitle?: string; children: ReactNode; footer?: ReactNode;
-}) {
-  return (
-    <div className="min-h-screen flex flex-col items-center justify-center px-4 relative overflow-hidden">
-      {/* Dynamic Background */}
-      <div className="absolute top-[-20%] left-[-10%] w-[50%] h-[50%] bg-brand-vibrant/10 blur-[150px] rounded-full -z-10" />
-      <div className="absolute bottom-[-20%] right-[-10%] w-[50%] h-[50%] bg-rose-500/10 blur-[150px] rounded-full -z-10" />
+interface AuthLayoutProps {
+  children: ReactNode;
+  title:    string;
+  subtitle?: string;
+  footer?:   ReactNode;
+}
 
-      <motion.div 
-        initial={{ opacity: 0, scale: 0.95 }}
-        animate={{ opacity: 1, scale: 1 }}
-        transition={{ duration: 0.5 }}
-        className="w-full max-w-md relative"
-      >
-        <div className="text-center mb-8">
-          <Link to="/" className="inline-flex flex-col items-center group">
-            <div className="w-12 h-12 bg-brand-vibrant rounded-2xl flex items-center justify-center shadow-glow mb-3 group-hover:rotate-12 transition-transform">
-               <Sparkles className="text-white" size={24} />
-            </div>
-            <h2 className="text-3xl font-black tracking-tighter gradient-text">CareerOps</h2>
-            <p className="text-xs font-bold text-slate-400 uppercase tracking-widest mt-1">Intelligence for your Career</p>
+const TESTIMONIALS = [
+  { text: 'Got 3 interviews in my first week. The match scoring is scarily accurate.', name: 'Aoife M.', role: 'Frontend Dev, Dublin' },
+  { text: 'Finally a job tracker that actually helps me stay organised during the hunt.', name: 'Conor B.', role: 'Full-Stack Engineer' },
+  { text: 'The AI cover letter tool alone is worth it. Saved me hours every application.', name: 'Priya S.', role: 'Data Analyst, Cork' },
+];
+
+export function AuthLayout({ children, title, subtitle, footer }: AuthLayoutProps) {
+  const tIndex = Math.floor(Date.now() / 1000 / 60 / 5) % TESTIMONIALS.length;
+  const t = TESTIMONIALS[tIndex];
+
+  return (
+    <div className="min-h-screen flex">
+      {/* Left panel — brand */}
+      <div className="hidden lg:flex w-[45%] shrink-0 bg-gradient-to-br from-brand-700 via-brand-600 to-brand-500 flex-col justify-between p-10 relative overflow-hidden">
+        {/* Decorative circles */}
+        <div className="absolute -top-20 -left-20 w-80 h-80 bg-white/10 rounded-full blur-3xl" />
+        <div className="absolute -bottom-32 -right-16 w-96 h-96 bg-brand-900/30 rounded-full blur-3xl" />
+        <div className="absolute top-1/2 left-1/3 w-40 h-40 bg-white/5 rounded-full blur-2xl" />
+
+        {/* Logo */}
+        <Link to="/" className="relative flex items-center gap-2.5 group w-fit">
+          <div className="w-9 h-9 bg-white/20 backdrop-blur-sm rounded-xl flex items-center justify-center border border-white/30">
+            <Sparkles size={18} className="text-white" />
+          </div>
+          <span className="font-bold text-xl text-white tracking-tight font-display">CareerOps</span>
+        </Link>
+
+        {/* Hero text */}
+        <div className="relative z-10 space-y-6">
+          <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-white/15 border border-white/25 text-white/90 text-xs font-medium">
+            <span className="w-1.5 h-1.5 rounded-full bg-green-400 animate-pulse" />
+            AI-powered job matching for Ireland
+          </div>
+          <h1 className="text-4xl font-bold text-white leading-tight text-balance font-display">
+            Your next role is one smart application away.
+          </h1>
+          <p className="text-white/70 text-base leading-relaxed">
+            Match your skills to real jobs. Track every application. Land interviews faster.
+          </p>
+          <Link
+            to="/signup"
+            className="inline-flex items-center gap-2 text-sm font-semibold text-white hover:gap-3 transition-all group"
+          >
+            Start for free
+            <ArrowRight size={15} className="group-hover:translate-x-1 transition-transform" />
           </Link>
         </div>
 
-        <div className="glass-card p-8 sm:p-10 shadow-premium border-white/50">
-          <div className="space-y-1 mb-8">
-            <h1 className="text-2xl font-bold text-slate-900 tracking-tight">{title}</h1>
-            {subtitle && <p className="text-sm font-medium text-slate-500">{subtitle}</p>}
-          </div>
-          
-          <div className="relative">
-            {children}
+        {/* Testimonial */}
+        <div className="relative z-10 bg-white/10 backdrop-blur-sm border border-white/20 rounded-2xl p-5">
+          <p className="text-white/85 text-sm leading-relaxed mb-3">&ldquo;{t.text}&rdquo;</p>
+          <div className="flex items-center gap-2.5">
+            <div className="w-8 h-8 rounded-full bg-white/30 flex items-center justify-center text-white font-bold text-xs">
+              {t.name[0]}
+            </div>
+            <div>
+              <p className="text-white text-xs font-semibold">{t.name}</p>
+              <p className="text-white/60 text-[10px]">{t.role}</p>
+            </div>
           </div>
         </div>
+      </div>
 
-        {footer && (
-          <motion.div 
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            transition={{ delay: 0.3 }}
-            className="text-center text-sm font-medium text-slate-500 mt-6"
-          >
-            {footer}
-          </motion.div>
-        )}
-      </motion.div>
-      
-      <footer className="absolute bottom-8 text-center w-full">
-        <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">
-          &copy; 2026 CareerOps &middot; All Rights Reserved
-        </p>
-      </footer>
+      {/* Right panel — form */}
+      <div className="flex-1 flex items-center justify-center p-6 bg-surface-raised">
+        <motion.div
+          initial={{ opacity: 0, y: 12 }}
+          animate={{ opacity: 1, y:  0 }}
+          transition={{ duration: 0.25, ease: [0.16, 1, 0.3, 1] }}
+          className="w-full max-w-[400px]"
+        >
+          {/* Mobile logo */}
+          <Link to="/" className="lg:hidden flex items-center gap-2 mb-8">
+            <div className="w-8 h-8 bg-brand-500 rounded-lg flex items-center justify-center shadow-brand">
+              <Sparkles size={15} className="text-white" />
+            </div>
+            <span className="font-bold text-base text-text-primary font-display">CareerOps</span>
+          </Link>
+
+          <div className="mb-7">
+            <h2 className="text-2xl font-bold text-text-primary font-display">{title}</h2>
+            {subtitle && <p className="text-sm text-text-secondary mt-1.5">{subtitle}</p>}
+          </div>
+
+          {children}
+
+          {footer && <div className="mt-5 text-center text-sm text-text-secondary">{footer}</div>}
+        </motion.div>
+      </div>
     </div>
   );
 }
+
+export default AuthLayout;

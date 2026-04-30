@@ -3,10 +3,7 @@ package com.careerops.service;
 import com.careerops.model.SkillRun;
 import com.careerops.repository.SkillRunRepository;
 import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
 import com.openhtmltopdf.pdfboxout.PdfRendererBuilder;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 
 import java.io.ByteArrayOutputStream;
@@ -19,15 +16,12 @@ import java.util.*;
  * Three PDF types:
  *   1. Single skill    → generateSkillPdf()
  *   2. All 9 skills    → generateAllSkillsPdf()
- *   3. Tailored resume → generateResumePdf() (renders resumeHtml directly)
+ *   3. Tailored resume → generateResumePdf()
  *
  * Uses openhtmltopdf (Apache 2.0) + pdfbox 2.x.
- * No external services needed — runs fully local inside the JVM.
  */
 @Service
 public class PdfExportService {
-
-    private static final Logger log = LoggerFactory.getLogger(PdfExportService.class);
 
     private static final List<String> ALL_SKILLS = List.of(
         "evaluate", "tailor-resume", "research", "prep-interview",
@@ -35,38 +29,28 @@ public class PdfExportService {
     );
 
     private final SkillRunRepository skillRuns;
-    private final ObjectMapper       mapper;
 
-    public PdfExportService(SkillRunRepository skillRuns, ObjectMapper mapper) {
+    public PdfExportService(SkillRunRepository skillRuns) {
         this.skillRuns = skillRuns;
-        this.mapper    = mapper;
     }
 
     // ================================================================
     // PUBLIC METHODS
     // ================================================================
 
-    /**
-     * Generate a PDF for a single skill.
-     * Returns the raw PDF bytes to stream to the client.
-     */
     public byte[] generateSkillPdf(UUID userId, UUID userJobId, String skillName) throws Exception {
         Optional<SkillRun> runOpt = skillRuns
                 .findFirstByUserIdAndUserJobIdAndSkillOrderByCreatedAtDesc(userId, userJobId, skillName);
 
         String html = buildPageHtml(
-                "CareerOps — " + toTitle(skillName),
+                "CareerOps \u2014 " + toTitle(skillName),
                 List.of(buildSkillSection(skillName, runOpt.orElse(null)))
         );
         return renderToPdf(html);
     }
 
-    /**
-     * Generate a PDF containing all 9 skills, each on its own page.
-     */
     public byte[] generateAllSkillsPdf(UUID userId, UUID userJobId) throws Exception {
         List<SkillRun> allRuns = skillRuns.findByUserIdAndUserJobIdOrderByCreatedAtDesc(userId, userJobId);
-        // Map skill → most recent run
         Map<String, SkillRun> runBySkill = new LinkedHashMap<>();
         for (SkillRun sr : allRuns) {
             runBySkill.putIfAbsent(sr.getSkill(), sr);
@@ -77,28 +61,22 @@ public class PdfExportService {
             sections.add(buildSkillSection(skill, runBySkill.get(skill)));
         }
 
-        String html = buildPageHtml("CareerOps — Complete Career Pack", sections);
+        String html = buildPageHtml("CareerOps \u2014 Complete Career Pack", sections);
         return renderToPdf(html);
     }
 
-    /**
-     * Generate a PDF from the stored resume HTML.
-     * The HTML is already ATS-formatted by Claude — rendered exactly as-is.
-     */
     public byte[] generateResumePdf(UUID userId, UUID userJobId) throws Exception {
         Optional<SkillRun> runOpt = skillRuns
                 .findFirstByUserIdAndUserJobIdAndSkillOrderByCreatedAtDesc(userId, userJobId, "tailor-resume");
 
         if (runOpt.isEmpty() || runOpt.get().getResumeHtml() == null) {
-            // Fall back to a placeholder page
             String html = buildPageHtml("Resume Not Available", List.of(
                 "<div class='placeholder'><h2>Resume not yet generated</h2>" +
-                "<p>Run the <strong>Tailor Resume</strong> skill first to generate your ATS-optimised resume.</p></div>"
+                "<p>Run the <strong>Tailor Resume</strong> skill first.</p></div>"
             ));
             return renderToPdf(html);
         }
 
-        // Wrap the resume HTML in a minimal PDF-safe page shell
         String resumeHtml = """
                 <!DOCTYPE html>
                 <html>
@@ -130,7 +108,6 @@ public class PdfExportService {
 
     private String buildSkillSection(String skillName, SkillRun run) {
         StringBuilder sb = new StringBuilder();
-        // Page-break before every section except the first
         sb.append("<div class='skill-section' style='page-break-before: always;'>");
         sb.append("<div class='skill-header'>");
         sb.append("<h1>").append(toTitle(skillName)).append("</h1>");
@@ -151,18 +128,11 @@ public class PdfExportService {
         return sb.toString();
     }
 
-    /**
-     * Convert a skill's JSON output to readable HTML.
-     * Handles both structured JSON objects and plain text strings.
-     */
     private String outputToHtml(String skillName, JsonNode output) {
         if (output == null) return "<p>No output available.</p>";
 
-        // If output is a plain text string (Claude returned markdown)
         if (output.isTextual()) {
-            String text = output.asText();
-            // Convert markdown-ish text to basic HTML
-            text = text
+            String text = output.asText()
                 .replace("&", "&amp;")
                 .replace("<", "&lt;")
                 .replace(">", "&gt;")
@@ -177,7 +147,6 @@ public class PdfExportService {
             return "<p>" + text + "</p>";
         }
 
-        // If output is a JSON object, render key-value pairs
         if (output.isObject()) {
             StringBuilder sb = new StringBuilder();
             output.fields().forEachRemaining(entry -> {
@@ -199,7 +168,6 @@ public class PdfExportService {
         return "<pre>" + output.toString() + "</pre>";
     }
 
-    /** Wrap sections in a full PDF-safe HTML document with shared styles. */
     private String buildPageHtml(String title, List<String> sections) {
         return """
                 <!DOCTYPE html>
@@ -231,7 +199,6 @@ public class PdfExportService {
                 """.formatted(title, String.join("\n", sections));
     }
 
-    /** Render HTML string to PDF bytes via openhtmltopdf. */
     private byte[] renderToPdf(String html) throws Exception {
         try (ByteArrayOutputStream baos = new ByteArrayOutputStream()) {
             PdfRendererBuilder builder = new PdfRendererBuilder();

@@ -20,25 +20,21 @@ import java.util.stream.Collectors;
 
 /**
  * Wires scrape -> dedup -> JobMatchingService pre-rank -> parallel Gemini score -> top-N -> persist.
- *
- * Gemini calls are fired in parallel using CompletableFuture so a batch of 25 jobs
- * scores in ~15s instead of up to 25 minutes sequentially.
  */
 @Service
 public class JobDeliveryService {
     private static final Logger log = LoggerFactory.getLogger(JobDeliveryService.class);
 
-    private final JobScrapeService        scrape;
-    private final DeduplicationService    dedup;
-    private final GeminiService           gemini;
-    private final SkillPromptLibrary      prompts;
-    private final UserProfileRepository   profiles;
-    private final UserJobRepository       userJobs;
-    private final JobRepository           jobs;
-    private final CvService               cvService;
-    private final DailyLimitService       limits;
-    private final JobMatchingService      matcher;
-    private final ObjectMapper            mapper = new ObjectMapper();
+    private final JobScrapeService      scrape;
+    private final DeduplicationService  dedup;
+    private final GeminiService         gemini;
+    private final SkillPromptLibrary    prompts;
+    private final UserProfileRepository profiles;
+    private final UserJobRepository     userJobs;
+    private final CvService             cvService;
+    private final DailyLimitService     limits;
+    private final JobMatchingService    matcher;
+    private final ObjectMapper          mapper = new ObjectMapper();
 
     @Value("${jobs.cron.daily.count:3}")
     private int cronShare;
@@ -49,12 +45,11 @@ public class JobDeliveryService {
     public JobDeliveryService(JobScrapeService scrape, DeduplicationService dedup,
                               GeminiService gemini, SkillPromptLibrary prompts,
                               UserProfileRepository profiles, UserJobRepository userJobs,
-                              JobRepository jobs, CvService cv, DailyLimitService limits,
+                              CvService cv, DailyLimitService limits,
                               JobMatchingService matcher) {
-        this.scrape = scrape; this.dedup = dedup; this.gemini = gemini;
-        this.prompts = prompts; this.profiles = profiles; this.userJobs = userJobs;
-        this.jobs = jobs; this.cvService = cv; this.limits = limits;
-        this.matcher = matcher;
+        this.scrape   = scrape;    this.dedup    = dedup;    this.gemini   = gemini;
+        this.prompts  = prompts;   this.profiles = profiles; this.userJobs = userJobs;
+        this.cvService = cv;       this.limits   = limits;   this.matcher  = matcher;
     }
 
     @Transactional
@@ -69,14 +64,10 @@ public class JobDeliveryService {
             throw new ApiException(HttpStatus.TOO_MANY_REQUESTS, "Daily limit reached. Resets at midnight.");
         int target = Math.min(desiredCount, remaining);
 
-        // 1. Scrape all sources
-        List<Job> raw = scrape.fetchRaw(p);
-
-        // 2. Dedup globally
+        List<Job> raw     = scrape.fetchRaw(p);
         List<Job> deduped = dedup.dedupAndPersist(userId, raw);
         log.info("User {} dedup pool size: {}", userId, deduped.size());
 
-        // 3. Pre-rank cheaply — pick best N for Gemini
         List<Job> preRanked = matcher.topN(deduped, p, preRankPool)
             .stream().map(JobMatchingService.ScoredJob::job).toList();
         log.info("User {} pre-ranked pool for Gemini: {}", userId, preRanked.size());
@@ -85,11 +76,8 @@ public class JobDeliveryService {
             return new FetchSummary(0, limits.getCount(userId), limits.max(), limits.remaining(userId));
         }
 
-        // 4. Parallel Gemini deep-scoring
-        //    Fires all CompletableFutures concurrently then collects back on this thread
-        //    (still inside the @Transactional boundary — DB saves happen after .join())
         String cvText       = cvService.activeCvText(userId);
-        String systemPrompt = prompts.prompt("evaluate");
+        String systemPrompt = prompts.buildFullSystemPrompt("evaluate");
         int    minPct       = p.getMinMatchPercent() == null ? 60 : p.getMinMatchPercent();
 
         List<CompletableFuture<Scored>> futures = preRanked.stream()
@@ -101,7 +89,6 @@ public class JobDeliveryService {
                 }))
             .toList();
 
-        // Block until ALL futures complete (still on the transaction thread)
         CompletableFuture.allOf(futures.toArray(new CompletableFuture[0])).join();
 
         List<Scored> scored = futures.stream()
@@ -109,7 +96,6 @@ public class JobDeliveryService {
             .filter(s -> s.match() >= minPct)
             .collect(Collectors.toList());
 
-        // 5. De-dup by company, sort by Gemini score, take top-N
         Set<String> companies = new HashSet<>();
         scored.sort(Comparator.comparingInt(Scored::match).reversed());
         List<Scored> top = scored.stream()
@@ -117,7 +103,6 @@ public class JobDeliveryService {
             .limit(target)
             .collect(Collectors.toList());
 
-        // 6. Persist to user_jobs
         for (Scored s : top) {
             if (userJobs.findByUserIdAndJobId(userId, s.job().getId()).isPresent()) continue;
             UserJob uj = UserJob.builder()
@@ -143,7 +128,6 @@ public class JobDeliveryService {
 
     public int cronShare() { return cronShare; }
 
-    // ── Prompt builder (extracted from inline scoreOne) ────────────────────
     private String buildPrompt(Job j, UserProfile p, String cv) {
         return String.format("""
             USER:
@@ -174,7 +158,6 @@ public class JobDeliveryService {
         );
     }
 
-    // ── Helpers ────────────────────────────────────────────────────────────
     private ObjectNode emptyJson() { return mapper.createObjectNode(); }
 
     private static String[] toArr(JsonNode n) {

@@ -8,7 +8,6 @@ import com.careerops.model.SkillConversation;
 import com.careerops.model.SkillRun;
 import com.careerops.repository.SkillConversationRepository;
 import com.careerops.repository.SkillRunRepository;
-import com.careerops.repository.UserJobRepository;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
@@ -33,29 +32,24 @@ import java.util.*;
  *   4. Run Claude agentic loop (ClaudeAgentService)
  *   5. Handle result: Done | NeedsAnswer | Error
  *   6. Save SkillRun with appropriate TTL
- *
- * Zero Gemini calls remain in this service.
- * All AI generation goes through ClaudeAgentService.
  */
 @Service
 public class SkillService {
 
     private static final Logger log = LoggerFactory.getLogger(SkillService.class);
 
-    // TTL in days per skill. Null = no cache (always fresh).
     private static final Map<String, Integer> CACHE_TTL_DAYS = Map.of(
-        "evaluate",      7,
-        "research",      1,
+        "evaluate",       7,
+        "research",       1,
         "prep-interview", 3
     );
 
-    private final ClaudeAgentService           claude;
-    private final SkillPromptLibrary           prompts;
-    private final ProfileValidator             validator;
-    private final SkillRunRepository           skillRuns;
-    private final SkillConversationRepository  conversations;
-    private final UserJobRepository            userJobs;
-    private final ObjectMapper                 mapper;
+    private final ClaudeAgentService          claude;
+    private final SkillPromptLibrary          prompts;
+    private final ProfileValidator            validator;
+    private final SkillRunRepository          skillRuns;
+    private final SkillConversationRepository conversations;
+    private final ObjectMapper                mapper;
 
     @Value("${skill.conversation.expire.minutes:30}")
     private int conversationExpireMinutes;
@@ -66,14 +60,12 @@ public class SkillService {
             ProfileValidator validator,
             SkillRunRepository skillRuns,
             SkillConversationRepository conversations,
-            UserJobRepository userJobs,
             ObjectMapper mapper) {
         this.claude        = claude;
         this.prompts       = prompts;
         this.validator     = validator;
         this.skillRuns     = skillRuns;
         this.conversations = conversations;
-        this.userJobs      = userJobs;
         this.mapper        = mapper;
     }
 
@@ -81,10 +73,6 @@ public class SkillService {
     // START A SKILL
     // ================================================================
 
-    /**
-     * Start or resume a skill run.
-     * Handles profile validation, TTL cache, and Claude invocation.
-     */
     @Transactional
     public SkillRunResponse startSkill(SkillStartRequest req, UUID userId) {
         String skill     = req.skillName();
@@ -92,14 +80,12 @@ public class SkillService {
 
         log.info("startSkill: skill={}, userId={}, userJobId={}", skill, userId, userJobId);
 
-        // ── 1. Profile validation ─────────────────────────────────────────────
         List<String> missing = validator.validateForSkill(userId, skill);
         if (!missing.isEmpty()) {
             log.debug("Profile incomplete for skill={}: {}", skill, missing);
             return SkillRunResponse.profileIncomplete(skill, missing);
         }
 
-        // ── 2. TTL cache check ────────────────────────────────────────────────
         if (userJobId != null && CACHE_TTL_DAYS.containsKey(skill)) {
             Optional<SkillRun> cached = skillRuns.findValidCachedRun(userId, userJobId, skill);
             if (cached.isPresent()) {
@@ -108,11 +94,9 @@ public class SkillService {
             }
         }
 
-        // ── 3. Build initial message ──────────────────────────────────────────
         String systemPrompt = prompts.buildFullSystemPrompt(skill);
         ArrayNode messages  = buildInitialMessages(req, userId);
 
-        // ── 4. Run Claude ──────────────────────────────────────────────────
         return handleAgentResult(
                 claude.run(systemPrompt, messages, userId, userJobId),
                 skill, userId, userJobId, messages
@@ -123,14 +107,10 @@ public class SkillService {
     // RESUME A PAUSED CONVERSATION
     // ================================================================
 
-    /**
-     * Resume a paused skill run after the user answers Claude's question.
-     */
     @Transactional
     public SkillRunResponse resumeConversation(UUID conversationId, String answer, UUID userId) {
         log.info("resumeConversation: id={}, userId={}", conversationId, userId);
 
-        // Secure fetch: always scoped to userId
         SkillConversation conv = conversations.findByIdAndUserId(conversationId, userId)
                 .orElse(null);
 
@@ -145,10 +125,8 @@ public class SkillService {
                     "This conversation has expired. Please start the skill again.");
         }
 
-        // Restore message history from DB
         ArrayNode history = (ArrayNode) conv.getMessages();
 
-        // Append the tool_result for the ask_user call
         ObjectNode toolResultMsg = mapper.createObjectNode();
         toolResultMsg.put("role", "user");
         ArrayNode toolResultContent = mapper.createArrayNode();
@@ -160,11 +138,9 @@ public class SkillService {
         toolResultMsg.set("content", toolResultContent);
         history.add(toolResultMsg);
 
-        // Resume Claude from where it paused
         String systemPrompt = prompts.buildFullSystemPrompt(conv.getSkill());
         AgentResult result  = claude.run(systemPrompt, history, userId, conv.getUserJobId());
 
-        // Mark conversation as completed regardless of result
         conv.setStatus("completed");
         conversations.save(conv);
 
@@ -175,10 +151,6 @@ public class SkillService {
     // RUN ALL SKILLS
     // ================================================================
 
-    /**
-     * Run all 9 skills for a given job sequentially.
-     * Individual failures do NOT stop the rest.
-     */
     @Transactional
     public RunAllSkillsResponse runAllSkills(UUID userId, UUID userJobId) {
         log.info("runAllSkills: userId={}, userJobId={}", userId, userJobId);
@@ -212,7 +184,7 @@ public class SkillService {
     }
 
     // ================================================================
-    // GET LAST RUN (no re-execution)
+    // GET LAST RUN
     // ================================================================
 
     public SkillRunResponse getLastRun(UUID userId, UUID userJobId, String skillName) {
@@ -226,9 +198,6 @@ public class SkillService {
     // PRIVATE HELPERS
     // ================================================================
 
-    /**
-     * Handle the 3 possible AgentResult types uniformly.
-     */
     private SkillRunResponse handleAgentResult(
             AgentResult result,
             String skill,
@@ -239,15 +208,13 @@ public class SkillService {
         return switch (result) {
 
             case AgentResult.Done done -> {
-                // Parse Claude's text output as JSON (or wrap in a text node)
                 JsonNode output = parseOutput(done.text());
 
-                // Save SkillRun with TTL
                 SkillRun run = SkillRun.builder()
                         .userId(userId)
                         .userJobId(userJobId)
                         .skill(skill)
-                        .input(mapper.createObjectNode()) // input context saved separately if needed
+                        .input(mapper.createObjectNode())
                         .output(output)
                         .expiresAt(computeExpiry(skill))
                         .build();
@@ -258,8 +225,6 @@ public class SkillService {
             }
 
             case AgentResult.NeedsAnswer needs -> {
-                // Save paused conversation to DB for resumption within TTL
-                // Delete any existing pending conversation for this skill+job first
                 conversations.findByUserIdAndSkillAndUserJobIdAndStatus(
                         userId, skill, userJobId, "pending_answer")
                     .ifPresent(conversations::delete);
@@ -286,10 +251,6 @@ public class SkillService {
         };
     }
 
-    /**
-     * Build the initial user message for a skill run.
-     * Includes skill-specific context (channel, tone, compareJobIds, etc.)
-     */
     private ArrayNode buildInitialMessages(SkillStartRequest req, UUID userId) {
         ArrayNode messages = mapper.createArrayNode();
         ObjectNode userMsg = mapper.createObjectNode();
@@ -298,9 +259,9 @@ public class SkillService {
         StringBuilder content = new StringBuilder();
         content.append("Please run the ").append(req.skillName()).append(" skill for me.\n");
 
-        if (req.channel() != null)  content.append("Channel: ").append(req.channel()).append("\n");
-        if (req.tone() != null)     content.append("Tone: ").append(req.tone()).append("\n");
-        if (req.step() != null)     content.append("Step: ").append(req.step()).append("\n");
+        if (req.channel()  != null) content.append("Channel: ").append(req.channel()).append("\n");
+        if (req.tone()     != null) content.append("Tone: ").append(req.tone()).append("\n");
+        if (req.step()     != null) content.append("Step: ").append(req.step()).append("\n");
         if (req.scanTarget() != null) content.append("Scan target: ").append(req.scanTarget()).append("\n");
 
         if (req.compareJobIds() != null && !req.compareJobIds().isEmpty()) {
@@ -317,15 +278,10 @@ public class SkillService {
         return messages;
     }
 
-    /**
-     * Try to parse Claude's text output as JSON.
-     * If it fails, wrap it in a {\"text\": \"...\"} node so the frontend always gets valid JSON.
-     */
     private JsonNode parseOutput(String text) {
         if (text == null || text.isBlank()) {
             return mapper.createObjectNode().put("text", "No output generated.");
         }
-        // Try to find JSON block in the text (Claude sometimes wraps JSON in markdown)
         String trimmed = text.trim();
         int jsonStart = trimmed.indexOf('{');
         int jsonEnd   = trimmed.lastIndexOf('}');
@@ -335,16 +291,11 @@ public class SkillService {
                 return mapper.readTree(jsonPart);
             } catch (Exception ignored) {}
         }
-        // Not parseable as JSON — return as text node
         ObjectNode wrap = mapper.createObjectNode();
         wrap.put("text", text);
         return wrap;
     }
 
-    /**
-     * Compute expiry timestamp for a skill run.
-     * Returns null for skills with no cache TTL.
-     */
     private Instant computeExpiry(String skill) {
         Integer days = CACHE_TTL_DAYS.get(skill);
         return days != null ? Instant.now().plus(days, ChronoUnit.DAYS) : null;

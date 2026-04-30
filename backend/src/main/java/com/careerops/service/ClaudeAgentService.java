@@ -15,7 +15,6 @@ import org.springframework.web.reactive.function.client.WebClient;
 import org.springframework.web.reactive.function.client.WebClientResponseException;
 
 import java.time.Duration;
-import java.util.List;
 import java.util.UUID;
 
 /**
@@ -27,9 +26,6 @@ import java.util.UUID;
  *   3. Append tool_result back into the message history
  *   4. Loop until Claude returns end_turn or max iterations exceeded
  *   5. If ask_user tool is called, immediately PAUSE and return NeedsAnswer
- *
- * Security: userId is always passed through to SkillToolDispatcher —
- * tools can ONLY access data belonging to the authenticated user.
  */
 @Service
 public class ClaudeAgentService {
@@ -64,25 +60,10 @@ public class ClaudeAgentService {
         this.webClient  = WebClient.builder()
                 .baseUrl(ANTHROPIC_API_URL)
                 .defaultHeader(HttpHeaders.CONTENT_TYPE, MediaType.APPLICATION_JSON_VALUE)
-                .codecs(cfg -> cfg.defaultCodecs().maxInMemorySize(10 * 1024 * 1024)) // 10MB
+                .codecs(cfg -> cfg.defaultCodecs().maxInMemorySize(10 * 1024 * 1024))
                 .build();
     }
 
-    // ============================================================
-    // PUBLIC API
-    // ============================================================
-
-    /**
-     * Run a skill agentic loop.
-     *
-     * @param systemPrompt  Full SKILL.md + reference docs (from SkillPromptLibrary)
-     * @param messages      Mutable list of Claude message nodes (role+content)
-     *                      On first call: single user message with skill context.
-     *                      On resume: full restored conversation history.
-     * @param userId        Authenticated user — passed to all tool dispatches
-     * @param userJobId     Job context (may be null for triage/compare)
-     * @return AgentResult.Done | AgentResult.NeedsAnswer | AgentResult.Error
-     */
     public AgentResult run(
             String systemPrompt,
             ArrayNode messages,
@@ -95,7 +76,6 @@ public class ClaudeAgentService {
             iterations++;
             log.debug("Claude iteration {}/{} for userId={}", iterations, maxIterations, userId);
 
-            // ── Build API request ─────────────────────────────────────────────────
             ObjectNode body = mapper.createObjectNode();
             body.put("model",      model);
             body.put("max_tokens", maxTokens);
@@ -103,7 +83,6 @@ public class ClaudeAgentService {
             body.set("messages",   messages);
             body.set("tools",      buildToolDefinitions());
 
-            // ── Call Claude ───────────────────────────────────────────────────
             JsonNode response = callWithRetry(body);
             if (response == null) {
                 return AgentResult.error("Claude API is temporarily unavailable. Please try again.");
@@ -111,39 +90,33 @@ public class ClaudeAgentService {
 
             String stopReason = response.path("stop_reason").asText();
 
-            // ── Claude is done ─────────────────────────────────────────────────
             if ("end_turn".equals(stopReason)) {
                 String text = extractTextContent(response);
                 return AgentResult.done(text);
             }
 
-            // ── Claude wants to call tools ───────────────────────────────────────
             if ("tool_use".equals(stopReason)) {
-                // Append Claude's response (with tool_use blocks) to history
                 ObjectNode assistantMsg = mapper.createObjectNode();
                 assistantMsg.put("role", "assistant");
                 assistantMsg.set("content", response.path("content"));
                 ((ArrayNode) messages).add(assistantMsg);
 
-                // Process all tool calls in this response
                 ArrayNode toolResults = mapper.createArrayNode();
                 for (JsonNode block : response.path("content")) {
                     if (!"tool_use".equals(block.path("type").asText())) continue;
 
-                    String toolName  = block.path("name").asText();
-                    String toolUseId = block.path("id").asText();
+                    String toolName   = block.path("name").asText();
+                    String toolUseId  = block.path("id").asText();
                     JsonNode toolInput = block.path("input");
 
                     log.debug("Claude calling tool: {} (id={})", toolName, toolUseId);
 
-                    // ★ PAUSE POINT: ask_user tool pauses the loop
                     if ("ask_user".equals(toolName)) {
                         String question = toolInput.path("question").asText(
                                 "I need a bit more information to continue.");
                         return AgentResult.needsAnswer(question, messages, toolUseId);
                     }
 
-                    // Execute all other tools
                     String result = dispatcher.dispatch(toolName, toolInput, userId, userJobId);
 
                     ObjectNode toolResult = mapper.createObjectNode();
@@ -153,39 +126,27 @@ public class ClaudeAgentService {
                     toolResults.add(toolResult);
                 }
 
-                // Append all tool results as a single user message
                 if (!toolResults.isEmpty()) {
                     ObjectNode userMsg = mapper.createObjectNode();
                     userMsg.put("role", "user");
                     userMsg.set("content", toolResults);
                     ((ArrayNode) messages).add(userMsg);
                 }
-                continue; // Next iteration
+                continue;
             }
 
-            // Unexpected stop reason
             log.warn("Unexpected Claude stop_reason: {}", stopReason);
             return AgentResult.error("Unexpected response from AI engine. Please try again.");
         }
 
-        log.warn("Claude max iterations ({}) exceeded for userId={}, skill loop terminated",
-                maxIterations, userId);
-        return AgentResult.error(
-                "This skill is taking longer than expected. Please try again.");
+        log.warn("Claude max iterations ({}) exceeded for userId={}", maxIterations, userId);
+        return AgentResult.error("This skill is taking longer than expected. Please try again.");
     }
 
-    // ============================================================
-    // PRIVATE HELPERS
-    // ============================================================
-
-    /**
-     * Calls Claude API with retry on 429 / 529.
-     * Returns null on unrecoverable failure.
-     */
     private JsonNode callWithRetry(ObjectNode body) {
-        int attempts = 0;
+        int attempts  = 0;
         int maxAttempts = 3;
-        long delayMs = 2000;
+        long delayMs  = 2000;
 
         while (attempts < maxAttempts) {
             attempts++;
@@ -205,18 +166,18 @@ public class ClaudeAgentService {
                 int status = e.getStatusCode().value();
 
                 if (status == 401) {
-                    log.error("Anthropic API key is invalid (401). Check anthropic.api.key.");
+                    log.error("Anthropic API key is invalid (401).");
                     return null;
                 }
 
                 if ((status == 429 || status == 529) && attempts < maxAttempts) {
-                    log.warn("Claude rate limited ({}), retrying in {}ms (attempt {}/{})",
+                    log.warn("Claude rate limited ({}), retrying in {}ms ({}/{})",
                             status, delayMs, attempts, maxAttempts);
                     try { Thread.sleep(delayMs); } catch (InterruptedException ie) {
                         Thread.currentThread().interrupt();
                         return null;
                     }
-                    delayMs *= 2; // exponential backoff
+                    delayMs *= 2;
                     continue;
                 }
 
@@ -231,7 +192,6 @@ public class ClaudeAgentService {
         return null;
     }
 
-    /** Extract plain text from Claude's end_turn response content. */
     private String extractTextContent(JsonNode response) {
         StringBuilder sb = new StringBuilder();
         for (JsonNode block : response.path("content")) {
@@ -242,10 +202,6 @@ public class ClaudeAgentService {
         return sb.toString().trim();
     }
 
-    /**
-     * All 10 tools available to Claude during skill runs.
-     * Definitions match the Anthropic tool-use schema exactly.
-     */
     private JsonNode buildToolDefinitions() {
         try {
             String json = """
@@ -257,27 +213,27 @@ public class ClaudeAgentService {
               },
               {
                 "name": "read_resume",
-                "description": "Read the user's uploaded CV/resume as plain text. Returns the full text extracted from their uploaded document.",
+                "description": "Read the user's uploaded CV/resume as plain text.",
                 "input_schema": { "type": "object", "properties": {}, "required": [] }
               },
               {
                 "name": "read_job",
-                "description": "Read the full details of the current job posting including title, company, location, salary, description, requirements, and sponsorship information.",
+                "description": "Read the full details of the current job posting.",
                 "input_schema": { "type": "object", "properties": {}, "required": [] }
               },
               {
                 "name": "read_evaluation",
-                "description": "Read the most recent saved evaluation for the current job. Returns the full evaluation output if one exists, or a message indicating no evaluation exists yet.",
+                "description": "Read the most recent saved evaluation for the current job.",
                 "input_schema": { "type": "object", "properties": {}, "required": [] }
               },
               {
                 "name": "read_research",
-                "description": "Read the most recent saved company research for the current job's company. Returns the research output if one exists.",
+                "description": "Read the most recent saved company research for the current job.",
                 "input_schema": { "type": "object", "properties": {}, "required": [] }
               },
               {
                 "name": "web_fetch",
-                "description": "Fetch the content of a public URL and return it as plain text. Use this to retrieve job postings from URLs, company pages, or career portals. Maximum 4000 characters returned.",
+                "description": "Fetch the content of a public URL and return it as plain text.",
                 "input_schema": {
                   "type": "object",
                   "properties": {
@@ -288,7 +244,7 @@ public class ClaudeAgentService {
               },
               {
                 "name": "web_search",
-                "description": "Search the web for current information. Use for: salary data, company news, Glassdoor ratings, job market data, company culture information. Returns top 5 results with title, URL, and snippet.",
+                "description": "Search the web for current information.",
                 "input_schema": {
                   "type": "object",
                   "properties": {
@@ -299,18 +255,18 @@ public class ClaudeAgentService {
               },
               {
                 "name": "ask_user",
-                "description": "Ask the user a clarifying question when you need information that is not in their profile or the job data. This PAUSES the skill run and shows a popup to the user. Use sparingly — only when information is genuinely missing and essential.",
+                "description": "Ask the user a clarifying question when you need information not in their profile.",
                 "input_schema": {
                   "type": "object",
                   "properties": {
-                    "question": { "type": "string", "description": "The specific question to ask the user. Be concise and clear." }
+                    "question": { "type": "string", "description": "The specific question to ask the user." }
                   },
                   "required": ["question"]
                 }
               },
               {
                 "name": "save_resume_html",
-                "description": "Save the generated ATS-optimised resume HTML to the user's account. Call this after generating the resume HTML in the tailor-resume skill.",
+                "description": "Save the generated ATS-optimised resume HTML to the user's account.",
                 "input_schema": {
                   "type": "object",
                   "properties": {
@@ -322,14 +278,13 @@ public class ClaudeAgentService {
               },
               {
                 "name": "update_application_status",
-                "description": "Update the user's application status for the current job in their tracker/kanban board.",
+                "description": "Update the user's application status for the current job.",
                 "input_schema": {
                   "type": "object",
                   "properties": {
                     "status": {
                       "type": "string",
-                      "enum": ["New","Saved","Applied","Interview","Offer","Rejected","Withdrawn"],
-                      "description": "New application status"
+                      "enum": ["New","Saved","Applied","Interview","Offer","Rejected","Withdrawn"]
                     }
                   },
                   "required": ["status"]

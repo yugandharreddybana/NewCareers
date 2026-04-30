@@ -1,14 +1,14 @@
 import { Routes, Route, Navigate } from 'react-router-dom';
 import { useAuth } from '@/context/AuthContext';
-import Login from '@/pages/Login';
-import Signup from '@/pages/Signup';
+import Login          from '@/pages/Login';
+import Signup         from '@/pages/Signup';
 import ForgotPassword from '@/pages/ForgotPassword';
-import Onboarding from '@/pages/Onboarding';
-import Dashboard from '@/pages/Dashboard';
-import JobDetail from '@/pages/JobDetail';
-import Kanban from '@/pages/Kanban';
-import Profile from '@/pages/Profile';
-import AppShell from '@/components/layout/AppShell';
+import Onboarding     from '@/pages/Onboarding';
+import Dashboard      from '@/pages/Dashboard';
+import JobDetail      from '@/pages/JobDetail';
+import Kanban         from '@/pages/Kanban';
+import Profile        from '@/pages/Profile';
+import AppShell       from '@/components/layout/AppShell';
 
 function Protected({ children }: { children: JSX.Element }) {
   const { user } = useAuth();
@@ -21,16 +21,16 @@ function Protected({ children }: { children: JSX.Element }) {
 export default function App() {
   return (
     <Routes>
-      <Route path="/login" element={<Login />} />
-      <Route path="/signup" element={<Signup />} />
+      <Route path="/login"           element={<Login />} />
+      <Route path="/signup"          element={<Signup />} />
       <Route path="/forgot-password" element={<ForgotPassword />} />
-      <Route path="/onboarding" element={<Protected><Onboarding /></Protected>} />
+      <Route path="/onboarding"      element={<Protected><Onboarding /></Protected>} />
 
       <Route element={<Protected><AppShell /></Protected>}>
         <Route path="/dashboard" element={<Dashboard />} />
-        <Route path="/jobs/:id" element={<JobDetail />} />
-        <Route path="/kanban" element={<Kanban />} />
-        <Route path="/profile" element={<Profile />} />
+        <Route path="/jobs/:id"  element={<JobDetail />} />
+        <Route path="/kanban"    element={<Kanban />} />
+        <Route path="/profile"   element={<Profile />} />
       </Route>
 
       <Route path="*" element={<Navigate to="/dashboard" replace />} />
