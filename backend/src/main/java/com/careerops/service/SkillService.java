@@ -8,6 +8,7 @@ import com.careerops.model.SkillConversation;
 import com.careerops.model.SkillRun;
 import com.careerops.repository.SkillConversationRepository;
 import com.careerops.repository.SkillRunRepository;
+import com.careerops.service.skills.SkillHandlerRegistry;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
@@ -23,21 +24,30 @@ import java.time.temporal.ChronoUnit;
 import java.util.*;
 
 /**
- * Orchestrates all 9 CareerOps skills.
+ * Orchestrates all 14 CareerOps skills (9 Phase 1 + 5 Phase 2).
  *
- * Flow:
+ * Routing:
+ *   Phase 1 skills  → ClaudeAgentService (multi-turn agentic tool loop)
+ *   Phase 2 skills  → SkillHandlerRegistry (Claude direct single-turn, structured JSON)
+ *
+ * Flow (Phase 1):
  *   1. Validate profile completeness (ProfileValidator)
  *   2. Check TTL cache (SkillRunRepository)
  *   3. Build system prompt (SkillPromptLibrary)
  *   4. Run Claude agentic loop (ClaudeAgentService)
  *   5. Handle result: Done | NeedsAnswer | Error
  *   6. Save SkillRun with appropriate TTL
+ *
+ * Flow (Phase 2):
+ *   1. Validate profile completeness
+ *   2. Delegate entirely to SkillHandlerRegistry (cache check + handler + persist)
  */
 @Service
 public class SkillService {
 
     private static final Logger log = LoggerFactory.getLogger(SkillService.class);
 
+    /** TTL cache for Phase 1 skills only */
     private static final Map<String, Integer> CACHE_TTL_DAYS = Map.of(
         "evaluate",       7,
         "research",       1,
@@ -49,6 +59,7 @@ public class SkillService {
     private final ProfileValidator            validator;
     private final SkillRunRepository          skillRuns;
     private final SkillConversationRepository conversations;
+    private final SkillHandlerRegistry        registry;
     private final ObjectMapper                mapper;
 
     @Value("${skill.conversation.expire.minutes:30}")
@@ -60,12 +71,14 @@ public class SkillService {
             ProfileValidator validator,
             SkillRunRepository skillRuns,
             SkillConversationRepository conversations,
+            SkillHandlerRegistry registry,
             ObjectMapper mapper) {
         this.claude        = claude;
         this.prompts       = prompts;
         this.validator     = validator;
         this.skillRuns     = skillRuns;
         this.conversations = conversations;
+        this.registry      = registry;
         this.mapper        = mapper;
     }
 
@@ -80,20 +93,29 @@ public class SkillService {
 
         log.info("startSkill: skill={}, userId={}, userJobId={}", skill, userId, userJobId);
 
+        // Step 1: Profile validation (applies to all 14 skills)
         List<String> missing = validator.validateForSkill(userId, skill);
         if (!missing.isEmpty()) {
             log.debug("Profile incomplete for skill={}: {}", skill, missing);
             return SkillRunResponse.profileIncomplete(skill, missing);
         }
 
+        // Step 2: Phase 2 routing — delegate to SkillHandlerRegistry
+        if (registry.handles(skill)) {
+            log.info("Routing Phase 2 skill={} to SkillHandlerRegistry", skill);
+            return registry.execute(skill, userId, userJobId);
+        }
+
+        // Step 3: Phase 1 — TTL cache check
         if (userJobId != null && CACHE_TTL_DAYS.containsKey(skill)) {
             Optional<SkillRun> cached = skillRuns.findValidCachedRun(userId, userJobId, skill);
             if (cached.isPresent()) {
-                log.debug("Cache hit for skill={}, userId={}", skill, userId);
+                log.debug("Cache hit for Phase 1 skill={}, userId={}", skill, userId);
                 return SkillRunResponse.result(skill, cached.get().getOutput());
             }
         }
 
+        // Step 4: Phase 1 — Claude agentic loop
         String systemPrompt = prompts.buildFullSystemPrompt(skill);
         ArrayNode messages  = buildInitialMessages(req, userId);
 
@@ -104,7 +126,7 @@ public class SkillService {
     }
 
     // ================================================================
-    // RESUME A PAUSED CONVERSATION
+    // RESUME A PAUSED CONVERSATION (Phase 1 only — Phase 2 is single-turn)
     // ================================================================
 
     @Transactional
@@ -148,7 +170,7 @@ public class SkillService {
     }
 
     // ================================================================
-    // RUN ALL SKILLS
+    // RUN ALL 14 SKILLS
     // ================================================================
 
     @Transactional
@@ -173,7 +195,8 @@ public class SkillService {
                 }
             } catch (Exception e) {
                 log.error("runAllSkills: skill={} failed unexpectedly: {}", skill, e.getMessage(), e);
-                results.put(skill, SkillRunResponse.error(skill, "Skill failed unexpectedly. Please try individually."));
+                results.put(skill, SkillRunResponse.error(skill,
+                        "Skill failed unexpectedly. Please try individually."));
                 failed++;
             }
         }
@@ -191,7 +214,8 @@ public class SkillService {
         return skillRuns
                 .findFirstByUserIdAndUserJobIdAndSkillOrderByCreatedAtDesc(userId, userJobId, skillName)
                 .map(sr -> SkillRunResponse.result(skillName, sr.getOutput()))
-                .orElse(SkillRunResponse.error(skillName, "No previous run found. Run the skill first."));
+                .orElse(SkillRunResponse.error(skillName,
+                        "No previous run found. Run the skill first."));
     }
 
     // ================================================================
@@ -237,7 +261,8 @@ public class SkillService {
                 conv.setToolUseId(needs.toolUseId());
                 conv.setQuestion(needs.question());
                 conv.setStatus("pending_answer");
-                conv.setExpiresAt(Instant.now().plus(conversationExpireMinutes, ChronoUnit.MINUTES));
+                conv.setExpiresAt(
+                        Instant.now().plus(conversationExpireMinutes, ChronoUnit.MINUTES));
                 SkillConversation saved = conversations.save(conv);
 
                 log.info("Skill {} paused for userId={}, waiting for answer", skill, userId);
@@ -259,9 +284,9 @@ public class SkillService {
         StringBuilder content = new StringBuilder();
         content.append("Please run the ").append(req.skillName()).append(" skill for me.\n");
 
-        if (req.channel()  != null) content.append("Channel: ").append(req.channel()).append("\n");
-        if (req.tone()     != null) content.append("Tone: ").append(req.tone()).append("\n");
-        if (req.step()     != null) content.append("Step: ").append(req.step()).append("\n");
+        if (req.channel()    != null) content.append("Channel: ").append(req.channel()).append("\n");
+        if (req.tone()       != null) content.append("Tone: ").append(req.tone()).append("\n");
+        if (req.step()       != null) content.append("Step: ").append(req.step()).append("\n");
         if (req.scanTarget() != null) content.append("Scan target: ").append(req.scanTarget()).append("\n");
 
         if (req.compareJobIds() != null && !req.compareJobIds().isEmpty()) {
@@ -271,7 +296,8 @@ public class SkillService {
             content.append("\n");
         }
 
-        content.append("\nStart by calling read_profile, read_resume, and read_job to gather context before generating output.");
+        content.append("\nStart by calling read_profile, read_resume, and read_job to gather"
+                + " context before generating output.");
 
         userMsg.put("content", content.toString());
         messages.add(userMsg);
@@ -283,6 +309,14 @@ public class SkillService {
             return mapper.createObjectNode().put("text", "No output generated.");
         }
         String trimmed = text.trim();
+        // Strip markdown code fences if present
+        if (trimmed.startsWith("```")) {
+            int firstNewline = trimmed.indexOf('\n');
+            int lastFence    = trimmed.lastIndexOf("```");
+            if (firstNewline > 0 && lastFence > firstNewline) {
+                trimmed = trimmed.substring(firstNewline + 1, lastFence).trim();
+            }
+        }
         int jsonStart = trimmed.indexOf('{');
         int jsonEnd   = trimmed.lastIndexOf('}');
         if (jsonStart >= 0 && jsonEnd > jsonStart) {
