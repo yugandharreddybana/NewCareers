@@ -32,11 +32,16 @@ public class RssSource implements JobSource {
         List<Job> out = new ArrayList<>();
         SyndFeedInput input = new SyndFeedInput();
         for (String feed : FEEDS) {
-            try (XmlReader r = new XmlReader(new URL(feed))) {
+            try (
+                // Use XmlReader(InputStream) — the XmlReader(URL) constructor is deprecated
+                // in Rome 2.x; opening the stream explicitly avoids the compiler warning.
+                var conn = new URL(feed).openConnection();
+                XmlReader r = new XmlReader(conn.getInputStream())
+            ) {
                 SyndFeed f = input.build(r);
                 for (SyndEntry e : f.getEntries()) {
-                    String title = e.getTitle() == null ? "Untitled" : e.getTitle();
-                    String desc  = e.getDescription() == null ? "" : e.getDescription().getValue();
+                    String title   = e.getTitle() == null ? "Untitled" : e.getTitle();
+                    String desc    = e.getDescription() == null ? "" : e.getDescription().getValue();
                     String company = extractCompany(title);
                     Job j = Job.builder()
                         .title(stripCompany(title))
@@ -47,12 +52,15 @@ public class RssSource implements JobSource {
                         .sourceName(feed.contains("indeed") ? "Indeed IE" :
                                     feed.contains("jobs.ie") ? "Jobs.ie" : "IrishJobs")
                         .currency("EUR")
-                        .postedAt(e.getPublishedDate() != null ? e.getPublishedDate().toInstant() : Instant.now())
+                        .postedAt(e.getPublishedDate() != null
+                            ? e.getPublishedDate().toInstant() : Instant.now())
                         .build();
                     j.setFingerprint(FingerprintUtil.of(j.getCompany(), j.getTitle(), j.getLocation()));
                     out.add(j);
                 }
-            } catch (Exception e) { log.warn("RSS feed failed {}: {}", feed, e.getMessage()); }
+            } catch (Exception e) {
+                log.warn("RSS feed failed {}: {}", feed, e.getMessage());
+            }
         }
         return out;
     }
@@ -61,12 +69,13 @@ public class RssSource implements JobSource {
         if (title == null) return "Unknown";
         int at = title.toLowerCase().indexOf(" at ");
         if (at > 0 && at + 4 < title.length()) {
-            String c = title.substring(at + 4).trim();
-            int dash = c.indexOf(" - ");
+            String c    = title.substring(at + 4).trim();
+            int    dash = c.indexOf(" - ");
             return (dash > 0 ? c.substring(0, dash) : c).trim();
         }
         return "Unknown";
     }
+
     private static String stripCompany(String title) {
         if (title == null) return "Untitled";
         int at = title.toLowerCase().indexOf(" at ");
