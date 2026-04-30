@@ -1,276 +1,395 @@
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '@/context/AuthContext';
+import { profileApi } from '@/services/api';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Zap, MapPin, Code2, Briefcase, DollarSign, ArrowRight, ArrowLeft, Check } from 'lucide-react';
-import Button from '@/components/ui/Button';
-import Input from '@/components/ui/Input';
-import { cn } from '@/lib/utils';
+import {
+  CloudUpload, Briefcase, MapPin,
+  ArrowLeft, ChevronRight, FileText, Check,
+} from 'lucide-react';
 import toast from 'react-hot-toast';
 
-interface OnboardingData {
-  location:   string;
-  role:       string;
-  skills:     string[];
-  experience: string;
-  salaryMin:  string;
+// ─── Constants ─────────────────────────────────────────────────────────────
+const SENIORITY_OPTIONS = ['Junior', 'Mid-Level', 'Senior', 'Lead / Principal'];
+const REMOTE_OPTIONS    = ['On-site', 'Hybrid', 'Remote'];
+const ONSITE_DAY_OPTIONS = [
+  '1 Day per week',
+  '2 Days per week',
+  '3 Days per week',
+  '4 Days per week',
+  '5 Days per week (Full on-site)',
+];
+
+const TOTAL_STEPS = 3;
+
+// ─── Small reusable components ───────────────────────────────────────────────────
+// Step progress pills at the top
+function StepPills({ current, total }: { current: number; total: number }) {
+  return (
+    <div className="flex items-center justify-center gap-1.5 mb-8">
+      {Array.from({ length: total }).map((_, i) => (
+        <div
+          key={i}
+          className={[
+            'h-2 rounded-full transition-all duration-300',
+            i < current  ? 'w-12 bg-emerald-500' :
+            i === current ? 'w-10 bg-emerald-500' :
+                            'w-8 bg-slate-200',
+          ].join(' ')}
+        />
+      ))}
+    </div>
+  );
 }
 
-const EXPERIENCE_OPTIONS = [
-  { value: 'junior',   label: 'Junior',   sub: '0–2 years' },
-  { value: 'mid',      label: 'Mid',      sub: '2–5 years' },
-  { value: 'senior',   label: 'Senior',   sub: '5+ years' },
-  { value: 'lead',     label: 'Lead',     sub: 'Team lead / Principal' },
-];
+// Back button
+function BackBtn({ onClick }: { onClick: () => void }) {
+  return (
+    <button
+      onClick={onClick}
+      className="flex items-center gap-1.5 text-sm text-slate-400 hover:text-slate-600 font-medium mb-6 transition-colors"
+    >
+      <ArrowLeft size={15} />
+      Back
+    </button>
+  );
+}
 
-const STEPS = [
-  { id: 'location',   icon: MapPin,     title: 'Where are you based?',         desc: "We'll prioritise jobs in your area." },
-  { id: 'role',       icon: Briefcase,  title: 'What role are you targeting?',  desc: 'e.g. Full Stack Developer, Data Analyst' },
-  { id: 'skills',     icon: Code2,      title: 'Your top skills',               desc: 'Add your strongest skills for better matches.' },
-  { id: 'experience', icon: Zap,        title: 'Experience level',              desc: 'Helps us match you to the right seniority.' },
-  { id: 'salary',     icon: DollarSign, title: 'Salary expectation',            desc: "We'll filter out roles below your target." },
-];
+// Form label
+function Label({ children }: { children: React.ReactNode }) {
+  return (
+    <p className="text-sm font-semibold text-slate-700 mb-2">{children}</p>
+  );
+}
 
+// Native select styled
+function StyledSelect({
+  value, onChange, options,
+}: { value: string; onChange: (v: string) => void; options: string[] }) {
+  return (
+    <select
+      value={value}
+      onChange={e => onChange(e.target.value)}
+      className="w-full px-4 h-12 rounded-xl border border-slate-200 bg-white text-slate-700 text-sm font-medium focus:outline-none focus:ring-2 focus:ring-emerald-500/30 focus:border-emerald-400 transition-all appearance-none cursor-pointer"
+      style={{ backgroundImage: `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 24 24' stroke='%2394a3b8' stroke-width='2'%3E%3Cpath stroke-linecap='round' stroke-linejoin='round' d='M19 9l-7 7-7-7'/%3E%3C/svg%3E")`, backgroundRepeat: 'no-repeat', backgroundPosition: 'right 12px center', backgroundSize: '18px', paddingRight: '40px' }}
+    >
+      {options.map(o => <option key={o}>{o}</option>)}
+    </select>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Main onboarding flow
+// ─────────────────────────────────────────────────────────────────────────────
 export default function Onboarding() {
   const { updateProfile } = useAuth();
-  const nav = useNavigate();
-  const [step, setStep] = useState(0);
+  const nav     = useNavigate();
+  const cvRef   = useRef<HTMLInputElement>(null);
+
+  const [step,   setStep]   = useState(0);
   const [saving, setSaving] = useState(false);
-  const [skillInput, setSkillInput] = useState('');
-  const [data, setData] = useState<OnboardingData>({
-    location:   '',
-    role:       '',
-    skills:     [],
-    experience: '',
-    salaryMin:  '',
-  });
 
-  const totalSteps = STEPS.length;
-  const progress = ((step) / (totalSteps - 1)) * 100;
-  const currentStep = STEPS[step];
-  const StepIcon = currentStep.icon;
+  // Step 0 — CV
+  const [cvFile, setCvFile] = useState<File | null>(null);
 
-  const addSkill = () => {
-    const s = skillInput.trim();
-    if (s && !data.skills.includes(s)) {
-      setData((d) => ({ ...d, skills: [...d.skills, s] }));
-    }
-    setSkillInput('');
-  };
+  // Step 1 — Target Blueprint
+  const [targetRoles, setTargetRoles] = useState('');
+  const [techStack,   setTechStack]   = useState('');
 
-  const removeSkill = (skill: string) =>
-    setData((d) => ({ ...d, skills: d.skills.filter((sk) => sk !== skill) }));
+  // Step 2 — Work Context
+  const [seniority,    setSeniority]    = useState('Mid-Level');
+  const [remotePolicy, setRemotePolicy] = useState('Hybrid');
+  const [onsiteDays,   setOnsiteDays]   = useState('2 Days per week');
+  const [sponsorship,  setSponsorship]  = useState(false);
 
+  // Validation per step
   const canAdvance = (): boolean => {
-    switch (currentStep.id) {
-      case 'location':   return !!data.location.trim();
-      case 'role':       return !!data.role.trim();
-      case 'skills':     return data.skills.length > 0;
-      case 'experience': return !!data.experience;
-      case 'salary':     return true;
-      default:           return true;
-    }
+    if (step === 0) return true;                  // CV optional
+    if (step === 1) return targetRoles.trim().length > 0; // need at least one role
+    return true;
   };
 
-  const handleFinish = async () => {
+  // Final submit
+  async function handleFinish() {
     setSaving(true);
     try {
+      if (cvFile) {
+        await profileApi.uploadCv(cvFile);
+      }
+      const roles  = targetRoles.split(',').map(r => r.trim()).filter(Boolean);
+      const stack  = techStack.split(',').map(s => s.trim()).filter(Boolean);
+      const expMap: Record<string, string> = {
+        'Junior': 'junior', 'Mid-Level': 'mid',
+        'Senior': 'senior', 'Lead / Principal': 'lead',
+      };
       await updateProfile({
-        location:            data.location,
-        targetRole:          data.role,
-        skills:              data.skills,
-        experienceLevel:     data.experience,
-        desiredSalaryMin:    data.salaryMin ? Number(data.salaryMin) : undefined,
+        targetRole:          roles[0] ?? '',
+        skills:              [...roles, ...stack],
+        experienceLevel:     expMap[seniority] ?? 'mid',
+        sponsorshipRequired: sponsorship,
+        location:            'Dublin',
         onboardingCompleted: true,
-      });
+      } as any);
       nav('/dashboard');
     } catch {
-      toast.error('Could not save profile, please try again');
+      toast.error('Could not save your profile — please try again.');
     } finally {
       setSaving(false);
     }
-  };
+  }
 
   return (
-    <div className="min-h-screen bg-[#f8f9fc] flex flex-col">
-      {/* Header */}
-      <header className="h-14 px-6 flex items-center justify-between border-b border-border bg-white">
-        <div className="flex items-center gap-2">
-          <div className="w-7 h-7 bg-brand-500 rounded-lg flex items-center justify-center shadow-brand">
-            <Zap size={13} className="text-white" fill="white" />
-          </div>
-          <span className="font-bold text-sm text-text-primary font-display">
-            Career<span className="text-brand-500">Ops</span>
-          </span>
-        </div>
-        <span className="text-xs text-text-tertiary font-medium">
-          Step {step + 1} of {totalSteps}
+    <div className="min-h-screen bg-slate-100 flex flex-col">
+
+      {/* ── Minimal header ── */}
+      <header className="h-14 px-6 flex items-center justify-between bg-white border-b border-slate-200">
+        <span className="font-bold text-base text-slate-900">
+          Career<span className="text-emerald-500">Ops</span>
         </span>
+        <span className="text-xs text-slate-400 font-medium">Step {step + 1} of {TOTAL_STEPS}</span>
       </header>
 
-      {/* Progress bar */}
-      <div className="h-1 bg-slate-100">
-        <motion.div
-          className="h-full bg-brand-500 rounded-full"
-          initial={false}
-          animate={{ width: `${progress}%` }}
-          transition={{ duration: 0.4, ease: 'easeInOut' }}
-        />
-      </div>
-
-      {/* Main */}
+      {/* ── Body ── */}
       <div className="flex-1 flex items-center justify-center px-4 py-12">
-        <div className="w-full max-w-md">
-          {/* Step indicators */}
-          <div className="flex items-center justify-center gap-2 mb-10">
-            {STEPS.map((s, i) => (
-              <div
-                key={s.id}
-                className={cn(
-                  'transition-all duration-300 rounded-full',
-                  i < step  ? 'w-6 h-6 bg-brand-500 flex items-center justify-center' :
-                  i === step ? 'w-6 h-2 bg-brand-500' :
-                               'w-2 h-2 bg-slate-200'
-                )}
-              >
-                {i < step && <Check size={12} className="text-white" />}
-              </div>
-            ))}
-          </div>
+        <div className="w-full max-w-[440px]">
 
+          {/* Step pills */}
+          <StepPills current={step} total={TOTAL_STEPS} />
+
+          {/* Animated card */}
           <AnimatePresence mode="wait">
             <motion.div
               key={step}
-              initial={{ opacity: 0, x: 20 }}
+              initial={{ opacity: 0, x: 24 }}
               animate={{ opacity: 1, x: 0 }}
-              exit={{ opacity: 0, x: -20 }}
-              transition={{ duration: 0.2, ease: 'easeOut' }}
-              className="space-y-6"
+              exit={{ opacity: 0, x: -24 }}
+              transition={{ duration: 0.22, ease: 'easeOut' }}
+              className="bg-white rounded-2xl p-8 shadow-sm border border-slate-200"
             >
-              {/* Step header */}
-              <div className="space-y-2">
-                <div className="w-12 h-12 rounded-2xl bg-brand-50 border border-brand-100 flex items-center justify-center">
-                  <StepIcon size={22} className="text-brand-500" />
-                </div>
-                <h2 className="text-xl font-bold text-text-primary">{currentStep.title}</h2>
-                <p className="text-sm text-text-secondary">{currentStep.desc}</p>
-              </div>
 
-              {/* Step content */}
-              {currentStep.id === 'location' && (
-                <Input
-                  placeholder="Dublin, Ireland"
-                  value={data.location}
-                  onChange={(e) => setData((d) => ({ ...d, location: e.target.value }))}
-                  autoFocus
-                />
-              )}
+              {/* Back button (steps 1+) */}
+              {step > 0 && <BackBtn onClick={() => setStep(s => s - 1)} />}
 
-              {currentStep.id === 'role' && (
-                <Input
-                  placeholder="Full Stack Developer"
-                  value={data.role}
-                  onChange={(e) => setData((d) => ({ ...d, role: e.target.value }))}
-                  autoFocus
-                />
-              )}
-
-              {currentStep.id === 'skills' && (
-                <div className="space-y-3">
-                  <div className="flex gap-2">
-                    <input
-                      className="flex-1 h-10 px-3.5 rounded-lg border border-border bg-white text-sm text-text-primary placeholder:text-text-tertiary outline-none focus:ring-2 focus:ring-brand-500/20 focus:border-brand-500 transition-all"
-                      placeholder="e.g. React, TypeScript"
-                      value={skillInput}
-                      onChange={(e) => setSkillInput(e.target.value)}
-                      onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); addSkill(); } }}
-                    />
-                    <Button variant="outline" size="md" onClick={addSkill} type="button">Add</Button>
-                  </div>
-                  {data.skills.length > 0 && (
-                    <div className="flex flex-wrap gap-2">
-                      {data.skills.map((sk) => (
-                        <span
-                          key={sk}
-                          className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-medium bg-brand-50 text-brand-600 border border-brand-200 cursor-pointer hover:bg-danger-50 hover:text-danger-600 hover:border-danger-100 transition-colors"
-                          onClick={() => removeSkill(sk)}
-                        >
-                          {sk} ×
-                        </span>
-                      ))}
+              {/* ────────── STEP 0: CV UPLOAD ────────── */}
+              {step === 0 && (
+                <div className="space-y-6">
+                  {/* Header */}
+                  <div className="flex flex-col items-center text-center gap-3">
+                    <div className="w-16 h-16 rounded-full bg-emerald-100 flex items-center justify-center">
+                      <FileText size={28} className="text-emerald-500" />
                     </div>
-                  )}
-                </div>
-              )}
+                    <h2 className="text-2xl font-bold text-slate-900">Let's build your pipeline</h2>
+                    <p className="text-sm text-slate-500 leading-relaxed max-w-xs">
+                      Start by uploading your primary CV. The engine uses this to understand your entire history,
+                      mapping it against live job requirements.
+                    </p>
+                  </div>
 
-              {currentStep.id === 'experience' && (
-                <div className="grid grid-cols-2 gap-3">
-                  {EXPERIENCE_OPTIONS.map((opt) => (
+                  {/* Upload zone */}
+                  <div
+                    className={[
+                      'border-2 border-dashed rounded-2xl p-8 flex flex-col items-center gap-3 cursor-pointer transition-all',
+                      cvFile
+                        ? 'border-emerald-400 bg-emerald-50'
+                        : 'border-slate-200 bg-slate-50 hover:border-emerald-300 hover:bg-emerald-50/40',
+                    ].join(' ')}
+                    onClick={() => cvRef.current?.click()}
+                  >
+                    <input
+                      ref={cvRef}
+                      type="file"
+                      accept=".pdf,.docx,.txt"
+                      className="hidden"
+                      onChange={e => setCvFile(e.target.files?.[0] ?? null)}
+                    />
+                    <div className="w-12 h-12 rounded-full bg-white border border-slate-200 flex items-center justify-center shadow-sm">
+                      <CloudUpload size={22} className={cvFile ? 'text-emerald-500' : 'text-slate-400'} />
+                    </div>
+                    {cvFile ? (
+                      <>
+                        <p className="font-semibold text-emerald-700 text-sm text-center">{cvFile.name}</p>
+                        <p className="text-xs text-emerald-500">{(cvFile.size / 1024 / 1024).toFixed(2)} MB</p>
+                      </>
+                    ) : (
+                      <>
+                        <p className="font-semibold text-slate-700 text-sm">Upload your CV</p>
+                        <p className="text-xs text-slate-400">Drag and drop, or click to browse</p>
+                        <button
+                          type="button"
+                          onClick={e => { e.stopPropagation(); cvRef.current?.click(); }}
+                          className="mt-1 px-5 py-2 bg-white border border-slate-200 rounded-xl text-sm font-semibold text-slate-700 hover:border-emerald-300 hover:text-emerald-700 transition-all shadow-sm"
+                        >
+                          Select File
+                        </button>
+                        <p className="text-[11px] text-slate-300 uppercase tracking-wider font-semibold">PDF, WORD, OR TXT (MAX 5MB)</p>
+                      </>
+                    )}
+                  </div>
+
+                  {/* Next */}
+                  <div className="flex justify-end">
                     <button
-                      key={opt.value}
-                      type="button"
-                      onClick={() => setData((d) => ({ ...d, experience: opt.value }))}
-                      className={cn(
-                        'p-4 rounded-xl border-2 text-left transition-all duration-150',
-                        data.experience === opt.value
-                          ? 'border-brand-500 bg-brand-50 text-brand-600'
-                          : 'border-border bg-white text-text-secondary hover:border-brand-200 hover:bg-brand-50/50'
-                      )}
+                      onClick={() => setStep(1)}
+                      className="flex items-center gap-2 px-6 h-11 bg-slate-900 text-white rounded-xl font-bold text-sm hover:bg-slate-800 transition-all"
                     >
-                      <p className="font-semibold text-sm">{opt.label}</p>
-                      <p className="text-xs text-text-tertiary mt-0.5">{opt.sub}</p>
+                      Next Step <ChevronRight size={16} />
                     </button>
-                  ))}
+                  </div>
                 </div>
               )}
 
-              {currentStep.id === 'salary' && (
-                <Input
-                  label="Minimum annual salary (€)"
-                  type="number"
-                  placeholder="50000"
-                  value={data.salaryMin}
-                  onChange={(e) => setData((d) => ({ ...d, salaryMin: e.target.value }))}
-                  hint="Leave blank to see all salaries"
-                  autoFocus
-                />
+              {/* ────────── STEP 1: TARGET BLUEPRINT ────────── */}
+              {step === 1 && (
+                <div className="space-y-5">
+                  {/* Header */}
+                  <div className="flex items-start gap-3 mb-1">
+                    <div className="w-9 h-9 rounded-xl bg-emerald-100 flex items-center justify-center shrink-0 mt-0.5">
+                      <Briefcase size={18} className="text-emerald-600" />
+                    </div>
+                    <div>
+                      <h2 className="text-xl font-bold text-slate-900">Target Blueprint</h2>
+                      <p className="text-sm text-slate-500 mt-0.5">
+                        What exactly are we hunting for? The engine uses this strictly for semantic matching.
+                      </p>
+                    </div>
+                  </div>
+
+                  {/* Target roles */}
+                  <div>
+                    <Label>
+                      Target Roles <span className="text-slate-400 font-normal text-xs">(comma separated)</span>
+                    </Label>
+                    <input
+                      type="text"
+                      autoFocus
+                      placeholder="e.g. Frontend Engineer, React Developer"
+                      value={targetRoles}
+                      onChange={e => setTargetRoles(e.target.value)}
+                      required
+                      className="w-full px-4 h-12 rounded-xl border border-slate-200 bg-white text-slate-700 text-sm placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-emerald-500/30 focus:border-emerald-400 transition-all"
+                    />
+                  </div>
+
+                  {/* Tech stack */}
+                  <div>
+                    <Label>Core Tech Stack</Label>
+                    <textarea
+                      rows={4}
+                      placeholder="React, TypeScript, Node.js..."
+                      value={techStack}
+                      onChange={e => setTechStack(e.target.value)}
+                      className="w-full px-4 py-3 rounded-xl border border-slate-200 bg-white text-slate-700 text-sm placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-emerald-500/30 focus:border-emerald-400 transition-all resize-none"
+                    />
+                    <p className="text-xs text-slate-400 mt-1.5">
+                      List the absolute non-negotiable tools. We'll penalize jobs heavily if they demand things outside this list.
+                    </p>
+                  </div>
+
+                  {/* Next */}
+                  <div className="flex justify-end pt-1">
+                    <button
+                      onClick={() => { if (canAdvance()) setStep(2); }}
+                      disabled={!canAdvance()}
+                      className="flex items-center gap-2 px-6 h-11 bg-slate-900 text-white rounded-xl font-bold text-sm hover:bg-slate-800 transition-all disabled:opacity-40 disabled:cursor-not-allowed"
+                    >
+                      Next Step <ChevronRight size={16} />
+                    </button>
+                  </div>
+                </div>
               )}
 
-              {/* Navigation */}
-              <div className="flex items-center justify-between pt-2">
-                {step > 0 ? (
-                  <Button
-                    variant="ghost"
-                    size="md"
-                    leftIcon={<ArrowLeft size={15} />}
-                    onClick={() => setStep((s) => s - 1)}
-                  >
-                    Back
-                  </Button>
-                ) : <div />}
+              {/* ────────── STEP 2: WORK CONTEXT ────────── */}
+              {step === 2 && (
+                <div className="space-y-5">
+                  {/* Header */}
+                  <div className="flex items-start gap-3 mb-1">
+                    <div className="w-9 h-9 rounded-xl bg-emerald-100 flex items-center justify-center shrink-0 mt-0.5">
+                      <MapPin size={18} className="text-emerald-600" />
+                    </div>
+                    <div>
+                      <h2 className="text-xl font-bold text-slate-900">Work Context</h2>
+                      <p className="text-sm text-slate-500 mt-0.5">
+                        Set your hard limitations. The engine will drop jobs that violate these constraints natively.
+                      </p>
+                    </div>
+                  </div>
 
-                {step < totalSteps - 1 ? (
-                  <Button
-                    variant="primary"
-                    size="md"
-                    rightIcon={<ArrowRight size={15} />}
-                    disabled={!canAdvance()}
-                    onClick={() => setStep((s) => s + 1)}
-                  >
-                    Continue
-                  </Button>
-                ) : (
-                  <Button
-                    variant="primary"
-                    size="md"
-                    loading={saving}
-                    rightIcon={<Check size={15} />}
+                  {/* Seniority */}
+                  <div>
+                    <Label>Seniority</Label>
+                    <StyledSelect value={seniority} onChange={setSeniority} options={SENIORITY_OPTIONS} />
+                  </div>
+
+                  {/* Remote policy */}
+                  <div>
+                    <Label>Remote Policy</Label>
+                    <StyledSelect value={remotePolicy} onChange={setRemotePolicy} options={REMOTE_OPTIONS} />
+                  </div>
+
+                  {/* Max on-site days — only when Hybrid */}
+                  <AnimatePresence>
+                    {remotePolicy === 'Hybrid' && (
+                      <motion.div
+                        initial={{ opacity: 0, height: 0 }}
+                        animate={{ opacity: 1, height: 'auto' }}
+                        exit={{ opacity: 0, height: 0 }}
+                        transition={{ duration: 0.2 }}
+                        className="overflow-hidden"
+                      >
+                        <Label>Max On-Site Days</Label>
+                        <StyledSelect value={onsiteDays} onChange={setOnsiteDays} options={ONSITE_DAY_OPTIONS} />
+                      </motion.div>
+                    )}
+                  </AnimatePresence>
+
+                  {/* Visa sponsorship */}
+                  <label className="flex items-start gap-3 p-4 bg-slate-50 rounded-xl border border-slate-200 cursor-pointer hover:border-emerald-300 transition-all">
+                    <div className="relative mt-0.5">
+                      <input
+                        type="checkbox"
+                        checked={sponsorship}
+                        onChange={e => setSponsorship(e.target.checked)}
+                        className="peer sr-only"
+                      />
+                      <div className="w-5 h-5 rounded border-2 border-slate-300 peer-checked:bg-emerald-500 peer-checked:border-emerald-500 flex items-center justify-center transition-all">
+                        {sponsorship && <Check size={12} className="text-white" strokeWidth={3} />}
+                      </div>
+                    </div>
+                    <div>
+                      <p className="font-semibold text-slate-800 text-sm">Requires Visa Sponsorship</p>
+                      <p className="text-xs text-slate-400 mt-0.5">Check this if you require a Critical Skills permit in Ireland</p>
+                    </div>
+                  </label>
+
+                  {/* Initialize pipeline CTA */}
+                  <button
                     onClick={handleFinish}
+                    disabled={saving}
+                    className="w-full h-14 bg-slate-900 text-white rounded-xl font-bold text-base hover:bg-slate-800 transition-all disabled:opacity-50 flex items-center justify-center gap-2 mt-2"
                   >
-                    Finish setup
-                  </Button>
-                )}
-              </div>
+                    {saving ? (
+                      <span className="flex items-center gap-2">
+                        <motion.span
+                          animate={{ rotate: 360 }}
+                          transition={{ duration: 0.8, repeat: Infinity, ease: 'linear' }}
+                          className="inline-block w-4 h-4 border-2 border-white/30 border-t-white rounded-full"
+                        />
+                        Initializing…
+                      </span>
+                    ) : (
+                      <>
+                        <span>Initialize Pipeline Profiles</span>
+                        <span className="text-emerald-400 font-mono text-lg leading-none">&lt;&gt;</span>
+                      </>
+                    )}
+                  </button>
+
+                  <p className="text-center text-xs text-slate-400">
+                    By initializing, you authorize the engine to aggressively scan matching positions across the job market.
+                  </p>
+                </div>
+              )}
+
             </motion.div>
           </AnimatePresence>
         </div>
