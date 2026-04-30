@@ -7,13 +7,11 @@ import com.careerops.repository.JobRepository;
 import com.careerops.repository.SkillRunRepository;
 import com.careerops.repository.UserJobRepository;
 import com.careerops.repository.UserProfileRepository;
-import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import org.jsoup.Jsoup;
 import org.jsoup.nodes.Document;
-import org.jsoup.safety.Safelist;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
@@ -21,8 +19,10 @@ import org.springframework.stereotype.Service;
 import org.springframework.web.reactive.function.client.WebClient;
 
 import java.net.URI;
+import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.Arrays;
+import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 
@@ -127,11 +127,8 @@ public class SkillToolDispatcher {
             return "No profile found. The user has not set up their career profile yet.";
         }
         UserProfile p = opt.get();
-        // Serialise as YAML-style text matching references/profile-schema.md
         StringBuilder yaml = new StringBuilder();
         yaml.append("# User Career Profile\n");
-        appendField(yaml, "name",                   p.getName());
-        appendField(yaml, "email",                  p.getEmail());
         appendField(yaml, "location",               p.getLocation());
         appendField(yaml, "target_roles",           arrayToYaml(p.getTargetRoles()));
         appendField(yaml, "tech_stack",             arrayToYaml(p.getTechStack()));
@@ -141,9 +138,6 @@ public class SkillToolDispatcher {
         appendField(yaml, "salary_currency",        "EUR");
         appendField(yaml, "sponsorship_required",   p.getSponsorshipRequired());
         appendField(yaml, "min_match_percent",      p.getMinMatchPercent());
-        appendField(yaml, "work_authorisation",     p.getWorkAuthorisation());
-        appendField(yaml, "county",                 p.getCounty());
-        appendField(yaml, "remote_preference",      p.getRemotePreference());
         return truncate(yaml.toString(), TOOL_RESULT_MAX_CHARS);
     }
 
@@ -179,8 +173,8 @@ public class SkillToolDispatcher {
         appendField(sb, "salary_min",  j.getSalaryMin());
         appendField(sb, "salary_max",  j.getSalaryMax());
         appendField(sb, "sponsorship", j.getSponsorship());
-        appendField(sb, "source",      j.getSource());
-        appendField(sb, "url",         j.getUrl());
+        appendField(sb, "source",      j.getSourceName());
+        appendField(sb, "url",         j.getSourceUrl());
         sb.append("\n# Full Job Description\n");
         sb.append(j.getDescription() != null ? j.getDescription() : "Not available");
         return truncate(sb.toString(), TOOL_RESULT_MAX_CHARS);
@@ -208,7 +202,6 @@ public class SkillToolDispatcher {
     private String handleWebFetch(String url) {
         if (url == null || url.isBlank()) return "No URL provided.";
 
-        // SSRF protection: reject non-http(s) and private ranges
         if (!url.startsWith("http://") && !url.startsWith("https://")) {
             return "Only http/https URLs are allowed.";
         }
@@ -216,7 +209,10 @@ public class SkillToolDispatcher {
             URI uri = URI.create(url);
             String host = uri.getHost().toLowerCase();
             for (String blocked : BLOCKED_HOSTS) {
-                if (host.startsWith(blocked) || host.equals(blocked.stripTrailing("."))) {
+                String normalized = blocked.endsWith(".")
+                        ? blocked.substring(0, blocked.length() - 1)
+                        : blocked;
+                if (host.startsWith(blocked) || host.equals(normalized)) {
                     return "Access to this host is not permitted.";
                 }
             }
@@ -235,9 +231,7 @@ public class SkillToolDispatcher {
 
             if (raw == null || raw.isBlank()) return "Page returned empty content.";
 
-            // Strip HTML tags using Jsoup
             Document doc = Jsoup.parse(raw);
-            // Remove script, style, nav, footer, header noise
             doc.select("script, style, nav, footer, header, .cookie-banner, #cookie").remove();
             String text = doc.body().text();
 
@@ -269,7 +263,7 @@ public class SkillToolDispatcher {
                             .queryParam("q", query)
                             .queryParam("num", "5")
                             .queryParam("hl", "en")
-                            .queryParam("gl", "ie")  // Ireland locale for Irish job market
+                            .queryParam("gl", "ie")
                             .build())
                     .retrieve()
                     .bodyToMono(String.class)
@@ -304,18 +298,15 @@ public class SkillToolDispatcher {
         if (html == null || html.isBlank()) return "No HTML content provided to save.";
 
         try {
-            // Sanitise filename
             String safeFilename = filename
                     .replaceAll("[^a-zA-Z0-9\\-_\\.]", "-")
                     .toLowerCase();
             if (!safeFilename.endsWith(".html")) safeFilename += ".html";
 
-            // Store in Supabase application-cvs bucket
             String storagePath = userId + "/resumes/" + safeFilename;
-            supabase.uploadText("application-cvs", storagePath,
-                    html, "text/html; charset=utf-8");
+            supabase.upload("application-cvs", storagePath,
+                    html.getBytes(StandardCharsets.UTF_8), "text/html; charset=utf-8");
 
-            // Update the most recent tailor-resume SkillRun with the HTML
             if (userJobId != null) {
                 skillRuns.findFirstByUserIdAndUserJobIdAndSkillOrderByCreatedAtDesc(
                         userId, userJobId, "tailor-resume")
