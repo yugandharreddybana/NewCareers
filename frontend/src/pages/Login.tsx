@@ -22,8 +22,8 @@ export default function Login() {
     setError('');
     setLoading(true);
     try {
-      await signIn(form.email, form.password);
-      nav('/dashboard');
+      const u = await signIn(form.email, form.password);
+      nav(u.onboarded ? '/dashboard' : '/onboarding', { replace: true });
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : 'Invalid email or password');
     } finally {
@@ -37,7 +37,7 @@ export default function Login() {
       subtitle="Sign in to your CareerOps account"
       footer={
         <>
-          Don’t have an account?{' '}
+          Don't have an account?{' '}
           <Link to="/signup" className="font-semibold text-brand-500 hover:text-brand-600 transition-colors">
             Create one free
           </Link>
