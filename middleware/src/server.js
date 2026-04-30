@@ -6,12 +6,13 @@ import morgan from 'morgan';
 import cookieParser from 'cookie-parser';
 import { rateLimit } from 'express-rate-limit';
 
-import auth      from './routes/auth.routes.js';
-import profile   from './routes/profile.routes.js';
-import jobs      from './routes/jobs.routes.js';
-import kanban    from './routes/kanban.routes.js';
-import skills    from './routes/skills.routes.js';
-import analytics from './routes/analytics.routes.js';
+import auth          from './routes/auth.routes.js';
+import profile       from './routes/profile.routes.js';
+import jobs          from './routes/jobs.routes.js';
+import kanban        from './routes/kanban.routes.js';
+import skills        from './routes/skills.routes.js';
+import analytics     from './routes/analytics.routes.js';
+import notifications from './routes/notifications.routes.js';  // Section 8
 
 const app = express();
 
@@ -29,12 +30,13 @@ app.use('/api', rateLimit({ windowMs: 60_000, max: 200, standardHeaders: true, l
 
 app.get('/health', (_req, res) => res.json({ ok: true, ts: Date.now() }));
 
-app.use('/api/auth',      auth);
-app.use('/api/profile',   profile);
-app.use('/api/jobs',      jobs);
-app.use('/api/kanban',    kanban);
-app.use('/api/skills',    skills);
-app.use('/api/analytics', analytics);
+app.use('/api/auth',          auth);
+app.use('/api/profile',       profile);
+app.use('/api/jobs',          jobs);
+app.use('/api/kanban',        kanban);
+app.use('/api/skills',        skills);
+app.use('/api/analytics',     analytics);
+app.use('/api/notifications', notifications);  // Section 8 — Task 83
 
 app.use((err, _req, res, _next) => {
   // eslint-disable-next-line no-console

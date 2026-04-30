@@ -1,19 +1,26 @@
+/**
+ * Section 8 — Task 87
+ * TopBar updated to wire in the live NotificationBell component.
+ * The static Bell icon + hardcoded dot placeholder has been replaced.
+ */
+
 import { useLocation, Link } from 'react-router-dom';
-import { Bell, Search } from 'lucide-react';
+import { Search } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui';
+import NotificationBell from '@/components/notifications/NotificationBell';
 
 const BREADCRUMBS: Record<string, { label: string; parent?: string; parentPath?: string }> = {
-  '/dashboard':     { label: 'Dashboard' },
-  '/kanban':        { label: 'Job Tracker' },
-  '/profile':       { label: 'Profile' },
-  '/jobs':          { label: 'Job Detail', parent: 'Dashboard', parentPath: '/dashboard' },
-  '/onboarding':    { label: 'Onboarding' },
+  '/dashboard':  { label: 'Dashboard' },
+  '/kanban':     { label: 'Job Tracker' },
+  '/profile':    { label: 'Profile' },
+  '/jobs':       { label: 'Job Detail', parent: 'Dashboard', parentPath: '/dashboard' },
+  '/onboarding': { label: 'Onboarding' },
 };
 
 export default function TopBar() {
   const { pathname } = useLocation();
-  const base = '/' + pathname.split('/')[1];
+  const base  = '/' + pathname.split('/')[1];
   const crumb = BREADCRUMBS[base] ?? { label: '' };
 
   return (
@@ -29,7 +36,10 @@ export default function TopBar() {
       <div className="flex items-center gap-2 text-sm">
         {crumb.parent && (
           <>
-            <Link to={crumb.parentPath!} className="text-text-tertiary hover:text-text-secondary transition-colors">
+            <Link
+              to={crumb.parentPath!}
+              className="text-text-tertiary hover:text-text-secondary transition-colors"
+            >
               {crumb.parent}
             </Link>
             <span className="text-text-tertiary">/</span>
@@ -40,14 +50,17 @@ export default function TopBar() {
 
       {/* Right actions */}
       <div className="flex items-center gap-2">
-        <Button variant="ghost" size="icon" className="text-text-tertiary hover:text-text-primary" aria-label="Search">
+        <Button
+          variant="ghost"
+          size="icon"
+          className="text-text-tertiary hover:text-text-primary"
+          aria-label="Search"
+        >
           <Search size={17} />
         </Button>
-        <Button variant="ghost" size="icon" className="text-text-tertiary hover:text-text-primary relative" aria-label="Notifications">
-          <Bell size={17} />
-          {/* Notification dot — will be wired up in Phase 2 notifications section */}
-          <span className="absolute top-1.5 right-1.5 w-1.5 h-1.5 bg-brand-500 rounded-full" />
-        </Button>
+
+        {/* Section 8 — Task 87: live bell with unread count badge + drawer */}
+        <NotificationBell />
       </div>
     </header>
   );
