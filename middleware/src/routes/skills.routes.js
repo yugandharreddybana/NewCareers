@@ -1,179 +1,89 @@
-import express from 'express';
-import { authGuard } from '../middleware/authGuard.js';
-import { forward, bubble } from '../services/backendProxy.js';
-import { skillLimiter } from '../middleware/rateLimiter.js';
+const express = require('express');
+const router  = express.Router();
+const { authGuard } = require('../middleware/authGuard');
+const { createProxyMiddleware } = require('http-proxy-middleware');
 
-const router = express.Router();
+const JAVA = process.env.JAVA_BACKEND_URL || 'http://localhost:8080';
 
-// authGuard validates JWT and attaches req.userId on every skills route
-// skillLimiter enforces per-user rate limit on skill runs
-router.use(authGuard, skillLimiter);
-
-// ================================================================
-// START ANY SKILL  ─  POST /api/skills/start
-// Body: { skillName, userJobId, channel?, tone?, step?,
-//         compareJobIds?, scanTarget? }
-// Replaces: /evaluate /tailor-resume /research /outreach /apply
-//           /prep-interview /compare /triage (all now deleted)
-// ================================================================
-router.post('/start', async (req, res, next) => {
-  try {
-    const r = await forward({
-      method: 'POST',
-      path: '/skills/start',
-      userId: req.userId,
-      data: req.body,
-    });
-    bubble(r, res);
-  } catch (e) { next(e); }
+const javaProxy = createProxyMiddleware({
+  target: JAVA,
+  changeOrigin: true,
+  on: {
+    error: (err, req, res) => {
+      res.status(502).json({ error: 'Backend unavailable', details: err.message });
+    },
+  },
 });
 
-// ================================================================
-// REPLY TO CLAUDE'S QUESTION  ─  POST /api/skills/conversation/reply
-// Body: { conversationId, answer }
-// ================================================================
-router.post('/conversation/reply', async (req, res, next) => {
-  try {
-    const r = await forward({
-      method: 'POST',
-      path: '/skills/conversation/reply',
-      userId: req.userId,
-      data: req.body,
-    });
-    bubble(r, res);
-  } catch (e) { next(e); }
-});
+// ─── Core skill endpoints ────────────────────────────────────────────────────
 
-// ================================================================
-// RUN ALL 9 SKILLS  ─  POST /api/skills/run-all/:userJobId
-// ================================================================
-router.post('/run-all/:userJobId', async (req, res, next) => {
-  try {
-    const r = await forward({
-      method: 'POST',
-      path: `/skills/run-all/${req.params.userJobId}`,
-      userId: req.userId,
-      data: {},
-    });
-    bubble(r, res);
-  } catch (e) { next(e); }
-});
+// Start or continue a skill run (POST /api/skills/start)
+router.post('/start', authGuard, javaProxy);
 
-// ================================================================
-// GET LAST RUN (no re-execution)  ─  GET /api/skills/last-run/:userJobId/:skillName
-// ================================================================
-router.get('/last-run/:userJobId/:skillName', async (req, res, next) => {
-  try {
-    const r = await forward({
-      method: 'GET',
-      path: `/skills/last-run/${req.params.userJobId}/${req.params.skillName}`,
-      userId: req.userId,
-    });
-    bubble(r, res);
-  } catch (e) { next(e); }
-});
+// Reply to a pending conversation (POST /api/skills/reply)
+router.post('/reply', authGuard, javaProxy);
 
-// ================================================================
-// PDF DOWNLOADS
-// GET /api/skills/pdf/:userJobId/:skillName  ─ single skill PDF
-// GET /api/skills/pdf/:userJobId/all         ─ complete career pack PDF
-// GET /api/skills/pdf/:userJobId/resume      ─ tailored resume PDF
-// ================================================================
-router.get('/pdf/:userJobId/all', async (req, res, next) => {
-  try {
-    const r = await forward({
-      method: 'GET',
-      path: `/skills/pdf/${req.params.userJobId}/all`,
-      userId: req.userId,
-      responseType: 'arraybuffer',
-    });
-    // Pipe PDF bytes directly — bypass bubble() which wraps in JSON
-    res.set('Content-Type', 'application/pdf');
-    res.set('Content-Disposition', 'attachment; filename="careerops-complete-pack.pdf"');
-    res.set('X-Content-Type-Options', 'nosniff');
-    res.send(Buffer.from(r.data));
-  } catch (e) { next(e); }
-});
+// Run all skills at once (POST /api/skills/run-all)
+router.post('/run-all', authGuard, javaProxy);
 
-router.get('/pdf/:userJobId/resume', async (req, res, next) => {
-  try {
-    const r = await forward({
-      method: 'GET',
-      path: `/skills/pdf/${req.params.userJobId}/resume`,
-      userId: req.userId,
-      responseType: 'arraybuffer',
-    });
-    res.set('Content-Type', 'application/pdf');
-    res.set('Content-Disposition', 'attachment; filename="tailored-resume.pdf"');
-    res.set('X-Content-Type-Options', 'nosniff');
-    res.send(Buffer.from(r.data));
-  } catch (e) { next(e); }
-});
+// PDF export — single skill or complete pack (GET /api/skills/pdf/:userJobId/:type)
+router.get('/pdf/:userJobId/:type', authGuard, javaProxy);
 
-router.get('/pdf/:userJobId/:skillName', async (req, res, next) => {
-  try {
-    const r = await forward({
-      method: 'GET',
-      path: `/skills/pdf/${req.params.userJobId}/${req.params.skillName}`,
-      userId: req.userId,
-      responseType: 'arraybuffer',
-    });
-    res.set('Content-Type', 'application/pdf');
-    res.set('Content-Disposition',
-      `attachment; filename="${req.params.skillName}-report.pdf"`);
-    res.set('X-Content-Type-Options', 'nosniff');
-    res.send(Buffer.from(r.data));
-  } catch (e) { next(e); }
-});
+// Get cached skill result (GET /api/skills/result/:userJobId/:skill)
+router.get('/result/:userJobId/:skill', authGuard, javaProxy);
 
-// ================================================================
-// LEGACY ALIASES  ─  kept for backward compat during migration
-// All delegate to /skills/start on the Java backend.
-// Remove in Phase 2 once frontend is fully migrated.
-// ================================================================
-const legacySkillRoutes = [
-  { path: '/evaluate',      skillName: 'evaluate'      },
-  { path: '/tailor-resume', skillName: 'tailor-resume' },
-  { path: '/research',      skillName: 'research'      },
-  { path: '/outreach',      skillName: 'outreach'      },
-  { path: '/apply',         skillName: 'apply'         },
-  { path: '/prep-interview', skillName: 'prep-interview' },
-  { path: '/compare',       skillName: 'compare'       },
-  { path: '/triage',        skillName: 'triage'        },
-  { path: '/scan',          skillName: 'scan'          },
+// ─── Phase 1 skill aliases (named shortcuts) ─────────────────────────────────
+
+const phase1Skills = [
+  'evaluate',
+  'tailor-resume',
+  'apply',
+  'outreach',
+  'research',
+  'prep-interview',
+  'compare',
+  'triage',
+  'scan',
 ];
 
-for (const { path, skillName } of legacySkillRoutes) {
-  router.post(path, async (req, res, next) => {
-    try {
-      const body = {
-        skillName,
-        ...req.body,
-        // Map legacy field names → new unified fields
-        compareJobIds: req.body.userJobIds ?? req.body.compareJobIds,
-      };
-      const r = await forward({
-        method: 'POST',
-        path: '/skills/start',
-        userId: req.userId,
-        data: body,
-      });
-      bubble(r, res);
-    } catch (e) { next(e); }
-  });
-}
+phase1Skills.forEach((skillName) => {
+  // POST /api/skills/:skillName/run  → proxied to Java /skills/start with skill injected
+  router.post(`/${skillName}/run`, authGuard, (req, res, next) => {
+    req.body = { ...req.body, skill: skillName };
+    next();
+  }, javaProxy);
 
-// Legacy /last → new /last-run
-router.get('/last', async (req, res, next) => {
-  try {
-    const { userJobId, skill } = req.query;
-    const r = await forward({
-      method: 'GET',
-      path: `/skills/last-run/${userJobId}/${skill}`,
-      userId: req.userId,
-    });
-    bubble(r, res);
-  } catch (e) { next(e); }
+  // GET /api/skills/:skillName/result/:userJobId
+  router.get(`/${skillName}/result/:userJobId`, authGuard, (req, res, next) => {
+    req.url = `/skills/result/${req.params.userJobId}/${skillName}`;
+    next();
+  }, javaProxy);
 });
 
-export default router;
+// ─── Phase 2 skill aliases (5 new skills) ────────────────────────────────────
+
+const phase2Skills = [
+  'salary-negotiation',
+  'culture-fit',
+  'linkedin-optimize',
+  'cover-letter',
+  'skills-gap-plan',
+];
+
+phase2Skills.forEach((skillName) => {
+  router.post(`/${skillName}/run`, authGuard, (req, res, next) => {
+    req.body = { ...req.body, skill: skillName };
+    next();
+  }, javaProxy);
+
+  router.get(`/${skillName}/result/:userJobId`, authGuard, (req, res, next) => {
+    req.url = `/skills/result/${req.params.userJobId}/${skillName}`;
+    next();
+  }, javaProxy);
+});
+
+// ─── CV Human Score endpoint ─────────────────────────────────────────────────
+// POST /api/skills/cv-human-score  — returns ATS + human scores for tailored CV
+router.post('/cv-human-score', authGuard, javaProxy);
+
+module.exports = router;
