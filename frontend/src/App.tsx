@@ -1,17 +1,18 @@
-// App.tsx — updated with /workspaces route (Section 3.4)
+// App.tsx — updated with /progress route (Section 3.5)
 import React, { Suspense, lazy } from 'react';
 import { BrowserRouter, Route, Routes } from 'react-router-dom';
 import { ProtectedRoute } from './components/ProtectedRoute';
 import { LoadingSpinner } from './components/LoadingSpinner';
 
-const DashboardPage       = lazy(() => import('./pages/DashboardPage'));
-const JobDetailPage       = lazy(() => import('./pages/JobDetailPage'));
-const ProfilePage         = lazy(() => import('./pages/ProfilePage'));
-const LoginPage           = lazy(() => import('./pages/LoginPage'));
-const RegisterPage        = lazy(() => import('./pages/RegisterPage'));
+const DashboardPage        = lazy(() => import('./pages/DashboardPage'));
+const JobDetailPage        = lazy(() => import('./pages/JobDetailPage'));
+const ProfilePage          = lazy(() => import('./pages/ProfilePage'));
+const LoginPage            = lazy(() => import('./pages/LoginPage'));
+const RegisterPage         = lazy(() => import('./pages/RegisterPage'));
 const InterviewHistoryPage = lazy(() => import('./pages/InterviewHistoryPage'));
-const NetworkingPage      = lazy(() => import('./pages/NetworkingPage'));
-const WorkspacePage       = lazy(() => import('./pages/WorkspacePage'));
+const NetworkingPage       = lazy(() => import('./pages/NetworkingPage'));
+const WorkspacePage        = lazy(() => import('./pages/WorkspacePage'));
+const ProgressPage         = lazy(() => import('./pages/ProgressPage'));
 
 export const App: React.FC = () => (
   <BrowserRouter>
@@ -27,6 +28,7 @@ export const App: React.FC = () => (
           <Route path="/interviews"    element={<InterviewHistoryPage />} />
           <Route path="/networking"    element={<NetworkingPage />} />
           <Route path="/workspaces"    element={<WorkspacePage />} />
+          <Route path="/progress"      element={<ProgressPage />} />
         </Route>
       </Routes>
     </Suspense>

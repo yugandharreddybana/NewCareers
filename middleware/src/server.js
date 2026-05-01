@@ -16,6 +16,7 @@ import notifications from './routes/notifications.routes.js';  // Section 8
 import referrals     from './routes/referrals.routes.js';       // Section 9
 import interview     from './routes/interview.routes.js';       // Phase 3 — Task 13
 import networking    from './routes/networking.routes.js';      // Section 3.3 — Task 36
+import progress      from './routes/progress.routes.js';        // Section 3.5 — Task 61
 
 const app = express();
 
@@ -43,9 +44,9 @@ app.use('/api/notifications', notifications);  // Section 8 — Task 83
 app.use('/api/referrals',     referrals);       // Section 9 — Task 98
 app.use('/api/interview',     interview);       // Phase 3 — Task 13
 app.use('/api/networking',    networking);      // Section 3.3 — Task 36
+app.use('/api/progress',      progress);        // Section 3.5 — Task 61
 
 app.use((err, _req, res, _next) => {
-  // eslint-disable-next-line no-console
   console.error('Middleware error:', err.message);
   const status = err.status || err.response?.status || 500;
   res.status(status).json({
