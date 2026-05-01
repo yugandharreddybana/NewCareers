@@ -4,57 +4,44 @@ import com.careerops.model.UserProfile;
 
 /**
  * Section 10 — Task 113
- * Calculates the profile completeness score (0–100) for a given UserProfile.
+ * Computes a profile completeness score (0–100).
  *
- * Scoring breakdown:
- *   CV uploaded           = 30 pts  (checked by caller via activeCvFileName)
- *   Target roles set      = 20 pts
- *   Tech stack added      = 20 pts
- *   Location set          = 10 pts
- *   Salary range set      = 10 pts
- *   Match threshold set   = 10 pts
- *   ----  Section 10 additions  ----
- *   Portfolio (>=1 item)  = 10 pts  (bonus; total cap = 100)
- *   Career goal set       = 10 pts  (bonus; total cap = 100)
+ * Breakdown:
+ *   CV uploaded                   → +30
+ *   Target roles set              → +20
+ *   Tech stack added              → +20
+ *   Location set                  → +10
+ *   Salary range set              → +10
+ *   Min match threshold set       → +10  (was previously part of base 100)
+ *   Portfolio (>= 1 project)      → +10  (Section 10 new)
+ *   Career goals (title + salary) → +10  (Section 10 new)
  *
- * Note: the bonus points replace the match-threshold and location points
- * when present, so the maximum is always 100.
+ * Total possible = 120, clamped to 100 so existing users can still reach 100%
+ * without needing every new field.
  */
-public class ProfileValidator {
+public final class ProfileValidator {
 
     private ProfileValidator() {}
 
-    /**
-     * @param profile           the user's profile entity
-     * @param hasCv             whether the user has an active CV uploaded
-     * @return                  completeness percentage (0–100)
-     */
-    public static int completeness(UserProfile profile, boolean hasCv) {
-        int score = 0;
+    public static int score(UserProfile p, String activeCvFileName) {
+        int pts = 0;
 
-        // ─ Original checks ────────────────────────────────────────────────
-        if (hasCv)                                                    score += 30;
-        if (profile.getTargetRoles()   != null
-                && profile.getTargetRoles().length > 0)               score += 20;
-        if (profile.getTechStack()     != null
-                && profile.getTechStack().length > 0)                 score += 20;
-        if (profile.getLocation()      != null
-                && !profile.getLocation().isBlank())                  score += 10;
-        if (profile.getSalaryMin()     != null
-                && profile.getSalaryMax() != null)                    score += 10;
-        if (profile.getMinMatchPercent() != null
-                && profile.getMinMatchPercent() > 0)                  score += 10;
+        // Base checks (unchanged from existing completeness logic)
+        if (activeCvFileName != null && !activeCvFileName.isBlank()) pts += 30;
+        if (p.getTargetRoles() != null && p.getTargetRoles().length > 0)       pts += 20;
+        if (p.getTechStack()   != null && p.getTechStack().length   > 0)       pts += 20;
+        if (p.getLocation()    != null && !p.getLocation().isBlank())          pts += 10;
+        if (p.getSalaryMin()   != null && p.getSalaryMin() > 0
+                && p.getSalaryMax() != null && p.getSalaryMax() > 0)           pts += 10;
+        if (p.getMinMatchPercent() != null && p.getMinMatchPercent() > 0)      pts += 10;
 
-        // ─ Section 10 bonus checks (cap at 100) ───────────────────────────
-        if (profile.getPortfolioItems() != null
-                && !profile.getPortfolioItems().isEmpty())            score += 10;
+        // Section 10 — Portfolio: at least 1 project
+        if (p.getPortfolioItems() != null && !p.getPortfolioItems().isEmpty()) pts += 10;
 
-        boolean hasGoal = profile.getGoalTitle()     != null
-                && !profile.getGoalTitle().isBlank()
-                && profile.getGoalSalaryMin() != null
-                && profile.getGoalSalaryMax() != null;
-        if (hasGoal)                                                   score += 10;
+        // Section 10 — Career goals: target role title + salary set
+        if (p.getGoalTitle()     != null && !p.getGoalTitle().isBlank()
+                && p.getGoalSalaryMin() != null && p.getGoalSalaryMin() > 0)  pts += 10;
 
-        return Math.min(score, 100);
+        return Math.min(pts, 100);
     }
 }
