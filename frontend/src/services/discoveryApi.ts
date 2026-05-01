@@ -2,6 +2,10 @@
  * Section 7 — Task 75 (API layer)
  * Discovery API service.
  * Covers recommended jobs and keyword search endpoints.
+ *
+ * Section 3.3 fix: removed duplicate /api prefix.
+ * The `api` axios instance already has baseURL = .../api,
+ * so paths here must be /jobs/... not /api/jobs/...
  */
 
 import { api } from './api';
@@ -47,17 +51,17 @@ export interface SearchResult {
 
 export const discoveryApi = {
   /**
-   * GET /api/jobs/recommended
+   * GET /api/jobs/recommended  (baseURL already includes /api)
    * Returns top 5 jobs from the user's Discovered pipeline
    * with a whyRecommended label per job.
    */
   getRecommended: async (): Promise<RecommendedJob[]> => {
-    const res = await api.get<RecommendedJob[]>('/api/jobs/recommended');
+    const res = await api.get<RecommendedJob[]>('/jobs/recommended');
     return res.data;
   },
 
   /**
-   * GET /api/jobs/search
+   * GET /api/jobs/search  (baseURL already includes /api)
    * Server-side filtered search within the user's pipeline.
    * All params optional — omit to return full pipeline.
    */
@@ -69,7 +73,7 @@ export const discoveryApi = {
         clean[k] = v as string | number | boolean;
       }
     });
-    const res = await api.get<SearchResult>('/api/jobs/search', { params: clean });
+    const res = await api.get<SearchResult>('/jobs/search', { params: clean });
     return res.data;
   },
 };

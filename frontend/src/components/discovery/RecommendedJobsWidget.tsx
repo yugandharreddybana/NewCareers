@@ -2,6 +2,9 @@
  * Section 7 — Task 75
  * RecommendedJobsWidget
  *
+ * Section 3.3 fix: wired "View All" button to navigate to
+ * /kanban?column=Discovered instead of being a no-op.
+ *
  * Horizontally scrollable strip of up to 5 recommended jobs.
  * Each card shows: title, company, location, match %, salary (if available),
  * and a coloured "whyRecommended" chip explaining the recommendation reason.
@@ -13,7 +16,7 @@
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
-import { Sparkles, MapPin, Building2, TrendingUp, ChevronRight } from 'lucide-react';
+import { Sparkles, MapPin, Building2, ChevronRight } from 'lucide-react';
 import { discoveryApi, RecommendedJob } from '@/services/discoveryApi';
 
 // ── Chip colour by recommendation reason ─────────────────────────────────
@@ -92,6 +95,7 @@ function RecommendedCard({ job, index }: { job: RecommendedJob; index: number })
 // ── Widget ─────────────────────────────────────────────────────────────────
 
 export default function RecommendedJobsWidget() {
+  const nav = useNavigate();
   const [jobs,    setJobs]    = useState<RecommendedJob[]>([]);
   const [loading, setLoading] = useState(true);
 
@@ -134,9 +138,9 @@ export default function RecommendedJobsWidget() {
             <RecommendedCard key={String(job.userJobId)} job={job} index={idx} />
           ))}
 
-          {/* View All pill at the end of the strip */}
+          {/* View All pill — navigates to Kanban board filtered to Discovered column */}
           <button
-            onClick={() => {/* future: navigate to /kanban filtered to Discovered */}}
+            onClick={() => nav('/kanban?column=Discovered')}
             className="shrink-0 w-20 h-full min-h-[10rem] bg-slate-50 border border-dashed
                        border-slate-200 rounded-2xl flex flex-col items-center justify-center
                        gap-2 text-slate-400 hover:text-indigo-500 hover:border-indigo-300
