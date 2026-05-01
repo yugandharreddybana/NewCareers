@@ -17,6 +17,7 @@
     <properties>
         <java.version>21</java.version>
         <openhtmltopdf.version>1.0.10</openhtmltopdf.version>
+        <bucket4j.version>8.10.1</bucket4j.version>
     </properties>
 
     <dependencies>
@@ -43,7 +44,6 @@
         <dependency><groupId>com.rometools</groupId><artifactId>rome</artifactId><version>2.1.0</version></dependency>
 
         <!-- HTML to PDF rendering (openhtmltopdf - Apache 2.0 license, commercial friendly) -->
-        <!-- Uses pdfbox 2.x internally. We exclude the old explicit pdfbox 3.x dep. -->
         <dependency>
             <groupId>io.github.openhtmltopdf</groupId>
             <artifactId>openhtmltopdf-pdfbox</artifactId>
@@ -54,7 +54,6 @@
             <artifactId>openhtmltopdf-core</artifactId>
             <version>${openhtmltopdf.version}</version>
         </dependency>
-        <!-- openhtmltopdf ships pdfbox 2.x transitively. We keep poi-ooxml for DOCX parsing. -->
         <dependency><groupId>org.apache.poi</groupId><artifactId>poi-ooxml</artifactId><version>5.3.0</version></dependency>
 
         <!-- Jackson -->
@@ -67,6 +66,13 @@
             <version>3.8.3</version>
         </dependency>
 
+        <!-- Rate limiting (Task 130 / Section 12 Batch 2) -->
+        <dependency>
+            <groupId>com.bucket4j</groupId>
+            <artifactId>bucket4j-core</artifactId>
+            <version>${bucket4j.version}</version>
+        </dependency>
+
         <!-- Lombok -->
         <dependency><groupId>org.projectlombok</groupId><artifactId>lombok</artifactId><optional>true</optional></dependency>
 
@@ -77,12 +83,6 @@
 
     <build>
         <plugins>
-            <!--
-              Explicitly declare the compiler plugin with release=21.
-              This forces both Maven builds AND IDEs (IntelliJ / VS Code)
-              to recognise Java 21 features such as Pattern Matching in switch
-              without requiring a manual "Reload Maven Project" each time.
-            -->
             <plugin>
                 <groupId>org.apache.maven.plugins</groupId>
                 <artifactId>maven-compiler-plugin</artifactId>
