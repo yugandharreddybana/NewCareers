@@ -18,5 +18,12 @@ public class User {
     @Column(name = "password_hash", nullable = false) private String passwordHash;
     @Column(name = "created_at") private Instant createdAt;
 
+    // Task 116 — refresh token stored hashed; raw value is never persisted
+    @Column(name = "refresh_token", length = 500)
+    private String refreshToken;
+
+    @Column(name = "refresh_token_expires_at")
+    private Instant refreshTokenExpiresAt;
+
     @PrePersist void onCreate() { if (createdAt == null) createdAt = Instant.now(); }
 }
