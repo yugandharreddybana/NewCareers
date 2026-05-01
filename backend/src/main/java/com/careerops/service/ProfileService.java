@@ -15,6 +15,9 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.util.*;
 
+/**
+ * Section 10 Task 106 — portfolio CRUD + goal fields + completeness score.
+ */
 @Service
 public class ProfileService {
 
@@ -28,89 +31,99 @@ public class ProfileService {
         this.userJobs  = uj;
     }
 
-    // ── GET ─────────────────────────────────────────────────────────────────
+    // ── GET ───────────────────────────────────────────────────────────────
 
     public ProfileResponse get(UUID userId) {
-        UserProfile p = profiles.findByUserId(userId)
-            .orElseThrow(() -> new ApiException(HttpStatus.NOT_FOUND, "Profile not found"));
+        UserProfile p = find(userId);
         String cvName = cvs.findFirstByUserIdAndIsActiveTrueOrderByUploadedAtDesc(userId)
-            .map(UserCv::getFileName).orElse(null);
+                           .map(UserCv::getFileName).orElse(null);
         return toResponse(p, cvName);
     }
 
-    // ── UPSERT (preferences + goal fields) ───────────────────────────────────
+    // ── UPSERT (preferences + goals) ──────────────────────────────────────
 
     @Transactional
     public ProfileResponse upsert(UUID userId, ProfileRequest req) {
         UserProfile p = profiles.findByUserId(userId)
-            .orElseGet(() -> UserProfile.builder().userId(userId).build());
+                .orElseGet(() -> UserProfile.builder().userId(userId).build());
 
-        // Preference fields
-        if (req.targetRoles()         != null) p.setTargetRoles(req.targetRoles());
-        if (req.techStack()           != null) p.setTechStack(req.techStack());
-        if (req.location()            != null) p.setLocation(req.location());
-        if (req.salaryMin()           != null) p.setSalaryMin(req.salaryMin());
-        if (req.salaryMax()           != null) p.setSalaryMax(req.salaryMax());
-        if (req.sectors()             != null) p.setSectors(req.sectors());
-        if (req.freshnessHours()      != null) p.setFreshnessHours(req.freshnessHours());
-        if (req.minMatchPercent()     != null) p.setMinMatchPercent(req.minMatchPercent());
-        if (req.sponsorshipRequired() != null) p.setSponsorshipRequired(req.sponsorshipRequired());
-        if (req.onboarded()           != null) p.setOnboarded(req.onboarded());
-
-        // Section 10 — Career goal fields
-        if (req.goalTitle()      != null) p.setGoalTitle(req.goalTitle());
-        if (req.goalSalaryMin()  != null) p.setGoalSalaryMin(req.goalSalaryMin());
-        if (req.goalSalaryMax()  != null) p.setGoalSalaryMax(req.goalSalaryMax());
-        if (req.goalLocation()   != null) p.setGoalLocation(req.goalLocation());
-        if (req.openToRemote()   != null) p.setOpenToRemote(req.openToRemote());
+        if (req.targetRoles()        != null) p.setTargetRoles(req.targetRoles());
+        if (req.techStack()          != null) p.setTechStack(req.techStack());
+        if (req.location()           != null) p.setLocation(req.location());
+        if (req.salaryMin()          != null) p.setSalaryMin(req.salaryMin());
+        if (req.salaryMax()          != null) p.setSalaryMax(req.salaryMax());
+        if (req.sectors()            != null) p.setSectors(req.sectors());
+        if (req.freshnessHours()     != null) p.setFreshnessHours(req.freshnessHours());
+        if (req.minMatchPercent()    != null) p.setMinMatchPercent(req.minMatchPercent());
+        if (req.sponsorshipRequired()!= null) p.setSponsorshipRequired(req.sponsorshipRequired());
+        if (req.onboarded()          != null) p.setOnboarded(req.onboarded());
+        // Goal fields
+        if (req.goalTitle()          != null) p.setGoalTitle(req.goalTitle());
+        if (req.goalSalaryMin()      != null) p.setGoalSalaryMin(req.goalSalaryMin());
+        if (req.goalSalaryMax()      != null) p.setGoalSalaryMax(req.goalSalaryMax());
+        if (req.goalLocation()       != null) p.setGoalLocation(req.goalLocation());
+        if (req.openToRemote()       != null) p.setOpenToRemote(req.openToRemote());
 
         profiles.save(p);
         return get(userId);
     }
 
-    // ── PORTFOLIO CRUD ──────────────────────────────────────────────────────
+    // ── PORTFOLIO CRUD ────────────────────────────────────────────────────
 
-    /** Add or update a portfolio project in the JSONB array. */
     @Transactional
-    public ProfileResponse upsertPortfolioItem(UUID userId, PortfolioItemRequest req) {
-        UserProfile p = loadOrCreate(userId);
+    public ProfileResponse addPortfolioItem(UUID userId, PortfolioItemRequest req) {
+        UserProfile p = find(userId);
+        List<Map<String, Object>> items = mutablePortfolio(p);
 
-        List<Map<String, Object>> items = mutableCopy(p.getPortfolioItems());
-
-        if (req.id() != null) {
-            // Update existing item by id
-            boolean found = false;
-            for (int i = 0; i < items.size(); i++) {
-                if (req.id().equals(items.get(i).get("id"))) {
-                    items.set(i, toItemMap(req.id(), req));
-                    found = true;
-                    break;
-                }
-            }
-            if (!found) throw new ApiException(HttpStatus.NOT_FOUND, "Portfolio item not found");
-        } else {
-            // Add new item with generated UUID
-            items.add(toItemMap(UUID.randomUUID().toString(), req));
-        }
+        Map<String, Object> item = new LinkedHashMap<>();
+        item.put("id",          UUID.randomUUID().toString());
+        item.put("title",       req.title());
+        item.put("url",         req.url());
+        item.put("description", req.description());
+        item.put("techTags",    req.techTags() != null ? req.techTags() : List.of());
+        items.add(item);
 
         p.setPortfolioItems(items);
         profiles.save(p);
         return get(userId);
     }
 
-    /** Delete a portfolio project by id. */
+    @Transactional
+    public ProfileResponse updatePortfolioItem(UUID userId, PortfolioItemRequest req) {
+        if (req.id() == null) throw new ApiException(HttpStatus.BAD_REQUEST, "id is required for update");
+        UserProfile p = find(userId);
+        List<Map<String, Object>> items = mutablePortfolio(p);
+
+        boolean found = false;
+        for (Map<String, Object> item : items) {
+            if (req.id().equals(item.get("id"))) {
+                if (req.title()       != null) item.put("title",       req.title());
+                if (req.url()         != null) item.put("url",         req.url());
+                if (req.description() != null) item.put("description", req.description());
+                if (req.techTags()    != null) item.put("techTags",    req.techTags());
+                found = true;
+                break;
+            }
+        }
+        if (!found) throw new ApiException(HttpStatus.NOT_FOUND, "Portfolio item not found");
+
+        p.setPortfolioItems(items);
+        profiles.save(p);
+        return get(userId);
+    }
+
     @Transactional
     public ProfileResponse deletePortfolioItem(UUID userId, String itemId) {
-        UserProfile p = loadOrCreate(userId);
-        List<Map<String, Object>> items = mutableCopy(p.getPortfolioItems());
-        boolean removed = items.removeIf(m -> itemId.equals(m.get("id")));
+        UserProfile p = find(userId);
+        List<Map<String, Object>> items = mutablePortfolio(p);
+        boolean removed = items.removeIf(i -> itemId.equals(i.get("id")));
         if (!removed) throw new ApiException(HttpStatus.NOT_FOUND, "Portfolio item not found");
         p.setPortfolioItems(items);
         profiles.save(p);
         return get(userId);
     }
 
-    // ── STATS ────────────────────────────────────────────────────────────────
+    // ── STATS ─────────────────────────────────────────────────────────────
 
     public StatsResponse stats(UUID userId) {
         List<UserJob> all = userJobs.findByUserIdOrderByDeliveredAtDesc(userId);
@@ -119,44 +132,35 @@ public class ProfileService {
         long interviews = all.stream().filter(j -> "Interview".equals(j.getKanbanColumn())).count();
         long offers     = all.stream().filter(j -> "Offer".equals(j.getKanbanColumn())).count();
         double avg      = all.stream().filter(j -> j.getMatchPercent() != null)
-            .mapToInt(UserJob::getMatchPercent).average().orElse(0);
+                             .mapToInt(UserJob::getMatchPercent).average().orElse(0);
         return new StatsResponse(total, applied, interviews, offers, Math.round(avg * 10.0) / 10.0);
     }
 
-    // ── Helpers ─────────────────────────────────────────────────────────────
+    // ── Helpers ───────────────────────────────────────────────────────────
 
-    private UserProfile loadOrCreate(UUID userId) {
+    private UserProfile find(UUID userId) {
         return profiles.findByUserId(userId)
-            .orElseGet(() -> UserProfile.builder().userId(userId).build());
-    }
-
-    private static Map<String, Object> toItemMap(String id, PortfolioItemRequest req) {
-        Map<String, Object> m = new LinkedHashMap<>();
-        m.put("id",          id);
-        m.put("title",       req.title()       != null ? req.title()       : "");
-        m.put("url",         req.url()         != null ? req.url()         : "");
-        m.put("description", req.description() != null ? req.description() : "");
-        m.put("techTags",    req.techTags()    != null ? req.techTags()    : List.of());
-        return m;
+                .orElseThrow(() -> new ApiException(HttpStatus.NOT_FOUND, "Profile not found"));
     }
 
     @SuppressWarnings("unchecked")
-    private static List<Map<String, Object>> mutableCopy(List<Map<String, Object>> src) {
-        if (src == null) return new ArrayList<>();
-        return new ArrayList<>(src.stream().map(LinkedHashMap::new).toList());
+    private List<Map<String, Object>> mutablePortfolio(UserProfile p) {
+        List<Map<String, Object>> existing = p.getPortfolioItems();
+        return existing == null ? new ArrayList<>() : new ArrayList<>(existing);
     }
 
     private ProfileResponse toResponse(UserProfile p, String cvName) {
+        int score = ProfileValidator.completenessScore(p, cvName != null);
         return new ProfileResponse(
             p.getTargetRoles(), p.getTechStack(), p.getLocation(),
             p.getSalaryMin(), p.getSalaryMax(), p.getSectors(),
             p.getFreshnessHours(), p.getMinMatchPercent(),
             p.getSponsorshipRequired(), p.getOnboarded(),
             cvName,
+            p.getPortfolioItems() != null ? p.getPortfolioItems() : List.of(),
             p.getGoalTitle(), p.getGoalSalaryMin(), p.getGoalSalaryMax(),
             p.getGoalLocation(), p.getOpenToRemote(),
-            p.getPortfolioItems() != null ? p.getPortfolioItems() : List.of(),
-            ProfileValidator.score(p, cvName)
+            score
         );
     }
 }

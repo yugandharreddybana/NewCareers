@@ -2,46 +2,45 @@ package com.careerops.util;
 
 import com.careerops.model.UserProfile;
 
+import java.util.List;
+import java.util.Map;
+
 /**
- * Section 10 — Task 113
- * Computes a profile completeness score (0–100).
+ * Section 10 Task 113 — profile completeness score (0-100).
  *
  * Breakdown:
- *   CV uploaded                   → +30
- *   Target roles set              → +20
- *   Tech stack added              → +20
- *   Location set                  → +10
- *   Salary range set              → +10
- *   Min match threshold set       → +10  (was previously part of base 100)
- *   Portfolio (>= 1 project)      → +10  (Section 10 new)
- *   Career goals (title + salary) → +10  (Section 10 new)
- *
- * Total possible = 120, clamped to 100 so existing users can still reach 100%
- * without needing every new field.
+ *   CV uploaded            30%
+ *   Target roles set       20%
+ *   Tech stack added       10%   (was 20%, shifted 10 to new items)
+ *   Location set           10%
+ *   Salary range set       10%
+ *   Match threshold set     0%   (implicit — always present after onboarding)
+ *   Portfolio (≥1 project) 10%   ← NEW Section 10
+ *   Career goals set       10%   ← NEW Section 10 (goalTitle + at least one salary)
  */
 public final class ProfileValidator {
 
     private ProfileValidator() {}
 
-    public static int score(UserProfile p, String activeCvFileName) {
-        int pts = 0;
+    public static int completenessScore(UserProfile p, boolean hasCv) {
+        int score = 0;
 
-        // Base checks (unchanged from existing completeness logic)
-        if (activeCvFileName != null && !activeCvFileName.isBlank()) pts += 30;
-        if (p.getTargetRoles() != null && p.getTargetRoles().length > 0)       pts += 20;
-        if (p.getTechStack()   != null && p.getTechStack().length   > 0)       pts += 20;
-        if (p.getLocation()    != null && !p.getLocation().isBlank())          pts += 10;
+        if (hasCv)                                                       score += 30;
+        if (p.getTargetRoles() != null && p.getTargetRoles().length > 0) score += 20;
+        if (p.getTechStack()   != null && p.getTechStack().length   > 0) score += 10;
+        if (p.getLocation()    != null && !p.getLocation().isBlank())    score += 10;
         if (p.getSalaryMin()   != null && p.getSalaryMin() > 0
-                && p.getSalaryMax() != null && p.getSalaryMax() > 0)           pts += 10;
-        if (p.getMinMatchPercent() != null && p.getMinMatchPercent() > 0)      pts += 10;
+         && p.getSalaryMax()   != null && p.getSalaryMax() > 0)          score += 10;
 
-        // Section 10 — Portfolio: at least 1 project
-        if (p.getPortfolioItems() != null && !p.getPortfolioItems().isEmpty()) pts += 10;
+        // Section 10 — portfolio (≥1 project) = +10%
+        List<Map<String, Object>> portfolio = p.getPortfolioItems();
+        if (portfolio != null && !portfolio.isEmpty())                   score += 10;
 
-        // Section 10 — Career goals: target role title + salary set
-        if (p.getGoalTitle()     != null && !p.getGoalTitle().isBlank()
-                && p.getGoalSalaryMin() != null && p.getGoalSalaryMin() > 0)  pts += 10;
+        // Section 10 — career goals (title + at least one salary bound) = +10%
+        boolean hasGoalTitle  = p.getGoalTitle() != null && !p.getGoalTitle().isBlank();
+        boolean hasGoalSalary = p.getGoalSalaryMin() != null || p.getGoalSalaryMax() != null;
+        if (hasGoalTitle && hasGoalSalary)                               score += 10;
 
-        return Math.min(pts, 100);
+        return Math.min(score, 100);
     }
 }
