@@ -15,6 +15,16 @@ import java.nio.charset.StandardCharsets;
 import java.util.List;
 import java.util.UUID;
 
+/**
+ * CV REST endpoints.
+ *
+ * GET    /api/cv               — list all CVs for the current user, newest first
+ * POST   /api/cv               — upload a new CV (multipart/form-data)
+ * PATCH  /api/cv/{id}/activate — set this CV as the active one
+ * DELETE /api/cv/{id}          — delete a CV (owner only)
+ *
+ * Uses findByUserIdOrderByUploadedAtDesc() from UserCvRepository (Batch 2).
+ */
 @RestController
 @RequestMapping("/api/cv")
 @RequiredArgsConstructor
@@ -22,29 +32,23 @@ public class CvController {
 
     private final UserCvRepository userCvRepository;
 
-    /** List all CVs for the authenticated user */
     @GetMapping
     public ResponseEntity<List<UserCv>> listCvs(@AuthenticationPrincipal Jwt jwt) {
         UUID userId = UUID.fromString(jwt.getSubject());
-        return ResponseEntity.ok(userCvRepository.findByUserId(userId));
+        // Fixed: use the correctly named repository method added in Batch 2
+        return ResponseEntity.ok(userCvRepository.findByUserIdOrderByUploadedAtDesc(userId));
     }
 
-    /**
-     * Upload a new CV (plain-text or PDF stored as text).
-     * In production, swap the in-memory text parse for Apache PDFBox / Tika.
-     */
     @PostMapping(consumes = "multipart/form-data")
     public ResponseEntity<UserCv> uploadCv(
             @AuthenticationPrincipal Jwt jwt,
             @RequestParam("file") MultipartFile file,
             @RequestParam(value = "setActive", defaultValue = "false") boolean setActive
     ) throws IOException {
-
         UUID userId = UUID.fromString(jwt.getSubject());
 
         if (setActive) {
-            // Deactivate all existing CVs for this user first
-            List<UserCv> existing = userCvRepository.findByUserId(userId);
+            List<UserCv> existing = userCvRepository.findByUserIdOrderByUploadedAtDesc(userId);
             existing.forEach(cv -> cv.setIsActive(false));
             userCvRepository.saveAll(existing);
         }
@@ -63,15 +67,13 @@ public class CvController {
         return ResponseEntity.status(HttpStatus.CREATED).body(userCvRepository.save(cv));
     }
 
-    /** Set a specific CV as the active one */
     @PatchMapping("/{id}/activate")
     public ResponseEntity<UserCv> activateCv(
             @AuthenticationPrincipal Jwt jwt,
             @PathVariable UUID id
     ) {
         UUID userId = UUID.fromString(jwt.getSubject());
-
-        List<UserCv> all = userCvRepository.findByUserId(userId);
+        List<UserCv> all = userCvRepository.findByUserIdOrderByUploadedAtDesc(userId);
         all.forEach(cv -> cv.setIsActive(cv.getId().equals(id)));
         userCvRepository.saveAll(all);
 
@@ -82,7 +84,6 @@ public class CvController {
                 .orElse(ResponseEntity.notFound().build());
     }
 
-    /** Delete a CV by ID (only the owner can delete) */
     @DeleteMapping("/{id}")
     public ResponseEntity<Void> deleteCv(
             @AuthenticationPrincipal Jwt jwt,
