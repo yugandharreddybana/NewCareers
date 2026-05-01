@@ -1,16 +1,34 @@
+import { lazy, Suspense } from 'react';
 import { Routes, Route, Navigate } from 'react-router-dom';
 import { useAuth } from '@/context/AuthContext';
-import Login from '@/pages/Login';
-import Signup from '@/pages/Signup';
-import ForgotPassword from '@/pages/ForgotPassword';
-import Onboarding from '@/pages/Onboarding';
-import Dashboard from '@/pages/Dashboard';
-import JobDetail from '@/pages/JobDetail';
-import Kanban from '@/pages/Kanban';
-import Profile from '@/pages/Profile';
-import Analytics from '@/pages/Analytics';
-import Refer from '@/pages/Refer';
 import AppShell from '@/components/layout/AppShell';
+
+// Eagerly loaded (core auth flow — no delay acceptable)
+import Login          from '@/pages/Login';
+import Signup         from '@/pages/Signup';
+import ForgotPassword from '@/pages/ForgotPassword';
+import Onboarding     from '@/pages/Onboarding';
+
+// Route-level code splitting for all authenticated pages
+const Dashboard      = lazy(() => import('@/pages/Dashboard'));
+const JobDetail      = lazy(() => import('@/pages/JobDetail'));
+const Kanban         = lazy(() => import('@/pages/Kanban'));
+const Profile        = lazy(() => import('@/pages/Profile'));
+const Analytics      = lazy(() => import('@/pages/Analytics'));
+const Refer          = lazy(() => import('@/pages/Refer'));
+const Skills         = lazy(() => import('@/pages/Skills'));
+const CvManager      = lazy(() => import('@/pages/CvManager'));
+const Billing        = lazy(() => import('@/pages/BillingPage'));
+const AccountSettings= lazy(() => import('@/pages/AccountSettings'));
+
+// Skeleton fallback for Suspense boundaries
+function PageFallback() {
+  return (
+    <div className="flex items-center justify-center h-64">
+      <div className="w-8 h-8 rounded-full border-2 border-emerald-500 border-t-transparent animate-spin" />
+    </div>
+  );
+}
 
 const USE_MOCKS = import.meta.env.VITE_USE_MOCKS === 'true';
 
@@ -26,20 +44,30 @@ function Protected({ children }: { children: JSX.Element }) {
 export default function App() {
   return (
     <Routes>
-      <Route path="/login" element={<Login />} />
-      <Route path="/signup" element={<Signup />} />
+      {/* ── Public routes ── */}
+      <Route path="/login"           element={<Login />} />
+      <Route path="/signup"          element={<Signup />} />
       <Route path="/forgot-password" element={<ForgotPassword />} />
-      <Route path="/onboarding" element={<Protected><Onboarding /></Protected>} />
+      <Route path="/onboarding"      element={<Protected><Onboarding /></Protected>} />
 
+      {/* ── Protected app shell ── */}
       <Route element={<Protected><AppShell /></Protected>}>
-        <Route path="/dashboard" element={<Dashboard />} />
-        <Route path="/jobs/:id" element={<JobDetail />} />
-        <Route path="/kanban" element={<Kanban />} />
-        <Route path="/profile" element={<Profile />} />
-        <Route path="/analytics" element={<Analytics />} />
-        <Route path="/refer"     element={<Refer />} />  {/* Section 9 — Task 101 */}
+        <Route path="/dashboard" element={<Suspense fallback={<PageFallback />}><Dashboard /></Suspense>} />
+        <Route path="/jobs/:id"  element={<Suspense fallback={<PageFallback />}><JobDetail /></Suspense>} />
+        <Route path="/kanban"    element={<Suspense fallback={<PageFallback />}><Kanban /></Suspense>} />
+        <Route path="/profile"   element={<Suspense fallback={<PageFallback />}><Profile /></Suspense>} />
+        <Route path="/analytics" element={<Suspense fallback={<PageFallback />}><Analytics /></Suspense>} />
+        <Route path="/refer"     element={<Suspense fallback={<PageFallback />}><Refer /></Suspense>} />
+        {/* Section 13 Batch 2 — new pages */}
+        <Route path="/skills"    element={<Suspense fallback={<PageFallback />}><Skills /></Suspense>} />
+        <Route path="/cv"        element={<Suspense fallback={<PageFallback />}><CvManager /></Suspense>} />
+        {/* Section 6 — Billing */}
+        <Route path="/billing"   element={<Suspense fallback={<PageFallback />}><Billing /></Suspense>} />
+        {/* Section 11 — Account/GDPR */}
+        <Route path="/account"   element={<Suspense fallback={<PageFallback />}><AccountSettings /></Suspense>} />
       </Route>
 
+      {/* Fallback */}
       <Route path="*" element={<Navigate to="/dashboard" replace />} />
     </Routes>
   );
