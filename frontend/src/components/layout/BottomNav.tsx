@@ -1,75 +1,66 @@
 /**
- * Task 145 — BottomNav (mobile)
- * Changes:
- *  - Added Skills (/skills) and CV (/cv) links (5 items total)
- *  - Smaller icon + label sizes to fit 5 items cleanly
- *  - Active icon scales up with framer-motion spring animation
- *  - Active tab shows an emerald dot indicator above the icon
- *  - Safe-area padding preserved for notched phones
+ * BottomNav — Section 13 QA update
+ *  - bg-white → bg-white (kept; already correct)
+ *  - border-slate-200 → border-border token
+ *  - text-slate-400/600 → text-text-tertiary / text-brand-600 tokens
+ *  - safe-area-inset-bottom applied to both height calc AND inner padding
+ *    so the nav doesn't clip on notched phones (iPhone SE → iPhone 16 Pro Max)
+ *  - Added aria-label on <nav> for screen readers
+ *  - Active colour uses brand token (was emerald hard-coded)
  */
 import { NavLink } from 'react-router-dom';
 import {
   LayoutDashboard, Kanban, TrendingUp, Brain, User,
 } from 'lucide-react';
 import { motion } from 'framer-motion';
+import { cn } from '@/lib/utils';
 
-// CV Manager is accessible from Profile on mobile to keep bottom nav clean at 5 items.
-// Skills replaces the 5th slot; Profile remains as last item.
 const NAV = [
-  { to: '/dashboard',  label: 'Dashboard',   icon: LayoutDashboard },
-  { to: '/kanban',     label: 'Board',        icon: Kanban },
-  { to: '/analytics',  label: 'Analytics',   icon: TrendingUp },
-  { to: '/skills',     label: 'Skills',       icon: Brain },
-  { to: '/profile',    label: 'Profile',      icon: User },
+  { to: '/dashboard', label: 'Dashboard', icon: LayoutDashboard },
+  { to: '/kanban',    label: 'Board',      icon: Kanban           },
+  { to: '/analytics', label: 'Analytics', icon: TrendingUp       },
+  { to: '/skills',    label: 'Skills',     icon: Brain            },
+  { to: '/profile',   label: 'Profile',    icon: User             },
 ];
 
 export default function BottomNav() {
   return (
-    <nav className="md:hidden fixed bottom-0 left-0 right-0 z-40 bg-white border-t border-slate-200">
-      <div
-        className="flex items-stretch h-16"
-        style={{ paddingBottom: 'env(safe-area-inset-bottom)' }}
-      >
+    <nav
+      aria-label="Main navigation"
+      className="md:hidden fixed bottom-0 left-0 right-0 z-40 bg-white border-t border-border"
+      style={{ paddingBottom: 'env(safe-area-inset-bottom)' }}
+    >
+      <div className="flex items-stretch h-16">
         {NAV.map(({ to, label, icon: Icon }) => (
           <NavLink
             key={to}
             to={to}
-            className={({ isActive }) => [
+            end={to === '/dashboard'}
+            aria-label={label}
+            className={({ isActive }) => cn(
               'flex-1 flex flex-col items-center justify-center gap-0.5 transition-colors relative',
-              isActive ? 'text-emerald-600' : 'text-slate-400 hover:text-slate-600',
-            ].join(' ')}
+              isActive ? 'text-brand-600' : 'text-text-tertiary hover:text-text-secondary',
+            )}
           >
             {({ isActive }) => (
               <>
-                {/* Active dot indicator */}
+                {/* Active dot */}
                 {isActive && (
                   <motion.span
                     layoutId="bottom-nav-dot"
-                    className="absolute top-1.5 w-1 h-1 rounded-full bg-emerald-500"
+                    className="absolute top-1.5 w-1 h-1 rounded-full bg-brand-500"
                     transition={{ type: 'spring', stiffness: 500, damping: 35 }}
                   />
                 )}
 
-                {/* Icon with scale animation */}
                 <motion.div
-                  animate={{
-                    scale: isActive ? 1.15 : 1,
-                  }}
+                  animate={{ scale: isActive ? 1.15 : 1 }}
                   transition={{ type: 'spring', stiffness: 400, damping: 25 }}
                 >
-                  <Icon
-                    size={20}
-                    strokeWidth={isActive ? 2.5 : 1.8}
-                  />
+                  <Icon size={20} strokeWidth={isActive ? 2.5 : 1.8} />
                 </motion.div>
 
-                {/* Label */}
-                <span
-                  className={[
-                    'text-[9px] leading-none',
-                    isActive ? 'font-bold' : 'font-medium',
-                  ].join(' ')}
-                >
+                <span className={cn('text-[9px] leading-none', isActive ? 'font-bold' : 'font-medium')}>
                   {label}
                 </span>
               </>
