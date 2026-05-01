@@ -4,7 +4,7 @@ import { useState } from 'react';
 import {
   LayoutDashboard, Kanban as KanbanIcon, User,
   LogOut, ChevronLeft, ChevronRight,
-  Sparkles, HelpCircle, Settings,
+  Sparkles, HelpCircle, Gift,
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { cn } from '@/lib/utils';
@@ -19,9 +19,10 @@ interface NavItem {
 }
 
 const NAV_ITEMS: NavItem[] = [
-  { to: '/dashboard', icon: <LayoutDashboard size={18} />, label: 'Dashboard' },
-  { to: '/kanban',    icon: <KanbanIcon       size={18} />, label: 'Tracker'   },
-  { to: '/profile',   icon: <User             size={18} />, label: 'Profile'   },
+  { to: '/dashboard', icon: <LayoutDashboard size={18} />, label: 'Dashboard'   },
+  { to: '/kanban',    icon: <KanbanIcon       size={18} />, label: 'Tracker'     },
+  { to: '/profile',   icon: <User             size={18} />, label: 'Profile'     },
+  { to: '/refer',     icon: <Gift             size={18} />, label: 'Refer & Earn' }, // Section 9 — Task 101
 ];
 
 const BOTTOM_ITEMS: NavItem[] = [

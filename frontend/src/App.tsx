@@ -9,6 +9,7 @@ import JobDetail      from '@/pages/JobDetail';
 import Kanban         from '@/pages/Kanban';
 import Profile        from '@/pages/Profile';
 import Analytics      from '@/pages/Analytics';
+import Refer          from '@/pages/Refer';          // Section 9 — Task 101
 import AppShell       from '@/components/layout/AppShell';
 
 function Protected({ children }: { children: JSX.Element }) {
@@ -33,6 +34,7 @@ export default function App() {
         <Route path="/kanban"    element={<Kanban />} />
         <Route path="/profile"   element={<Profile />} />
         <Route path="/analytics" element={<Analytics />} />
+        <Route path="/refer"     element={<Refer />} />  {/* Section 9 — Task 101 */}
       </Route>
 
       <Route path="*" element={<Navigate to="/dashboard" replace />} />
