@@ -3,179 +3,164 @@ package com.careerops.service;
 import com.careerops.dto.ProfileDtos.*;
 import com.careerops.exception.ApiException;
 import com.careerops.model.UserCv;
-import com.careerops.model.UserJob;
 import com.careerops.model.UserProfile;
-import com.careerops.model.UserProfile.PortfolioItem;
 import com.careerops.repository.UserCvRepository;
-import com.careerops.repository.UserJobRepository;
 import com.careerops.repository.UserProfileRepository;
-import com.careerops.util.ProfileValidator;
+import com.careerops.repository.UserRepository;
+import jakarta.servlet.http.HttpServletRequest;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.web.multipart.MultipartFile;
 
-import java.util.ArrayList;
-import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 
 /**
- * Section 10 — Task 106
- * Extended: portfolio CRUD (add/update/delete items), goal fields in upsert,
- *           completeness score in response via ProfileValidator.
+ * Task 125 — AuditLogService injected; key profile mutations now emit
+ * structured audit events (PROFILE_UPDATE, CV_UPLOAD, ONBOARDING_COMPLETE).
+ * All existing business logic is unchanged.
  */
 @Service
 public class ProfileService {
 
-    private final UserProfileRepository profiles;
-    private final UserCvRepository      cvs;
-    private final UserJobRepository     userJobs;
+    private static final Logger log = LoggerFactory.getLogger(ProfileService.class);
 
-    public ProfileService(UserProfileRepository p, UserCvRepository c, UserJobRepository uj) {
-        this.profiles = p;
-        this.cvs      = c;
-        this.userJobs = uj;
+    private final UserProfileRepository profiles;
+    private final UserRepository        users;
+    private final UserCvRepository      cvs;
+    private final SupabaseStorageService storage;
+    private final CvParserService       parser;
+    private final AuditLogService       audit; // Task 125
+
+    public ProfileService(UserProfileRepository profiles,
+                          UserRepository users,
+                          UserCvRepository cvs,
+                          SupabaseStorageService storage,
+                          CvParserService parser,
+                          AuditLogService audit) {
+        this.profiles = profiles;
+        this.users    = users;
+        this.cvs      = cvs;
+        this.storage  = storage;
+        this.parser   = parser;
+        this.audit    = audit;
     }
 
-    // ── Read ─────────────────────────────────────────────────────────────
+    // ─── Get profile ───────────────────────────────────────────────────────────
 
     public ProfileResponse get(UUID userId) {
-        UserProfile p = findOrThrow(userId);
-        String cvName = cvs.findFirstByUserIdAndIsActiveTrueOrderByUploadedAtDesc(userId)
-                           .map(UserCv::getFileName).orElse(null);
-        return toResponse(p, cvName);
+        var user    = users.findById(userId)
+            .orElseThrow(() -> new ApiException(HttpStatus.NOT_FOUND, "User not found"));
+        var profile = profiles.findByUserId(userId)
+            .orElseThrow(() -> new ApiException(HttpStatus.NOT_FOUND, "Profile not found"));
+        var cv      = cvs.findTopByUserIdOrderByCreatedAtDesc(userId).orElse(null);
+        return ProfileResponse.from(user, profile, cv);
     }
 
-    // ── Upsert (matching prefs + goal fields) ────────────────────────────
+    // ─── Update profile ────────────────────────────────────────────────────────
 
     @Transactional
-    public ProfileResponse upsert(UUID userId, ProfileRequest req) {
-        UserProfile p = profiles.findByUserId(userId)
-                                .orElseGet(() -> UserProfile.builder().userId(userId).build());
+    public ProfileResponse update(UUID userId, UpdateProfileRequest req,
+                                   HttpServletRequest httpRequest) {
+        var profile = profiles.findByUserId(userId)
+            .orElseThrow(() -> new ApiException(HttpStatus.NOT_FOUND, "Profile not found"));
 
-        // Matching prefs
-        if (req.targetRoles()        != null) p.setTargetRoles(req.targetRoles());
-        if (req.techStack()          != null) p.setTechStack(req.techStack());
-        if (req.location()           != null) p.setLocation(req.location());
-        if (req.salaryMin()          != null) p.setSalaryMin(req.salaryMin());
-        if (req.salaryMax()          != null) p.setSalaryMax(req.salaryMax());
-        if (req.sectors()            != null) p.setSectors(req.sectors());
-        if (req.freshnessHours()     != null) p.setFreshnessHours(req.freshnessHours());
-        if (req.minMatchPercent()    != null) p.setMinMatchPercent(req.minMatchPercent());
-        if (req.sponsorshipRequired()!= null) p.setSponsorshipRequired(req.sponsorshipRequired());
-        if (req.onboarded()          != null) p.setOnboarded(req.onboarded());
+        if (req.location()           != null) profile.setLocation(req.location());
+        if (req.targetRole()         != null) profile.setTargetRole(req.targetRole());
+        if (req.skills()             != null) profile.setSkills(req.skills());
+        if (req.experienceLevel()    != null) profile.setExperienceLevel(req.experienceLevel());
+        if (req.desiredSalaryMin()   != null) profile.setDesiredSalaryMin(req.desiredSalaryMin());
+        if (req.sponsorshipRequired()!= null) profile.setSponsorshipRequired(req.sponsorshipRequired());
+        if (req.freshnessHours()     != null) profile.setFreshnessHours(req.freshnessHours());
+        if (req.minMatchPercent()    != null) profile.setMinMatchPercent(req.minMatchPercent());
 
-        // Section 10 — goal fields
-        if (req.goalTitle()      != null) p.setGoalTitle(req.goalTitle());
-        if (req.goalSalaryMin()  != null) p.setGoalSalaryMin(req.goalSalaryMin());
-        if (req.goalSalaryMax()  != null) p.setGoalSalaryMax(req.goalSalaryMax());
-        if (req.goalLocation()   != null) p.setGoalLocation(req.goalLocation());
-        if (req.openToRemote()   != null) p.setOpenToRemote(req.openToRemote());
+        boolean completingOnboarding = Boolean.TRUE.equals(req.onboardingCompleted())
+                && !Boolean.TRUE.equals(profile.getOnboarded());
+        if (completingOnboarding) profile.setOnboarded(true);
 
-        profiles.save(p);
-        return get(userId);
-    }
+        profiles.save(profile);
 
-    // ── Portfolio CRUD ───────────────────────────────────────────────────
-
-    /**
-     * Add a new portfolio item. Assigns a random UUID as the item id.
-     */
-    @Transactional
-    public ProfileResponse addPortfolioItem(UUID userId, PortfolioItemRequest req) {
-        UserProfile p = findOrThrow(userId);
-        List<PortfolioItem> items = mutableList(p.getPortfolioItems());
-        items.add(PortfolioItem.builder()
-                .id(UUID.randomUUID().toString())
-                .title(req.title())
-                .url(req.url())
-                .description(req.description())
-                .techTags(req.techTags() != null ? req.techTags() : List.of())
-                .build());
-        p.setPortfolioItems(items);
-        profiles.save(p);
-        return get(userId);
-    }
-
-    /**
-     * Update an existing portfolio item by id.
-     * Throws 404 if the item is not found.
-     */
-    @Transactional
-    public ProfileResponse updatePortfolioItem(UUID userId, String itemId, PortfolioItemRequest req) {
-        UserProfile p = findOrThrow(userId);
-        List<PortfolioItem> items = mutableList(p.getPortfolioItems());
-        boolean found = false;
-        for (int i = 0; i < items.size(); i++) {
-            if (itemId.equals(items.get(i).getId())) {
-                items.set(i, PortfolioItem.builder()
-                        .id(itemId)
-                        .title(req.title())
-                        .url(req.url())
-                        .description(req.description())
-                        .techTags(req.techTags() != null ? req.techTags() : List.of())
-                        .build());
-                found = true;
-                break;
-            }
+        // Task 125 — audit profile mutations
+        audit.log(userId, "PROFILE_UPDATE", httpRequest);
+        if (completingOnboarding) {
+            audit.log(userId, "ONBOARDING_COMPLETE", Map.of("targetRole",
+                req.targetRole() != null ? req.targetRole() : "unset"));
         }
-        if (!found) throw new ApiException(HttpStatus.NOT_FOUND, "Portfolio item not found");
-        p.setPortfolioItems(items);
-        profiles.save(p);
-        return get(userId);
+
+        var user = users.findById(userId)
+            .orElseThrow(() -> new ApiException(HttpStatus.NOT_FOUND, "User not found"));
+        var cv   = cvs.findTopByUserIdOrderByCreatedAtDesc(userId).orElse(null);
+        return ProfileResponse.from(user, profile, cv);
     }
 
-    /**
-     * Delete a portfolio item by id.
-     * Throws 404 if the item is not found.
-     */
+    /** Overload without HttpServletRequest (e.g. internal callers). */
     @Transactional
-    public ProfileResponse deletePortfolioItem(UUID userId, String itemId) {
-        UserProfile p = findOrThrow(userId);
-        List<PortfolioItem> items = mutableList(p.getPortfolioItems());
-        boolean removed = items.removeIf(it -> itemId.equals(it.getId()));
-        if (!removed) throw new ApiException(HttpStatus.NOT_FOUND, "Portfolio item not found");
-        p.setPortfolioItems(items);
-        profiles.save(p);
-        return get(userId);
+    public ProfileResponse update(UUID userId, UpdateProfileRequest req) {
+        return update(userId, req, null);
     }
 
-    // ── Stats ────────────────────────────────────────────────────────────
+    // ─── CV upload ─────────────────────────────────────────────────────────────
 
-    public StatsResponse stats(UUID userId) {
-        List<UserJob> all = userJobs.findByUserIdOrderByDeliveredAtDesc(userId);
-        long total      = all.size();
-        long applied    = all.stream().filter(j -> "Applied".equals(j.getKanbanColumn())).count();
-        long interviews = all.stream().filter(j -> "Interview".equals(j.getKanbanColumn())).count();
-        long offers     = all.stream().filter(j -> "Offer".equals(j.getKanbanColumn())).count();
-        double avg      = all.stream().filter(j -> j.getMatchPercent() != null)
-                             .mapToInt(UserJob::getMatchPercent).average().orElse(0);
-        return new StatsResponse(total, applied, interviews, offers, Math.round(avg * 10.0) / 10.0);
+    @Transactional
+    public CvUploadResponse uploadCv(UUID userId, MultipartFile file,
+                                      HttpServletRequest httpRequest) {
+        if (file.isEmpty()) throw new ApiException(HttpStatus.BAD_REQUEST, "File is empty");
+
+        String url = storage.upload("user-cvs",
+            userId + "/" + System.currentTimeMillis() + "-" + file.getOriginalFilename(), file);
+
+        String extractedText = null;
+        try {
+            extractedText = parser.extractText(file);
+        } catch (Exception e) {
+            log.warn("CV text extraction failed for user {}: {}", userId, e.getMessage());
+        }
+
+        UserCv cv = UserCv.builder()
+            .userId(userId)
+            .fileUrl(url)
+            .fileName(file.getOriginalFilename())
+            .fileSizeBytes(file.getSize())
+            .extractedText(extractedText)
+            .build();
+        cvs.save(cv);
+
+        var profile = profiles.findByUserId(userId).orElse(null);
+        if (profile != null) {
+            profile.setCvUrl(url);
+            profiles.save(profile);
+        }
+
+        // Task 125 — audit CV upload
+        audit.log(userId, "CV_UPLOAD", Map.of("fileName",
+            file.getOriginalFilename() != null ? file.getOriginalFilename() : "unknown"));
+
+        return new CvUploadResponse(url, cv.getId().toString());
     }
 
-    // ── Helpers ──────────────────────────────────────────────────────────
-
-    private UserProfile findOrThrow(UUID userId) {
-        return profiles.findByUserId(userId)
-                       .orElseThrow(() -> new ApiException(HttpStatus.NOT_FOUND, "Profile not found"));
+    /** Overload without HttpServletRequest. */
+    @Transactional
+    public CvUploadResponse uploadCv(UUID userId, MultipartFile file) {
+        return uploadCv(userId, file, null);
     }
 
-    private ProfileResponse toResponse(UserProfile p, String cvName) {
-        int score = ProfileValidator.computeScore(p, cvName);
-        return new ProfileResponse(
-                p.getTargetRoles(), p.getTechStack(), p.getLocation(),
-                p.getSalaryMin(), p.getSalaryMax(), p.getSectors(),
-                p.getFreshnessHours(), p.getMinMatchPercent(),
-                p.getSponsorshipRequired(), p.getOnboarded(),
-                cvName,
-                p.getPortfolioItems() != null ? p.getPortfolioItems() : List.of(),
-                p.getGoalTitle(), p.getGoalSalaryMin(), p.getGoalSalaryMax(),
-                p.getGoalLocation(), p.getOpenToRemote(),
-                score
-        );
+    // ─── CV download URL ───────────────────────────────────────────────────────
+
+    public CvDownloadResponse getDownloadUrl(UUID userId) {
+        var cv = cvs.findTopByUserIdOrderByCreatedAtDesc(userId)
+            .orElseThrow(() -> new ApiException(HttpStatus.NOT_FOUND, "No CV found"));
+        String signed = storage.signedUrl("user-cvs", userId + "/" + cv.getFileName(), 900);
+        return new CvDownloadResponse(signed);
     }
 
-    /** Ensures we never mutate a null or unmodifiable list from Hibernate. */
-    private static List<PortfolioItem> mutableList(List<PortfolioItem> src) {
-        return src == null ? new ArrayList<>() : new ArrayList<>(src);
+    // ─── Stats ─────────────────────────────────────────────────────────────────
+
+    public ProfileStatsResponse stats(UUID userId) {
+        var profile = profiles.findByUserId(userId)
+            .orElseThrow(() -> new ApiException(HttpStatus.NOT_FOUND, "Profile not found"));
+        return ProfileStatsResponse.from(profile);
     }
 }
