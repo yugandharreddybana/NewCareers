@@ -9,6 +9,8 @@ import com.careerops.repository.PasswordResetRepository;
 import com.careerops.repository.UserProfileRepository;
 import com.careerops.repository.UserRepository;
 import com.careerops.security.JwtService;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpStatus;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
@@ -22,33 +24,62 @@ import java.time.temporal.ChronoUnit;
 @Service
 public class AuthService {
 
-    private final UserRepository users;
-    private final UserProfileRepository profiles;
-    private final PasswordResetRepository resets;
-    private final PasswordEncoder encoder;
-    private final JwtService jwt;
-    private final ResendEmailService email;
+    private static final Logger log = LoggerFactory.getLogger(AuthService.class);
 
-    public AuthService(UserRepository users, UserProfileRepository profiles,
-                       PasswordResetRepository resets, PasswordEncoder encoder,
-                       JwtService jwt, ResendEmailService email) {
-        this.users = users; this.profiles = profiles; this.resets = resets;
-        this.encoder = encoder; this.jwt = jwt; this.email = email;
+    private final UserRepository         users;
+    private final UserProfileRepository  profiles;
+    private final PasswordResetRepository resets;
+    private final PasswordEncoder        encoder;
+    private final JwtService             jwt;
+    private final ResendEmailService     email;
+    private final ReferralService        referralService; // Section 9 — Task 96
+
+    public AuthService(UserRepository users,
+                       UserProfileRepository profiles,
+                       PasswordResetRepository resets,
+                       PasswordEncoder encoder,
+                       JwtService jwt,
+                       ResendEmailService email,
+                       ReferralService referralService) {
+        this.users           = users;
+        this.profiles        = profiles;
+        this.resets          = resets;
+        this.encoder         = encoder;
+        this.jwt             = jwt;
+        this.email           = email;
+        this.referralService = referralService;
     }
 
     @Transactional
     public AuthResponse signup(SignupRequest req) {
-        if (users.existsByEmail(req.email())) throw new ApiException(HttpStatus.CONFLICT, "Email already in use");
-        if (users.existsByUsername(req.username())) throw new ApiException(HttpStatus.CONFLICT, "Username taken");
+        if (users.existsByEmail(req.email()))
+            throw new ApiException(HttpStatus.CONFLICT, "Email already in use");
+        if (users.existsByUsername(req.username()))
+            throw new ApiException(HttpStatus.CONFLICT, "Username taken");
 
         User u = users.save(User.builder()
-            .name(req.name()).username(req.username()).email(req.email())
-            .passwordHash(encoder.encode(req.password())).build());
+            .name(req.name())
+            .username(req.username())
+            .email(req.email())
+            .passwordHash(encoder.encode(req.password()))
+            .build());
 
         profiles.save(UserProfile.builder()
-            .userId(u.getId()).location("Ireland")
-            .freshnessHours(96).minMatchPercent(60)
-            .sponsorshipRequired(false).onboarded(false).build());
+            .userId(u.getId())
+            .location("Ireland")
+            .freshnessHours(96)
+            .minMatchPercent(60)
+            .sponsorshipRequired(false)
+            .onboarded(false)
+            .build());
+
+        // Section 9 — Task 96: credit any pending referral for this email.
+        // Non-fatal: wrapped so a referral failure never blocks signup.
+        try {
+            referralService.onRefereeSignup(u.getEmail(), u.getName());
+        } catch (Exception e) {
+            log.warn("onRefereeSignup non-fatal during signup for {}: {}", u.getEmail(), e.getMessage());
+        }
 
         return new AuthResponse(jwt.issue(u.getId().toString(), u.getEmail()), toDto(u, false));
     }
@@ -58,7 +89,8 @@ public class AuthService {
             .orElseThrow(() -> new ApiException(HttpStatus.UNAUTHORIZED, "Invalid credentials"));
         if (!encoder.matches(req.password(), u.getPasswordHash()))
             throw new ApiException(HttpStatus.UNAUTHORIZED, "Invalid credentials");
-        boolean onboarded = profiles.findByUserId(u.getId()).map(UserProfile::getOnboarded).orElse(false);
+        boolean onboarded = profiles.findByUserId(u.getId())
+            .map(UserProfile::getOnboarded).orElse(false);
         return new AuthResponse(jwt.issue(u.getId().toString(), u.getEmail()), toDto(u, onboarded));
     }
 
@@ -67,16 +99,19 @@ public class AuthService {
         if (users.findByEmail(req.email()).isEmpty()) return; // do not leak existence
         String otp = String.format("%06d", new SecureRandom().nextInt(1_000_000));
         PasswordReset pr = PasswordReset.builder()
-            .email(req.email()).otpHash(sha256(otp))
+            .email(req.email())
+            .otpHash(sha256(otp))
             .expiresAt(Instant.now().plus(15, ChronoUnit.MINUTES))
-            .used(false).build();
+            .used(false)
+            .build();
         resets.save(pr);
         email.sendOtp(req.email(), otp);
     }
 
     @Transactional
     public void verifyOtp(VerifyOtpRequest req) {
-        PasswordReset pr = resets.findFirstByEmailAndUsedFalseOrderByCreatedAtDesc(req.email())
+        PasswordReset pr = resets
+            .findFirstByEmailAndUsedFalseOrderByCreatedAtDesc(req.email())
             .orElseThrow(() -> new ApiException(HttpStatus.BAD_REQUEST, "No reset request found"));
         if (Instant.now().isAfter(pr.getExpiresAt()))
             throw new ApiException(HttpStatus.BAD_REQUEST, "OTP expired");

@@ -13,6 +13,7 @@ import kanban        from './routes/kanban.routes.js';
 import skills        from './routes/skills.routes.js';
 import analytics     from './routes/analytics.routes.js';
 import notifications from './routes/notifications.routes.js';  // Section 8
+import referrals     from './routes/referrals.routes.js';       // Section 9
 
 const app = express();
 
@@ -37,6 +38,7 @@ app.use('/api/kanban',        kanban);
 app.use('/api/skills',        skills);
 app.use('/api/analytics',     analytics);
 app.use('/api/notifications', notifications);  // Section 8 — Task 83
+app.use('/api/referrals',     referrals);       // Section 9 — Task 98
 
 app.use((err, _req, res, _next) => {
   // eslint-disable-next-line no-console
