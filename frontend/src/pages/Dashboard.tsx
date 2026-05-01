@@ -3,10 +3,8 @@
  * Dashboard wired with:
  *   - JobSearchBar (above job grid) — calls discoveryApi.search() on submit
  *   - RecommendedJobsWidget (below job grid) — always visible when data exists
- *
- * Search mode: when the user submits the JobSearchBar, Dashboard switches to
- * "search results" mode. The existing client-side filter bar is hidden while
- * search results are active. Clearing search restores the full pipeline view.
+ *   - PlannerWidget (sidebar) — shows overdue badge, upcoming deadlines & tasks
+ *   - JobPlannerPanel (slide-over drawer) — opens when PlannerWidget item clicked
  *
  * Mobile audit (task 133): header action buttons wrap on 375px, stats col=1,
  * no horizontal overflow.
@@ -26,6 +24,7 @@ import ComparePanel from '@/components/skills/ComparePanel';
 import TriagePanel from '@/components/skills/TriagePanel';
 import JobSearchBar from '@/components/discovery/JobSearchBar';
 import RecommendedJobsWidget from '@/components/discovery/RecommendedJobsWidget';
+import { PlannerWidget, JobPlannerPanel } from '@/components/planner';
 import {
   RotateCw, SlidersHorizontal, X,
   Target, Zap, AlertTriangle, Building2, Send, TrendingUp, Search,
@@ -57,6 +56,19 @@ export default function Dashboard() {
   const [searchResult,  setSearchResult]  = useState<SearchResult | null>(null);
   const [searching,     setSearching]     = useState(false);
   const isSearchMode = searchResult !== null;
+
+  // ── Planner drawer state ─────────────────────────────────────────────
+  const [plannerJobId,    setPlannerJobId]    = useState<string | null>(null);
+  const [plannerJobTitle, setPlannerJobTitle] = useState<string>('');
+  const plannerOpen = plannerJobId !== null;
+
+  function openPlannerForJob(userJobId: string) {
+    // Find the job title from the current pipeline or search results
+    const allJobs: JobCard[] = data?.items || [];
+    const found = allJobs.find(j => j.userJobId === userJobId);
+    setPlannerJobTitle(found?.title ?? 'Job');
+    setPlannerJobId(userJobId);
+  }
 
   // AI skill hooks
   const compareSkill = useSkill(useCallback(async () => {
@@ -153,17 +165,12 @@ export default function Dashboard() {
   return (
     <div className="space-y-8 pb-20">
 
-      {/* ── Page header ──
-           Mobile fix (task 133): header action buttons use flex-wrap so they
-           never overflow on 375px screens. Stat row is already grid-cols-1
-           on mobile via the Progress section further down.
-      */}
+      {/* ── Page header ── */}
       <section className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-4 pt-2">
         <div>
           <h1 className="text-2xl font-bold text-slate-900 leading-tight">Your Daily Mission</h1>
           <p className="text-slate-400 text-sm mt-1">What should you focus on today?</p>
         </div>
-        {/* ✓ flex-wrap prevents 3-button row from overflowing at 375px */}
         <div className="flex flex-wrap items-center gap-2 shrink-0">
           <SkillButton
             label="Compare"
@@ -219,213 +226,219 @@ export default function Dashboard() {
         )}
       </AnimatePresence>
 
-      {/* ── Job Search + Pipeline section ── */}
-      <section>
-        <div className="flex items-center justify-between mb-4">
-          <h2 className="text-base font-semibold text-slate-800">
-            {isSearchMode
-              ? `Search Results (${searchResult?.total ?? 0})`
-              : 'Top Targeted Matches'}
-          </h2>
-          <div className="flex items-center gap-3">
-            {isSearchMode && (
-              <button
-                onClick={() => setSearchResult(null)}
-                className="flex items-center gap-1.5 text-xs font-semibold
-                           text-slate-400 hover:text-rose-500 transition-colors"
-              >
-                <X size={12} /> Clear search
-              </button>
-            )}
-            {!isSearchMode && data && data.dailyCount > 0 && (
-              <span className="text-xs text-slate-400">
-                {data.dailyCount} / {data.dailyLimit} today
-              </span>
-            )}
-          </div>
-        </div>
-        <div className="h-px bg-slate-200 mb-5" />
+      {/* ── Main two-column layout: job pipeline + planner widget ── */}
+      <div className="flex flex-col xl:flex-row gap-6 items-start">
 
-        {/* ── Section 7: JobSearchBar ── */}
-        <div className="mb-6">
-          <JobSearchBar onSearch={handleSearch} loading={searching} />
-        </div>
-
-        {/* Legacy pipeline filter bar (hidden in search mode) */}
-        {!isSearchMode && (
-          <div className="flex flex-col gap-3 mb-6">
-            <div className="flex gap-2 items-center">
-              <div className="relative flex-1">
-                <Search size={15}
-                  className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400" />
-                <input
-                  type="text"
-                  placeholder="Quick filter by title or company…"
-                  value={search}
-                  onChange={e => setSearch(e.target.value)}
-                  className="w-full pl-10 pr-4 h-10 rounded-xl border border-slate-200
-                             bg-white text-sm text-slate-700 placeholder:text-slate-400
-                             focus:outline-none focus:ring-2 focus:ring-emerald-500/20
-                             focus:border-emerald-400 transition-all"
-                />
-              </div>
-              <button
-                onClick={() => setShowFilters(v => !v)}
-                className={[
-                  'h-10 px-3.5 rounded-xl border text-sm font-semibold',
-                  'flex items-center gap-1.5 transition-all',
-                  showFilters || activeFilters
-                    ? 'bg-emerald-500 text-white border-emerald-500'
-                    : 'bg-white text-slate-500 border-slate-200 hover:border-emerald-300',
-                ].join(' ')}
-              >
-                <SlidersHorizontal size={14} />
-                Filters
-                {activeFilters && !showFilters && (
-                  <span className="w-1.5 h-1.5 rounded-full bg-white inline-block" />
-                )}
-              </button>
-            </div>
-
-            <AnimatePresence>
-              {showFilters && (
-                <motion.div
-                  initial={{ opacity: 0, height: 0 }}
-                  animate={{ opacity: 1, height: 'auto' }}
-                  exit={{ opacity: 0, height: 0 }}
-                  className="overflow-hidden"
-                >
-                  <div className="bg-white border border-slate-200 rounded-2xl p-4
-                                  flex flex-col md:flex-row gap-4 items-start md:items-center">
-                    <div className="flex flex-col gap-1">
-                      <label className="text-[10px] font-bold text-slate-400
-                                        uppercase tracking-widest">Source</label>
-                      <select
-                        value={sourceFilter}
-                        onChange={e => setSource(e.target.value)}
-                        className="h-9 px-3 rounded-xl border border-slate-200 bg-white
-                                   text-sm font-medium text-slate-600 focus:outline-none
-                                   focus:border-emerald-400 cursor-pointer"
-                      >
-                        {SOURCE_OPTIONS.map(s => <option key={s}>{s}</option>)}
-                      </select>
-                    </div>
-                    <div className="flex flex-col gap-1 flex-1">
-                      <label className="text-[10px] font-bold text-slate-400
-                                        uppercase tracking-widest">
-                        Min Match:&nbsp;
-                        <span className="text-emerald-600">
-                          {minMatch > 0 ? `${minMatch}%` : 'Any'}
-                        </span>
-                      </label>
-                      <input
-                        type="range" min={0} max={100} step={5}
-                        value={minMatch}
-                        onChange={e => setMinMatch(Number(e.target.value))}
-                        className="w-full accent-emerald-500"
-                      />
-                    </div>
-                    {activeFilters && (
-                      <button
-                        onClick={() => { setSearch(''); setSource('All Sources'); setMinMatch(0); }}
-                        className="flex items-center gap-1.5 text-xs font-semibold
-                                   text-slate-400 hover:text-rose-500 transition-colors"
-                      >
-                        <X size={13} /> Clear all
-                      </button>
-                    )}
-                  </div>
-                </motion.div>
-              )}
-            </AnimatePresence>
-          </div>
-        )}
-
-        {/* ── Job grid: single col on mobile ── */}
-        {loading || searching ? (
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
-            {[...Array(3)].map((_, i) => (
-              <div key={i}
-                className="h-56 bg-white border border-slate-200 rounded-2xl animate-pulse" />
-            ))}
-          </div>
-        ) : displayJobs.length === 0 ? (
-          <div className="bg-white border border-slate-200 rounded-2xl p-16
-                          flex flex-col items-center text-center">
-            <div className="w-16 h-16 bg-slate-50 rounded-full flex items-center
-                            justify-center mb-5">
-              <Building2 size={28} className="text-slate-300" />
-            </div>
-            <h3 className="text-lg font-bold text-slate-800 mb-1">
-              {isSearchMode ? 'No jobs match your search' :
-               activeFilters ? 'No jobs match your filters' :
-               'No matches found in database'}
-            </h3>
-            <p className="text-sm text-slate-400 mb-6 max-w-sm">
+        {/* ── Left: Job Search + Pipeline section ── */}
+        <section className="flex-1 min-w-0">
+          <div className="flex items-center justify-between mb-4">
+            <h2 className="text-base font-semibold text-slate-800">
               {isSearchMode
-                ? 'Try different keywords, location, or remove salary filters.'
-                : activeFilters
-                ? 'Try loosening the filters above to see more results.'
-                : "You haven't scanned the market since creating your profile."}
-            </p>
-            {isSearchMode && (
-              <button
-                onClick={() => setSearchResult(null)}
-                className="px-7 py-3 bg-slate-900 text-white rounded-xl font-bold
-                           text-sm hover:bg-slate-800 transition-all"
-              >
-                Back to pipeline
-              </button>
-            )}
-            {!isSearchMode && !activeFilters && (
+                ? `Search Results (${searchResult?.total ?? 0})`
+                : 'Top Targeted Matches'}
+            </h2>
+            <div className="flex items-center gap-3">
+              {isSearchMode && (
+                <button
+                  onClick={() => setSearchResult(null)}
+                  className="flex items-center gap-1.5 text-xs font-semibold
+                             text-slate-400 hover:text-rose-500 transition-colors"
+                >
+                  <X size={12} /> Clear search
+                </button>
+              )}
+              {!isSearchMode && data && data.dailyCount > 0 && (
+                <span className="text-xs text-slate-400">
+                  {data.dailyCount} / {data.dailyLimit} today
+                </span>
+              )}
+            </div>
+          </div>
+          <div className="h-px bg-slate-200 mb-5" />
+
+          {/* ── Section 7: JobSearchBar ── */}
+          <div className="mb-6">
+            <JobSearchBar onSearch={handleSearch} loading={searching} />
+          </div>
+
+          {/* Legacy pipeline filter bar (hidden in search mode) */}
+          {!isSearchMode && (
+            <div className="flex flex-col gap-3 mb-6">
+              <div className="flex gap-2 items-center">
+                <div className="relative flex-1">
+                  <Search size={15}
+                    className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400" />
+                  <input
+                    type="text"
+                    placeholder="Quick filter by title or company…"
+                    value={search}
+                    onChange={e => setSearch(e.target.value)}
+                    className="w-full pl-10 pr-4 h-10 rounded-xl border border-slate-200
+                               bg-white text-sm text-slate-700 placeholder:text-slate-400
+                               focus:outline-none focus:ring-2 focus:ring-emerald-500/20
+                               focus:border-emerald-400 transition-all"
+                  />
+                </div>
+                <button
+                  onClick={() => setShowFilters(v => !v)}
+                  className={[
+                    'h-10 px-3.5 rounded-xl border text-sm font-semibold',
+                    'flex items-center gap-1.5 transition-all',
+                    showFilters || activeFilters
+                      ? 'bg-emerald-500 text-white border-emerald-500'
+                      : 'bg-white text-slate-500 border-slate-200 hover:border-emerald-300',
+                  ].join(' ')}
+                >
+                  <SlidersHorizontal size={14} />
+                  Filters
+                  {activeFilters && !showFilters && (
+                    <span className="w-1.5 h-1.5 rounded-full bg-white inline-block" />
+                  )}
+                </button>
+              </div>
+
+              <AnimatePresence>
+                {showFilters && (
+                  <motion.div
+                    initial={{ opacity: 0, height: 0 }}
+                    animate={{ opacity: 1, height: 'auto' }}
+                    exit={{ opacity: 0, height: 0 }}
+                    className="overflow-hidden"
+                  >
+                    <div className="bg-white border border-slate-200 rounded-2xl p-4
+                                    flex flex-col md:flex-row gap-4 items-start md:items-center">
+                      <div className="flex flex-col gap-1">
+                        <label className="text-[10px] font-bold text-slate-400
+                                          uppercase tracking-widest">Source</label>
+                        <select
+                          value={sourceFilter}
+                          onChange={e => setSource(e.target.value)}
+                          className="h-9 px-3 rounded-xl border border-slate-200 bg-white
+                                     text-sm font-medium text-slate-600 focus:outline-none
+                                     focus:border-emerald-400 cursor-pointer"
+                        >
+                          {SOURCE_OPTIONS.map(s => <option key={s}>{s}</option>)}
+                        </select>
+                      </div>
+                      <div className="flex flex-col gap-1 flex-1">
+                        <label className="text-[10px] font-bold text-slate-400
+                                          uppercase tracking-widest">
+                          Min Match:&nbsp;
+                          <span className="text-emerald-600">
+                            {minMatch > 0 ? `${minMatch}%` : 'Any'}
+                          </span>
+                        </label>
+                        <input
+                          type="range" min={0} max={100} step={5}
+                          value={minMatch}
+                          onChange={e => setMinMatch(Number(e.target.value))}
+                          className="w-full accent-emerald-500"
+                        />
+                      </div>
+                      {activeFilters && (
+                        <button
+                          onClick={() => { setSearch(''); setSource('All Sources'); setMinMatch(0); }}
+                          className="flex items-center gap-1.5 text-xs font-semibold
+                                     text-slate-400 hover:text-rose-500 transition-colors"
+                        >
+                          <X size={13} /> Clear all
+                        </button>
+                      )}
+                    </div>
+                  </motion.div>
+                )}
+              </AnimatePresence>
+            </div>
+          )}
+
+          {/* ── Job grid ── */}
+          {loading || searching ? (
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
+              {[...Array(3)].map((_, i) => (
+                <div key={i}
+                  className="h-56 bg-white border border-slate-200 rounded-2xl animate-pulse" />
+              ))}
+            </div>
+          ) : displayJobs.length === 0 ? (
+            <div className="bg-white border border-slate-200 rounded-2xl p-16
+                            flex flex-col items-center text-center">
+              <div className="w-16 h-16 bg-slate-50 rounded-full flex items-center
+                              justify-center mb-5">
+                <Building2 size={28} className="text-slate-300" />
+              </div>
+              <h3 className="text-lg font-bold text-slate-800 mb-1">
+                {isSearchMode ? 'No jobs match your search' :
+                 activeFilters ? 'No jobs match your filters' :
+                 'No matches found in database'}
+              </h3>
+              <p className="text-sm text-slate-400 mb-6 max-w-sm">
+                {isSearchMode
+                  ? 'Try different keywords, location, or remove salary filters.'
+                  : activeFilters
+                  ? 'Try loosening the filters above to see more results.'
+                  : "You haven't scanned the market since creating your profile."}
+              </p>
+              {isSearchMode && (
+                <button
+                  onClick={() => setSearchResult(null)}
+                  className="px-7 py-3 bg-slate-900 text-white rounded-xl font-bold
+                             text-sm hover:bg-slate-800 transition-all"
+                >
+                  Back to pipeline
+                </button>
+              )}
+              {!isSearchMode && !activeFilters && (
+                <button
+                  onClick={getMore}
+                  disabled={fetching}
+                  className="px-7 py-3 bg-slate-900 text-white rounded-xl font-bold
+                             text-sm hover:bg-slate-800 transition-all disabled:opacity-50"
+                >
+                  {fetching ? 'Scanning…' : 'Scan the Market Now'}
+                </button>
+              )}
+            </div>
+          ) : (
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
+              {displayJobs.map((j, idx) => (
+                <motion.div
+                  key={j.userJobId}
+                  initial={{ opacity: 0, y: 16 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  transition={{ delay: idx * 0.05 }}
+                >
+                  <JobCardUI job={j} />
+                </motion.div>
+              ))}
+            </div>
+          )}
+
+          {/* Load more (pipeline mode only) */}
+          {!isSearchMode && data && data.remaining > 0 && topJobs.length > 0 && (
+            <div className="flex justify-center mt-8">
               <button
                 onClick={getMore}
                 disabled={fetching}
-                className="px-7 py-3 bg-slate-900 text-white rounded-xl font-bold
-                           text-sm hover:bg-slate-800 transition-all disabled:opacity-50"
+                className="px-8 py-3 bg-white border border-slate-200 rounded-xl font-semibold
+                           text-sm text-slate-600 hover:border-emerald-300
+                           hover:text-emerald-700 transition-all disabled:opacity-50"
               >
-                {fetching ? 'Scanning…' : 'Scan the Market Now'}
+                {fetching ? 'Fetching…' : `Discover ${data.remaining} More Jobs`}
               </button>
-            )}
-          </div>
-        ) : (
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
-            {displayJobs.map((j, idx) => (
-              <motion.div
-                key={j.userJobId}
-                initial={{ opacity: 0, y: 16 }}
-                animate={{ opacity: 1, y: 0 }}
-                transition={{ delay: idx * 0.05 }}
-              >
-                <JobCardUI job={j} />
-              </motion.div>
-            ))}
-          </div>
-        )}
+            </div>
+          )}
+        </section>
 
-        {/* Load more (pipeline mode only) */}
-        {!isSearchMode && data && data.remaining > 0 && topJobs.length > 0 && (
-          <div className="flex justify-center mt-8">
-            <button
-              onClick={getMore}
-              disabled={fetching}
-              className="px-8 py-3 bg-white border border-slate-200 rounded-xl font-semibold
-                         text-sm text-slate-600 hover:border-emerald-300
-                         hover:text-emerald-700 transition-all disabled:opacity-50"
-            >
-              {fetching ? 'Fetching…' : `Discover ${data.remaining} More Jobs`}
-            </button>
-          </div>
-        )}
-      </section>
+        {/* ── Right: Planner Widget (sticky sidebar on xl) ── */}
+        <aside className="w-full xl:w-80 shrink-0 xl:sticky xl:top-6">
+          <PlannerWidget onOpenJob={openPlannerForJob} />
+        </aside>
+      </div>
 
       {/* ── Section 7: Recommended Jobs Widget ── */}
       {!isSearchMode && <RecommendedJobsWidget />}
 
-      {/* ── Market Pulse (real analytics data) ──
-           Mobile fix (task 133): grid is grid-cols-1 on mobile via the
-           responsive class below — already correct.
-      */}
+      {/* ── Market Pulse ── */}
       <section>
         <div className="bg-white border border-slate-200 rounded-2xl overflow-hidden">
           <div className="flex items-center gap-2 px-6 pt-5 pb-4 border-b border-slate-100">
@@ -434,7 +447,6 @@ export default function Dashboard() {
             </div>
             <h3 className="font-semibold text-slate-800">Your Progress This Week</h3>
           </div>
-          {/* ✓ grid-cols-1 on mobile, 3 cols on md+ — already handles task 133 stats wrap */}
           <div className="grid grid-cols-1 md:grid-cols-3 divide-y md:divide-y-0
                           md:divide-x divide-slate-100">
             <div className="px-6 py-5 space-y-1">
@@ -495,6 +507,35 @@ export default function Dashboard() {
         open={triageSkill.open}
         onClose={() => triageSkill.setOpen(false)}
       />
+
+      {/* ── JobPlannerPanel slide-over drawer ── */}
+      <AnimatePresence>
+        {plannerOpen && (
+          <>
+            {/* Backdrop */}
+            <motion.div
+              key="planner-backdrop"
+              initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+              className="fixed inset-0 bg-black/30 z-40"
+              onClick={() => setPlannerJobId(null)}
+            />
+            {/* Drawer */}
+            <motion.div
+              key="planner-drawer"
+              initial={{ x: '100%' }} animate={{ x: 0 }} exit={{ x: '100%' }}
+              transition={{ type: 'spring', damping: 28, stiffness: 260 }}
+              className="fixed right-0 top-0 h-full w-full max-w-md bg-white shadow-2xl z-50
+                         flex flex-col overflow-hidden"
+            >
+              <JobPlannerPanel
+                userJobId={plannerJobId!}
+                jobTitle={plannerJobTitle}
+                onClose={() => setPlannerJobId(null)}
+              />
+            </motion.div>
+          </>
+        )}
+      </AnimatePresence>
     </div>
   );
 }

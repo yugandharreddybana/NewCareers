@@ -11,12 +11,13 @@ import RunAllSkillsButton from '@/components/skills/RunAllSkillsButton';
 import ProfileCompletenessAlert from '@/components/skills/ProfileCompletenessAlert';
 import InterviewTracker from '@/components/InterviewTracker';
 import MockInterview from '@/components/MockInterview';
+import { JobPlannerPanel } from '@/components/planner';
 import {
   MapPin, Calendar, Euro, ShieldCheck,
   ExternalLink, Sparkles, CheckCircle2, AlertCircle,
   Bookmark, Send, Zap, FileDown, ChevronRight,
   Brain, ClipboardList, Layers, Building2, Loader2,
-  GraduationCap,
+  GraduationCap, CalendarCheck,
 } from 'lucide-react';
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -42,7 +43,7 @@ const ALL_SKILLS = [
 ] as const;
 
 type SkillName = typeof ALL_SKILLS[number]['name'];
-type Tab = 'overview' | 'ai-tools' | 'interview' | 'apply';
+type Tab = 'overview' | 'ai-tools' | 'interview' | 'planner' | 'apply';
 
 // ── Source badge helpers ────────────────────────────────────────────────────
 const SOURCE_STYLES: Record<string, string> = {
@@ -252,10 +253,11 @@ export default function JobDetailPage() {
       : 'Negotiable';
 
   const TABS: { id: Tab; label: string; icon: React.ReactNode; badge?: number }[] = [
-    { id: 'overview',   label: 'Overview',   icon: <Layers size={14} /> },
-    { id: 'ai-tools',   label: 'AI Tools',   icon: <Brain size={14} />, badge: doneCount || undefined },
-    { id: 'interview',  label: 'Interview',  icon: <GraduationCap size={14} /> },
-    { id: 'apply',      label: 'Apply',      icon: <ClipboardList size={14} /> },
+    { id: 'overview',  label: 'Overview',  icon: <Layers size={14} /> },
+    { id: 'ai-tools',  label: 'AI Tools',  icon: <Brain size={14} />, badge: doneCount || undefined },
+    { id: 'interview', label: 'Interview', icon: <GraduationCap size={14} /> },
+    { id: 'planner',   label: 'Planner',   icon: <CalendarCheck size={14} /> },
+    { id: 'apply',     label: 'Apply',     icon: <ClipboardList size={14} /> },
   ];
 
   return (
@@ -360,13 +362,13 @@ export default function JobDetailPage() {
       </section>
 
       {/* ── Tab bar ── */}
-      <div className="flex gap-1 bg-slate-100 p-1 rounded-xl mb-6 w-fit">
+      <div className="flex gap-1 bg-slate-100 p-1 rounded-xl mb-6 overflow-x-auto">
         {TABS.map(t => (
           <button
             key={t.id}
             onClick={() => setTab(t.id)}
             className={[
-              'flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-semibold transition-all',
+              'flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-semibold transition-all whitespace-nowrap',
               tab === t.id
                 ? 'bg-white text-slate-900 shadow-sm border border-slate-200'
                 : 'text-slate-500 hover:text-slate-700',
@@ -597,6 +599,23 @@ export default function JobDetailPage() {
                 />
               </div>
             )}
+          </motion.div>
+        )}
+
+        {/* PLANNER */}
+        {tab === 'planner' && (
+          <motion.div key="planner"
+            initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -8 }} transition={{ duration: 0.18 }}
+            className="max-w-2xl"
+          >
+            <div className="bg-white border border-slate-200 rounded-2xl overflow-hidden shadow-sm">
+              <JobPlannerPanel
+                userJobId={id!}
+                jobTitle={job.title}
+                onClose={() => setTab('overview')}
+              />
+            </div>
           </motion.div>
         )}
 
