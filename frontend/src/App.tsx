@@ -6,6 +6,9 @@
  *  - /jobs/:id route added → JobDetail page
  *  - /onboarding, /refer, /interviews, /interview/:id routes added
  *  - ResetPassword shim added (redirects to /login if page not yet created)
+ *
+ * Section 3.3 Batch 2:
+ *  - /networking route added → NetworkingPage
  */
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { AuthProvider, useAuth } from '@/context/AuthContext';
@@ -28,6 +31,7 @@ const JobDetail            = lazy(() => import('@/pages/JobDetail'));
 const Refer                = lazy(() => import('@/pages/Refer'));
 const InterviewHistoryPage = lazy(() => import('@/pages/InterviewHistoryPage'));
 const InterviewPage        = lazy(() => import('@/pages/InterviewPage'));
+const NetworkingPage       = lazy(() => import('@/pages/NetworkingPage'));  // Section 3.3
 const NotFound             = lazy(() => import('@/pages/NotFound'));
 
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
@@ -54,15 +58,16 @@ export default function App() {
             <Route path="/onboarding" element={<ProtectedRoute><Onboarding /></ProtectedRoute>} />
 
             {/* Core protected routes */}
-            <Route path="/dashboard"  element={<ProtectedRoute><Dashboard /></ProtectedRoute>} />
-            <Route path="/kanban"     element={<ProtectedRoute><Kanban /></ProtectedRoute>} />
-            <Route path="/analytics"  element={<ProtectedRoute><Analytics /></ProtectedRoute>} />
-            <Route path="/skills"     element={<ProtectedRoute><Skills /></ProtectedRoute>} />
-            <Route path="/cv"         element={<ProtectedRoute><CvManager /></ProtectedRoute>} />
-            <Route path="/profile"    element={<ProtectedRoute><Profile /></ProtectedRoute>} />
-            <Route path="/account"    element={<ProtectedRoute><AccountSettings /></ProtectedRoute>} />
-            <Route path="/billing"    element={<ProtectedRoute><BillingPage /></ProtectedRoute>} />
-            <Route path="/refer"      element={<ProtectedRoute><Refer /></ProtectedRoute>} />
+            <Route path="/dashboard"   element={<ProtectedRoute><Dashboard /></ProtectedRoute>} />
+            <Route path="/kanban"      element={<ProtectedRoute><Kanban /></ProtectedRoute>} />
+            <Route path="/analytics"   element={<ProtectedRoute><Analytics /></ProtectedRoute>} />
+            <Route path="/skills"      element={<ProtectedRoute><Skills /></ProtectedRoute>} />
+            <Route path="/cv"          element={<ProtectedRoute><CvManager /></ProtectedRoute>} />
+            <Route path="/profile"     element={<ProtectedRoute><Profile /></ProtectedRoute>} />
+            <Route path="/account"     element={<ProtectedRoute><AccountSettings /></ProtectedRoute>} />
+            <Route path="/billing"     element={<ProtectedRoute><BillingPage /></ProtectedRoute>} />
+            <Route path="/refer"       element={<ProtectedRoute><Refer /></ProtectedRoute>} />
+            <Route path="/networking"  element={<ProtectedRoute><NetworkingPage /></ProtectedRoute>} />
 
             {/* Section 3.3 — Job Detail route (was missing, caused 404 on JobCard click) */}
             <Route path="/jobs/:id" element={<ProtectedRoute><JobDetail /></ProtectedRoute>} />
