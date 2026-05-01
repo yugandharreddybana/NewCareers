@@ -25,6 +25,7 @@ import TriagePanel from '@/components/skills/TriagePanel';
 import JobSearchBar from '@/components/discovery/JobSearchBar';
 import RecommendedJobsWidget from '@/components/discovery/RecommendedJobsWidget';
 import { PlannerWidget, JobPlannerPanel } from '@/components/planner';
+import SalaryRangeFilter from '@/components/jobs/SalaryRangeFilter';
 import {
   RotateCw, SlidersHorizontal, X,
   Target, Zap, AlertTriangle, Building2, Send, TrendingUp, Search,
@@ -52,6 +53,10 @@ export default function Dashboard() {
   const [minMatch,     setMinMatch]    = useState(0);
   const [showFilters,  setShowFilters] = useState(false);
 
+  // Salary range filter for pipeline
+  const [pipelineMinSalary, setPipelineMinSalary] = useState<number | undefined>(undefined);
+  const [pipelineMaxSalary, setPipelineMaxSalary] = useState<number | undefined>(undefined);
+
   // ── Section 7: Search mode state ────────────────────────────────────
   const [searchResult,  setSearchResult]  = useState<SearchResult | null>(null);
   const [searching,     setSearching]     = useState(false);
@@ -63,7 +68,6 @@ export default function Dashboard() {
   const plannerOpen = plannerJobId !== null;
 
   function openPlannerForJob(userJobId: string) {
-    // Find the job title from the current pipeline or search results
     const allJobs: JobCard[] = data?.items || [];
     const found = allJobs.find(j => j.userJobId === userJobId);
     setPlannerJobTitle(found?.title ?? 'Job');
@@ -128,7 +132,7 @@ export default function Dashboard() {
     }
   }
 
-  // ── Pipeline jobs (existing filter logic) ─────────────────────────────
+  // ── Pipeline jobs (existing filter logic + salary) ─────────────────────────────
   const allJobs: JobCard[] = data?.items || [];
 
   const filteredJobs = useMemo(() => {
@@ -140,9 +144,12 @@ export default function Dashboard() {
         const q = search.toLowerCase();
         if (!j.title.toLowerCase().includes(q) && !j.company.toLowerCase().includes(q)) return false;
       }
+      // Salary range filter: a job qualifies if its salary range overlaps the filter range
+      if (pipelineMinSalary != null && j.salaryMax != null && j.salaryMax < pipelineMinSalary) return false;
+      if (pipelineMaxSalary != null && j.salaryMin != null && j.salaryMin > pipelineMaxSalary) return false;
       return true;
     });
-  }, [allJobs, search, sourceFilter, minMatch]);
+  }, [allJobs, search, sourceFilter, minMatch, pipelineMinSalary, pipelineMaxSalary]);
 
   const topJobs = filteredJobs
     .filter(j => j.kanbanColumn === 'Discovered' || j.kanbanColumn === 'Saved')
@@ -156,7 +163,8 @@ export default function Dashboard() {
     return Object.entries(map).sort((a, b) => b[1] - a[1]).slice(0, 5).filter(([, c]) => c >= 2);
   }, [allJobs]);
 
-  const activeFilters = search || sourceFilter !== 'All Sources' || minMatch > 0;
+  const activeFilters = search || sourceFilter !== 'All Sources' || minMatch > 0
+    || pipelineMinSalary != null || pipelineMaxSalary != null;
 
   const displayJobs: JobCard[] = isSearchMode
     ? (searchResult?.items ?? [])
@@ -306,7 +314,7 @@ export default function Dashboard() {
                     className="overflow-hidden"
                   >
                     <div className="bg-white border border-slate-200 rounded-2xl p-4
-                                    flex flex-col md:flex-row gap-4 items-start md:items-center">
+                                    flex flex-col md:flex-row gap-4 items-start md:items-center flex-wrap">
                       <div className="flex flex-col gap-1">
                         <label className="text-[10px] font-bold text-slate-400
                                           uppercase tracking-widest">Source</label>
@@ -320,7 +328,7 @@ export default function Dashboard() {
                           {SOURCE_OPTIONS.map(s => <option key={s}>{s}</option>)}
                         </select>
                       </div>
-                      <div className="flex flex-col gap-1 flex-1">
+                      <div className="flex flex-col gap-1 flex-1 min-w-[160px]">
                         <label className="text-[10px] font-bold text-slate-400
                                           uppercase tracking-widest">
                           Min Match:&nbsp;
@@ -335,9 +343,26 @@ export default function Dashboard() {
                           className="w-full accent-emerald-500"
                         />
                       </div>
+                      {/* Salary range filter */}
+                      <div className="shrink-0 w-full md:w-auto md:min-w-[200px]">
+                        <SalaryRangeFilter
+                          minSalary={pipelineMinSalary}
+                          maxSalary={pipelineMaxSalary}
+                          onChange={(min, max) => {
+                            setPipelineMinSalary(min);
+                            setPipelineMaxSalary(max);
+                          }}
+                        />
+                      </div>
                       {activeFilters && (
                         <button
-                          onClick={() => { setSearch(''); setSource('All Sources'); setMinMatch(0); }}
+                          onClick={() => {
+                            setSearch('');
+                            setSource('All Sources');
+                            setMinMatch(0);
+                            setPipelineMinSalary(undefined);
+                            setPipelineMaxSalary(undefined);
+                          }}
                           className="flex items-center gap-1.5 text-xs font-semibold
                                      text-slate-400 hover:text-rose-500 transition-colors"
                         >
