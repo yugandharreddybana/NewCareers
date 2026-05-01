@@ -1,36 +1,89 @@
-import { type ReactNode } from 'react';
-import { cn } from '@/lib/utils';
+/**
+ * Task 141 — EmptyState
+ * Reusable empty-state component used across all pages/lists.
+ * Usage:
+ *   <EmptyState
+ *     icon={<Building2 size={28} className="text-slate-300" />}
+ *     message="No jobs found"
+ *     description="Scan the market to find jobs matching your profile."
+ *     cta="Scan Now"
+ *     onCta={() => getMore()}
+ *   />
+ */
+import { ReactNode } from 'react';
 
-type Size = 'sm' | 'md' | 'lg';
-
-interface EmptyStateProps {
-  icon?:        ReactNode;
-  title:        string;
+type Props = {
+  /** Icon element — typically a lucide icon */
+  icon?: ReactNode;
+  /** Primary bold message */
+  message: string;
+  /** Optional softer sub-text */
   description?: string;
-  action?:      ReactNode;
-  className?:   string;
-  size?:        Size;
-}
-
-const sizes = {
-  sm: { wrapper: 'py-10', wrap: 'w-12 h-12 text-xl mb-4',  title: 'text-sm font-semibold', desc: 'text-xs mt-1' },
-  md: { wrapper: 'py-16', wrap: 'w-16 h-16 text-2xl mb-5', title: 'text-sm font-semibold', desc: 'text-sm mt-1.5' },
-  lg: { wrapper: 'py-24', wrap: 'w-20 h-20 text-3xl mb-6', title: 'text-base font-semibold', desc: 'text-sm mt-2' },
+  /** CTA button label */
+  cta?: string;
+  /** CTA click handler */
+  onCta?: () => void;
+  /** Whether the CTA button is in a loading/disabled state */
+  ctaLoading?: boolean;
+  /** Optional second action (e.g. "or do X") */
+  secondaryCta?: string;
+  onSecondaryCta?: () => void;
 };
 
-export function EmptyState({ icon, title, description, action, className, size = 'md' }: EmptyStateProps) {
-  const s = sizes[size];
+export default function EmptyState({
+  icon,
+  message,
+  description,
+  cta,
+  onCta,
+  ctaLoading = false,
+  secondaryCta,
+  onSecondaryCta,
+}: Props) {
   return (
-    <div className={cn('flex flex-col items-center justify-center text-center', s.wrapper, className)}>
+    <div
+      className="bg-white border border-slate-200 rounded-2xl p-14
+                 flex flex-col items-center text-center"
+    >
       {icon && (
-        <div className={cn('rounded-2xl bg-surface-overlay border border-border flex items-center justify-center text-text-tertiary', s.wrap)}>
+        <div
+          className="w-16 h-16 bg-slate-50 rounded-full flex items-center
+                     justify-center mb-5"
+        >
           {icon}
         </div>
       )}
-      <p className={cn('text-text-primary', s.title)}>{title}</p>
-      {description && <p className={cn('text-text-secondary max-w-xs text-balance', s.desc)}>{description}</p>}
-      {action && <div className="mt-5">{action}</div>}
+
+      <h3 className="text-lg font-bold text-slate-800 mb-1">{message}</h3>
+
+      {description && (
+        <p className="text-sm text-slate-400 mb-6 max-w-sm leading-relaxed">
+          {description}
+        </p>
+      )}
+
+      {cta && onCta && (
+        <div className="flex flex-col sm:flex-row items-center gap-3">
+          <button
+            onClick={onCta}
+            disabled={ctaLoading}
+            className="px-7 py-3 bg-slate-900 text-white rounded-xl font-bold
+                       text-sm hover:bg-slate-800 transition-all disabled:opacity-50"
+          >
+            {ctaLoading ? 'Loading…' : cta}
+          </button>
+
+          {secondaryCta && onSecondaryCta && (
+            <button
+              onClick={onSecondaryCta}
+              className="px-5 py-3 text-sm font-semibold text-slate-500
+                         hover:text-slate-800 transition-colors"
+            >
+              {secondaryCta}
+            </button>
+          )}
+        </div>
+      )}
     </div>
   );
 }
-export default EmptyState;

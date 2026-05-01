@@ -1,13 +1,19 @@
 /**
- * Task 120 — Axios instance with silent-refresh interceptor.
+ * Task 137 — Axios instance with silent-refresh interceptor + global 429 handling.
  *
  * Flow on 401:
  *  1. Check if we have a refresh token in tokenStore.
  *  2. POST /auth/refresh once (guarded by isRefreshing flag to queue concurrent calls).
  *  3. On success → store new tokens, retry all queued requests with new access token.
  *  4. On failure → clear tokens, redirect to /login.
+ *
+ * Flow on 429:
+ *  1. Read error message from response body (fallback generic string).
+ *  2. Fire a react-hot-toast error (deduped via toast id).
+ *  3. Attach normalizedMessage to the error for page-level handling.
  */
 import axios, { AxiosRequestConfig, InternalAxiosRequestConfig } from 'axios';
+import toast from 'react-hot-toast';
 import * as mocks from './mockApi';
 import { tokenStore } from '@/lib/tokenStore';
 
@@ -44,13 +50,24 @@ function processQueue(error: unknown, token: string | null = null) {
   failedQueue = [];
 }
 
-// ── Response interceptor: handle 401 → silent refresh → retry ─────────────
+// ── Response interceptor: handle 401 → silent refresh → retry, 429 → toast ─
 api.interceptors.response.use(
   r => r,
   async (err) => {
     const originalRequest: AxiosRequestConfig & { _retry?: boolean } = err.config;
 
-    // Only attempt refresh on 401 and only once per request
+    // ── 429 Too Many Requests ──────────────────────────────────────────────
+    if (err.response?.status === 429) {
+      const msg =
+        err.response?.data?.error ||
+        err.response?.data?.message ||
+        'Too many requests — please slow down.';
+      toast.error(msg, { id: 'rate-limit', duration: 4000 });
+      err.normalizedMessage = msg;
+      return Promise.reject(err);
+    }
+
+    // ── 401 → silent token refresh ─────────────────────────────────────────
     if (
       err.response?.status === 401 &&
       !originalRequest._retry &&
@@ -60,14 +77,12 @@ api.interceptors.response.use(
       const refresh = tokenStore.getRefresh();
 
       if (!refresh) {
-        // No refresh token stored — force logout
         tokenStore.clear();
         window.location.href = '/login';
         return Promise.reject(err);
       }
 
       if (isRefreshing) {
-        // Queue this request until the in-flight refresh resolves
         return new Promise<string>((resolve, reject) => {
           failedQueue.push({ resolve, reject });
         })
@@ -106,7 +121,7 @@ api.interceptors.response.use(
       }
     }
 
-    // Normalise error message for all other errors
+    // ── Normalise error message for all other errors ───────────────────────
     const msg = err.response?.data?.error || err.message || 'Request failed';
     err.normalizedMessage = msg;
     return Promise.reject(err);
