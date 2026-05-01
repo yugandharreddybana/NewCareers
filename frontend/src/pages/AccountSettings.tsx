@@ -3,7 +3,9 @@
  *
  * GDPR-safe account management: display name, email, password change,
  * data export, and account deletion.
- * Wired and production-safe; destructive actions gated behind confirmation.
+ *
+ * Batch 4 fix: password-change now calls PATCH /account/password (not POST /auth/change-password)
+ * to match AccountController. Account delete calls DELETE /account.
  */
 import { useState } from 'react';
 import { useAuth } from '@/context/AuthContext';
@@ -80,7 +82,8 @@ export default function AccountSettings() {
     if (newPw.length < 8)    { toast.error('Password must be at least 8 characters'); return; }
     setSavingPw(true);
     try {
-      await api.post('/auth/change-password', { currentPassword: currentPw, newPassword: newPw });
+      // PATCH /api/account/password — handled by AccountController.changePassword()
+      await api.patch('/account/password', { currentPassword: currentPw, newPassword: newPw });
       setPwDone(true);
       setCurrentPw(''); setNewPw(''); setConfirmPw('');
       toast.success('Password changed successfully');
@@ -123,6 +126,7 @@ export default function AccountSettings() {
     if (deleteConfirm !== 'DELETE') return;
     setDeleting(true);
     try {
+      // DELETE /api/account — handled by AccountController.deleteAccount()
       await api.delete('/account');
       await signOut();
       nav('/login');

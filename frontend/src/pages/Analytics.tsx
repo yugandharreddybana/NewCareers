@@ -1,22 +1,28 @@
 /**
- * Section 5 — Task 51
- * Analytics page at /analytics.
+ * Analytics — /analytics
  *
- * Three visualisations:
- *   1. Headline stats row  — skills run, applications submitted, avg match %
- *   2. Application funnel  — vertical bar chart (Discovered → Offer → Rejected)
- *   3. Skill usage         — horizontal bar chart (most-used skill at top)
+ * Four visualisations:
+ *   1. Headline stats row    — skills run, applications submitted, avg match %
+ *   2. Application funnel    — vertical bar chart (Discovered → Offer → Rejected)
+ *   3. Weekly trend chart    — line chart: applications + match avg over last 8 weeks (NEW)
+ *   4. Skill usage           — horizontal bar chart (most-used skill at top)
  *
  * All charts use Recharts. Empty states shown when no data exists.
+ * Batch 4: added weekly trend line chart wired to GET /api/analytics/time-series
  */
 
 import { useEffect, useState } from 'react';
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
-  Cell,
+  Cell, LineChart, Line, Legend,
 } from 'recharts';
 import { motion } from 'framer-motion';
-import { analyticsApi, AnalyticsSummary, FunnelStage } from '@/services/analyticsApi';
+import {
+  analyticsApi,
+  AnalyticsSummary,
+  FunnelStage,
+  TimeSeriesPoint,
+} from '@/services/analyticsApi';
 import { BarChart2, Zap, Send, Target, TrendingUp } from 'lucide-react';
 import toast from 'react-hot-toast';
 
@@ -70,7 +76,7 @@ function EmptyChart({ message }: { message: string }) {
   );
 }
 
-// ── Custom tooltip for funnel chart ───────────────────────────────────
+// ── Custom tooltips ────────────────────────────────────────────────────
 
 function FunnelTooltip({ active, payload }: any) {
   if (!active || !payload?.length) return null;
@@ -94,22 +100,39 @@ function SkillTooltip({ active, payload }: any) {
   );
 }
 
+function TrendTooltip({ active, payload, label }: any) {
+  if (!active || !payload?.length) return null;
+  return (
+    <div className="bg-white border border-slate-200 rounded-xl shadow-lg px-4 py-3 text-sm">
+      <p className="font-semibold text-slate-700 mb-1">w/c {label}</p>
+      {payload.map((p: any) => (
+        <p key={p.dataKey} style={{ color: p.color }} className="text-xs">
+          {p.name}: <span className="font-bold">{p.value}{p.dataKey === 'matchAvg' ? '%' : ''}</span>
+        </p>
+      ))}
+    </div>
+  );
+}
+
 // ── Main page ──────────────────────────────────────────────────────────────
 
 export default function Analytics() {
-  const [summary, setSummary] = useState<AnalyticsSummary | null>(null);
-  const [funnel,  setFunnel]  = useState<FunnelStage[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [summary,    setSummary]    = useState<AnalyticsSummary | null>(null);
+  const [funnel,     setFunnel]     = useState<FunnelStage[]>([]);
+  const [timeSeries, setTimeSeries] = useState<TimeSeriesPoint[]>([]);
+  const [loading,    setLoading]    = useState(true);
 
   useEffect(() => {
     async function load() {
       try {
-        const [s, f] = await Promise.all([
+        const [s, f, ts] = await Promise.all([
           analyticsApi.getSummary(),
           analyticsApi.getFunnel(),
+          analyticsApi.getTimeSeries(8),
         ]);
         setSummary(s);
         setFunnel(f);
+        setTimeSeries(ts);
       } catch (e: any) {
         toast.error(e?.normalizedMessage || 'Failed to load analytics');
       } finally {
@@ -121,14 +144,22 @@ export default function Analytics() {
 
   const skillUsage = summary?.skillUsage ?? [];
 
-  // Normalise skill names for display
   const skillUsageDisplay = skillUsage.map(s => ({
     ...s,
     label: s.skill.replace(/-/g, ' ').replace(/\b\w/g, c => c.toUpperCase()),
   }));
 
+  // Format week label as "Apr 28" from "2026-04-28"
+  const trendData = timeSeries.map(p => ({
+    ...p,
+    weekLabel: new Date(p.week + 'T00:00:00Z').toLocaleDateString('en-GB', {
+      month: 'short', day: 'numeric', timeZone: 'UTC',
+    }),
+  }));
+
   const totalFunnelJobs = funnel.reduce((sum, s) => sum + s.count, 0);
   const totalSkillRuns  = skillUsage.reduce((sum, s) => sum + s.count, 0);
+  const hasTrend        = trendData.length > 0;
 
   return (
     <div className="space-y-8 pb-20">
@@ -197,7 +228,6 @@ export default function Analytics() {
               </p>
             </div>
           </div>
-
           <div className="px-6 py-6">
             {loading ? (
               <div className="h-64 animate-pulse bg-slate-50 rounded-xl" />
@@ -214,30 +244,22 @@ export default function Analytics() {
                   <XAxis
                     dataKey="stage"
                     tick={{ fontSize: 12, fill: '#94A3B8', fontWeight: 500 }}
-                    axisLine={false}
-                    tickLine={false}
+                    axisLine={false} tickLine={false}
                   />
                   <YAxis
                     tick={{ fontSize: 11, fill: '#CBD5E1' }}
-                    axisLine={false}
-                    tickLine={false}
-                    allowDecimals={false}
+                    axisLine={false} tickLine={false} allowDecimals={false}
                   />
                   <Tooltip content={<FunnelTooltip />} cursor={{ fill: '#F8FAFC' }} />
                   <Bar dataKey="count" radius={[6, 6, 0, 0]}>
                     {funnel.map((entry) => (
-                      <Cell
-                        key={entry.stage}
-                        fill={FUNNEL_COLOURS[entry.stage] ?? '#6366F1'}
-                      />
+                      <Cell key={entry.stage} fill={FUNNEL_COLOURS[entry.stage] ?? '#6366F1'} />
                     ))}
                   </Bar>
                 </BarChart>
               </ResponsiveContainer>
             )}
           </div>
-
-          {/* Legend */}
           {!loading && totalFunnelJobs > 0 && (
             <div className="flex flex-wrap gap-3 px-6 pb-5">
               {funnel.map(({ stage, count }) => (
@@ -256,6 +278,76 @@ export default function Analytics() {
         </div>
       </section>
 
+      {/* ── Weekly trend chart (NEW) ── */}
+      <section>
+        <div className="bg-white border border-slate-200 rounded-2xl overflow-hidden">
+          <div className="px-6 pt-5 pb-4 border-b border-slate-100">
+            <h2 className="font-semibold text-slate-800">Weekly Activity Trend</h2>
+            <p className="text-xs text-slate-400 mt-0.5">Applications moved to pipeline + avg match score — last 8 weeks</p>
+          </div>
+          <div className="px-6 py-6">
+            {loading ? (
+              <div className="h-56 animate-pulse bg-slate-50 rounded-xl" />
+            ) : !hasTrend ? (
+              <EmptyChart message="No application activity in the last 8 weeks yet." />
+            ) : (
+              <ResponsiveContainer width="100%" height={240}>
+                <LineChart
+                  data={trendData}
+                  margin={{ top: 4, right: 16, left: -12, bottom: 0 }}
+                >
+                  <CartesianGrid strokeDasharray="3 3" stroke="#F1F5F9" vertical={false} />
+                  <XAxis
+                    dataKey="weekLabel"
+                    tick={{ fontSize: 11, fill: '#94A3B8' }}
+                    axisLine={false} tickLine={false}
+                  />
+                  <YAxis
+                    yAxisId="apps"
+                    tick={{ fontSize: 11, fill: '#CBD5E1' }}
+                    axisLine={false} tickLine={false} allowDecimals={false}
+                  />
+                  <YAxis
+                    yAxisId="match"
+                    orientation="right"
+                    domain={[0, 100]}
+                    tick={{ fontSize: 11, fill: '#CBD5E1' }}
+                    axisLine={false} tickLine={false}
+                    tickFormatter={(v) => `${v}%`}
+                  />
+                  <Tooltip content={<TrendTooltip />} />
+                  <Legend
+                    wrapperStyle={{ fontSize: 12, color: '#94A3B8', paddingTop: 12 }}
+                    formatter={(value) => value === 'applications' ? 'Applications' : 'Avg Match %'}
+                  />
+                  <Line
+                    yAxisId="apps"
+                    type="monotone"
+                    dataKey="applications"
+                    stroke="#F59E0B"
+                    strokeWidth={2}
+                    dot={{ r: 3, fill: '#F59E0B' }}
+                    activeDot={{ r: 5 }}
+                    name="applications"
+                  />
+                  <Line
+                    yAxisId="match"
+                    type="monotone"
+                    dataKey="matchAvg"
+                    stroke="#10B981"
+                    strokeWidth={2}
+                    strokeDasharray="4 3"
+                    dot={{ r: 3, fill: '#10B981' }}
+                    activeDot={{ r: 5 }}
+                    name="matchAvg"
+                  />
+                </LineChart>
+              </ResponsiveContainer>
+            )}
+          </div>
+        </div>
+      </section>
+
       {/* ── Skill usage chart ── */}
       <section>
         <div className="bg-white border border-slate-200 rounded-2xl overflow-hidden">
@@ -267,7 +359,6 @@ export default function Analytics() {
               </p>
             </div>
           </div>
-
           <div className="px-6 py-6">
             {loading ? (
               <div className="h-64 animate-pulse bg-slate-50 rounded-xl" />
@@ -288,17 +379,14 @@ export default function Analytics() {
                   <XAxis
                     type="number"
                     tick={{ fontSize: 11, fill: '#CBD5E1' }}
-                    axisLine={false}
-                    tickLine={false}
-                    allowDecimals={false}
+                    axisLine={false} tickLine={false} allowDecimals={false}
                   />
                   <YAxis
                     type="category"
                     dataKey="label"
                     width={140}
                     tick={{ fontSize: 12, fill: '#64748B', fontWeight: 500 }}
-                    axisLine={false}
-                    tickLine={false}
+                    axisLine={false} tickLine={false}
                   />
                   <Tooltip content={<SkillTooltip />} cursor={{ fill: '#F8FAFC' }} />
                   <Bar dataKey="count" fill={SKILL_COLOUR} radius={[0, 6, 6, 0]} />

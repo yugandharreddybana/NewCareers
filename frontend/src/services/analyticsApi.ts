@@ -1,7 +1,8 @@
 /**
- * Section 5 — Task 49
  * Analytics API service.
  * Calls the Node middleware which proxies to Java backend.
+ *
+ * Batch 4 — added getTimeSeries() wired to GET /api/analytics/time-series
  */
 
 import { api } from './api';
@@ -25,6 +26,14 @@ export interface FunnelStage {
   count: number;
 }
 
+/** One data point for the weekly trend chart */
+export interface TimeSeriesPoint {
+  /** ISO date string for Monday of that week, e.g. "2026-04-28" */
+  week:         string;
+  applications: number;
+  matchAvg:     number;
+}
+
 // ── API calls ────────────────────────────────────────────────────────────────
 
 export const analyticsApi = {
@@ -45,6 +54,18 @@ export const analyticsApi = {
    */
   getFunnel: async (): Promise<FunnelStage[]> => {
     const res = await api.get<FunnelStage[]>('/api/analytics/funnel');
+    return res.data;
+  },
+
+  /**
+   * GET /api/analytics/time-series?weeks=N
+   * Returns one data point per week for the last N weeks.
+   * Each point: { week: "2026-04-28", applications: 3, matchAvg: 72 }
+   *
+   * @param weeks number of rolling weeks to fetch (1-52, default 8)
+   */
+  getTimeSeries: async (weeks = 8): Promise<TimeSeriesPoint[]> => {
+    const res = await api.get<TimeSeriesPoint[]>(`/api/analytics/time-series?weeks=${weeks}`);
     return res.data;
   },
 };
