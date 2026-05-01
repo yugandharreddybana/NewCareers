@@ -1,6 +1,10 @@
 import axios from 'axios';
+import * as mocks from './mockApi';
 
 const baseURL = import.meta.env.VITE_MIDDLEWARE_URL || 'http://localhost:4000';
+const USE_MOCKS = import.meta.env.VITE_USE_MOCKS === 'true';
+
+const delay = (ms = 800) => new Promise(res => setTimeout(res, ms));
 
 export const api = axios.create({
   baseURL: `${baseURL}/api`,
@@ -8,6 +12,7 @@ export const api = axios.create({
   timeout: 90_000,
 });
 
+// ... existing interceptors ...
 api.interceptors.response.use(
   r => r,
   err => {
@@ -19,19 +24,28 @@ api.interceptors.response.use(
 
 // Auth
 export const authApi = {
-  signup: (b: { name: string; username: string; email: string; password: string }) =>
-    api.post('/auth/signup', b).then(r => r.data),
-  login:  (b: { email: string; password: string }) =>
-    api.post('/auth/login', b).then(r => r.data),
-  logout: () => api.post('/auth/logout').then(r => r.data),
+  signup: async (b: any) => {
+    if (USE_MOCKS) { await delay(); return { user: mocks.MOCK_USER }; }
+    return api.post('/auth/signup', b).then(r => r.data);
+  },
+  login:  async (b: any) => {
+    if (USE_MOCKS) { await delay(); return { user: mocks.MOCK_USER }; }
+    return api.post('/auth/login', b).then(r => r.data);
+  },
+  logout: async () => {
+    if (USE_MOCKS) { await delay(); return { success: true }; }
+    return api.post('/auth/logout').then(r => r.data);
+  },
   forgot: (email: string) => api.post('/auth/forgot-password', { email }).then(r => r.data),
-  reset:  (b: { email: string; otp: string; newPassword: string }) =>
-    api.post('/auth/reset-password', b).then(r => r.data),
+  reset:  (b: any) => api.post('/auth/reset-password', b).then(r => r.data),
 };
 
 // Profile
 export const profileApi = {
-  get:    () => api.get('/profile').then(r => r.data),
+  get:    async () => {
+    if (USE_MOCKS) { await delay(400); return mocks.MOCK_USER; }
+    return api.get('/profile').then(r => r.data);
+  },
   update: (b: object) => api.put('/profile', b).then(r => r.data),
   uploadCv: (file: File) => {
     const fd = new FormData();
@@ -39,50 +53,74 @@ export const profileApi = {
     return api.post('/profile/cv', fd).then(r => r.data);
   },
   cvDownload: () => api.get('/profile/cv/download').then(r => r.data),
-  stats:  () => api.get('/profile/stats').then(r => r.data),
+  stats:  async () => {
+    if (USE_MOCKS) { await delay(300); return mocks.MOCK_STATS; }
+    return api.get('/profile/stats').then(r => r.data);
+  },
 };
 
 // Jobs
 export const jobsApi = {
-  list:   () => api.get('/jobs').then(r => r.data),
-  detail: (id: string) => api.get(`/jobs/${id}`).then(r => r.data),
-  fetch:  (count = 5) => api.post('/jobs/fetch', null, { params: { count } }).then(r => r.data),
-  limits: () => api.get('/jobs/limits').then(r => r.data),
-  stats:  () => api.get('/jobs/stats').then(r => r.data),
+  list:   async () => {
+    if (USE_MOCKS) { await delay(1000); return { items: mocks.MOCK_JOBS, dailyCount: 5, dailyLimit: 15, remaining: 10 }; }
+    return api.get('/jobs').then(r => r.data);
+  },
+  detail: async (id: string) => {
+    if (USE_MOCKS) { await delay(600); return mocks.MOCK_JOB_DETAIL; }
+    return api.get(`/jobs/${id}`).then(r => r.data);
+  },
+  fetch:  async (count = 5) => {
+    if (USE_MOCKS) { await delay(2000); return mocks.MOCK_FETCH_SUMMARY; }
+    return api.post('/jobs/fetch', null, { params: { count } }).then(r => r.data);
+  },
+  limits: async () => {
+    if (USE_MOCKS) { return mocks.MOCK_FETCH_SUMMARY; }
+    return api.get('/jobs/limits').then(r => r.data);
+  },
+  stats:  async () => {
+    if (USE_MOCKS) { return mocks.MOCK_STATS; }
+    return api.get('/jobs/stats').then(r => r.data);
+  },
 };
 
 // Kanban
 export const kanbanApi = {
-  patch:    (id: string, body: { kanbanColumn?: string; status?: string }) =>
-    api.patch(`/kanban/${id}`, body).then(r => r.data),
+  patch:    (id: string, body: { kanbanColumn?: string; status?: string }) => {
+    if (USE_MOCKS) return Promise.resolve({ success: true });
+    return api.patch(`/kanban/${id}`, body).then(r => r.data);
+  },
   uploadCv: (id: string, file: File) => {
     const fd = new FormData(); fd.append('file', file);
     return api.post(`/kanban/${id}/cv`, fd).then(r => r.data);
   }
 };
 
-/**
- * Skills API — all 9 skills unified under /skills/start
- * Old per-skill methods kept for backward compatibility during migration.
- * New code should import from services/skillsApi.ts instead.
- */
+// Skills
 export const skillsApi = {
-  // ── NEW unified endpoints (use these) ─────────────────────────
-  start: (req: object) =>
-    api.post('/skills/start', req, { timeout: 180_000 }).then(r => r.data),
+  start: async (req: any) => {
+    if (USE_MOCKS) {
+      await delay(2500);
+      return { state: 'done', data: mocks.MOCK_SKILL_RESULTS[req.skillName] || { text: 'Skill execution complete.' } };
+    }
+    return api.post('/skills/start', req, { timeout: 180_000 }).then(r => r.data);
+  },
 
   reply: (req: { conversationId: string; answer: string }) =>
     api.post('/skills/conversation/reply', req, { timeout: 180_000 }).then(r => r.data),
 
-  runAll: (userJobId: string) =>
-    api.post(`/skills/run-all/${userJobId}`, null, { timeout: 600_000 }).then(r => r.data),
+  runAll: async (userJobId: string) => {
+    if (USE_MOCKS) { await delay(4000); return { success: true }; }
+    return api.post(`/skills/run-all/${userJobId}`, null, { timeout: 600_000 }).then(r => r.data);
+  },
 
-  getLastRun: (userJobId: string, skill: string) =>
-    api.get(`/skills/last-run/${userJobId}/${skill}`).then(r => r.data),
+  getLastRun: async (userJobId: string, skill: string) => {
+    if (USE_MOCKS) { return { state: 'done', data: mocks.MOCK_SKILL_RESULTS[skill] }; }
+    return api.get(`/skills/last-run/${userJobId}/${skill}`).then(r => r.data);
+  },
 
-  // ── PDF downloads ──────────────────────────────────────────
-  downloadSkillPdf: (userJobId: string, skillName: string) =>
-    api.get(`/skills/pdf/${userJobId}/${skillName}`, { responseType: 'blob', timeout: 60_000 })
+  downloadSkillPdf: (userJobId: string, skillName: string) => {
+    if (USE_MOCKS) { alert('MOCK: Downloading PDF...'); return Promise.resolve(); }
+    return api.get(`/skills/pdf/${userJobId}/${skillName}`, { responseType: 'blob', timeout: 60_000 })
       .then(r => {
         const url  = window.URL.createObjectURL(r.data);
         const link = document.createElement('a');
@@ -90,10 +128,12 @@ export const skillsApi = {
         document.body.appendChild(link); link.click();
         document.body.removeChild(link);
         window.URL.revokeObjectURL(url);
-      }),
+      });
+  },
 
-  downloadAllPdf: (userJobId: string) =>
-    api.get(`/skills/pdf/${userJobId}/all`, { responseType: 'blob', timeout: 120_000 })
+  downloadAllPdf: (userJobId: string) => {
+    if (USE_MOCKS) { alert('MOCK: Downloading complete pack...'); return Promise.resolve(); }
+    return api.get(`/skills/pdf/${userJobId}/all`, { responseType: 'blob', timeout: 120_000 })
       .then(r => {
         const url  = window.URL.createObjectURL(r.data);
         const link = document.createElement('a');
@@ -101,10 +141,12 @@ export const skillsApi = {
         document.body.appendChild(link); link.click();
         document.body.removeChild(link);
         window.URL.revokeObjectURL(url);
-      }),
+      });
+  },
 
-  downloadResumePdf: (userJobId: string) =>
-    api.get(`/skills/pdf/${userJobId}/resume`, { responseType: 'blob', timeout: 60_000 })
+  downloadResumePdf: (userJobId: string) => {
+    if (USE_MOCKS) { alert('MOCK: Downloading resume...'); return Promise.resolve(); }
+    return api.get(`/skills/pdf/${userJobId}/resume`, { responseType: 'blob', timeout: 60_000 })
       .then(r => {
         const url  = window.URL.createObjectURL(r.data);
         const link = document.createElement('a');
@@ -112,34 +154,22 @@ export const skillsApi = {
         document.body.appendChild(link); link.click();
         document.body.removeChild(link);
         window.URL.revokeObjectURL(url);
-      }),
+      });
+  },
 
-  // ── Legacy aliases (kept for backward compat — will be removed in Phase 2) ──
-  /** @deprecated Use skillsApi.start({ skillName: 'evaluate', userJobId }) */
-  evaluate:      (userJobId: string) =>
-    api.post('/skills/start', { skillName: 'evaluate', userJobId }, { timeout: 180_000 }).then(r => r.data),
-  /** @deprecated Use skillsApi.start({ skillName: 'tailor-resume', userJobId }) */
-  tailorResume:  (userJobId: string) =>
-    api.post('/skills/start', { skillName: 'tailor-resume', userJobId }, { timeout: 180_000 }).then(r => r.data),
-  /** @deprecated */
-  research:      (userJobId: string) =>
-    api.post('/skills/start', { skillName: 'research', userJobId }, { timeout: 180_000 }).then(r => r.data),
-  /** @deprecated */
-  outreach: (userJobId: string, channel = 'linkedin', tone = 'professional') =>
-    api.post('/skills/start', { skillName: 'outreach', userJobId, channel, tone }, { timeout: 180_000 }).then(r => r.data),
-  /** @deprecated */
-  apply: (userJobId: string, step = 'all') =>
-    api.post('/skills/start', { skillName: 'apply', userJobId, step }, { timeout: 180_000 }).then(r => r.data),
-  /** @deprecated */
-  prepInterview: (userJobId: string) =>
-    api.post('/skills/start', { skillName: 'prep-interview', userJobId }, { timeout: 180_000 }).then(r => r.data),
-  /** @deprecated */
-  compare: (userJobIds: string[]) =>
-    api.post('/skills/start', { skillName: 'compare', compareJobIds: userJobIds }, { timeout: 180_000 }).then(r => r.data),
-  /** @deprecated */
-  triage: () =>
-    api.post('/skills/start', { skillName: 'triage' }, { timeout: 180_000 }).then(r => r.data),
-  /** @deprecated */
-  last: (userJobId: string, skill: string) =>
-    api.get(`/skills/last-run/${userJobId}/${skill}`).then(r => r.data),
+  // Legacy aliases
+  evaluate:      (userJobId: string) => skillsApi.start({ skillName: 'evaluate', userJobId }),
+  tailorResume:  (userJobId: string) => skillsApi.start({ skillName: 'tailor-resume', userJobId }),
+  research:      (userJobId: string) => skillsApi.start({ skillName: 'research', userJobId }),
+  outreach:      (userJobId: string, channel = 'linkedin', tone = 'professional') => 
+    skillsApi.start({ skillName: 'outreach', userJobId, channel, tone }),
+  apply:         (userJobId: string, step = 'all') => 
+    skillsApi.start({ skillName: 'apply', userJobId, step }),
+  prepInterview: (userJobId: string) => 
+    skillsApi.start({ skillName: 'prep-interview', userJobId }),
+  compare:       (userJobIds: string[]) => 
+    skillsApi.start({ skillName: 'compare', compareJobIds: userJobIds }),
+  triage:        () => 
+    skillsApi.start({ skillName: 'triage' }),
+  last:          (userJobId: string, skill: string) => skillsApi.getLastRun(userJobId, skill),
 };

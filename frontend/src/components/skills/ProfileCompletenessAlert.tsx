@@ -2,8 +2,8 @@ import React, { useState } from 'react';
 
 interface Props {
   missingFields: string[];
-  skillName:     string;
-  onDismiss:     () => void;
+  skillName: string;
+  onDismiss: () => void;
 }
 
 /**
@@ -68,3 +68,5 @@ export function ProfileCompletenessAlert({ missingFields, skillName, onDismiss }
     </div>
   );
 }
+
+export default ProfileCompletenessAlert;

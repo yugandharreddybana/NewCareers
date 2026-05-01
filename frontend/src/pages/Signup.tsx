@@ -14,10 +14,10 @@ export default function Signup() {
   const { signUp } = useAuth();
   const nav = useNavigate();
 
-  const [form,    setForm]    = useState({ name: '', email: '', password: '' });
-  const [showPw,  setShowPw]  = useState(false);
+  const [form, setForm] = useState({ name: '', email: '', password: '' });
+  const [showPw, setShowPw] = useState(false);
   const [loading, setLoading] = useState(false);
-  const [error,   setError]   = useState('');
+  const [error, setError] = useState('');
 
   const set = (k: keyof typeof form) =>
     (e: React.ChangeEvent<HTMLInputElement>) =>

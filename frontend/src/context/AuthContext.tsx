@@ -1,4 +1,5 @@
 import { createContext, useContext, useEffect, useState, ReactNode } from 'react';
+import * as mocks from '@/services/mockApi';
 import { User } from '@/types';
 import { authApi, profileApi } from '@/services/api';
 
@@ -24,8 +25,11 @@ interface Ctx {
 
 const AuthCtx = createContext<Ctx | null>(null);
 
+const USE_MOCKS = import.meta.env.VITE_USE_MOCKS === 'true';
+
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null>(() => {
+    if (USE_MOCKS) return mocks.MOCK_USER;
     try { return JSON.parse(localStorage.getItem('co_user') || 'null'); } catch { return null; }
   });
   const [loading, setLoading] = useState(false);

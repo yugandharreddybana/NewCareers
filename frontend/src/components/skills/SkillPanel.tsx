@@ -9,15 +9,15 @@ import { SkillsGapPlanPanel } from './SkillsGapPlanPanel';
 import type { SkillState } from '../../types/skills';
 
 interface Props {
-  skillName:      string;
-  label:          string;
-  userJobId:      string;
-  state:          SkillState;
-  data:           Record<string, unknown> | null;
-  error:          string | null;
-  missingFields:  string[];
-  isActive:       boolean;
-  onRun:          () => void;
+  skillName: string;
+  label: string;
+  userJobId: string;
+  state: SkillState;
+  data: Record<string, unknown> | null;
+  error: string | null;
+  missingFields: string[];
+  isActive: boolean;
+  onRun: () => void;
   onDismissAlert: () => void;
 }
 
@@ -76,8 +76,8 @@ export function SkillPanel({
             {showLoading ? (
               <>
                 <svg className="animate-spin h-3.5 w-3.5" viewBox="0 0 24 24" fill="none">
-                  <circle cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" className="opacity-25"/>
-                  <path fill="currentColor" d="M4 12a8 8 0 018-8v8H4z" className="opacity-75"/>
+                  <circle cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" className="opacity-25" />
+                  <path fill="currentColor" d="M4 12a8 8 0 018-8v8H4z" className="opacity-75" />
                 </svg>
                 Running...
               </>
@@ -99,7 +99,7 @@ export function SkillPanel({
       {isActive && state === 'waiting_answer' && (
         <div className="flex items-center gap-2 text-sm text-indigo-600 dark:text-indigo-400">
           <svg className="animate-pulse h-4 w-4" viewBox="0 0 24 24" fill="currentColor">
-            <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 18c-4.41 0-8-3.59-8-8s3.59-8 8-8 8 3.59 8 8-3.59 8-8 8zm-1-13h2v6h-2zm0 8h2v2h-2z"/>
+            <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 18c-4.41 0-8-3.59-8-8s3.59-8 8-8 8 3.59 8 8-3.59 8-8 8zm-1-13h2v6h-2zm0 8h2v2h-2z" />
           </svg>
           Waiting for your answer in the popup above...
         </div>
@@ -119,6 +119,8 @@ export function SkillPanel({
     </div>
   );
 }
+
+export default SkillPanel;
 
 /** Dispatches to a dedicated rich panel for Phase 2 skills; generic renderer otherwise. */
 function SkillOutput({

@@ -1,12 +1,12 @@
 import React, { useEffect, useRef, useState } from 'react';
 
 interface Props {
-  isOpen:      boolean;
-  skillName:   string;
-  question:    string;
-  onSubmit:    (answer: string) => void;
-  onSkip:      () => void;
-  isLoading:   boolean;
+  isOpen: boolean;
+  skillName: string;
+  question: string;
+  onSubmit: (answer: string) => void;
+  onSkip: () => void;
+  isLoading: boolean;
 }
 
 /**
@@ -27,9 +27,9 @@ export function SkillQuestionModal({
   onSkip,
   isLoading,
 }: Props) {
-  const [answer, setAnswer]   = useState('');
-  const textareaRef           = useRef<HTMLTextAreaElement>(null);
-  const modalRef              = useRef<HTMLDivElement>(null);
+  const [answer, setAnswer] = useState('');
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const modalRef = useRef<HTMLDivElement>(null);
 
   // Auto-focus textarea when modal opens
   useEffect(() => {
@@ -122,8 +122,8 @@ export function SkillQuestionModal({
             {isLoading ? (
               <>
                 <svg className="animate-spin h-4 w-4" viewBox="0 0 24 24" fill="none">
-                  <circle cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" className="opacity-25"/>
-                  <path fill="currentColor" d="M4 12a8 8 0 018-8v8H4z" className="opacity-75"/>
+                  <circle cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" className="opacity-25" />
+                  <path fill="currentColor" d="M4 12a8 8 0 018-8v8H4z" className="opacity-75" />
                 </svg>
                 Processing...
               </>
@@ -139,3 +139,5 @@ export function SkillQuestionModal({
     </div>
   );
 }
+
+export default SkillQuestionModal;

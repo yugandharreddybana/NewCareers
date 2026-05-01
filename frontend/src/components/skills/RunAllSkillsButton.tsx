@@ -12,9 +12,9 @@ interface Props {
  * Shows live progress count and a Download All PDF button on completion.
  */
 export function RunAllSkillsButton({ userJobId, onComplete }: Props) {
-  const [status,   setStatus]   = useState<'idle' | 'running' | 'done' | 'error'>('idle');
-  const [results,  setResults]  = useState<RunAllSkillsResponse | null>(null);
-  const [error,    setError]    = useState<string | null>(null);
+  const [status, setStatus] = useState<'idle' | 'running' | 'done' | 'error'>('idle');
+  const [results, setResults] = useState<RunAllSkillsResponse | null>(null);
+  const [error, setError] = useState<string | null>(null);
   const [downloading, setDownloading] = useState(false);
 
   const handleRunAll = async () => {
@@ -27,7 +27,7 @@ export function RunAllSkillsButton({ userJobId, onComplete }: Props) {
       onComplete?.(res);
     } catch (err: unknown) {
       const msg = (err as { normalizedMessage?: string })?.normalizedMessage
-               || 'Run All failed. Please try again.';
+        || 'Run All failed. Please try again.';
       setError(msg);
       setStatus('error');
     }
@@ -56,8 +56,8 @@ export function RunAllSkillsButton({ userJobId, onComplete }: Props) {
           {status === 'running' ? (
             <>
               <svg className="animate-spin h-4 w-4" viewBox="0 0 24 24" fill="none">
-                <circle cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" className="opacity-25"/>
-                <path fill="currentColor" d="M4 12a8 8 0 018-8v8H4z" className="opacity-75"/>
+                <circle cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" className="opacity-25" />
+                <path fill="currentColor" d="M4 12a8 8 0 018-8v8H4z" className="opacity-75" />
               </svg>
               Running all skills...
             </>
@@ -102,8 +102,8 @@ export function RunAllSkillsButton({ userJobId, onComplete }: Props) {
             {downloading ? (
               <>
                 <svg className="animate-spin h-4 w-4" viewBox="0 0 24 24" fill="none">
-                  <circle cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" className="opacity-25"/>
-                  <path fill="currentColor" d="M4 12a8 8 0 018-8v8H4z" className="opacity-75"/>
+                  <circle cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" className="opacity-25" />
+                  <path fill="currentColor" d="M4 12a8 8 0 018-8v8H4z" className="opacity-75" />
                 </svg>
                 Generating PDF...
               </>
@@ -142,3 +142,5 @@ export function RunAllSkillsButton({ userJobId, onComplete }: Props) {
     </div>
   );
 }
+
+export default RunAllSkillsButton;
