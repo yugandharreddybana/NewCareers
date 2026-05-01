@@ -6,6 +6,15 @@ export interface User {
   onboarded: boolean;
 }
 
+// Section 10 — portfolio item
+export interface PortfolioItem {
+  id: string;
+  title: string;
+  url?: string;
+  description?: string;
+  techTags?: string[];
+}
+
 export interface Profile {
   targetRoles?: string[];
   techStack?: string[];
@@ -18,6 +27,25 @@ export interface Profile {
   sponsorshipRequired?: boolean;
   onboarded?: boolean;
   activeCvFileName?: string | null;
+  // Section 10 additions
+  portfolioItems?: PortfolioItem[];
+  goalTitle?: string;
+  goalSalaryMin?: number;
+  goalSalaryMax?: number;
+  goalLocation?: string;
+  openToRemote?: boolean;
+}
+
+// Section 10 — LinkedIn import summary
+export interface ImportSummary {
+  firstName: string;
+  lastName: string;
+  headline: string;
+  summary: string;
+  positionsImported: number;
+  skillsImported: number;
+  locationUpdated: boolean;
+  message: string;
 }
 
 export interface JobCard {
@@ -31,16 +59,15 @@ export interface JobCard {
   currency?: string;
   sponsorship?: boolean;
   matchPercent?: number;
-  preMatchScore?: number;       // fast keyword pre-score (0-100)
+  preMatchScore?: number;
   verdict?: string;
-  humanSummary?: string;        // 1-line Gemini plain-English summary
-  sourceName?: string;          // e.g. "LinkedIn (Twin AI)", "IrishJobs", "Reed"
-  sourceUrl?: string;           // direct link to the original job posting
+  humanSummary?: string;
+  sourceName?: string;
+  sourceUrl?: string;
   postedAt?: string;
   deliveredAt?: string;
   kanbanColumn: string;
   status: string;
-  // Included in list response so Dashboard can render CV Skills Gap banner
   matchedSkills?: string[];
   unmatchedSkills?: string[];
 }

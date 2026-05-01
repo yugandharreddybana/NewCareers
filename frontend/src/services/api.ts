@@ -12,7 +12,6 @@ export const api = axios.create({
   timeout: 90_000,
 });
 
-// ... existing interceptors ...
 api.interceptors.response.use(
   r => r,
   err => {
@@ -28,7 +27,7 @@ export const authApi = {
     if (USE_MOCKS) { await delay(); return { user: mocks.MOCK_USER }; }
     return api.post('/auth/signup', b).then(r => r.data);
   },
-  login:  async (b: any) => {
+  login: async (b: any) => {
     if (USE_MOCKS) { await delay(); return { user: mocks.MOCK_USER }; }
     return api.post('/auth/login', b).then(r => r.data);
   },
@@ -42,7 +41,7 @@ export const authApi = {
 
 // Profile
 export const profileApi = {
-  get:    async () => {
+  get: async () => {
     if (USE_MOCKS) { await delay(400); return mocks.MOCK_USER; }
     return api.get('/profile').then(r => r.data);
   },
@@ -53,15 +52,32 @@ export const profileApi = {
     return api.post('/profile/cv', fd).then(r => r.data);
   },
   cvDownload: () => api.get('/profile/cv/download').then(r => r.data),
-  stats:  async () => {
+  stats: async () => {
     if (USE_MOCKS) { await delay(300); return mocks.MOCK_STATS; }
     return api.get('/profile/stats').then(r => r.data);
+  },
+
+  // Section 10 — Portfolio CRUD
+  addPortfolioItem: (item: { title: string; url?: string; description?: string; techTags?: string[] }) =>
+    api.post('/profile/portfolio', item).then(r => r.data),
+
+  updatePortfolioItem: (itemId: string, item: { title: string; url?: string; description?: string; techTags?: string[] }) =>
+    api.put(`/profile/portfolio/${itemId}`, item).then(r => r.data),
+
+  deletePortfolioItem: (itemId: string) =>
+    api.delete(`/profile/portfolio/${itemId}`).then(r => r.data),
+
+  // Section 10 — LinkedIn Import
+  importLinkedIn: (file: File) => {
+    const fd = new FormData();
+    fd.append('file', file);
+    return api.post('/profile/import/linkedin', fd, { timeout: 30_000 }).then(r => r.data);
   },
 };
 
 // Jobs
 export const jobsApi = {
-  list:   async () => {
+  list: async () => {
     if (USE_MOCKS) { await delay(1000); return { items: mocks.MOCK_JOBS, dailyCount: 5, dailyLimit: 15, remaining: 10 }; }
     return api.get('/jobs').then(r => r.data);
   },
@@ -69,7 +85,7 @@ export const jobsApi = {
     if (USE_MOCKS) { await delay(600); return mocks.MOCK_JOB_DETAIL; }
     return api.get(`/jobs/${id}`).then(r => r.data);
   },
-  fetch:  async (count = 5) => {
+  fetch: async (count = 5) => {
     if (USE_MOCKS) { await delay(2000); return mocks.MOCK_FETCH_SUMMARY; }
     return api.post('/jobs/fetch', null, { params: { count } }).then(r => r.data);
   },
@@ -77,7 +93,7 @@ export const jobsApi = {
     if (USE_MOCKS) { return mocks.MOCK_FETCH_SUMMARY; }
     return api.get('/jobs/limits').then(r => r.data);
   },
-  stats:  async () => {
+  stats: async () => {
     if (USE_MOCKS) { return mocks.MOCK_STATS; }
     return api.get('/jobs/stats').then(r => r.data);
   },
@@ -85,14 +101,14 @@ export const jobsApi = {
 
 // Kanban
 export const kanbanApi = {
-  patch:    (id: string, body: { kanbanColumn?: string; status?: string }) => {
+  patch: (id: string, body: { kanbanColumn?: string; status?: string }) => {
     if (USE_MOCKS) return Promise.resolve({ success: true });
     return api.patch(`/kanban/${id}`, body).then(r => r.data);
   },
   uploadCv: (id: string, file: File) => {
     const fd = new FormData(); fd.append('file', file);
     return api.post(`/kanban/${id}/cv`, fd).then(r => r.data);
-  }
+  },
 };
 
 // Skills
@@ -157,19 +173,18 @@ export const skillsApi = {
       });
   },
 
-  // Legacy aliases
   evaluate:      (userJobId: string) => skillsApi.start({ skillName: 'evaluate', userJobId }),
   tailorResume:  (userJobId: string) => skillsApi.start({ skillName: 'tailor-resume', userJobId }),
   research:      (userJobId: string) => skillsApi.start({ skillName: 'research', userJobId }),
-  outreach:      (userJobId: string, channel = 'linkedin', tone = 'professional') => 
+  outreach:      (userJobId: string, channel = 'linkedin', tone = 'professional') =>
     skillsApi.start({ skillName: 'outreach', userJobId, channel, tone }),
-  apply:         (userJobId: string, step = 'all') => 
+  apply:         (userJobId: string, step = 'all') =>
     skillsApi.start({ skillName: 'apply', userJobId, step }),
-  prepInterview: (userJobId: string) => 
+  prepInterview: (userJobId: string) =>
     skillsApi.start({ skillName: 'prep-interview', userJobId }),
-  compare:       (userJobIds: string[]) => 
+  compare:       (userJobIds: string[]) =>
     skillsApi.start({ skillName: 'compare', compareJobIds: userJobIds }),
-  triage:        () => 
+  triage:        () =>
     skillsApi.start({ skillName: 'triage' }),
   last:          (userJobId: string, skill: string) => skillsApi.getLastRun(userJobId, skill),
 };
