@@ -6,51 +6,49 @@ export interface User {
   onboarded: boolean;
 }
 
-// ── Section 10: Portfolio & Career Goals ────────────────────────────────────────
-
+// Section 10 — Portfolio item
 export interface PortfolioItem {
   id: string;
   title: string;
-  url: string;
-  description: string;
-  techTags: string[];
+  url?: string;
+  description?: string;
+  techTags?: string[];
 }
 
+// Section 10 — LinkedIn import result
 export interface ImportSummary {
-  firstName:         string | null;
-  lastName:          string | null;
-  headline:          string | null;
-  location:          string | null;
-  skillsImported:    number;
+  firstName: string;
+  lastName: string;
+  headline: string;
+  location: string;
   positionsImported: number;
-  profileUpdated:    boolean;
+  skillsImported: number;
+  techStackUpdated: boolean;
+  targetRolesUpdated: boolean;
+  locationUpdated: boolean;
 }
-
-// ── Profile ─────────────────────────────────────────────────────────────────────
 
 export interface Profile {
-  targetRoles?:       string[];
-  techStack?:         string[];
-  location?:          string;
-  salaryMin?:         number;
-  salaryMax?:         number;
-  sectors?:           string[];
-  freshnessHours?:    number;
-  minMatchPercent?:   number;
+  targetRoles?: string[];
+  techStack?: string[];
+  location?: string;
+  salaryMin?: number;
+  salaryMax?: number;
+  sectors?: string[];
+  freshnessHours?: number;
+  minMatchPercent?: number;
   sponsorshipRequired?: boolean;
-  onboarded?:         boolean;
-  activeCvFileName?:  string | null;
+  onboarded?: boolean;
+  activeCvFileName?: string | null;
   // Section 10
-  goalTitle?:         string | null;
-  goalSalaryMin?:     number | null;
-  goalSalaryMax?:     number | null;
-  goalLocation?:      string | null;
-  openToRemote?:      boolean;
-  portfolioItems?:    PortfolioItem[];
+  portfolioItems?: PortfolioItem[];
+  goalTitle?: string;
+  goalSalaryMin?: number;
+  goalSalaryMax?: number;
+  goalLocation?: string;
+  openToRemote?: boolean;
   completenessScore?: number;
 }
-
-// ── Job types ─────────────────────────────────────────────────────────────────
 
 export interface JobCard {
   userJobId: string;
