@@ -8,6 +8,7 @@ import Login          from '@/pages/Login';
 import Signup         from '@/pages/Signup';
 import ForgotPassword from '@/pages/ForgotPassword';
 import Onboarding     from '@/pages/Onboarding';
+import NotFound       from '@/pages/NotFound';
 
 // Route-level code splitting for all authenticated pages
 const Dashboard      = lazy(() => import('@/pages/Dashboard'));
@@ -59,19 +60,18 @@ export default function App() {
         <Route path="/profile"   element={<Suspense fallback={<PageFallback />}><Profile /></Suspense>} />
         <Route path="/analytics" element={<Suspense fallback={<PageFallback />}><Analytics /></Suspense>} />
         <Route path="/refer"     element={<Suspense fallback={<PageFallback />}><Refer /></Suspense>} />
-        {/* Section 13 Batch 2 — new pages */}
         <Route path="/skills"    element={<Suspense fallback={<PageFallback />}><Skills /></Suspense>} />
         <Route path="/cv"        element={<Suspense fallback={<PageFallback />}><CvManager /></Suspense>} />
-        {/* Section 6 — Billing */}
         <Route path="/billing"   element={<Suspense fallback={<PageFallback />}><Billing /></Suspense>} />
-        {/* Section 11 — Account/GDPR */}
         <Route path="/account"   element={<Suspense fallback={<PageFallback />}><AccountSettings /></Suspense>} />
-        {/* Phase 3 — Interview Coach */}
         <Route path="/interview" element={<Suspense fallback={<PageFallback />}><InterviewPage /></Suspense>} />
       </Route>
 
-      {/* Fallback */}
-      <Route path="*" element={<Navigate to="/dashboard" replace />} />
+      {/* Root redirect */}
+      <Route path="/" element={<Navigate to="/dashboard" replace />} />
+
+      {/* 404 — anything else shows the NotFound page */}
+      <Route path="*" element={<NotFound />} />
     </Routes>
   );
 }
