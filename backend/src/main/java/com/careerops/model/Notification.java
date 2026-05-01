@@ -19,6 +19,7 @@ import java.util.UUID;
  *   JOB_MATCH           — high-quality new job delivered
  *   WEEKLY_DIGEST       — weekly summary email sent
  *   SYSTEM              — general platform messages
+ *   REFERRAL            — referral invite/signup/reward events
  */
 @Entity
 @Table(name = "notifications", schema = "career_operations")
@@ -59,11 +60,10 @@ public class Notification {
         if (createdAt == null) createdAt = Instant.now();
     }
 
-    // ── Type constants ────────────────────────────────────────────────
-
     public static final String TYPE_SKILL_COMPLETE     = "SKILL_COMPLETE";
     public static final String TYPE_INTERVIEW_REMINDER = "INTERVIEW_REMINDER";
     public static final String TYPE_JOB_MATCH          = "JOB_MATCH";
     public static final String TYPE_WEEKLY_DIGEST      = "WEEKLY_DIGEST";
     public static final String TYPE_SYSTEM             = "SYSTEM";
+    public static final String TYPE_REFERRAL           = "REFERRAL";
 }

@@ -32,19 +32,11 @@ public class ResendEmailService {
         this.client = b.baseUrl("https://api.resend.com").build();
     }
 
-    // ────────────────────────────────────────────────────────────────────────
-    // OTP email (existing)
-    // ────────────────────────────────────────────────────────────────────────
-
     public void sendOtp(String to, String otp) {
         if (isDevMode()) { log.info("[DEV] Reset OTP for {} = {}", to, otp); return; }
         send(to, "Your CareerOps password reset code",
             "<p>Your code: <b>" + otp + "</b> (valid 15 minutes)</p>");
     }
-
-    // ────────────────────────────────────────────────────────────────────────
-    // Daily job digest email (existing)
-    // ────────────────────────────────────────────────────────────────────────
 
     public void sendJobDigest(String to, String userName,
                               List<DigestJob> jobs, String appBaseUrl) {
@@ -55,7 +47,7 @@ public class ResendEmailService {
         if (jobs.isEmpty()) return;
         String html = buildDigestHtml(userName, jobs, appBaseUrl);
         send(to,
-            jobs.size() + " new AI-matched job" + (jobs.size() == 1 ? "" : "s") + " found for you today \uD83D\uDE80",
+            jobs.size() + " new AI-matched job" + (jobs.size() == 1 ? "" : "s") + " found for you today 🚀",
             html);
     }
 
@@ -69,10 +61,6 @@ public class ResendEmailService {
         String sourceUrl
     ) {}
 
-    // ────────────────────────────────────────────────────────────────────────
-    // Section 8 — Task 88 : Skill-complete transactional email
-    // ────────────────────────────────────────────────────────────────────────
-
     public void sendSkillCompleteEmail(UUID userId, String skillName, String jobTitle) {
         UserContact contact = resolveContact(userId);
         if (contact == null) return;
@@ -81,13 +69,9 @@ public class ResendEmailService {
                      contact.email(), skillName, jobTitle);
             return;
         }
-        String subject = "✨ " + skillName + " is ready for \u201c" + jobTitle + "\u201d";
+        String subject = "✨ " + skillName + " is ready for “" + jobTitle + "”";
         send(contact.email(), subject, buildSkillCompleteHtml(contact.firstName(), skillName, jobTitle));
     }
-
-    // ────────────────────────────────────────────────────────────────────────
-    // Section 8 — Task 89 : Interview-reminder transactional email
-    // ────────────────────────────────────────────────────────────────────────
 
     public void sendInterviewReminderEmail(UUID userId, String jobTitle, String companyName) {
         UserContact contact = resolveContact(userId);
@@ -97,22 +81,36 @@ public class ResendEmailService {
                      contact.email(), jobTitle, companyName);
             return;
         }
-        String subject = "\uD83D\uDCCB Interview stage: " + jobTitle + " @ " + companyName;
+        String subject = "📋 Interview stage: " + jobTitle + " @ " + companyName;
         send(contact.email(), subject, buildInterviewReminderHtml(contact.firstName(), jobTitle, companyName));
     }
 
-    // ────────────────────────────────────────────────────────────────────────
-    // Internals
-    // ────────────────────────────────────────────────────────────────────────
+    public void sendReferralInviteEmail(String referrerName, String refereeEmail, String referralLink) {
+        if (refereeEmail == null || refereeEmail.isBlank()) return;
+        if (isDevMode()) {
+            log.info("[DEV] Referral invite to {} from {}", refereeEmail, referrerName);
+            return;
+        }
+        String subject = referrerName + " invited you to join CareerOps 🎁";
+        send(refereeEmail, subject, buildReferralInviteHtml(referrerName, referralLink));
+    }
+
+    public void sendReferralSuccessEmail(UUID referrerId, String refereeName) {
+        UserContact contact = resolveContact(referrerId);
+        if (contact == null) return;
+        if (isDevMode()) {
+            log.info("[DEV] Referral success email for {} — referee='{}'",
+                     contact.email(), refereeName);
+            return;
+        }
+        String subject = "🎉 " + refereeName + " joined CareerOps — you've earned a reward!";
+        send(contact.email(), subject, buildReferralSuccessHtml(contact.firstName(), refereeName));
+    }
 
     private boolean isDevMode() {
         return key == null || key.isBlank() || key.startsWith("YOUR_");
     }
 
-    /**
-     * Package-private (not private) so WeeklyDigestService in the same package
-     * can call it directly to send arbitrary HTML emails.
-     */
     void send(String to, String subject, String html) {
         try {
             client.post().uri("/emails")
@@ -151,10 +149,6 @@ public class ResendEmailService {
 
     private record UserContact(String email, String firstName) {}
 
-    // ────────────────────────────────────────────────────────────────────────
-    // HTML builders
-    // ────────────────────────────────────────────────────────────────────────
-
     private String buildSkillCompleteHtml(String name, String skillName, String jobTitle) {
         return "<div style='font-family:Inter,sans-serif;max-width:600px;margin:0 auto;color:#1e293b'>" +
             "<div style='background:linear-gradient(135deg,#8b5cf6,#6366f1);padding:32px 24px;border-radius:16px 16px 0 0'>" +
@@ -175,7 +169,7 @@ public class ResendEmailService {
     private String buildInterviewReminderHtml(String name, String jobTitle, String companyName) {
         return "<div style='font-family:Inter,sans-serif;max-width:600px;margin:0 auto;color:#1e293b'>" +
             "<div style='background:linear-gradient(135deg,#6366f1,#3b82f6);padding:32px 24px;border-radius:16px 16px 0 0'>" +
-            "<h1 style='color:#fff;margin:0;font-size:22px'>\uD83C\uDF1F You've moved to Interview!</h1>" +
+            "<h1 style='color:#fff;margin:0;font-size:22px'>🌟 You've moved to Interview!</h1>" +
             "<p style='color:rgba(255,255,255,0.85);margin:8px 0 0'>Great work, " + name + ". Here's what to prepare next.</p>" +
             "</div>" +
             "<div style='background:#f8fafc;padding:28px 24px;border-radius:0 0 16px 16px'>" +
@@ -185,7 +179,7 @@ public class ResendEmailService {
             "<p style='margin:0;font-size:14px;color:#64748b'>at <strong>" + companyName + "</strong></p>" +
             "</div>" +
             "<div style='margin:20px 0;background:#fff;border-radius:12px;padding:20px;border:1px solid #e2e8f0'>" +
-            "<p style='margin:0 0 12px;font-size:14px;font-weight:600;color:#1e293b'>\uD83D\uDCCB Interview prep checklist</p>" +
+            "<p style='margin:0 0 12px;font-size:14px;font-weight:600;color:#1e293b'>📋 Interview prep checklist</p>" +
             "<ul style='margin:0;padding-left:20px;font-size:13px;color:#475569;line-height:1.8'>" +
             "<li>Run the Interview Prep skill in CareerOps for tailored Q&amp;As</li>" +
             "<li>Research " + companyName + "&rsquo;s recent news and culture</li>" +
@@ -196,11 +190,53 @@ public class ResendEmailService {
             "</div></div>";
     }
 
+    private String buildReferralInviteHtml(String referrerName, String referralLink) {
+        return "<div style='font-family:Inter,sans-serif;max-width:600px;margin:0 auto;color:#1e293b'>" +
+            "<div style='background:linear-gradient(135deg,#f59e0b,#ef4444);padding:32px 24px;border-radius:16px 16px 0 0'>" +
+            "<h1 style='color:#fff;margin:0;font-size:22px'>🎁 You've been invited to CareerOps!</h1>" +
+            "<p style='color:rgba(255,255,255,0.85);margin:8px 0 0'>" + referrerName + " thinks you'd love it.</p>" +
+            "</div>" +
+            "<div style='background:#f8fafc;padding:28px 24px;border-radius:0 0 16px 16px'>" +
+            "<p style='font-size:15px;color:#475569;margin:0 0 20px'>CareerOps is an AI-powered job search platform that matches you to roles, evaluates your CV, preps you for interviews, and tracks every application in one place.</p>" +
+            "<div style='background:#fff;border-radius:12px;padding:20px;border:1px solid #e2e8f0;margin-bottom:20px'>" +
+            "<p style='margin:0 0 8px;font-size:13px;color:#64748b'>✓ AI-matched job recommendations</p>" +
+            "<p style='margin:0 0 8px;font-size:13px;color:#64748b'>✓ Automated CV scoring &amp; improvement tips</p>" +
+            "<p style='margin:0 0 8px;font-size:13px;color:#64748b'>✓ Interview prep with tailored Q&amp;As</p>" +
+            "<p style='margin:0;font-size:13px;color:#64748b'>✓ Full application tracker with Kanban board</p>" +
+            "</div>" +
+            "<div style='text-align:center'>" +
+            "<a href='" + referralLink + "' style='display:inline-block;background:linear-gradient(135deg,#6366f1,#8b5cf6);color:#fff;padding:14px 32px;border-radius:10px;text-decoration:none;font-size:15px;font-weight:700'>Join CareerOps &rarr;</a>" +
+            "</div>" +
+            "<p style='text-align:center;font-size:12px;color:#94a3b8;margin-top:20px'>This invite link is personalised for you.<br/>Invited by " + referrerName + ".</p>" +
+            "<p style='text-align:center;color:#94a3b8;font-size:12px;margin-top:12px'>CareerOps &mdash; AI-powered job search</p>" +
+            "</div></div>";
+    }
+
+    private String buildReferralSuccessHtml(String referrerName, String refereeName) {
+        return "<div style='font-family:Inter,sans-serif;max-width:600px;margin:0 auto;color:#1e293b'>" +
+            "<div style='background:linear-gradient(135deg,#10b981,#06b6d4);padding:32px 24px;border-radius:16px 16px 0 0'>" +
+            "<h1 style='color:#fff;margin:0;font-size:22px'>🎉 Your referral worked!</h1>" +
+            "<p style='color:rgba(255,255,255,0.85);margin:8px 0 0'>Hey " + referrerName + ", you've earned a reward!</p>" +
+            "</div>" +
+            "<div style='background:#f8fafc;padding:28px 24px;border-radius:0 0 16px 16px'>" +
+            "<div style='background:#fff;border-radius:12px;padding:24px;border:1px solid #e2e8f0;text-align:center;margin-bottom:20px'>" +
+            "<div style='width:56px;height:56px;background:linear-gradient(135deg,#10b981,#06b6d4);border-radius:50%;margin:0 auto 12px;display:flex;align-items:center;justify-content:center;font-size:24px'>🏆</div>" +
+            "<h2 style='margin:0 0 8px;font-size:18px;color:#1e293b'>" + refereeName + " joined CareerOps!</h2>" +
+            "<p style='margin:0;font-size:14px;color:#64748b'>They signed up using your referral link. Your reward has been credited.</p>" +
+            "</div>" +
+            "<div style='background:linear-gradient(135deg,#f0fdf4,#ecfdf5);border:1px solid #86efac;border-radius:12px;padding:16px;text-align:center'>" +
+            "<p style='margin:0;font-size:14px;font-weight:600;color:#166534'>✓ Referral reward earned</p>" +
+            "<p style='margin:4px 0 0;font-size:13px;color:#166534'>Keep referring friends to earn more!</p>" +
+            "</div>" +
+            "<p style='text-align:center;color:#94a3b8;font-size:12px;margin-top:24px'>CareerOps &mdash; AI-powered job search</p>" +
+            "</div></div>";
+    }
+
     private String buildDigestHtml(String name, List<DigestJob> jobs, String base) {
         StringBuilder sb = new StringBuilder();
         sb.append("<div style='font-family:Inter,sans-serif;max-width:600px;margin:0 auto;color:#1e293b'>");
         sb.append("<div style='background:linear-gradient(135deg,#6366f1,#8b5cf6);padding:32px 24px;border-radius:16px 16px 0 0'>");
-        sb.append("<h1 style='color:#fff;margin:0;font-size:24px'>\uD83D\uDE80 Your Daily Job Digest</h1>");
+        sb.append("<h1 style='color:#fff;margin:0;font-size:24px'>🚀 Your Daily Job Digest</h1>");
         sb.append("<p style='color:rgba(255,255,255,0.8);margin:8px 0 0'>Hey ").append(name).append(", here are today's top AI-matched roles</p>");
         sb.append("</div><div style='background:#f8fafc;padding:24px;border-radius:0 0 16px 16px'>");
         for (DigestJob j : jobs) {

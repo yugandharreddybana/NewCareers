@@ -1,52 +1,55 @@
 /**
- * Section 9 — Task 99: Referrals API service.
+ * Section 9 — Task 99
+ * Referrals API service.
  */
-import api from './api';
 
-// ── Types ────────────────────────────────────────────────────────────────────
+import { api } from './api';
 
 export type ReferralStatus = 'pending' | 'signed_up' | 'rewarded';
 
 export interface ReferralDto {
-  id:           string;
+  id: string;
   refereeEmail: string;
-  status:       ReferralStatus;
-  createdAt:    string;
-  rewardedAt:   string | null;
+  status: ReferralStatus;
+  createdAt: string;
+  rewardedAt: string | null;
 }
 
 export interface ReferralStats {
-  sent:      number;
-  signedUp:  number;
-  rewarded:  number;
+  sent: number;
+  signedUp: number;
+  rewarded: number;
 }
 
 export interface MyReferralsResponse {
   referrals: ReferralDto[];
-  stats:     ReferralStats;
+  stats: ReferralStats;
 }
 
 export interface ValidateTokenResponse {
-  valid:        boolean;
+  valid: boolean;
   referrerName?: string;
-  status?:       ReferralStatus;
-  tokenType?:    'invite' | 'link';
+  status?: ReferralStatus;
+  tokenType?: 'invite' | 'link';
 }
 
-// ── API calls ────────────────────────────────────────────────────────────────
+export const referralsApi = {
+  createReferral: async (email: string): Promise<ReferralDto> => {
+    const res = await api.post<ReferralDto>('/api/referrals', { email });
+    return res.data;
+  },
 
-/** POST /api/referrals — send an email invite and create a referral record. */
-export const createReferral = (email: string): Promise<ReferralDto> =>
-  api.post('/referrals', { email }).then(r => r.data);
+  getMyReferrals: async (): Promise<MyReferralsResponse> => {
+    const res = await api.get<MyReferralsResponse>('/api/referrals/my');
+    return res.data;
+  },
 
-/** GET /api/referrals/my — fetch the current user's referrals list + stats. */
-export const getMyReferrals = (): Promise<MyReferralsResponse> =>
-  api.get('/referrals/my').then(r => r.data);
+  validateToken: async (token: string): Promise<ValidateTokenResponse> => {
+    const res = await api.get<ValidateTokenResponse>(`/api/referrals/validate/${token}`);
+    return res.data;
+  },
+};
 
-/**
- * GET /api/referrals/validate/:token
- * Public — called on the Signup page when ?ref=TOKEN is present.
- * Returns referrer name so the UI can show "Invited by <name>".
- */
-export const validateToken = (token: string): Promise<ValidateTokenResponse> =>
-  api.get(`/referrals/validate/${token}`).then(r => r.data);
+export const createReferral = referralsApi.createReferral;
+export const getMyReferrals = referralsApi.getMyReferrals;
+export const validateToken = referralsApi.validateToken;
