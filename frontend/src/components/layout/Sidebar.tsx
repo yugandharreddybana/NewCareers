@@ -5,7 +5,7 @@ import {
   LayoutDashboard, Kanban as KanbanIcon, User,
   LogOut, ChevronLeft, ChevronRight,
   Sparkles, HelpCircle, Gift, TrendingUp,
-  Brain, FileText, CreditCard, Settings,
+  Brain, FileText, CreditCard, Settings, GraduationCap,
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { cn } from '@/lib/utils';
@@ -19,19 +19,20 @@ interface NavItem {
   badge?: string;
 }
 
-// ── Main navigation ────────────────────────────────────────────────────────────
+// ── Main navigation ────────────────────────────────────────────────────────────────
 const NAV_ITEMS: NavItem[] = [
-  { to: '/dashboard',  icon: <LayoutDashboard size={18} />, label: 'Dashboard'    },
-  { to: '/kanban',     icon: <KanbanIcon       size={18} />, label: 'Tracker'      },
-  { to: '/analytics',  icon: <TrendingUp       size={18} />, label: 'Analytics'    },
-  { to: '/skills',     icon: <Brain            size={18} />, label: 'Skills Coach'  },
-  { to: '/cv',         icon: <FileText         size={18} />, label: 'CV Manager'    },
-  { to: '/profile',    icon: <User             size={18} />, label: 'Profile'      },
-  { to: '/refer',      icon: <Gift             size={18} />, label: 'Refer & Earn'  },
-  { to: '/billing',    icon: <CreditCard       size={18} />, label: 'Billing'       },
+  { to: '/dashboard',  icon: <LayoutDashboard size={18} />, label: 'Dashboard'      },
+  { to: '/kanban',     icon: <KanbanIcon       size={18} />, label: 'Tracker'        },
+  { to: '/analytics',  icon: <TrendingUp       size={18} />, label: 'Analytics'      },
+  { to: '/skills',     icon: <Brain            size={18} />, label: 'Skills Coach'   },
+  { to: '/cv',         icon: <FileText         size={18} />, label: 'CV Manager'     },
+  { to: '/interview',  icon: <GraduationCap    size={18} />, label: 'Interview Coach' },
+  { to: '/profile',    icon: <User             size={18} />, label: 'Profile'        },
+  { to: '/refer',      icon: <Gift             size={18} />, label: 'Refer & Earn'   },
+  { to: '/billing',    icon: <CreditCard       size={18} />, label: 'Billing'        },
 ];
 
-// ── Bottom / utility nav ────────────────────────────────────────────────────────
+// ── Bottom / utility nav ────────────────────────────────────────────────────────────────
 const BOTTOM_ITEMS: NavItem[] = [
   { to: '/account',       icon: <Settings    size={18} />, label: 'Account Settings' },
   { to: '/profile#help',  icon: <HelpCircle  size={18} />, label: 'Help'             },
@@ -155,7 +156,7 @@ export default function Sidebar() {
   );
 }
 
-// ── SidebarLink ────────────────────────────────────────────────────────────────
+// ── SidebarLink ─────────────────────────────────────────────────────────────────────────────
 function SidebarLink({ item, collapsed }: { item: NavItem; collapsed: boolean }) {
   return (
     <Tooltip content={item.label} placement="right" disabled={!collapsed}>

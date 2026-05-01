@@ -1,16 +1,12 @@
 /**
- * BottomNav — Section 13 QA update
- *  - bg-white → bg-white (kept; already correct)
- *  - border-slate-200 → border-border token
- *  - text-slate-400/600 → text-text-tertiary / text-brand-600 tokens
- *  - safe-area-inset-bottom applied to both height calc AND inner padding
- *    so the nav doesn't clip on notched phones (iPhone SE → iPhone 16 Pro Max)
- *  - Added aria-label on <nav> for screen readers
- *  - Active colour uses brand token (was emerald hard-coded)
+ * BottomNav — Phase 3 update
+ *  - Replaced /skills slot with /interview (Interview Coach)
+ *  - Skills accessible via Sidebar on desktop; Interview is primary mobile CTA
+ *  - All token usage preserved (brand, text-tertiary, border-border)
  */
 import { NavLink } from 'react-router-dom';
 import {
-  LayoutDashboard, Kanban, TrendingUp, Brain, User,
+  LayoutDashboard, Kanban, TrendingUp, GraduationCap, User,
 } from 'lucide-react';
 import { motion } from 'framer-motion';
 import { cn } from '@/lib/utils';
@@ -19,7 +15,7 @@ const NAV = [
   { to: '/dashboard', label: 'Dashboard', icon: LayoutDashboard },
   { to: '/kanban',    label: 'Board',      icon: Kanban           },
   { to: '/analytics', label: 'Analytics', icon: TrendingUp       },
-  { to: '/skills',    label: 'Skills',     icon: Brain            },
+  { to: '/interview', label: 'Interview',  icon: GraduationCap    },
   { to: '/profile',   label: 'Profile',    icon: User             },
 ];
 
