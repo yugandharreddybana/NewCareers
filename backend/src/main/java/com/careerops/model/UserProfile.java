@@ -7,12 +7,14 @@ import lombok.*;
 import org.hibernate.annotations.Type;
 
 import java.time.Instant;
+import java.util.ArrayList;
 import java.util.List;
-import java.util.Map;
 import java.util.UUID;
 
 /**
- * Section 10 Task 105 — added portfolio_items (JSONB), goal fields, open_to_remote
+ * Section 10 — Task 105
+ * Added: portfolioItems (JSONB), goal_title, goal_salary_min, goal_salary_max,
+ *        goal_location, open_to_remote
  */
 @Entity
 @Table(name = "user_profiles", schema = "career_operations")
@@ -25,6 +27,8 @@ public class UserProfile {
     @Column(name = "user_id", nullable = false, unique = true)
     private UUID userId;
 
+    // ── Existing matching prefs ──────────────────────────────────────────
+
     @Type(StringArrayType.class)
     @Column(name = "target_roles", columnDefinition = "text[]")
     private String[] targetRoles;
@@ -35,37 +39,54 @@ public class UserProfile {
 
     private String location;
 
-    @Column(name = "salary_min")  private Integer salaryMin;
-    @Column(name = "salary_max")  private Integer salaryMax;
+    @Column(name = "salary_min")     private Integer salaryMin;
+    @Column(name = "salary_max")     private Integer salaryMax;
 
     @Type(StringArrayType.class)
     @Column(columnDefinition = "text[]")
     private String[] sectors;
 
-    @Column(name = "freshness_hours")    private Integer freshnessHours;
-    @Column(name = "min_match_percent")  private Integer minMatchPercent;
+    @Column(name = "freshness_hours")   private Integer freshnessHours;
+    @Column(name = "min_match_percent") private Integer minMatchPercent;
     @Column(name = "sponsorship_required") private Boolean sponsorshipRequired;
     private Boolean onboarded;
 
-    // ── Section 10 new fields ──────────────────────────────────────────────
+    // ── Section 10: Portfolio items (JSONB array) ────────────────────────
 
     /**
-     * Array of portfolio project objects:
-     * [{id, title, url, description, techTags:[]}]
+     * Each element: { id, title, url, description, techTags[] }
+     * Stored as JSONB; managed via ProfileService portfolio CRUD.
      */
     @Type(JsonType.class)
     @Column(name = "portfolio_items", columnDefinition = "jsonb")
     @Builder.Default
-    private List<Map<String, Object>> portfolioItems = new java.util.ArrayList<>();
+    private List<PortfolioItem> portfolioItems = new ArrayList<>();
 
-    @Column(name = "goal_title",       length = 200) private String  goalTitle;
-    @Column(name = "goal_salary_min")                private Integer goalSalaryMin;
-    @Column(name = "goal_salary_max")                private Integer goalSalaryMax;
-    @Column(name = "goal_location",    length = 100) private String  goalLocation;
-    @Column(name = "open_to_remote")                 private Boolean openToRemote;
+    // ── Section 10: Career Goal fields ──────────────────────────────────
+
+    @Column(name = "goal_title",      length = 200) private String  goalTitle;
+    @Column(name = "goal_salary_min")               private Integer goalSalaryMin;
+    @Column(name = "goal_salary_max")               private Integer goalSalaryMax;
+    @Column(name = "goal_location",   length = 100) private String  goalLocation;
+    @Column(name = "open_to_remote")                private Boolean openToRemote;
 
     @Column(name = "updated_at") private Instant updatedAt;
 
     @PrePersist @PreUpdate
     void touch() { updatedAt = Instant.now(); }
+
+    // ── Embedded value object ────────────────────────────────────────────
+
+    /**
+     * Serialised as one element of the portfolio_items JSONB array.
+     * Must be a plain serialisable class (no JPA annotations needed).
+     */
+    @Getter @Setter @NoArgsConstructor @AllArgsConstructor @Builder
+    public static class PortfolioItem {
+        private String       id;          // client-generated UUID string
+        private String       title;
+        private String       url;
+        private String       description;
+        private List<String> techTags;
+    }
 }

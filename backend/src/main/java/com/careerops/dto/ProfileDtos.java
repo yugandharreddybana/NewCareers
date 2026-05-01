@@ -1,55 +1,62 @@
 package com.careerops.dto;
 
+import com.careerops.model.UserProfile.PortfolioItem;
+
 import java.util.List;
-import java.util.Map;
 
 /**
- * Section 10 — updated to include portfolio, goal fields, LinkedIn import summary.
+ * Section 10 — Task 106 (updated DTOs)
+ * Added: portfolio + goal fields to ProfileRequest/ProfileResponse.
+ * Added: PortfolioItemRequest, ImportSummary.
  */
 public class ProfileDtos {
 
-    // ── Core profile CRUD ───────────────────────────────────────────────────
+    // ── Core profile request ─────────────────────────────────────────────
 
     public record ProfileRequest(
-        String[] targetRoles,
-        String[] techStack,
-        String   location,
-        Integer  salaryMin,
-        Integer  salaryMax,
-        String[] sectors,
-        Integer  freshnessHours,
-        Integer  minMatchPercent,
-        Boolean  sponsorshipRequired,
-        Boolean  onboarded,
-        // Section 10 goal fields
-        String  goalTitle,
-        Integer goalSalaryMin,
-        Integer goalSalaryMax,
-        String  goalLocation,
-        Boolean openToRemote
+        String[]  targetRoles,
+        String[]  techStack,
+        String    location,
+        Integer   salaryMin,
+        Integer   salaryMax,
+        String[]  sectors,
+        Integer   freshnessHours,
+        Integer   minMatchPercent,
+        Boolean   sponsorshipRequired,
+        Boolean   onboarded,
+        // Section 10 — goal fields
+        String    goalTitle,
+        Integer   goalSalaryMin,
+        Integer   goalSalaryMax,
+        String    goalLocation,
+        Boolean   openToRemote
     ) {}
 
+    // ── Core profile response ────────────────────────────────────────────
+
     public record ProfileResponse(
-        String[] targetRoles,
-        String[] techStack,
-        String   location,
-        Integer  salaryMin,
-        Integer  salaryMax,
-        String[] sectors,
-        Integer  freshnessHours,
-        Integer  minMatchPercent,
-        Boolean  sponsorshipRequired,
-        Boolean  onboarded,
-        String   activeCvFileName,
+        String[]            targetRoles,
+        String[]            techStack,
+        String              location,
+        Integer             salaryMin,
+        Integer             salaryMax,
+        String[]            sectors,
+        Integer             freshnessHours,
+        Integer             minMatchPercent,
+        Boolean             sponsorshipRequired,
+        Boolean             onboarded,
+        String              activeCvFileName,
         // Section 10
-        List<Map<String, Object>> portfolioItems,
-        String  goalTitle,
-        Integer goalSalaryMin,
-        Integer goalSalaryMax,
-        String  goalLocation,
-        Boolean openToRemote,
-        int     completenessScore
+        List<PortfolioItem> portfolioItems,
+        String              goalTitle,
+        Integer             goalSalaryMin,
+        Integer             goalSalaryMax,
+        String              goalLocation,
+        Boolean             openToRemote,
+        Integer             completenessScore
     ) {}
+
+    // ── Stats ────────────────────────────────────────────────────────────
 
     public record StatsResponse(
         long   total,
@@ -59,19 +66,16 @@ public class ProfileDtos {
         double avgMatch
     ) {}
 
-    // ── Portfolio item operations ───────────────────────────────────────────
+    // ── Portfolio item request ────────────────────────────────────────────
 
     public record PortfolioItemRequest(
-        String       id,           // null = create, non-null = update
         String       title,
         String       url,
         String       description,
         List<String> techTags
     ) {}
 
-    public record DeletePortfolioItemRequest(String id) {}
-
-    // ── LinkedIn import ─────────────────────────────────────────────────────
+    // ── LinkedIn import result ────────────────────────────────────────────
 
     public record ImportSummary(
         String  firstName,
@@ -80,7 +84,8 @@ public class ProfileDtos {
         String  location,
         int     positionsImported,
         int     skillsImported,
-        boolean profileUpdated,
-        String  message
+        boolean techStackUpdated,
+        boolean targetRolesUpdated,
+        boolean locationUpdated
     ) {}
 }

@@ -11,38 +11,39 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.multipart.MultipartFile;
 
-import java.io.*;
+import java.io.BufferedReader;
+import java.io.IOException;
+import java.io.InputStreamReader;
 import java.nio.charset.StandardCharsets;
 import java.util.*;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipInputStream;
 
 /**
- * Section 10 Task 109 — LinkedIn Data Export ZIP importer.
+ * Section 10 — Task 109
  *
- * Accepted files inside the ZIP:
- *   - Profile.csv         → firstName, lastName, headline, location
- *   - Positions.csv       → work history (maps to targetRoles)
- *   - Skills.csv          → skill names (maps to techStack)
+ * Accepts a LinkedIn data export ZIP file and parses three CSVs:
+ *   - Profile.csv   → first/last name, headline, location
+ *   - Positions.csv → job titles mapped to target roles
+ *   - Skills.csv    → skill names mapped to tech stack
  *
- * Only non-null, non-blank mapped values update the profile.
- * Existing values are NOT overwritten unless the import provides a non-blank value.
+ * All updates are non-destructive: existing array values are merged,
+ * not replaced, so the user does not lose manually entered data.
  */
 @Service
 public class LinkedInImportService {
 
     private static final Logger log = LoggerFactory.getLogger(LinkedInImportService.class);
 
-    private static final long   MAX_ZIP_BYTES  = 20L * 1024 * 1024; // 20 MB
-    private static final String PROFILE_CSV    = "Profile.csv";
-    private static final String POSITIONS_CSV  = "Positions.csv";
-    private static final String SKILLS_CSV     = "Skills.csv";
+    private static final long MAX_ZIP_BYTES = 20 * 1024 * 1024L; // 20 MB
 
     private final UserProfileRepository profiles;
 
     public LinkedInImportService(UserProfileRepository profiles) {
         this.profiles = profiles;
     }
+
+    // ── Public API ───────────────────────────────────────────────────────
 
     @Transactional
     public ImportSummary importZip(UUID userId, MultipartFile file) throws IOException {
@@ -51,80 +52,96 @@ public class LinkedInImportService {
         if (file.getSize() > MAX_ZIP_BYTES)
             throw new ApiException(HttpStatus.BAD_REQUEST, "ZIP file exceeds 20 MB limit");
 
-        Map<String, String> csvMap = extractCsvFiles(file);
-        if (csvMap.isEmpty())
-            throw new ApiException(HttpStatus.BAD_REQUEST,
-                    "No recognised LinkedIn CSV files found in ZIP (Profile.csv, Positions.csv, Skills.csv)");
+        Map<String, List<Map<String, String>>> parsed = parseZip(file);
 
-        // Parse each CSV
-        Map<String, String> profileData  = csvMap.containsKey(PROFILE_CSV)
-                ? parseProfileCsv(csvMap.get(PROFILE_CSV)) : Map.of();
-        List<String>        positions    = csvMap.containsKey(POSITIONS_CSV)
-                ? parsePositionsCsv(csvMap.get(POSITIONS_CSV)) : List.of();
-        List<String>        skills       = csvMap.containsKey(SKILLS_CSV)
-                ? parseSkillsCsv(csvMap.get(SKILLS_CSV)) : List.of();
+        // Extract CSV sections
+        List<Map<String, String>> profileRows   = parsed.getOrDefault("Profile",   List.of());
+        List<Map<String, String>> positionRows  = parsed.getOrDefault("Positions", List.of());
+        List<Map<String, String>> skillRows     = parsed.getOrDefault("Skills",    List.of());
 
-        // Update profile
+        // ── Parse Profile.csv (first non-header row) ─────────────────────
+        String firstName = "", lastName = "", headline = "", linkedInLocation = "";
+        if (!profileRows.isEmpty()) {
+            Map<String, String> row = profileRows.get(0);
+            firstName        = value(row, "First Name");
+            lastName         = value(row, "Last Name");
+            headline         = value(row, "Headline");
+            linkedInLocation = value(row, "Geo Location");
+            if (linkedInLocation.isBlank()) linkedInLocation = value(row, "Location");
+        }
+
+        // ── Parse Positions.csv → target roles ───────────────────────────
+        List<String> importedRoles = new ArrayList<>();
+        for (Map<String, String> row : positionRows) {
+            String title = value(row, "Title");
+            if (!title.isBlank()) importedRoles.add(title);
+        }
+
+        // ── Parse Skills.csv → tech stack ────────────────────────────────
+        List<String> importedSkills = new ArrayList<>();
+        for (Map<String, String> row : skillRows) {
+            String name = value(row, "Name");
+            if (!name.isBlank()) importedSkills.add(name);
+        }
+
+        // ── Merge into UserProfile ────────────────────────────────────────
         UserProfile p = profiles.findByUserId(userId)
                 .orElseGet(() -> UserProfile.builder().userId(userId).build());
 
-        boolean updated = false;
+        boolean techStackUpdated  = false;
+        boolean rolesUpdated      = false;
+        boolean locationUpdated   = false;
 
-        String firstName = profileData.getOrDefault("firstName", "");
-        String lastName  = profileData.getOrDefault("lastName",  "");
-        String headline  = profileData.getOrDefault("headline",  "");
-        String location  = profileData.getOrDefault("location",  "");
-
-        if (!location.isBlank() && (p.getLocation() == null || p.getLocation().isBlank())) {
-            p.setLocation(location);
-            updated = true;
+        // Merge tech stack (deduplicated, case-insensitive)
+        if (!importedSkills.isEmpty()) {
+            p.setTechStack(mergeArrays(p.getTechStack(), importedSkills));
+            techStackUpdated = true;
         }
 
-        // Map latest positions title → goalTitle if not already set
-        if (!positions.isEmpty() && (p.getGoalTitle() == null || p.getGoalTitle().isBlank())) {
-            p.setGoalTitle(positions.get(0));
-            updated = true;
+        // Merge target roles (deduplicated)
+        if (!importedRoles.isEmpty()) {
+            p.setTargetRoles(mergeArrays(p.getTargetRoles(), importedRoles));
+            rolesUpdated = true;
         }
 
-        // Merge skills into techStack (deduplicated)
-        if (!skills.isEmpty()) {
-            Set<String> existing = new LinkedHashSet<>();
-            if (p.getTechStack() != null) existing.addAll(Arrays.asList(p.getTechStack()));
-            int before = existing.size();
-            existing.addAll(skills);
-            if (existing.size() > before) {
-                p.setTechStack(existing.toArray(String[]::new));
-                updated = true;
-            }
+        // Set location only if not already set
+        if (!linkedInLocation.isBlank() &&
+                (p.getLocation() == null || p.getLocation().isBlank())) {
+            p.setLocation(linkedInLocation);
+            locationUpdated = true;
         }
 
-        if (updated) profiles.save(p);
-
-        log.info("LinkedIn import complete for userId={}: positions={} skills={} updated={}",
-                 userId, positions.size(), skills.size(), updated);
+        profiles.save(p);
+        log.info("LinkedIn import complete for userId={} roles={} skills={}",
+                userId, importedRoles.size(), importedSkills.size());
 
         return new ImportSummary(
-            firstName, lastName, headline, location,
-            positions.size(), skills.size(), updated,
-            updated
-                ? "Profile updated with " + positions.size() + " positions and " + skills.size() + " skills."
-                : "No new data to import — profile already up to date."
+                firstName, lastName, headline, linkedInLocation,
+                importedRoles.size(), importedSkills.size(),
+                techStackUpdated, rolesUpdated, locationUpdated
         );
     }
 
-    // ── ZIP extraction ──────────────────────────────────────────────────────
+    // ── ZIP parsing ───────────────────────────────────────────────────────
 
-    private Map<String, String> extractCsvFiles(MultipartFile file) throws IOException {
-        Map<String, String> result = new HashMap<>();
+    /**
+     * Streams through the ZIP and collects CSV entries whose names match
+     * Profile.csv, Positions.csv, or Skills.csv (case-insensitive).
+     *
+     * Returns a map keyed by base name (without .csv extension).
+     */
+    private Map<String, List<Map<String, String>>> parseZip(MultipartFile file) throws IOException {
+        Map<String, List<Map<String, String>>> result = new HashMap<>();
         try (ZipInputStream zis = new ZipInputStream(
-                new BufferedInputStream(file.getInputStream()), StandardCharsets.UTF_8)) {
+                file.getInputStream(), StandardCharsets.UTF_8)) {
             ZipEntry entry;
             while ((entry = zis.getNextEntry()) != null) {
-                String name = new File(entry.getName()).getName(); // strip directories
-                if (PROFILE_CSV.equalsIgnoreCase(name)
-                 || POSITIONS_CSV.equalsIgnoreCase(name)
-                 || SKILLS_CSV.equalsIgnoreCase(name)) {
-                    result.put(name, new String(zis.readAllBytes(), StandardCharsets.UTF_8));
+                String name = entry.getName();
+                // Strip directory prefix if any
+                if (name.contains("/")) name = name.substring(name.lastIndexOf('/') + 1);
+                String key = csvKey(name);
+                if (key != null) {
+                    result.put(key, parseCsv(zis));
                 }
                 zis.closeEntry();
             }
@@ -132,113 +149,84 @@ public class LinkedInImportService {
         return result;
     }
 
-    // ── CSV parsers ─────────────────────────────────────────────────────────
-
-    /**
-     * Profile.csv headers (LinkedIn export):
-     * First Name, Last Name, Maiden Name, Address, Birth Date, Headline, Summary, Industry, Zip Code, Geo Location, Twitter Handles, Websites, Instant Messengers
-     */
-    private Map<String, String> parseProfileCsv(String csv) {
-        Map<String, String> result = new HashMap<>();
-        try {
-            List<String[]> rows = parseCsv(csv);
-            if (rows.size() < 2) return result;
-            String[] headers = rows.get(0);
-            String[] values  = rows.get(1);
-            Map<String, String> row = zipHeadersValues(headers, values);
-            result.put("firstName", row.getOrDefault("First Name",    "").trim());
-            result.put("lastName",  row.getOrDefault("Last Name",     "").trim());
-            result.put("headline",  row.getOrDefault("Headline",      "").trim());
-            result.put("location",  row.getOrDefault("Geo Location",  "").trim());
-        } catch (Exception e) {
-            log.warn("Profile.csv parse error: {}", e.getMessage());
-        }
-        return result;
+    /** Returns the logical key for known CSVs, or null to skip. */
+    private String csvKey(String filename) {
+        String lower = filename.toLowerCase(Locale.ROOT);
+        if (lower.equals("profile.csv"))   return "Profile";
+        if (lower.equals("positions.csv")) return "Positions";
+        if (lower.equals("skills.csv"))    return "Skills";
+        return null;
     }
 
     /**
-     * Positions.csv headers:
-     * Company Name, Title, Description, Location, Started On, Finished On
+     * Minimal CSV parser: reads the header row then data rows.
+     * Handles double-quoted fields with embedded commas.
      */
-    private List<String> parsePositionsCsv(String csv) {
-        List<String> titles = new ArrayList<>();
-        try {
-            List<String[]> rows = parseCsv(csv);
-            if (rows.size() < 2) return titles;
-            String[] headers = rows.get(0);
-            for (int i = 1; i < rows.size(); i++) {
-                Map<String, String> row = zipHeadersValues(headers, rows.get(i));
-                String title = row.getOrDefault("Title", "").trim();
-                if (!title.isBlank()) titles.add(title);
+    private List<Map<String, String>> parseCsv(ZipInputStream zis) throws IOException {
+        List<Map<String, String>> rows = new ArrayList<>();
+        BufferedReader reader = new BufferedReader(
+                new InputStreamReader(zis, StandardCharsets.UTF_8));
+        String headerLine = reader.readLine();
+        if (headerLine == null) return rows;
+        String[] headers = splitCsvLine(headerLine);
+
+        String line;
+        while ((line = reader.readLine()) != null) {
+            if (line.isBlank()) continue;
+            String[] vals = splitCsvLine(line);
+            Map<String, String> row = new LinkedHashMap<>();
+            for (int i = 0; i < headers.length; i++) {
+                row.put(headers[i].trim(), i < vals.length ? vals[i].trim() : "");
             }
-        } catch (Exception e) {
-            log.warn("Positions.csv parse error: {}", e.getMessage());
+            rows.add(row);
         }
-        return titles;
-    }
-
-    /**
-     * Skills.csv headers:
-     * Name
-     */
-    private List<String> parseSkillsCsv(String csv) {
-        List<String> skills = new ArrayList<>();
-        try {
-            List<String[]> rows = parseCsv(csv);
-            if (rows.size() < 2) return skills;
-            String[] headers = rows.get(0);
-            for (int i = 1; i < rows.size(); i++) {
-                Map<String, String> row = zipHeadersValues(headers, rows.get(i));
-                String name = row.getOrDefault("Name", "").trim();
-                if (!name.isBlank()) skills.add(name);
-            }
-        } catch (Exception e) {
-            log.warn("Skills.csv parse error: {}", e.getMessage());
-        }
-        return skills;
-    }
-
-    // ── Minimal RFC-4180 CSV parser (handles quoted fields) ─────────────────
-
-    private List<String[]> parseCsv(String content) {
-        List<String[]> rows = new ArrayList<>();
-        try (BufferedReader br = new BufferedReader(new StringReader(content))) {
-            String line;
-            while ((line = br.readLine()) != null) {
-                if (!line.isBlank()) rows.add(splitCsvLine(line));
-            }
-        } catch (IOException ignored) {}
         return rows;
     }
 
+    /** Splits a CSV line respecting double-quoted fields. */
     private String[] splitCsvLine(String line) {
-        List<String> fields = new ArrayList<>();
-        boolean inQuotes = false;
-        StringBuilder sb = new StringBuilder();
+        List<String> result = new ArrayList<>();
+        StringBuilder cur   = new StringBuilder();
+        boolean inQuotes    = false;
         for (int i = 0; i < line.length(); i++) {
             char c = line.charAt(i);
             if (c == '"') {
+                // Handle escaped quote ("") inside quoted field
                 if (inQuotes && i + 1 < line.length() && line.charAt(i + 1) == '"') {
-                    sb.append('"'); i++;
+                    cur.append('"');
+                    i++;
                 } else {
                     inQuotes = !inQuotes;
                 }
             } else if (c == ',' && !inQuotes) {
-                fields.add(sb.toString().trim());
-                sb.setLength(0);
+                result.add(cur.toString());
+                cur.setLength(0);
             } else {
-                sb.append(c);
+                cur.append(c);
             }
         }
-        fields.add(sb.toString().trim());
-        return fields.toArray(String[]::new);
+        result.add(cur.toString());
+        return result.toArray(String[]::new);
     }
 
-    private Map<String, String> zipHeadersValues(String[] headers, String[] values) {
-        Map<String, String> map = new LinkedHashMap<>();
-        for (int i = 0; i < headers.length; i++) {
-            map.put(headers[i].trim(), i < values.length ? values[i].trim() : "");
+    // ── Utilities ─────────────────────────────────────────────────────────
+
+    /** Case-insensitive deduplicated merge of an existing array + new list. */
+    private String[] mergeArrays(String[] existing, List<String> incoming) {
+        Set<String> seen = new LinkedHashSet<>();
+        if (existing != null) Collections.addAll(seen, existing);
+        for (String s : incoming) {
+            if (!s.isBlank()) {
+                // Only add if no case-insensitive duplicate already present
+                boolean duplicate = seen.stream()
+                        .anyMatch(e -> e.equalsIgnoreCase(s));
+                if (!duplicate) seen.add(s);
+            }
         }
-        return map;
+        return seen.toArray(String[]::new);
+    }
+
+    private String value(Map<String, String> row, String key) {
+        return row.getOrDefault(key, "").trim();
     }
 }
