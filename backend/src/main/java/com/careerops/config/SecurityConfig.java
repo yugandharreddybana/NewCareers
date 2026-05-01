@@ -1,5 +1,6 @@
 package com.careerops.config;
 
+import com.careerops.ratelimit.RateLimitFilter;
 import com.careerops.security.InternalTrustFilter;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -16,9 +17,12 @@ import org.springframework.security.web.authentication.UsernamePasswordAuthentic
 public class SecurityConfig {
 
     private final InternalTrustFilter internalTrustFilter;
+    private final RateLimitFilter rateLimitFilter;
 
-    public SecurityConfig(InternalTrustFilter internalTrustFilter) {
+    public SecurityConfig(InternalTrustFilter internalTrustFilter,
+                          RateLimitFilter rateLimitFilter) {
         this.internalTrustFilter = internalTrustFilter;
+        this.rateLimitFilter     = rateLimitFilter;
     }
 
     @Bean
@@ -34,7 +38,10 @@ public class SecurityConfig {
                 .requestMatchers("/auth/**", "/health").permitAll()
                 .anyRequest().authenticated()
             )
-            .addFilterBefore(internalTrustFilter, UsernamePasswordAuthenticationFilter.class);
+            // InternalTrustFilter first — populates X-User-Id request attribute
+            .addFilterBefore(internalTrustFilter, UsernamePasswordAuthenticationFilter.class)
+            // RateLimitFilter second — reads X-User-Id set by the filter above
+            .addFilterAfter(rateLimitFilter, InternalTrustFilter.class);
         return http.build();
     }
 }

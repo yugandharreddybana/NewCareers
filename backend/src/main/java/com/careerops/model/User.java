@@ -25,5 +25,9 @@ public class User {
     @Column(name = "refresh_token_expires_at")
     private Instant refreshTokenExpiresAt;
 
+    // Task 136 — soft-delete: set by AdminService.softDeleteUser(), never hard-deleted
+    @Column(name = "deleted_at")
+    private Instant deletedAt;
+
     @PrePersist void onCreate() { if (createdAt == null) createdAt = Instant.now(); }
 }

@@ -4,11 +4,14 @@ import com.careerops.model.UserJob;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
+
+import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 
 public interface UserJobRepository extends JpaRepository<UserJob, UUID> {
+
     List<UserJob> findByUserIdOrderByDeliveredAtDesc(UUID userId);
     Optional<UserJob> findByUserIdAndJobId(UUID userId, UUID jobId);
     Optional<UserJob> findByIdAndUserId(UUID id, UUID userId);
@@ -32,4 +35,11 @@ public interface UserJobRepository extends JpaRepository<UserJob, UUID> {
      */
     @Query("SELECT COALESCE(AVG(uj.matchPercent), 0.0) FROM UserJob uj WHERE uj.userId = :uid AND uj.matchPercent IS NOT NULL")
     double avgMatchPercentForUser(@Param("uid") UUID userId);
+
+    /**
+     * Task 135 — AdminService.platformStats(): how many jobs were delivered
+     * (i.e. UserJob rows created) since a given instant.
+     */
+    @Query("SELECT COUNT(uj) FROM UserJob uj WHERE uj.deliveredAt >= :since")
+    long countDeliveredSince(@Param("since") Instant since);
 }

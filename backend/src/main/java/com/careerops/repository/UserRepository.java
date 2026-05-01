@@ -32,4 +32,10 @@ public interface UserRepository extends JpaRepository<User, UUID> {
     @Query("UPDATE User u SET u.refreshToken = NULL, u.refreshTokenExpiresAt = NULL "
          + "WHERE u.refreshTokenExpiresAt IS NOT NULL AND u.refreshTokenExpiresAt < :now")
     int purgeExpiredRefreshTokens(Instant now);
+
+    /**
+     * Task 135 — AdminService.platformStats(): count only non-deleted users.
+     * Spring Data derives the query from the field name deletedAt.
+     */
+    long countByDeletedAtIsNull();
 }
