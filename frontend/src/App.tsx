@@ -9,6 +9,7 @@ import JobDetail from '@/pages/JobDetail';
 import Kanban from '@/pages/Kanban';
 import Profile from '@/pages/Profile';
 import Analytics from '@/pages/Analytics';
+import Refer from '@/pages/Refer';
 import AppShell from '@/components/layout/AppShell';
 
 const USE_MOCKS = import.meta.env.VITE_USE_MOCKS === 'true';
@@ -36,6 +37,7 @@ export default function App() {
         <Route path="/kanban" element={<Kanban />} />
         <Route path="/profile" element={<Profile />} />
         <Route path="/analytics" element={<Analytics />} />
+        <Route path="/refer"     element={<Refer />} />  {/* Section 9 — Task 101 */}
       </Route>
 
       <Route path="*" element={<Navigate to="/dashboard" replace />} />
