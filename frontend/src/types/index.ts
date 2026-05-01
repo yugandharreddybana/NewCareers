@@ -6,47 +6,51 @@ export interface User {
   onboarded: boolean;
 }
 
-// Section 10 — portfolio item
+// ── Section 10: Portfolio & Career Goals ────────────────────────────────────────
+
 export interface PortfolioItem {
   id: string;
   title: string;
-  url?: string;
-  description?: string;
-  techTags?: string[];
+  url: string;
+  description: string;
+  techTags: string[];
 }
+
+export interface ImportSummary {
+  firstName:         string | null;
+  lastName:          string | null;
+  headline:          string | null;
+  location:          string | null;
+  skillsImported:    number;
+  positionsImported: number;
+  profileUpdated:    boolean;
+}
+
+// ── Profile ─────────────────────────────────────────────────────────────────────
 
 export interface Profile {
-  targetRoles?: string[];
-  techStack?: string[];
-  location?: string;
-  salaryMin?: number;
-  salaryMax?: number;
-  sectors?: string[];
-  freshnessHours?: number;
-  minMatchPercent?: number;
+  targetRoles?:       string[];
+  techStack?:         string[];
+  location?:          string;
+  salaryMin?:         number;
+  salaryMax?:         number;
+  sectors?:           string[];
+  freshnessHours?:    number;
+  minMatchPercent?:   number;
   sponsorshipRequired?: boolean;
-  onboarded?: boolean;
-  activeCvFileName?: string | null;
-  // Section 10 additions
-  portfolioItems?: PortfolioItem[];
-  goalTitle?: string;
-  goalSalaryMin?: number;
-  goalSalaryMax?: number;
-  goalLocation?: string;
-  openToRemote?: boolean;
+  onboarded?:         boolean;
+  activeCvFileName?:  string | null;
+  // Section 10
+  goalTitle?:         string | null;
+  goalSalaryMin?:     number | null;
+  goalSalaryMax?:     number | null;
+  goalLocation?:      string | null;
+  openToRemote?:      boolean;
+  portfolioItems?:    PortfolioItem[];
+  completenessScore?: number;
 }
 
-// Section 10 — LinkedIn import summary
-export interface ImportSummary {
-  firstName: string;
-  lastName: string;
-  headline: string;
-  summary: string;
-  positionsImported: number;
-  skillsImported: number;
-  locationUpdated: boolean;
-  message: string;
-}
+// ── Job types ─────────────────────────────────────────────────────────────────
 
 export interface JobCard {
   userJobId: string;

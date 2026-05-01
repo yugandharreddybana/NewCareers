@@ -1,5 +1,6 @@
 import axios from 'axios';
 import * as mocks from './mockApi';
+import type { PortfolioItem, ImportSummary } from '@/types';
 
 const baseURL = import.meta.env.VITE_MIDDLEWARE_URL || 'http://localhost:4000';
 const USE_MOCKS = import.meta.env.VITE_USE_MOCKS === 'true';
@@ -21,7 +22,7 @@ api.interceptors.response.use(
   }
 );
 
-// Auth
+// ── Auth ────────────────────────────────────────────────────────────────
 export const authApi = {
   signup: async (b: any) => {
     if (USE_MOCKS) { await delay(); return { user: mocks.MOCK_USER }; }
@@ -39,7 +40,7 @@ export const authApi = {
   reset:  (b: any) => api.post('/auth/reset-password', b).then(r => r.data),
 };
 
-// Profile
+// ── Profile ─────────────────────────────────────────────────────────────
 export const profileApi = {
   get: async () => {
     if (USE_MOCKS) { await delay(400); return mocks.MOCK_USER; }
@@ -57,25 +58,25 @@ export const profileApi = {
     return api.get('/profile/stats').then(r => r.data);
   },
 
-  // Section 10 — Portfolio CRUD
-  addPortfolioItem: (item: { title: string; url?: string; description?: string; techTags?: string[] }) =>
+  // ─ Section 10: Portfolio CRUD ───────────────────────────────────────────
+  addPortfolioItem: (item: Omit<PortfolioItem, 'id'>) =>
     api.post('/profile/portfolio', item).then(r => r.data),
 
-  updatePortfolioItem: (itemId: string, item: { title: string; url?: string; description?: string; techTags?: string[] }) =>
-    api.put(`/profile/portfolio/${itemId}`, item).then(r => r.data),
+  updatePortfolioItem: (id: string, item: Omit<PortfolioItem, 'id'>) =>
+    api.put(`/profile/portfolio/${id}`, item).then(r => r.data),
 
-  deletePortfolioItem: (itemId: string) =>
-    api.delete(`/profile/portfolio/${itemId}`).then(r => r.data),
+  deletePortfolioItem: (id: string) =>
+    api.delete(`/profile/portfolio/${id}`).then(r => r.data),
 
-  // Section 10 — LinkedIn Import
-  importLinkedIn: (file: File) => {
+  // ─ Section 10: LinkedIn import ─────────────────────────────────────────
+  importLinkedIn: (file: File): Promise<ImportSummary> => {
     const fd = new FormData();
     fd.append('file', file);
-    return api.post('/profile/import/linkedin', fd, { timeout: 30_000 }).then(r => r.data);
+    return api.post('/profile/import/linkedin', fd, { timeout: 60_000 }).then(r => r.data);
   },
 };
 
-// Jobs
+// ── Jobs ────────────────────────────────────────────────────────────────
 export const jobsApi = {
   list: async () => {
     if (USE_MOCKS) { await delay(1000); return { items: mocks.MOCK_JOBS, dailyCount: 5, dailyLimit: 15, remaining: 10 }; }
@@ -99,7 +100,7 @@ export const jobsApi = {
   },
 };
 
-// Kanban
+// ── Kanban ──────────────────────────────────────────────────────────────
 export const kanbanApi = {
   patch: (id: string, body: { kanbanColumn?: string; status?: string }) => {
     if (USE_MOCKS) return Promise.resolve({ success: true });
@@ -108,10 +109,10 @@ export const kanbanApi = {
   uploadCv: (id: string, file: File) => {
     const fd = new FormData(); fd.append('file', file);
     return api.post(`/kanban/${id}/cv`, fd).then(r => r.data);
-  },
+  }
 };
 
-// Skills
+// ── Skills ─────────────────────────────────────────────────────────────
 export const skillsApi = {
   start: async (req: any) => {
     if (USE_MOCKS) {
@@ -120,25 +121,21 @@ export const skillsApi = {
     }
     return api.post('/skills/start', req, { timeout: 180_000 }).then(r => r.data);
   },
-
   reply: (req: { conversationId: string; answer: string }) =>
     api.post('/skills/conversation/reply', req, { timeout: 180_000 }).then(r => r.data),
-
   runAll: async (userJobId: string) => {
     if (USE_MOCKS) { await delay(4000); return { success: true }; }
     return api.post(`/skills/run-all/${userJobId}`, null, { timeout: 600_000 }).then(r => r.data);
   },
-
   getLastRun: async (userJobId: string, skill: string) => {
     if (USE_MOCKS) { return { state: 'done', data: mocks.MOCK_SKILL_RESULTS[skill] }; }
     return api.get(`/skills/last-run/${userJobId}/${skill}`).then(r => r.data);
   },
-
   downloadSkillPdf: (userJobId: string, skillName: string) => {
     if (USE_MOCKS) { alert('MOCK: Downloading PDF...'); return Promise.resolve(); }
     return api.get(`/skills/pdf/${userJobId}/${skillName}`, { responseType: 'blob', timeout: 60_000 })
       .then(r => {
-        const url  = window.URL.createObjectURL(r.data);
+        const url = window.URL.createObjectURL(r.data);
         const link = document.createElement('a');
         link.href = url; link.download = `${skillName}-report.pdf`;
         document.body.appendChild(link); link.click();
@@ -146,12 +143,11 @@ export const skillsApi = {
         window.URL.revokeObjectURL(url);
       });
   },
-
   downloadAllPdf: (userJobId: string) => {
     if (USE_MOCKS) { alert('MOCK: Downloading complete pack...'); return Promise.resolve(); }
     return api.get(`/skills/pdf/${userJobId}/all`, { responseType: 'blob', timeout: 120_000 })
       .then(r => {
-        const url  = window.URL.createObjectURL(r.data);
+        const url = window.URL.createObjectURL(r.data);
         const link = document.createElement('a');
         link.href = url; link.download = 'careerops-complete-pack.pdf';
         document.body.appendChild(link); link.click();
@@ -159,12 +155,11 @@ export const skillsApi = {
         window.URL.revokeObjectURL(url);
       });
   },
-
   downloadResumePdf: (userJobId: string) => {
     if (USE_MOCKS) { alert('MOCK: Downloading resume...'); return Promise.resolve(); }
     return api.get(`/skills/pdf/${userJobId}/resume`, { responseType: 'blob', timeout: 60_000 })
       .then(r => {
-        const url  = window.URL.createObjectURL(r.data);
+        const url = window.URL.createObjectURL(r.data);
         const link = document.createElement('a');
         link.href = url; link.download = 'tailored-resume.pdf';
         document.body.appendChild(link); link.click();
@@ -172,7 +167,7 @@ export const skillsApi = {
         window.URL.revokeObjectURL(url);
       });
   },
-
+  // Legacy aliases
   evaluate:      (userJobId: string) => skillsApi.start({ skillName: 'evaluate', userJobId }),
   tailorResume:  (userJobId: string) => skillsApi.start({ skillName: 'tailor-resume', userJobId }),
   research:      (userJobId: string) => skillsApi.start({ skillName: 'research', userJobId }),
