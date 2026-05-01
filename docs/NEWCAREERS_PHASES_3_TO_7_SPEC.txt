@@ -1,0 +1,477 @@
+NEWCAREERS ROADMAP — PHASES 3 TO 7 (IMPLEMENTATION SPEC)
+
+Owner: Yugandhar Reddy
+Repo: yugandharreddybana/NewCareers
+Context: Full-stack monorepo (React/TS frontend, Node.js middleware, Java Spring Boot backend, PostgreSQL with Flyway) for AI-powered job search and career tools.
+
+GOAL
+
+This document defines the implementation scope for Phases 3–7 of NewCareers.
+Each phase is designed to be:
+- End-to-end (DB → backend → middleware → frontend → UX)
+- Buildable in batches/sections
+- Executable by AI agents without ambiguity or leaving tasks half done.
+
+For every phase:
+- All migrations must be idempotent and follow existing Flyway naming.
+- All new endpoints must be covered with basic tests or manual test steps.
+- All features must be wired from DB to UI, not just partially implemented.
+
+============================================================
+PHASE 3 — JOB DISCOVERY & SAVED JOBS ENHANCEMENTS
+============================================================
+
+High-level objective
+
+Make the "Jobs" experience feel like a focused personal ATS: robust saving, tagging, basic notes, and a simple status pipeline (Saved → Applied → Interview → Offer → Rejected) without deep Kanban yet.
+
+Scope
+
+3.1 Database layer
+
+- Create Flyway migration VXX__jobs_enhancements.sql (replace XX with next number), including:
+  - New table job_status_history
+    - id (PK)
+    - user_id (FK → users)
+    - job_id (FK → jobs or user_jobs, aligned with current schema)
+    - status (enum-like text: SAVED/APPLIED/INTERVIEW/OFFER/REJECTED)
+    - changed_at (timestamp with time zone default now)
+    - source (MANUAL or SYSTEM)
+  - Extend user_jobs (or equivalent) with:
+    - current_status (text, same status domain)
+    - tags (text[] or JSONB)
+    - notes (text)
+    - last_updated_at (timestamp with time zone default now)
+  - Indexes:
+    - idx_user_jobs_user_status (user_id, current_status)
+    - idx_job_status_history_user_job (user_id, job_id)
+
+3.2 Java backend (Spring Boot)
+
+- Add/Update Job entity or UserJob entity to map new fields.
+- Add JobStatusHistory entity + repository.
+- Service methods:
+  - updateJobStatus(userId, jobId, newStatus, source)
+  - addJobTag(userId, jobId, tag)
+  - removeJobTag(userId, jobId, tag)
+  - updateJobNotes(userId, jobId, notes)
+  - getJobsByStatus(userId, status, pagination)
+  - getJobTimeline(userId, jobId) → full JobStatusHistory list ordered by changed_at.
+- Controller endpoints (REST):
+  - PUT /api/jobs/{jobId}/status
+    - body: { status }
+    - effect: update current_status + insert into job_status_history.
+  - PATCH /api/jobs/{jobId}/tags
+    - body: { add?: string[], remove?: string[] }
+  - PATCH /api/jobs/{jobId}/notes
+    - body: { notes }
+  - GET /api/jobs/status/{status}
+    - query params: page, size
+  - GET /api/jobs/{jobId}/timeline
+
+3.3 Node.js middleware
+
+- Add routes in jobs.routes.js (or equivalent):
+  - Forward the above backend endpoints via http client.
+  - Ensure authGuard is applied and user identity is propagated.
+- Add a small jobsService.ts (if not existing) to:
+  - Wrap backend calls.
+  - Handle errors consistently for frontend.
+
+3.4 Frontend (React/TypeScript)
+
+- Jobs page enhancements:
+  - Show status badge per job (Saved/Applied/Interview/Offer/Rejected).
+  - Allow inline status change (dropdown or status buttons).
+  - Allow adding/removing tags per job (chips UI).
+  - Allow notes per job (expandable textarea or modal).
+- Saved Jobs page (if separate):
+  - Filter by status.
+  - Simple search over title/company/location.
+- Job detail/tile:
+  - "Timeline" modal showing history from /timeline endpoint.
+
+3.5 Testing & UX completeness
+
+- Manual test checklist:
+  - Save a job → status set to SAVED.
+  - Change status through full funnel, verify history.
+  - Add/remove tags and notes, verify persistence.
+  - Reload page: data is consistent across views.
+- Ensure no TODOs left in code for this phase.
+
+============================================================
+PHASE 4 — APPLICATION TRACKING & KANBAN BOARD
+============================================================
+
+High-level objective
+
+Turn job status into a visual Kanban pipeline, with clear tracking of applications, interviews, and offers.
+
+Scope
+
+4.1 Database layer
+
+- Create Flyway migration VXX__kanban_applications.sql.
+- Either reuse user_jobs + job_status_history or introduce application table:
+  - applications
+    - id (PK)
+    - user_id (FK → users)
+    - job_id (FK → jobs/user_jobs)
+    - board_column (text: SAVED/APPLIED/INTERVIEW/OFFER/REJECTED)
+    - priority (int, smaller = higher priority)
+    - created_at, updated_at
+  - If new table is introduced, ensure it stays consistent with user_jobs.current_status.
+- Add index:
+  - idx_applications_user_column (user_id, board_column, priority).
+
+4.2 Java backend
+
+- Application entity + repository (if new table).
+- Service methods:
+  - getBoard(userId) → returns columns with ordered applications/jobs.
+  - moveCard(userId, applicationId, targetColumn, targetPosition).
+  - reorderColumn(userId, column, orderedApplicationIds).
+- Controller endpoints:
+  - GET /api/kanban/board
+  - PUT /api/kanban/card/{applicationId}/move
+  - PUT /api/kanban/column/{column}/reorder
+- Ensure every status move also updates user_jobs.current_status and adds a JobStatusHistory entry.
+
+4.3 Node.js middleware
+
+- Add kanban.routes.js:
+  - map the above endpoints.
+  - enforce auth.
+
+4.4 Frontend Kanban UI
+
+- New route: /kanban (or /applications).
+- Components:
+  - KanbanBoard
+  - KanbanColumn (per status)
+  - KanbanCard (job/application tile)
+- Functionality:
+  - Drag & drop between columns (using a library such as react-beautiful-dnd or existing pattern).
+  - Drag to reorder within a column.
+  - Click card → open job details (possibly reuse job detail panel from Phase 3).
+  - Column counts (number of cards per status).
+
+4.5 UX & validation
+
+- Manual tests:
+  - Move card between all statuses, verify DB and UI.
+  - Refresh page: board state persists.
+  - No duplicate entries; statuses remain consistent.
+
+============================================================
+PHASE 5 — PROFILE DEEPENING & CAREER DATA
+============================================================
+
+High-level objective
+
+Go beyond basic profile and capture richer data that powers better matching later (skills, preferences, constraints, goals). This complements the Phase 10 Profile Enhancements already built.
+
+Scope
+
+5.1 Database layer
+
+- Create VXX__profile_deepening.sql.
+- Extend user_profiles table with:
+  - skills JSONB (structured: { name, level, years })
+  - job_preferences JSONB (location prefs, remote preference, salary range, industries, roles)
+  - constraints JSONB (visa, relocation, time constraints)
+  - experience_summary TEXT (short narrative)
+- Add indexes for JSONB querying as needed (e.g. GIN index on skills, job_preferences).
+
+5.2 Java backend
+
+- Extend UserProfile entity with new fields.
+- Add DTOs and validation:
+  - SkillDto
+  - JobPreferencesDto
+  - ConstraintsDto
+- Service methods:
+  - updateSkills(userId, skills)
+  - updateJobPreferences(userId, jobPreferences)
+  - updateConstraints(userId, constraints)
+  - updateExperienceSummary(userId, text)
+- Controller endpoints:
+  - PUT /api/profile/skills
+  - PUT /api/profile/job-preferences
+  - PUT /api/profile/constraints
+  - PUT /api/profile/experience-summary
+
+5.3 Node.js middleware
+
+- profile.routes.js additions for the above endpoints.
+- Ensure request/response types are cleanly typed in TS.
+
+5.4 Frontend Profile UI
+
+- On Profile page:
+  - Skills editor: list of skills with level (e.g. Beginner/Intermediate/Expert) and years.
+  - Job preferences form: locations, remote/hybrid/onsite, salary range, industries, role titles.
+  - Constraints section: visa, relocation, working hours.
+  - Experience summary textarea with character count.
+- Ensure all forms use debounced autosave or explicit Save buttons.
+
+5.5 Future integration hooks
+
+- Ensure the data model is usable by future matching/AI phases (Phase 7). Do not implement AI here; just store clean structured data.
+
+============================================================
+PHASE 6 — NOTIFICATIONS & REMINDERS
+============================================================
+
+High-level objective
+
+Deliver timely reminders and notifications about job status changes, upcoming interviews (manual entry), and important follow-up dates.
+
+Scope
+
+6.1 Database layer
+
+- Create VXX__notifications.sql.
+- notifications table:
+  - id (PK)
+  - user_id (FK → users)
+  - type (APPLICATION_MOVED, INTERVIEW_REMINDER, FOLLOWUP_REMINDER, SYSTEM_MESSAGE, REFERRAL)
+  - title (text)
+  - body (text)
+  - metadata JSONB (e.g. { jobId, applicationId, targetDate })
+  - is_read (boolean default false)
+  - created_at, read_at
+- reminder_settings table:
+  - id (PK)
+  - user_id (FK)
+  - enable_email_notifications (boolean)
+  - enable_in_app_notifications (boolean)
+  - daily_digest_time (time, nullable)
+
+6.2 Java backend
+
+- Notification entity, repository, service.
+- Methods:
+  - createNotification(userId, type, title, body, metadata)
+  - markAsRead(userId, notificationId)
+  - markAllAsRead(userId)
+  - getNotifications(userId, unreadOnly?, pagination)
+- Integrations:
+  - On job status change (Phase 3 / 4), create APPLICATION_MOVED notification.
+  - For interview and follow-up reminders, allow creation via API (user picks date/time and label).
+- Controller endpoints:
+  - GET /api/notifications
+  - POST /api/notifications/mark-read
+  - POST /api/notifications/mark-all-read
+  - POST /api/notifications/reminders (to create a reminder tied to a job/application)
+
+6.3 Scheduler / cron (Java or Node)
+
+- Add scheduled job that runs periodically (e.g. every 15 minutes) to:
+  - find upcoming reminders within next time window.
+  - send notifications (in-app, email via existing email service).
+  - mark reminders as dispatched.
+
+6.4 Node.js middleware
+
+- notifications.routes.js to call the backend endpoints.
+- If email is triggered via backend, middleware just forwards calls.
+
+6.5 Frontend notifications UI
+
+- Notification bell in top navigation:
+  - badge with number of unread notifications.
+  - dropdown list with recent notifications.
+- Full Notifications page:
+  - list with filters (all/unread).
+  - "mark as read" and "mark all read".
+- On relevant job/application screens:
+  - "Add reminder" UI (date/time picker, reason field).
+
+6.6 UX completeness
+
+- Manual tests for:
+  - status change → notification created.
+  - reminder created → triggered by scheduler.
+  - email and in-app paths both working if configured.
+
+============================================================
+PHASE 7 — AI ENGINE, CREDITS, AND SMART CACHING
+============================================================
+
+High-level objective
+
+Turn NewCareers into a powerful, cost-aware AI product by:
+- pooling & caching job insights (20 jobs per batch),
+- introducing an AI credits system per user,
+- centralizing model routing,
+- and wiring everything into the existing jobs and profile flows.
+
+Scope
+
+7.1 Database layer — recommendation & AI artifacts
+
+- Create VXX__ai_engine_recommendations.sql.
+- recommendation_batches table:
+  - id (PK)
+  - user_id (FK → users)
+  - generated_at (timestamp with time zone)
+  - expires_at (timestamp with time zone)
+  - source (text: SCRAPER, IMPORT, MIXED)
+  - status (ACTIVE, EXPIRED, REPLACED)
+- recommended_jobs table:
+  - id (PK)
+  - batch_id (FK → recommendation_batches)
+  - job_id (FK → jobs/user_jobs)
+  - rank (int)
+  - score (numeric or double precision)
+  - is_shown (boolean default false)
+  - is_clicked (boolean default false)
+  - is_saved (boolean default false)
+  - is_applied (boolean default false)
+  - created_at, updated_at
+- ai_job_insights table:
+  - id (PK)
+  - user_id
+  - job_id
+  - profile_hash (text) — hash of profile attributes relevant to AI
+  - fit_reason (text)
+  - pros_cons (text)
+  - salary_comment (text)
+  - company_summary (text)
+  - raw_prompt_metadata JSONB (optional, for debugging)
+  - created_at
+  - UNIQUE index on (user_id, job_id, profile_hash) to support caching.
+
+7.2 Database layer — AI credits
+
+- Create VXX__ai_credits.sql.
+- ai_credits table:
+  - user_id (PK, FK → users)
+  - total_credits (int)
+  - credits_used (int)
+  - period_start (timestamp with time zone)
+  - period_end (timestamp with time zone)
+  - plan_type (text: FREE, PRO, CUSTOM)
+- ai_credit_transactions table:
+  - id (PK)
+  - user_id
+  - action_type (JOB_FIT, CV_REWRITE, COVER_LETTER, OUTREACH, BATCH_INSIGHTS, OTHER)
+  - credits (int)
+  - created_at
+  - metadata JSONB (e.g. job_id, application_id)
+
+7.3 Java backend — recommendation service
+
+- RecommendationBatchService:
+  - generateBatchForUser(userId):
+    - gather candidate jobs (based on profile prefs + Phase 5 data).
+    - score and rank jobs (heuristic initially, AI-assisted later).
+    - store top 20 in recommended_jobs.
+  - getNextJobs(userId, limit):
+    - return next unseen jobs from ACTIVE batch.
+    - if unseen count < threshold (5), trigger regeneration.
+  - markJobShown(userId, jobId)
+  - markJobClicked(userId, jobId)
+  - markJobSaved(userId, jobId)
+  - markJobApplied(userId, jobId)
+- Controllers:
+  - GET /api/recommendations/initial?limit=3
+  - GET /api/recommendations/more?limit=5
+  - POST /api/recommendations/{jobId}/events (body: { type: SHOWN/CLICKED/SAVED/APPLIED })
+
+7.4 Java backend — AI insights & cache
+
+- AiInsightsService:
+  - getJobInsights(userId, jobId):
+    - compute profile_hash from Phase 5 data.
+    - look up ai_job_insights by (user_id, job_id, profile_hash).
+    - if found → return cached.
+    - if not found → call AiEngineService, save insights, return.
+- Controller endpoints:
+  - GET /api/ai/jobs/{jobId}/insights
+
+7.5 Java backend — AI credits
+
+- AiCreditsService:
+  - ensureUserCreditsRecord(userId) — initialize with default FREE plan if absent.
+  - hasCredits(userId, required) → bool.
+  - consumeCredits(userId, actionType, required, metadata) → throws if insufficient.
+  - getCreditsInfo(userId) → summary (remaining, plan_type, period_end).
+- Controllers:
+  - GET /api/ai/credits
+  - POST /api/ai/credits/consume (used internally or via middleware guard).
+
+7.6 Java backend — AI engine & routing (abstraction)
+
+- AiEngineService (single entry point for any LLM call):
+  - Methods:
+    - generateJobInsights(userId, job, profileData) → returns fit_reason/pros_cons/etc.
+    - rewriteCv(userId, cvData, jobData)
+    - generateCoverLetter(userId, cvData, jobData)
+    - generateOutreachMessage(userId, jobData, context)
+  - Internally:
+    - builds prompts.
+    - chooses model (Claude vs cheaper model) based on action type.
+    - enforces max tokens and safety rules.
+- This layer is the ONLY place that talks to external LLM APIs.
+
+7.7 Node.js middleware
+
+- recommendations.routes.js:
+  - GET /recommendations/initial
+  - GET /recommendations/more
+  - POST /recommendations/{jobId}/events
+- ai.routes.js:
+  - GET /ai/jobs/{jobId}/insights
+  - GET /ai/credits
+- AiCreditsGuard middleware:
+  - checks user credits via backend endpoint before calling expensive AI actions.
+  - returns standardized error shape when credits are insufficient.
+
+7.8 Frontend — Recommendations UI
+
+- Dashboard or Jobs page:
+  - On load: call /recommendations/initial and show 3 jobs.
+  - "Show more jobs" button: calls /recommendations/more and appends items.
+  - Show indicator: "Showing X of 20 curated jobs for you".
+  - Track events:
+    - when job card enters viewport → SHOWN.
+    - on click → CLICKED.
+    - on save/apply → SAVED/APPLIED.
+
+7.9 Frontend — AI insights UI
+
+- On each job card/detail:
+  - "Why this job suits you" section.
+  - "Pros & cons" section.
+  - Load via /ai/jobs/{jobId}/insights with loading skeleton.
+- When credits are insufficient:
+  - show friendly upsell/limit message rather than silent failure.
+
+7.10 Frontend — AI credits UI
+
+- Profile or header:
+  - small component: "AI Credits: X / Y this month".
+- Dedicated AI Credits page:
+  - show remaining credits, reset date, and breakdown of past usage.
+
+7.11 Testing & safeguards
+
+- Ensure all AI calls go through AiEngineService only.
+- Ensure ai_job_insights caching works (no duplicate calls for same key).
+- Ensure credits are decremented only when a call is actually made.
+- Manual test happy paths and failure paths (no credits, API failure, etc.).
+
+============================================================
+IMPLEMENTATION NOTES FOR AI AGENTS
+============================================================
+
+- Always implement DB → backend → middleware → frontend for each feature before marking a phase as complete.
+- Do not leave TODOs or half-wired endpoints.
+- Follow existing project conventions for naming, error handling, authentication, and TypeScript types.
+- For any ambiguity, prefer adding small, well-named helpers/services over inlining complex logic.
+- Do not start the next phase until the current one is fully verified end-to-end.
+
+End of document.
