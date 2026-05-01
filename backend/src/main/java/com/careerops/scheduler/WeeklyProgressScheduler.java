@@ -1,16 +1,24 @@
 package com.careerops.scheduler;
 
+import com.careerops.model.UserStreak;
+import com.careerops.model.WeeklyProgressSnapshot;
+import com.careerops.repository.UserStreakRepository;
 import com.careerops.repository.WeeklyProgressSnapshotRepository;
-import com.careerops.service.ProgressInsightService;
+import com.careerops.service.WeeklyProgressEmailService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 
+import java.time.DayOfWeek;
+import java.time.LocalDate;
+import java.time.ZoneOffset;
+import java.util.List;
+import java.util.Optional;
+
 /**
- * Task 66 — weekly snapshot refresh + email trigger.
- * Runs every Monday at 08:00 UTC to generate the previous week's summary
- * and queue the weekly email for each user.
+ * Task 66 — Weekly progress snapshot refresh and email dispatch.
+ * Runs every Monday at 08:00 UTC.
  */
 @Component
 @RequiredArgsConstructor
@@ -18,15 +26,46 @@ import org.springframework.stereotype.Component;
 public class WeeklyProgressScheduler {
 
     private final WeeklyProgressSnapshotRepository snapshotRepo;
-    private final ProgressInsightService progressService;
+    private final UserStreakRepository streakRepo;
+    private final WeeklyProgressEmailService progressEmailService;
 
-    // Every Monday at 08:00 UTC
     @Scheduled(cron = "0 0 8 * * MON", zone = "UTC")
-    public void generateWeeklySnapshots() {
-        log.info("[WeeklyProgressScheduler] Starting weekly snapshot generation");
-        // Iterate all distinct users who had a snapshot last week and refresh/generate
-        // In production this would page through active users from the users table.
-        // Stubbed here — wired into full user list via UserRepository when EmailService is extended.
-        log.info("[WeeklyProgressScheduler] Weekly snapshot generation complete");
+    public void generateAndSendWeeklyProgress() {
+        log.info("[WeeklyProgressScheduler] Starting weekly progress email dispatch");
+
+        // Retrieve all snapshots for the current week (generated throughout the week
+        // by on-demand calls to ProgressInsightService.generateSnapshot)
+        LocalDate weekStart = LocalDate.now(ZoneOffset.UTC).with(DayOfWeek.MONDAY);
+        List<WeeklyProgressSnapshot> snaps = snapshotRepo
+                .findByWeekStartWithUserEmail(weekStart);
+
+        int sent = 0;
+        int skipped = 0;
+
+        for (WeeklyProgressSnapshot snap : snaps) {
+            try {
+                // Fetch streak for personalised email
+                Optional<UserStreak> streakOpt = streakRepo.findByUserId(snap.getUserId());
+                UserStreak streak = streakOpt.orElse(null);
+
+                // Email and first name come from the join query projection
+                String toEmail = snap.getUserEmail();
+                String firstName = snap.getUserFirstName();
+
+                if (toEmail == null || toEmail.isBlank()) {
+                    skipped++;
+                    continue;
+                }
+
+                progressEmailService.sendWeeklyProgressEmail(toEmail, firstName, snap, streak);
+                sent++;
+            } catch (Exception e) {
+                log.error("[WeeklyProgressScheduler] Error for userId={}: {}",
+                        snap.getUserId(), e.getMessage());
+                skipped++;
+            }
+        }
+
+        log.info("[WeeklyProgressScheduler] Complete — sent: {}, skipped: {}", sent, skipped);
     }
 }

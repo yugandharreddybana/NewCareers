@@ -1,0 +1,114 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Your Weekly CareerOps Progress</title>
+  <style>
+    body { margin: 0; padding: 0; background: #f7f6f2; font-family: 'Helvetica Neue', Arial, sans-serif; color: #28251d; }
+    .wrapper { max-width: 600px; margin: 40px auto; background: #ffffff; border-radius: 12px; overflow: hidden; border: 1px solid #dcd9d5; }
+    .header { background: #01696f; padding: 32px 40px; text-align: center; }
+    .header h1 { margin: 0; color: #ffffff; font-size: 22px; font-weight: 600; letter-spacing: -0.3px; }
+    .header p { margin: 6px 0 0; color: rgba(255,255,255,0.8); font-size: 14px; }
+    .body { padding: 32px 40px; }
+    .greeting { font-size: 16px; margin-bottom: 24px; }
+    .kpi-grid { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 16px; margin-bottom: 28px; }
+    .kpi-card { background: #f7f6f2; border-radius: 8px; padding: 16px; text-align: center; }
+    .kpi-value { font-size: 28px; font-weight: 700; color: #01696f; display: block; line-height: 1; }
+    .kpi-label { font-size: 12px; color: #7a7974; display: block; margin-top: 4px; text-transform: uppercase; letter-spacing: 0.5px; }
+    .section-title { font-size: 13px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.6px; color: #7a7974; margin: 24px 0 10px; }
+    .insight-box { border-radius: 8px; padding: 14px 16px; margin-bottom: 12px; font-size: 14px; line-height: 1.6; }
+    .insight-box.wins { background: #d4dfcc; border-left: 3px solid #437a22; }
+    .insight-box.bottleneck { background: #e0ced7; border-left: 3px solid #a12c7b; }
+    .insight-box.reco { background: #cedcd8; border-left: 3px solid #01696f; }
+    .cta-row { text-align: center; margin: 32px 0 8px; }
+    .cta-btn { display: inline-block; background: #01696f; color: #ffffff; text-decoration: none; padding: 14px 32px; border-radius: 8px; font-size: 15px; font-weight: 600; }
+    .streak-row { text-align: center; margin-bottom: 24px; }
+    .streak-pill { display: inline-block; background: #f3f0ec; border-radius: 9999px; padding: 8px 20px; font-size: 14px; color: #28251d; }
+    .streak-flame { font-size: 18px; vertical-align: middle; margin-right: 4px; }
+    .footer { background: #f7f6f2; padding: 20px 40px; text-align: center; font-size: 12px; color: #7a7974; border-top: 1px solid #dcd9d5; }
+    .footer a { color: #01696f; text-decoration: none; }
+    @media (max-width: 480px) {
+      .body, .header, .footer { padding: 24px 20px; }
+      .kpi-grid { grid-template-columns: 1fr 1fr; }
+    }
+  </style>
+</head>
+<body>
+  <div class="wrapper">
+    <div class="header">
+      <h1>Your Weekly Progress &#x1F4C8;</h1>
+      <p>Week of {{weekStartFormatted}} &ndash; {{weekEndFormatted}}</p>
+    </div>
+    <div class="body">
+      <p class="greeting">Hi {{firstName}},</p>
+      <p style="font-size:14px;color:#7a7974;margin-bottom:24px;">Here&rsquo;s a snapshot of your job search activity this week.</p>
+
+      <!-- Streak pill -->
+      <div class="streak-row">
+        <span class="streak-pill">
+          <span class="streak-flame">&#x1F525;</span>
+          <strong>{{currentStreak}}-day streak</strong> &mdash; longest: {{longestStreak}} days
+        </span>
+      </div>
+
+      <!-- KPIs -->
+      <div class="kpi-grid">
+        <div class="kpi-card">
+          <span class="kpi-value">{{jobsReviewed}}</span>
+          <span class="kpi-label">Jobs Reviewed</span>
+        </div>
+        <div class="kpi-card">
+          <span class="kpi-value">{{applicationsSubmitted}}</span>
+          <span class="kpi-label">Applications</span>
+        </div>
+        <div class="kpi-card">
+          <span class="kpi-value">{{interviewsScheduled}}</span>
+          <span class="kpi-label">Interviews</span>
+        </div>
+        <div class="kpi-card">
+          <span class="kpi-value">{{responsesReceived}}</span>
+          <span class="kpi-label">Responses</span>
+        </div>
+        <div class="kpi-card">
+          <span class="kpi-value">{{offersReceived}}</span>
+          <span class="kpi-label">Offers</span>
+        </div>
+        <div class="kpi-card">
+          <span class="kpi-value">{{responseRate}}%</span>
+          <span class="kpi-label">Response Rate</span>
+        </div>
+      </div>
+
+      <!-- AI Insights -->
+      {{#if winsSummary}}
+      <div class="section-title">&#x1F3C5; This Week&rsquo;s Wins</div>
+      <div class="insight-box wins">{{winsSummary}}</div>
+      {{/if}}
+
+      {{#if bottlenecksSummary}}
+      <div class="section-title">&#x26A0;&#xFE0F; Bottleneck</div>
+      <div class="insight-box bottleneck">{{bottlenecksSummary}}</div>
+      {{/if}}
+
+      {{#if recommendations}}
+      <div class="section-title">&#x1F4A1; Recommendations</div>
+      <div class="insight-box reco">{{recommendations}}</div>
+      {{/if}}
+
+      <!-- CTA -->
+      <div class="cta-row">
+        <a href="{{appBaseUrl}}/progress" class="cta-btn">View Full Progress Dashboard &rarr;</a>
+      </div>
+    </div>
+    <div class="footer">
+      You&rsquo;re receiving this because you have weekly progress emails enabled.
+      <br />
+      <a href="{{appBaseUrl}}/settings/notifications">Manage email preferences</a> &middot;
+      <a href="{{unsubscribeUrl}}">Unsubscribe</a>
+      <br /><br />
+      &copy; {{year}} CareerOps &mdash; Helping you land the right role, faster.
+    </div>
+  </div>
+</body>
+</html>

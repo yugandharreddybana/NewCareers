@@ -71,6 +71,16 @@ public class WeeklyProgressSnapshot {
     @Column(name = "created_at", nullable = false, updatable = false)
     private Instant createdAt;
 
+    // ---------------------------------------------------------------------------
+    // Transient fields populated by the native query join in the scheduler
+    // (not persisted columns — populated at query time via aliases)
+    // ---------------------------------------------------------------------------
+    @Transient
+    private String userEmail;
+
+    @Transient
+    private String userFirstName;
+
     @PrePersist
     protected void onCreate() { this.createdAt = Instant.now(); }
 }

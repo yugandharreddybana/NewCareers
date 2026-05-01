@@ -1,4 +1,4 @@
-// Section 3.5 — typed API client for progress & streaks
+// Section 3.5 — typed API client for weekly progress, streaks, history
 import axios from './axiosInstance';
 
 export interface BadgeDTO {
@@ -36,13 +36,29 @@ export interface WeeklySummaryResponse {
   createdAt: string;
 }
 
+export interface HistoryResponse {
+  weeks: WeeklySummaryResponse[];
+  streak: StreakResponse;
+}
+
 export const progressApi = {
+  // Task 61
   getWeeklySummary: () =>
     axios.get<WeeklySummaryResponse>('/progress/weekly-summary').then(r => r.data),
 
+  // Task 62
   getStreaks: () =>
     axios.get<StreakResponse>('/progress/streaks').then(r => r.data),
 
+  // Task 64 — record daily activity (call on page mount)
   recordActivity: () =>
     axios.post<StreakResponse>('/progress/activity').then(r => r.data),
+
+  // Task 67 — multi-week history for chart widgets
+  getHistory: (weeks = 8) =>
+    axios.get<WeeklySummaryResponse[]>(`/progress/history?weeks=${weeks}`).then(r => r.data),
+
+  // Task 68 — combined full data in one request
+  getFull: () =>
+    axios.get<HistoryResponse>('/progress/full').then(r => r.data),
 };

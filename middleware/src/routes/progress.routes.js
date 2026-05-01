@@ -17,13 +17,19 @@ const proxy = createProxyMiddleware({
   },
 });
 
-// Task 61 — GET /progress/weekly-summary
+// Task 61 — GET  /progress/weekly-summary
 router.get('/weekly-summary', verifyToken, proxy);
 
-// Task 62 — GET /progress/streaks
+// Task 62 — GET  /progress/streaks
 router.get('/streaks', verifyToken, proxy);
 
-// POST /progress/activity — record daily activity
+// Task 67 — GET  /progress/history?weeks=N (multi-week chart data)
+router.get('/history', verifyToken, proxy);
+
+// Task 68 — GET  /progress/full (history + streak in one round-trip)
+router.get('/full', verifyToken, proxy);
+
+// POST /progress/activity — record daily activity + streak update
 router.post('/activity', verifyToken, proxy);
 
 export default router;

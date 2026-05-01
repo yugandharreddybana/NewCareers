@@ -28,11 +28,10 @@ public class ProgressInsightService {
     private final UserStreakRepository streakRepo;
 
     // ------------------------------------------------------------------
-    // Task 61 — GET /progress/weekly-summary
+    // Task 61 — GET /progress/weekly-summary (current week)
     // ------------------------------------------------------------------
     public ProgressDTO.WeeklySummaryResponse getWeeklySummary(UUID userId) {
-        LocalDate weekStart = LocalDate.now(ZoneOffset.UTC)
-                .with(DayOfWeek.MONDAY);
+        LocalDate weekStart = LocalDate.now(ZoneOffset.UTC).with(DayOfWeek.MONDAY);
         WeeklyProgressSnapshot snap = snapshotRepo
                 .findByUserIdAndWeekStart(userId, weekStart)
                 .orElseGet(() -> buildEmptySnapshot(userId, weekStart));
@@ -45,39 +44,47 @@ public class ProgressInsightService {
     public ProgressDTO.StreakResponse getStreaks(UUID userId) {
         UserStreak streak = streakRepo.findByUserId(userId)
                 .orElseGet(() -> UserStreak.builder()
-                        .userId(userId)
-                        .currentDailyStreak(0)
-                        .longestDailyStreak(0)
-                        .totalJobsReviewed(0)
-                        .totalAppsSubmitted(0)
-                        .build());
-        return ProgressDTO.StreakResponse.builder()
-                .currentDailyStreak(streak.getCurrentDailyStreak())
-                .longestDailyStreak(streak.getLongestDailyStreak())
-                .lastActiveDate(streak.getLastActiveDate())
-                .totalJobsReviewed(streak.getTotalJobsReviewed())
-                .totalAppsSubmitted(streak.getTotalAppsSubmitted())
-                .badges(buildBadges(streak))
-                .build();
+                        .userId(userId).currentDailyStreak(0).longestDailyStreak(0)
+                        .totalJobsReviewed(0).totalAppsSubmitted(0).build());
+        return buildStreakResponse(streak);
     }
 
     // ------------------------------------------------------------------
-    // Task 60 — Generate/refresh weekly summary (called by scheduler or on-demand)
+    // Task 67 — GET /progress/history?weeks=N (for chart widgets)
+    // ------------------------------------------------------------------
+    public List<ProgressDTO.WeeklySummaryResponse> getHistory(UUID userId, int weeks) {
+        LocalDate from = LocalDate.now(ZoneOffset.UTC)
+                .with(DayOfWeek.MONDAY)
+                .minusWeeks(Math.max(1, Math.min(weeks, 52)));
+        return snapshotRepo.findRecentByUser(userId, from)
+                .stream()
+                .map(this::toSummaryResponse)
+                .collect(Collectors.toList());
+    }
+
+    // ------------------------------------------------------------------
+    // Task 68 — GET /progress/full (single round-trip for ProgressPage)
+    // ------------------------------------------------------------------
+    public ProgressDTO.HistoryResponse getFullHistory(UUID userId) {
+        List<ProgressDTO.WeeklySummaryResponse> weeks = getHistory(userId, 8);
+        ProgressDTO.StreakResponse streak = getStreaks(userId);
+        return ProgressDTO.HistoryResponse.builder().weeks(weeks).streak(streak).build();
+    }
+
+    // ------------------------------------------------------------------
+    // Task 60 — Generate/refresh snapshot (called on-demand or by scheduler)
     // ------------------------------------------------------------------
     @Transactional
     public WeeklyProgressSnapshot generateSnapshot(UUID userId, int jobsReviewed,
                                                     int appsSubmitted, int interviewsScheduled,
                                                     int responsesReceived, int offersReceived) {
         LocalDate weekStart = LocalDate.now(ZoneOffset.UTC).with(DayOfWeek.MONDAY);
-        LocalDate weekEnd = weekStart.plusDays(6);
+        LocalDate weekEnd   = weekStart.plusDays(6);
 
         WeeklyProgressSnapshot snap = snapshotRepo
                 .findByUserIdAndWeekStart(userId, weekStart)
                 .orElseGet(() -> WeeklyProgressSnapshot.builder()
-                        .userId(userId)
-                        .weekStart(weekStart)
-                        .weekEnd(weekEnd)
-                        .build());
+                        .userId(userId).weekStart(weekStart).weekEnd(weekEnd).build());
 
         snap.setJobsReviewed(jobsReviewed);
         snap.setApplicationsSubmitted(appsSubmitted);
@@ -85,31 +92,21 @@ public class ProgressInsightService {
         snap.setResponsesReceived(responsesReceived);
         snap.setOffersReceived(offersReceived);
 
-        // Compute rates
         if (appsSubmitted > 0) {
-            snap.setResponseRate(BigDecimal.valueOf(responsesReceived)
-                    .divide(BigDecimal.valueOf(appsSubmitted), 4, RoundingMode.HALF_UP)
-                    .multiply(BigDecimal.valueOf(100))
-                    .setScale(2, RoundingMode.HALF_UP));
-            snap.setInterviewRate(BigDecimal.valueOf(interviewsScheduled)
-                    .divide(BigDecimal.valueOf(appsSubmitted), 4, RoundingMode.HALF_UP)
-                    .multiply(BigDecimal.valueOf(100))
-                    .setScale(2, RoundingMode.HALF_UP));
+            snap.setResponseRate(rate(responsesReceived, appsSubmitted));
+            snap.setInterviewRate(rate(interviewsScheduled, appsSubmitted));
         }
 
-        // Task 60 — AI-generated narrative (stub; wire to GeminiService when available)
         snap.setWinsSummary(generateWins(snap));
         snap.setBottlenecksSummary(generateBottlenecks(snap));
         snap.setRecommendations(generateRecommendations(snap));
-
-        // Task 68 — best performing category heuristic
         snap.setBestPerformingCategory(deriveBestCategory(snap));
 
         return snapshotRepo.save(snap);
     }
 
     // ------------------------------------------------------------------
-    // Task 64 — record daily activity + update streak
+    // Task 64 — Record daily activity + update streak
     // ------------------------------------------------------------------
     @Transactional
     public ProgressDTO.StreakResponse recordDailyActivity(UUID userId) {
@@ -124,19 +121,26 @@ public class ProgressInsightService {
         } else if (last.isEqual(today.minusDays(1))) {
             streak.setCurrentDailyStreak(streak.getCurrentDailyStreak() + 1);
         }
-        // already recorded today — no change
+        // last == today: already recorded — no change
 
         if (streak.getCurrentDailyStreak() > streak.getLongestDailyStreak()) {
             streak.setLongestDailyStreak(streak.getCurrentDailyStreak());
         }
         streak.setLastActiveDate(today);
         streakRepo.save(streak);
-        return getStreaks(userId);
+        return buildStreakResponse(streak);
     }
 
     // ------------------------------------------------------------------
-    // Internal helpers
+    // Helpers
     // ------------------------------------------------------------------
+    private BigDecimal rate(int numerator, int denominator) {
+        return BigDecimal.valueOf(numerator)
+                .divide(BigDecimal.valueOf(denominator), 4, RoundingMode.HALF_UP)
+                .multiply(BigDecimal.valueOf(100))
+                .setScale(2, RoundingMode.HALF_UP);
+    }
+
     private WeeklyProgressSnapshot buildEmptySnapshot(UUID userId, LocalDate weekStart) {
         return WeeklyProgressSnapshot.builder()
                 .userId(userId).weekStart(weekStart).weekEnd(weekStart.plusDays(6))
@@ -155,7 +159,7 @@ public class ProgressInsightService {
 
     private String generateBottlenecks(WeeklyProgressSnapshot s) {
         if (s.getApplicationsSubmitted() > 5 && s.getResponsesReceived() == 0)
-            return "You have applied to several roles but haven't received a response yet. Consider tailoring your CV more closely to each role.";
+            return "You've applied to several roles but haven't received a response yet. Consider tailoring your CV more closely to each role.";
         if (s.getJobsReviewed() > 10 && s.getApplicationsSubmitted() == 0)
             return "You're reviewing many jobs but not converting to applications. Try setting a daily application goal.";
         return null;
@@ -172,7 +176,6 @@ public class ProgressInsightService {
     }
 
     private String deriveBestCategory(WeeklyProgressSnapshot s) {
-        // Heuristic: placeholder — in production this would query job categories from user_jobs
         if (s.getResponseRate() != null && s.getResponseRate().compareTo(BigDecimal.valueOf(20)) > 0)
             return "Tech / Software Engineering";
         return null;
@@ -181,19 +184,28 @@ public class ProgressInsightService {
     // Task 65 — badges
     private List<ProgressDTO.BadgeDTO> buildBadges(UserStreak s) {
         List<ProgressDTO.BadgeDTO> badges = new ArrayList<>();
-        badges.add(ProgressDTO.BadgeDTO.builder().key("streak_3").label("3-Day Streak").icon("🔥")
-                .earned(s.getCurrentDailyStreak() >= 3).build());
-        badges.add(ProgressDTO.BadgeDTO.builder().key("streak_7").label("7-Day Streak").icon("☕")
-                .earned(s.getCurrentDailyStreak() >= 7).build());
-        badges.add(ProgressDTO.BadgeDTO.builder().key("streak_30").label("30-Day Streak").icon("🏆")
-                .earned(s.getCurrentDailyStreak() >= 30).build());
-        badges.add(ProgressDTO.BadgeDTO.builder().key("apps_5").label("5 Applications").icon("💼")
-                .earned(s.getTotalAppsSubmitted() >= 5).build());
-        badges.add(ProgressDTO.BadgeDTO.builder().key("apps_25").label("25 Applications").icon("🚀")
-                .earned(s.getTotalAppsSubmitted() >= 25).build());
-        badges.add(ProgressDTO.BadgeDTO.builder().key("jobs_50").label("50 Jobs Reviewed").icon("🔍")
-                .earned(s.getTotalJobsReviewed() >= 50).build());
+        badges.add(badge("streak_3",  "3-Day Streak",      "\uD83D\uDD25", s.getCurrentDailyStreak() >= 3));
+        badges.add(badge("streak_7",  "7-Day Streak",      "\u2615",       s.getCurrentDailyStreak() >= 7));
+        badges.add(badge("streak_30", "30-Day Streak",     "\uD83C\uDFC6", s.getCurrentDailyStreak() >= 30));
+        badges.add(badge("apps_5",    "5 Applications",    "\uD83D\uDCBC", s.getTotalAppsSubmitted() >= 5));
+        badges.add(badge("apps_25",   "25 Applications",   "\uD83D\uDE80", s.getTotalAppsSubmitted() >= 25));
+        badges.add(badge("jobs_50",   "50 Jobs Reviewed",  "\uD83D\uDD0D", s.getTotalJobsReviewed() >= 50));
         return badges;
+    }
+
+    private ProgressDTO.BadgeDTO badge(String key, String label, String icon, boolean earned) {
+        return ProgressDTO.BadgeDTO.builder().key(key).label(label).icon(icon).earned(earned).build();
+    }
+
+    private ProgressDTO.StreakResponse buildStreakResponse(UserStreak s) {
+        return ProgressDTO.StreakResponse.builder()
+                .currentDailyStreak(s.getCurrentDailyStreak())
+                .longestDailyStreak(s.getLongestDailyStreak())
+                .lastActiveDate(s.getLastActiveDate())
+                .totalJobsReviewed(s.getTotalJobsReviewed())
+                .totalAppsSubmitted(s.getTotalAppsSubmitted())
+                .badges(buildBadges(s))
+                .build();
     }
 
     private ProgressDTO.WeeklySummaryResponse toSummaryResponse(WeeklyProgressSnapshot s) {
