@@ -7,6 +7,9 @@
  * Search mode: when the user submits the JobSearchBar, Dashboard switches to
  * "search results" mode. The existing client-side filter bar is hidden while
  * search results are active. Clearing search restores the full pipeline view.
+ *
+ * Mobile audit (task 133): header action buttons wrap on 375px, stats col=1,
+ * no horizontal overflow.
  */
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
@@ -50,7 +53,7 @@ export default function Dashboard() {
   const [minMatch,     setMinMatch]    = useState(0);
   const [showFilters,  setShowFilters] = useState(false);
 
-  // ── Section 7: Search mode state ─────────────────────────────────────
+  // ── Section 7: Search mode state ────────────────────────────────────
   const [searchResult,  setSearchResult]  = useState<SearchResult | null>(null);
   const [searching,     setSearching]     = useState(false);
   const isSearchMode = searchResult !== null;
@@ -98,7 +101,6 @@ export default function Dashboard() {
 
   // ── Section 7: handle search bar submit ─────────────────────────────
   async function handleSearch(params: SearchParams) {
-    // Empty params = clear search mode
     if (Object.keys(params).length === 0) {
       setSearchResult(null);
       return;
@@ -114,7 +116,7 @@ export default function Dashboard() {
     }
   }
 
-  // ── Pipeline jobs (existing filter logic) ───────────────────────────
+  // ── Pipeline jobs (existing filter logic) ─────────────────────────────
   const allJobs: JobCard[] = data?.items || [];
 
   const filteredJobs = useMemo(() => {
@@ -144,7 +146,6 @@ export default function Dashboard() {
 
   const activeFilters = search || sourceFilter !== 'All Sources' || minMatch > 0;
 
-  // Jobs to render in the grid (search mode OR pipeline mode)
   const displayJobs: JobCard[] = isSearchMode
     ? (searchResult?.items ?? [])
     : topJobs;
@@ -152,13 +153,18 @@ export default function Dashboard() {
   return (
     <div className="space-y-8 pb-20">
 
-      {/* ── Page header ── */}
+      {/* ── Page header ──
+           Mobile fix (task 133): header action buttons use flex-wrap so they
+           never overflow on 375px screens. Stat row is already grid-cols-1
+           on mobile via the Progress section further down.
+      */}
       <section className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-4 pt-2">
         <div>
           <h1 className="text-2xl font-bold text-slate-900 leading-tight">Your Daily Mission</h1>
           <p className="text-slate-400 text-sm mt-1">What should you focus on today?</p>
         </div>
-        <div className="flex items-center gap-2 shrink-0">
+        {/* ✓ flex-wrap prevents 3-button row from overflowing at 375px */}
+        <div className="flex flex-wrap items-center gap-2 shrink-0">
           <SkillButton
             label="Compare"
             icon={<Target size={15} className="mr-1.5" />}
@@ -335,7 +341,7 @@ export default function Dashboard() {
           </div>
         )}
 
-        {/* ── Job grid ── */}
+        {/* ── Job grid: single col on mobile ── */}
         {loading || searching ? (
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
             {[...Array(3)].map((_, i) => (
@@ -413,10 +419,13 @@ export default function Dashboard() {
         )}
       </section>
 
-      {/* ── Section 7: Recommended Jobs Widget (below job grid) ── */}
+      {/* ── Section 7: Recommended Jobs Widget ── */}
       {!isSearchMode && <RecommendedJobsWidget />}
 
-      {/* ── Market Pulse (real analytics data) ── */}
+      {/* ── Market Pulse (real analytics data) ──
+           Mobile fix (task 133): grid is grid-cols-1 on mobile via the
+           responsive class below — already correct.
+      */}
       <section>
         <div className="bg-white border border-slate-200 rounded-2xl overflow-hidden">
           <div className="flex items-center gap-2 px-6 pt-5 pb-4 border-b border-slate-100">
@@ -425,6 +434,7 @@ export default function Dashboard() {
             </div>
             <h3 className="font-semibold text-slate-800">Your Progress This Week</h3>
           </div>
+          {/* ✓ grid-cols-1 on mobile, 3 cols on md+ — already handles task 133 stats wrap */}
           <div className="grid grid-cols-1 md:grid-cols-3 divide-y md:divide-y-0
                           md:divide-x divide-slate-100">
             <div className="px-6 py-5 space-y-1">

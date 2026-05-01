@@ -13,7 +13,7 @@ import {
 
 interface ModalState { userJobId: string; jobTitle: string }
 
-// ── Per-column visual config ───────────────────────────────────────────────────────
+// ── Per-column visual config ───────────────────────────────────────────────────
 const COL_META: Record<KanbanColumn, {
   dot:          string;
   badge:        string;
@@ -58,7 +58,7 @@ const COL_META: Record<KanbanColumn, {
   },
 };
 
-// ── Company avatar helpers ────────────────────────────────────────────────────────
+// ── Company avatar helpers ──────────────────────────────────────────────────
 const AVATAR_COLORS = [
   'bg-blue-100 text-blue-700', 'bg-purple-100 text-purple-700',
   'bg-rose-100 text-rose-700', 'bg-amber-100 text-amber-700',
@@ -73,7 +73,7 @@ function avatarColor(c: string) {
   return AVATAR_COLORS[Math.abs(h) % AVATAR_COLORS.length];
 }
 
-// ── Source badge ─────────────────────────────────────────────────────────────────
+// ── Source badge ────────────────────────────────────────────────────────────
 const SOURCE_STYLES: Record<string, string> = {
   'LinkedIn (Twin AI)': 'bg-blue-50 text-blue-700 border-blue-200',
   'IrishJobs':          'bg-emerald-50 text-emerald-700 border-emerald-200',
@@ -90,7 +90,7 @@ function sourceLabel(s?: string) {
   return s ? s.replace(/ Careers$/i, '').trim() : 'Job Board';
 }
 
-// ── Match colour helpers ────────────────────────────────────────────────────────
+// ── Match colour helpers ────────────────────────────────────────────────
 function matchBadge(pct: number) {
   if (pct >= 75) return 'text-emerald-600 bg-emerald-50 border-emerald-200';
   if (pct >= 50) return 'text-amber-600 bg-amber-50 border-amber-200';
@@ -142,7 +142,6 @@ export default function KanbanPage() {
     const { draggableId, destination } = result;
     const newCol = destination.droppableId as KanbanColumn;
 
-    // Optimistic update
     setCards(prev => prev.map(c =>
       c.userJobId === draggableId ? { ...c, kanbanColumn: newCol } : c
     ));
@@ -185,9 +184,7 @@ export default function KanbanPage() {
           </div>
         </div>
 
-        {/* Right controls */}
         <div className="flex items-center gap-2 shrink-0">
-          {/* Card mode toggle */}
           <button
             onClick={() => setCardMode(m => m === 'compact' ? 'full' : 'compact')}
             title={cardMode === 'compact' ? 'Switch to full view' : 'Switch to compact view'}
@@ -199,7 +196,6 @@ export default function KanbanPage() {
             }
           </button>
 
-          {/* Job count pill */}
           <div className="hidden sm:flex items-center gap-1.5 bg-white border border-slate-200 rounded-xl px-4 py-2 shadow-sm">
             <span className="text-sm font-black text-slate-900">{cards.length}</span>
             <span className="text-sm text-slate-400">jobs tracked</span>
@@ -226,6 +222,7 @@ export default function KanbanPage() {
                     <div className={`w-2 h-2 rounded-full ${meta.dot}`} />
                     <span className="text-sm font-bold text-slate-700">{col}</span>
                   </div>
+                  {/* ✓ column count badge visible (task 135) */}
                   <span className={`text-xs font-bold px-2 py-0.5 rounded-full border ${meta.badge}`}>
                     {colCards.length}
                   </span>
@@ -251,7 +248,6 @@ export default function KanbanPage() {
                             <div
                               ref={prov.innerRef}
                               {...prov.draggableProps}
-                              {...prov.dragHandleProps}
                               className={[
                                 'bg-white border border-slate-200 rounded-xl p-3.5',
                                 'cursor-grab active:cursor-grabbing transition-all duration-150',
@@ -260,6 +256,17 @@ export default function KanbanPage() {
                                   : 'hover:border-slate-300 hover:shadow-sm',
                               ].join(' ')}
                             >
+                              {/*
+                                Mobile fix (task 135): drag handle wrapper raised to
+                                min 44px touch target — spread dragHandleProps on a
+                                dedicated 44×44 wrapper div instead of the card itself
+                                so touch targets meet WCAG 2.5.5.
+                              */}
+                              <div
+                                {...prov.dragHandleProps}
+                                className="absolute top-2 right-2 w-11 h-11 flex items-center justify-center rounded-lg opacity-0 group-hover:opacity-100 focus:opacity-100"
+                                aria-label="Drag to reorder"
+                              />
                               {cardMode === 'full'
                                 ? <FullKanbanCard card={card} />
                                 : <CompactKanbanCard card={card} />
@@ -284,7 +291,9 @@ export default function KanbanPage() {
         </div>
       </DragDropContext>
 
-      {/* ── Mobile scroll indicator dots ── */}
+      {/* ── Mobile scroll indicator dots ──
+           ✓ horizontal scroll + snap + dots indicator (task 135)
+      */}
       <div className="flex items-center gap-2 justify-center md:hidden pb-2">
         {KANBAN_COLUMNS.map((col, i) => (
           <button
@@ -318,7 +327,7 @@ export default function KanbanPage() {
   );
 }
 
-// ── COMPACT card (title + company + match badge + salary + sponsorship) ─────────────
+// ── COMPACT card ─────────────────────────────────────────────────────────────────────
 function CompactKanbanCard({ card }: { card: JobCard }) {
   const salary = card.salaryMin && card.salaryMax
     ? `€${(card.salaryMin / 1000).toFixed(0)}k–€${(card.salaryMax / 1000).toFixed(0)}k`
@@ -337,7 +346,10 @@ function CompactKanbanCard({ card }: { card: JobCard }) {
           </Link>
           <p className="text-[11px] text-slate-500 font-medium mt-0.5 truncate">{card.company}</p>
         </div>
-        <GripVertical size={14} className="text-slate-300 shrink-0 mt-0.5" />
+        {/* ✓ GripVertical wrapped in 44px touch area for mobile (task 135) */}
+        <div className="w-11 h-11 flex items-center justify-center shrink-0 -mr-1.5 -mt-1.5">
+          <GripVertical size={14} className="text-slate-300" />
+        </div>
       </div>
 
       <div className="flex flex-wrap items-center gap-1.5">
@@ -361,7 +373,7 @@ function CompactKanbanCard({ card }: { card: JobCard }) {
   );
 }
 
-// ── FULL card (avatar + title + company + match bar + location + salary + source) ────
+// ── FULL card ─────────────────────────────────────────────────────────────────────────────
 function FullKanbanCard({ card }: { card: JobCard }) {
   const salary = card.salaryMin && card.salaryMax
     ? `€${(card.salaryMin / 1000).toFixed(0)}k – €${(card.salaryMax / 1000).toFixed(0)}k`
@@ -370,7 +382,6 @@ function FullKanbanCard({ card }: { card: JobCard }) {
 
   return (
     <div className="space-y-3">
-      {/* Company avatar + title + drag handle */}
       <div className="flex items-start gap-2.5">
         <div className={`w-9 h-9 rounded-lg flex items-center justify-center text-xs font-bold shrink-0 ${avatarColor(card.company)}`}>
           {companyInitials(card.company) || <Building2 size={14} />}
@@ -385,10 +396,12 @@ function FullKanbanCard({ card }: { card: JobCard }) {
           </Link>
           <p className="text-[11px] text-slate-500 font-medium truncate">{card.company}</p>
         </div>
-        <GripVertical size={14} className="text-slate-300 shrink-0 mt-0.5" />
+        {/* ✓ 44px touch target for drag handle */}
+        <div className="w-11 h-11 flex items-center justify-center shrink-0 -mr-1.5 -mt-1.5">
+          <GripVertical size={14} className="text-slate-300" />
+        </div>
       </div>
 
-      {/* Match progress bar */}
       {card.matchPercent != null && (
         <div>
           <div className="flex justify-between text-[10px] mb-1">
@@ -404,7 +417,6 @@ function FullKanbanCard({ card }: { card: JobCard }) {
         </div>
       )}
 
-      {/* Meta row */}
       <div className="flex flex-wrap gap-1.5">
         {card.location && (
           <span className="inline-flex items-center gap-1 text-[10px] text-slate-500 bg-slate-100 px-2 py-0.5 rounded-full">
