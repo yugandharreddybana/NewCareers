@@ -1,5 +1,15 @@
-import axios from 'axios';
+/**
+ * Task 120 — Axios instance with silent-refresh interceptor.
+ *
+ * Flow on 401:
+ *  1. Check if we have a refresh token in tokenStore.
+ *  2. POST /auth/refresh once (guarded by isRefreshing flag to queue concurrent calls).
+ *  3. On success → store new tokens, retry all queued requests with new access token.
+ *  4. On failure → clear tokens, redirect to /login.
+ */
+import axios, { AxiosRequestConfig, InternalAxiosRequestConfig } from 'axios';
 import * as mocks from './mockApi';
+import { tokenStore } from '@/lib/tokenStore';
 
 const baseURL = import.meta.env.VITE_MIDDLEWARE_URL || 'http://localhost:4000';
 const USE_MOCKS = import.meta.env.VITE_USE_MOCKS === 'true';
@@ -12,34 +22,125 @@ export const api = axios.create({
   timeout: 90_000,
 });
 
+// ── Request interceptor: attach access token as Bearer header ──────────────
+api.interceptors.request.use((config: InternalAxiosRequestConfig) => {
+  const token = tokenStore.getAccess();
+  if (token && config.headers) {
+    config.headers['Authorization'] = `Bearer ${token}`;
+  }
+  return config;
+});
+
+// ── Refresh-token machinery ────────────────────────────────────────────────
+let isRefreshing = false;
+type FailedQueueItem = { resolve: (value: string) => void; reject: (reason?: unknown) => void };
+let failedQueue: FailedQueueItem[] = [];
+
+function processQueue(error: unknown, token: string | null = null) {
+  failedQueue.forEach(({ resolve, reject }) => {
+    if (error) reject(error);
+    else resolve(token as string);
+  });
+  failedQueue = [];
+}
+
+// ── Response interceptor: handle 401 → silent refresh → retry ─────────────
 api.interceptors.response.use(
   r => r,
-  err => {
+  async (err) => {
+    const originalRequest: AxiosRequestConfig & { _retry?: boolean } = err.config;
+
+    // Only attempt refresh on 401 and only once per request
+    if (
+      err.response?.status === 401 &&
+      !originalRequest._retry &&
+      originalRequest.url !== '/auth/refresh' &&
+      originalRequest.url !== '/auth/login'
+    ) {
+      const refresh = tokenStore.getRefresh();
+
+      if (!refresh) {
+        // No refresh token stored — force logout
+        tokenStore.clear();
+        window.location.href = '/login';
+        return Promise.reject(err);
+      }
+
+      if (isRefreshing) {
+        // Queue this request until the in-flight refresh resolves
+        return new Promise<string>((resolve, reject) => {
+          failedQueue.push({ resolve, reject });
+        })
+          .then(token => {
+            if (originalRequest.headers) {
+              (originalRequest.headers as Record<string, string>)['Authorization'] = `Bearer ${token}`;
+            }
+            return api(originalRequest);
+          })
+          .catch(e => Promise.reject(e));
+      }
+
+      originalRequest._retry = true;
+      isRefreshing = true;
+
+      try {
+        const resp = await axios.post(
+          `${baseURL}/api/auth/refresh`,
+          { refreshToken: refresh },
+          { withCredentials: true }
+        );
+        const { token: newAccess, refreshToken: newRefresh } = resp.data;
+        tokenStore.set(newAccess, newRefresh);
+        processQueue(null, newAccess);
+        if (originalRequest.headers) {
+          (originalRequest.headers as Record<string, string>)['Authorization'] = `Bearer ${newAccess}`;
+        }
+        return api(originalRequest);
+      } catch (refreshError) {
+        processQueue(refreshError, null);
+        tokenStore.clear();
+        window.location.href = '/login';
+        return Promise.reject(refreshError);
+      } finally {
+        isRefreshing = false;
+      }
+    }
+
+    // Normalise error message for all other errors
     const msg = err.response?.data?.error || err.message || 'Request failed';
     err.normalizedMessage = msg;
     return Promise.reject(err);
   }
 );
 
-// Auth
+// ── Auth API ───────────────────────────────────────────────────────────────
 export const authApi = {
   signup: async (b: any) => {
     if (USE_MOCKS) { await delay(); return { user: mocks.MOCK_USER }; }
-    return api.post('/auth/signup', b).then(r => r.data);
+    const r = await api.post('/auth/signup', b);
+    if (r.data.token)        tokenStore.setAccess(r.data.token);
+    if (r.data.refreshToken) tokenStore.setRefresh(r.data.refreshToken);
+    return r.data;
   },
   login: async (b: any) => {
     if (USE_MOCKS) { await delay(); return { user: mocks.MOCK_USER }; }
-    return api.post('/auth/login', b).then(r => r.data);
+    const r = await api.post('/auth/login', b);
+    if (r.data.token)        tokenStore.setAccess(r.data.token);
+    if (r.data.refreshToken) tokenStore.setRefresh(r.data.refreshToken);
+    return r.data;
   },
   logout: async () => {
     if (USE_MOCKS) { await delay(); return { success: true }; }
-    return api.post('/auth/logout').then(r => r.data);
+    try { await api.post('/auth/logout'); } finally { tokenStore.clear(); }
+    return { success: true };
   },
+  refresh: async (refreshToken: string) =>
+    api.post('/auth/refresh', { refreshToken }).then(r => r.data),
   forgot: (email: string) => api.post('/auth/forgot-password', { email }).then(r => r.data),
   reset:  (b: any) => api.post('/auth/reset-password', b).then(r => r.data),
 };
 
-// Profile
+// ── Profile API ────────────────────────────────────────────────────────────
 export const profileApi = {
   get: async () => {
     if (USE_MOCKS) { await delay(400); return mocks.MOCK_USER; }
@@ -56,30 +157,22 @@ export const profileApi = {
     if (USE_MOCKS) { await delay(300); return mocks.MOCK_STATS; }
     return api.get('/profile/stats').then(r => r.data);
   },
-
-  // Section 10 — Portfolio CRUD
   addPortfolioItem: (body: {
     title: string; url?: string; description?: string; techTags?: string[];
   }) => api.post('/profile/portfolio', body).then(r => r.data),
-
   updatePortfolioItem: (itemId: string, body: {
     title: string; url?: string; description?: string; techTags?: string[];
   }) => api.put(`/profile/portfolio/${itemId}`, body).then(r => r.data),
-
   deletePortfolioItem: (itemId: string) =>
     api.delete(`/profile/portfolio/${itemId}`).then(r => r.data),
-
-  // Section 10 — LinkedIn Import
   importLinkedIn: (file: File) => {
     const fd = new FormData();
     fd.append('file', file);
-    return api.post('/profile/import/linkedin', fd, {
-      timeout: 60_000,
-    }).then(r => r.data);
+    return api.post('/profile/import/linkedin', fd, { timeout: 60_000 }).then(r => r.data);
   },
 };
 
-// Jobs
+// ── Jobs API ───────────────────────────────────────────────────────────────
 export const jobsApi = {
   list: async () => {
     if (USE_MOCKS) { await delay(1000); return { items: mocks.MOCK_JOBS, dailyCount: 5, dailyLimit: 15, remaining: 10 }; }
@@ -103,7 +196,7 @@ export const jobsApi = {
   },
 };
 
-// Kanban
+// ── Kanban API ─────────────────────────────────────────────────────────────
 export const kanbanApi = {
   patch: (id: string, body: { kanbanColumn?: string; status?: string }) => {
     if (USE_MOCKS) return Promise.resolve({ success: true });
@@ -115,7 +208,7 @@ export const kanbanApi = {
   },
 };
 
-// Skills
+// ── Skills API ─────────────────────────────────────────────────────────────
 export const skillsApi = {
   start: async (req: any) => {
     if (USE_MOCKS) {

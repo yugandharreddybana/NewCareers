@@ -1,7 +1,17 @@
+/**
+ * Task 121 — AuthContext updated to wire refresh tokens through tokenStore.
+ *
+ * Changes from previous version:
+ *  - signIn / signUp store both access token + refresh token via tokenStore
+ *  - signOut calls /auth/logout (backend blacklist) then clears tokenStore
+ *  - Initial load reads user from localStorage (unchanged)
+ *  - tokenStore is the single source of truth for tokens; AuthContext owns user state
+ */
 import { createContext, useContext, useEffect, useState, ReactNode } from 'react';
 import * as mocks from '@/services/mockApi';
 import { User } from '@/types';
 import { authApi, profileApi } from '@/services/api';
+import { tokenStore } from '@/lib/tokenStore';
 
 interface UpdateProfilePayload {
   location?: string;
@@ -34,15 +44,21 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   });
   const [loading, setLoading] = useState(false);
 
+  // Persist user object to localStorage whenever it changes
   useEffect(() => {
     if (user) localStorage.setItem('co_user', JSON.stringify(user));
-    else localStorage.removeItem('co_user');
+    else {
+      localStorage.removeItem('co_user');
+      tokenStore.clear(); // Ensure tokens are also wiped when user is cleared
+    }
   }, [user]);
 
   const signIn = async (email: string, password: string): Promise<User> => {
     setLoading(true);
     try {
-      const { user: u } = await authApi.login({ email, password });
+      // authApi.login already stores tokens in tokenStore
+      const data = await authApi.login({ email, password });
+      const u: User = data.user;
       setUser(u);
       return u;
     } finally {
@@ -53,9 +69,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const signUp = async (name: string, email: string, password: string): Promise<User> => {
     setLoading(true);
     try {
-      // Derive a username from the email local-part (e.g. jane.smith@... → jane.smith)
       const username = email.split('@')[0].toLowerCase().replace(/[^a-z0-9._-]/g, '');
-      const { user: u } = await authApi.signup({ name, username, email, password });
+      // authApi.signup already stores tokens in tokenStore
+      const data = await authApi.signup({ name, username, email, password });
+      const u: User = data.user;
       setUser(u);
       return u;
     } finally {
@@ -65,8 +82,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const signOut = async () => {
     setLoading(true);
-    try { await authApi.logout(); } finally {
-      setUser(null);
+    try {
+      // Blacklists refresh token on the backend, clears tokenStore
+      await authApi.logout();
+    } finally {
+      setUser(null); // triggers useEffect → clears localStorage
       setLoading(false);
     }
   };
