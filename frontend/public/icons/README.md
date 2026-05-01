@@ -1,33 +1,34 @@
 # PWA Icons
 
-This directory contains the CareerOps PWA icons.
+This directory contains PWA icons for CareerOps.
 
-## Files
-- `icon-192.svg` — Source SVG for 192×192 icon (indigo background + white "C")
-- `icon-512.svg` — Source SVG for 512×512 icon (indigo background + white "C")
+## Required PNG files
 
-## Generating PNG files
+The following PNG files must be generated before production build:
 
-The PNG files (`icon-192.png`, `icon-512.png`) need to be generated from the SVGs.
-Run one of these methods:
+- `icon-192.png` — 192×192px, indigo background (#6366F1) with white "C" logo
+- `icon-512.png` — 512×512px, indigo background (#6366F1) with white "C" logo
 
-### Using sharp / Node
+## Generating PNGs from SVGs
+
+Use one of the following approaches:
+
 ```bash
-npx sharp-cli -i icon-192.svg -o icon-192.png
-npx sharp-cli -i icon-512.svg -o icon-512.png
+# Option 1: Using Inkscape (CLI)
+inkscape icon-192.png.svg --export-type=png --export-filename=icon-192.png --export-width=192 --export-height=192
+inkscape icon-512.png.svg --export-type=png --export-filename=icon-512.png --export-width=512 --export-height=512
+
+# Option 2: Using sharp (Node.js)
+npx @squoosh/cli --oxipng {} icon-192.png.svg
+
+# Option 3: Using sharp script
+node -e "
+const sharp = require('sharp');
+sharp('icon-192.png.svg').resize(192,192).png().toFile('icon-192.png');
+sharp('icon-512.png.svg').resize(512,512).png().toFile('icon-512.png');
+"
 ```
 
-### Using Inkscape (CLI)
-```bash
-inkscape icon-192.svg --export-type=png --export-filename=icon-192.png -w 192 -h 192
-inkscape icon-512.svg --export-type=png --export-filename=icon-512.png -w 512 -h 512
-```
-
-### Using svgexport
-```bash
-npx svgexport icon-192.svg icon-192.png 192:192
-npx svgexport icon-512.svg icon-512.png 512:512
-```
-
-The SVG files are valid standalone icons — browsers that support SVG favicons will use them directly.
-For full PWA compliance on iOS/Android, the PNG files are required.
+## Note
+The SVG source files (`icon-192.png.svg`, `icon-512.png.svg`) are committed as references.
+The actual `.png` files should be generated as part of the CI/CD pipeline before `vite build`.
