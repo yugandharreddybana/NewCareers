@@ -8,6 +8,7 @@ import org.hibernate.annotations.Type;
 
 import java.time.Instant;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 
 @Entity
@@ -21,7 +22,8 @@ public class UserProfile {
     @Column(name = "user_id", nullable = false, unique = true)
     private UUID userId;
 
-    // ── existing array fields ────────────────────────────────────────────────
+    // ── Existing matching preference fields ──────────────────────────────────
+
     @Type(StringArrayType.class)
     @Column(name = "target_roles", columnDefinition = "text[]")
     private String[] targetRoles;
@@ -39,40 +41,32 @@ public class UserProfile {
     @Column(columnDefinition = "text[]")
     private String[] sectors;
 
-    @Column(name = "freshness_hours")   private Integer freshnessHours;
-    @Column(name = "min_match_percent") private Integer minMatchPercent;
+    @Column(name = "freshness_hours")     private Integer freshnessHours;
+    @Column(name = "min_match_percent")   private Integer minMatchPercent;
     @Column(name = "sponsorship_required") private Boolean sponsorshipRequired;
     private Boolean onboarded;
 
-    // ── Section 10: portfolio items (JSONB array) ────────────────────────────
-    /**
-     * Each element: { id, title, url, description, techTags: string[] }
-     * Stored as JSONB in Postgres; mapped via hypersistence JsonType.
-     */
+    // ── Section 10: Portfolio items (JSONB array) ────────────────────────────
+    // Each element: { id, title, url, description, techTags: string[] }
+
     @Type(JsonType.class)
     @Column(name = "portfolio_items", columnDefinition = "jsonb")
     @Builder.Default
-    private List<PortfolioItem> portfolioItems = new java.util.ArrayList<>();
+    private List<Map<String, Object>> portfolioItems = new java.util.ArrayList<>();
 
-    // ── Section 10: career goal fields ───────────────────────────────────────
-    @Column(name = "goal_title",      length = 200) private String  goalTitle;
+    // ── Section 10: Career goal fields ──────────────────────────────────────
+
+    @Column(name = "goal_title",       length = 200) private String  goalTitle;
     @Column(name = "goal_salary_min")               private Integer goalSalaryMin;
     @Column(name = "goal_salary_max")               private Integer goalSalaryMax;
-    @Column(name = "goal_location",   length = 100) private String  goalLocation;
-    @Column(name = "open_to_remote")  private Boolean openToRemote;
+    @Column(name = "goal_location",    length = 100) private String  goalLocation;
+    @Column(name = "open_to_remote")                private Boolean openToRemote;
 
-    @Column(name = "updated_at") private Instant updatedAt;
+    // ── Audit ─────────────────────────────────────────────────────────────────
+
+    @Column(name = "updated_at")
+    private Instant updatedAt;
 
     @PrePersist @PreUpdate
     void touch() { updatedAt = Instant.now(); }
-
-    // ── Embedded portfolio item ───────────────────────────────────────────────
-    @Getter @Setter @NoArgsConstructor @AllArgsConstructor @Builder
-    public static class PortfolioItem {
-        private String   id;          // client-generated UUID string
-        private String   title;
-        private String   url;
-        private String   description;
-        private List<String> techTags;
-    }
 }
