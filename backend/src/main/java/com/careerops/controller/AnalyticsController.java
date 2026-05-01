@@ -9,13 +9,11 @@ import java.util.Map;
 import java.util.UUID;
 
 /**
- * Section 5 — Task 47
- *
  * Analytics REST endpoints.
- * All routes require a valid JWT — the middleware injects X-User-Id header.
  *
- * GET /analytics/summary  — weekly stats + skill usage
- * GET /analytics/funnel   — application pipeline counts per kanban stage
+ * GET /analytics/summary          — weekly stats + skill usage
+ * GET /analytics/funnel           — application pipeline counts per kanban stage
+ * GET /analytics/time-series      — weekly trend data for charts (new)
  */
 @RestController
 @RequestMapping("/analytics")
@@ -27,38 +25,42 @@ public class AnalyticsController {
         this.analyticsService = analyticsService;
     }
 
-    /**
-     * GET /analytics/summary
-     * Returns:
-     *   skillsRunThisWeek    — int
-     *   applicationsSubmitted — int
-     *   avgMatchPercent      — int (0-100)
-     *   skillUsage           — [ { skill, count } ]
-     */
     @GetMapping("/summary")
     public ResponseEntity<Map<String, Object>> getSummary(
             @RequestHeader("X-User-Id") String userId) {
         try {
-            Map<String, Object> summary = analyticsService.getWeeklyStats(UUID.fromString(userId));
-            return ResponseEntity.ok(summary);
+            return ResponseEntity.ok(analyticsService.getWeeklyStats(UUID.fromString(userId)));
+        } catch (IllegalArgumentException e) {
+            return ResponseEntity.badRequest().build();
+        }
+    }
+
+    @GetMapping("/funnel")
+    public ResponseEntity<List<Map<String, Object>>> getFunnel(
+            @RequestHeader("X-User-Id") String userId) {
+        try {
+            return ResponseEntity.ok(analyticsService.getApplicationFunnel(UUID.fromString(userId)));
         } catch (IllegalArgumentException e) {
             return ResponseEntity.badRequest().build();
         }
     }
 
     /**
-     * GET /analytics/funnel
-     * Returns ordered list:
-     *   [ { stage: "Discovered", count: 45 }, { stage: "Saved", count: 20 }, ... ]
-     * All 6 stages always present (zero-filled if empty).
+     * GET /analytics/time-series?weeks=8
+     *
+     * Returns weekly application + match-average trend for the last N weeks.
+     * Response: [ { week: "2026-04-28", applications: 3, matchAvg: 72 }, ... ]
+     *
+     * @param weeks number of rolling weeks (1-52, default 8)
      */
-    @GetMapping("/funnel")
-    public ResponseEntity<List<Map<String, Object>>> getFunnel(
-            @RequestHeader("X-User-Id") String userId) {
+    @GetMapping("/time-series")
+    public ResponseEntity<List<Map<String, Object>>> getTimeSeries(
+            @RequestHeader("X-User-Id") String userId,
+            @RequestParam(defaultValue = "8") int weeks) {
         try {
-            List<Map<String, Object>> funnel =
-                analyticsService.getApplicationFunnel(UUID.fromString(userId));
-            return ResponseEntity.ok(funnel);
+            return ResponseEntity.ok(
+                analyticsService.getWeeklyTimeSeries(UUID.fromString(userId), weeks)
+            );
         } catch (IllegalArgumentException e) {
             return ResponseEntity.badRequest().build();
         }

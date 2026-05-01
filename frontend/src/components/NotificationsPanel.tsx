@@ -11,9 +11,11 @@ interface Notification {
 
 interface Props {
   onClose: () => void;
+  /** Called after mark-all-read so Navbar can zero the badge instantly */
+  onMarkAllRead?: () => void;
 }
 
-const NotificationsPanel: React.FC<Props> = ({ onClose }) => {
+const NotificationsPanel: React.FC<Props> = ({ onClose, onMarkAllRead }) => {
   const [notifications, setNotifications] = useState<Notification[]>([]);
   const [loading, setLoading] = useState(true);
 
@@ -26,49 +28,36 @@ const NotificationsPanel: React.FC<Props> = ({ onClose }) => {
 
   const markAllRead = () => {
     api.patch('/api/notifications/mark-all-read')
-      .then(() => setNotifications(prev => prev.map(n => ({ ...n, read: true }))));
+      .then(() => {
+        setNotifications(prev => prev.map(n => ({ ...n, read: true })));
+        onMarkAllRead?.();
+      });
   };
 
   const unreadCount = notifications.filter(n => !n.read).length;
 
   return (
     <div
-      style={{
-        position: 'absolute',
-        top: '100%',
-        right: 0,
-        width: 360,
-        background: 'var(--color-surface)',
-        border: '1px solid var(--color-border)',
-        borderRadius: 'var(--radius-lg)',
-        boxShadow: 'var(--shadow-lg)',
-        zIndex: 200,
-        overflow: 'hidden',
-      }}
+      className="w-[360px] rounded-2xl overflow-hidden shadow-lg
+                 bg-white border border-border"
     >
       {/* Header */}
-      <div style={{
-        display: 'flex',
-        justifyContent: 'space-between',
-        alignItems: 'center',
-        padding: '0.875rem 1rem',
-        borderBottom: '1px solid var(--color-divider)',
-      }}>
-        <span style={{ fontWeight: 600 }}>
-          Notifications {unreadCount > 0 && <span style={{
-            background: 'var(--color-primary)',
-            color: '#fff',
-            borderRadius: 'var(--radius-full)',
-            fontSize: '0.7rem',
-            padding: '0.1rem 0.45rem',
-            marginLeft: '0.4rem',
-          }}>{unreadCount}</span>}
+      <div className="flex justify-between items-center px-4 py-3 border-b border-border">
+        <span className="text-sm font-semibold text-text-primary">
+          Notifications
+          {unreadCount > 0 && (
+            <span className="ml-1.5 inline-flex items-center justify-center
+                             min-w-[18px] h-[18px] px-1 rounded-full
+                             bg-brand-500 text-white text-[10px] font-bold">
+              {unreadCount}
+            </span>
+          )}
         </span>
-        <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
+        <div className="flex items-center gap-2">
           {unreadCount > 0 && (
             <button
               onClick={markAllRead}
-              style={{ fontSize: '0.8rem', color: 'var(--color-primary)', background: 'none', border: 'none', cursor: 'pointer' }}
+              className="text-xs text-brand-600 hover:text-brand-700 transition-colors font-medium"
             >
               Mark all read
             </button>
@@ -76,40 +65,42 @@ const NotificationsPanel: React.FC<Props> = ({ onClose }) => {
           <button
             onClick={onClose}
             aria-label="Close notifications"
-            style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: '1.1rem', color: 'var(--color-text-muted)' }}
+            className="p-1 rounded hover:bg-surface-overlay transition-colors
+                       text-text-tertiary hover:text-text-primary"
           >
-            ✕
+            <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
+              <path d="M1 1l12 12M13 1L1 13" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
+            </svg>
           </button>
         </div>
       </div>
 
       {/* Body */}
-      <div style={{ maxHeight: 360, overflowY: 'auto' }}>
+      <div className="max-h-[360px] overflow-y-auto">
         {loading && (
-          <div style={{ padding: '2rem', textAlign: 'center', color: 'var(--color-text-muted)' }}>Loading…</div>
+          <div className="py-10 text-center text-sm text-text-muted">Loading…</div>
         )}
         {!loading && notifications.length === 0 && (
-          <div style={{ padding: '2.5rem 1rem', textAlign: 'center' }}>
-            <div style={{ fontSize: '2rem', marginBottom: '0.5rem' }}>🔔</div>
-            <p style={{ color: 'var(--color-text-muted)', margin: 0 }}>You're all caught up!</p>
+          <div className="py-12 text-center">
+            <div className="text-3xl mb-2">🔔</div>
+            <p className="text-sm text-text-muted">You're all caught up!</p>
           </div>
         )}
         {!loading && notifications.map(n => (
           <div
             key={n.id}
-            style={{
-              padding: '0.75rem 1rem',
-              borderBottom: '1px solid var(--color-divider)',
-              background: n.read ? 'transparent' : 'var(--color-primary-highlight)',
-              display: 'flex',
-              gap: '0.6rem',
-              alignItems: 'flex-start',
-            }}
+            className={cn(
+              'flex gap-3 items-start px-4 py-3 border-b border-border last:border-0 transition-colors',
+              n.read ? 'bg-transparent' : 'bg-brand-50',
+            )}
           >
-            <span style={{ width: 8, height: 8, borderRadius: '50%', background: n.read ? 'transparent' : 'var(--color-primary)', flexShrink: 0, marginTop: '0.35rem' }} />
-            <div>
-              <p style={{ margin: 0, fontSize: '0.875rem' }}>{n.message}</p>
-              <p style={{ margin: '0.2rem 0 0', fontSize: '0.75rem', color: 'var(--color-text-muted)' }}>
+            <span className={cn(
+              'mt-1.5 w-2 h-2 rounded-full shrink-0',
+              n.read ? 'bg-transparent' : 'bg-brand-500',
+            )} />
+            <div className="min-w-0">
+              <p className="text-sm text-text-primary leading-snug">{n.message}</p>
+              <p className="mt-0.5 text-xs text-text-tertiary">
                 {new Date(n.createdAt).toLocaleString()}
               </p>
             </div>
@@ -119,5 +110,9 @@ const NotificationsPanel: React.FC<Props> = ({ onClose }) => {
     </div>
   );
 };
+
+function cn(...classes: (string | undefined | false)[]) {
+  return classes.filter(Boolean).join(' ');
+}
 
 export default NotificationsPanel;
