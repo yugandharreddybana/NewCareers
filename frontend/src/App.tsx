@@ -20,6 +20,7 @@ const Skills         = lazy(() => import('@/pages/Skills'));
 const CvManager      = lazy(() => import('@/pages/CvManager'));
 const Billing        = lazy(() => import('@/pages/BillingPage'));
 const AccountSettings= lazy(() => import('@/pages/AccountSettings'));
+const InterviewPage  = lazy(() => import('@/pages/InterviewPage'));
 
 // Skeleton fallback for Suspense boundaries
 function PageFallback() {
@@ -65,6 +66,8 @@ export default function App() {
         <Route path="/billing"   element={<Suspense fallback={<PageFallback />}><Billing /></Suspense>} />
         {/* Section 11 — Account/GDPR */}
         <Route path="/account"   element={<Suspense fallback={<PageFallback />}><AccountSettings /></Suspense>} />
+        {/* Phase 3 — Interview Coach */}
+        <Route path="/interview" element={<Suspense fallback={<PageFallback />}><InterviewPage /></Suspense>} />
       </Route>
 
       {/* Fallback */}

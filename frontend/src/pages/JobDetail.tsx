@@ -9,11 +9,14 @@ import SkillPanel from '@/components/skills/SkillPanel';
 import SkillQuestionModal from '@/components/skills/SkillQuestionModal';
 import RunAllSkillsButton from '@/components/skills/RunAllSkillsButton';
 import ProfileCompletenessAlert from '@/components/skills/ProfileCompletenessAlert';
+import InterviewTracker from '@/components/InterviewTracker';
+import MockInterview from '@/components/MockInterview';
 import {
   MapPin, Calendar, Euro, ShieldCheck,
   ExternalLink, Sparkles, CheckCircle2, AlertCircle,
   Bookmark, Send, Zap, FileDown, ChevronRight,
   Brain, ClipboardList, Layers, Building2, Loader2,
+  GraduationCap,
 } from 'lucide-react';
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -39,7 +42,7 @@ const ALL_SKILLS = [
 ] as const;
 
 type SkillName = typeof ALL_SKILLS[number]['name'];
-type Tab = 'overview' | 'ai-tools' | 'apply';
+type Tab = 'overview' | 'ai-tools' | 'interview' | 'apply';
 
 // ── Source badge helpers ────────────────────────────────────────────────────
 const SOURCE_STYLES: Record<string, string> = {
@@ -130,6 +133,7 @@ export default function JobDetailPage() {
   const [loading, setLoading] = useState(true);
   const [tab, setTab]       = useState<Tab>('overview');
   const [openSkill, setOpenSkill] = useState<SkillName | null>(null);
+  const [mockTrackId, setMockTrackId] = useState<string | null>(null);
   const nav = useNavigate();
 
   useEffect(() => {
@@ -159,7 +163,6 @@ export default function JobDetailPage() {
   const skillsGap     = useSkill('skills-gap-plan',    id ?? '');
 
   const skillHooks: Record<SkillName, ReturnType<typeof useSkill>> = {
-    // Phase 1
     'evaluate':           evaluate,
     'tailor-resume':      tailorResume,
     'research':           research,
@@ -169,7 +172,6 @@ export default function JobDetailPage() {
     'compare':            compare,
     'triage':             triage,
     'scan':               scan,
-    // Phase 2
     'salary-negotiation': salaryNeg,
     'culture-fit':        cultureFit,
     'linkedin-optimize':  linkedinOpt,
@@ -250,9 +252,10 @@ export default function JobDetailPage() {
       : 'Negotiable';
 
   const TABS: { id: Tab; label: string; icon: React.ReactNode; badge?: number }[] = [
-    { id: 'overview',  label: 'Overview',  icon: <Layers size={14} /> },
-    { id: 'ai-tools',  label: 'AI Tools',  icon: <Brain size={14} />, badge: doneCount || undefined },
-    { id: 'apply',     label: 'Apply',     icon: <ClipboardList size={14} /> },
+    { id: 'overview',   label: 'Overview',   icon: <Layers size={14} /> },
+    { id: 'ai-tools',   label: 'AI Tools',   icon: <Brain size={14} />, badge: doneCount || undefined },
+    { id: 'interview',  label: 'Interview',  icon: <GraduationCap size={14} /> },
+    { id: 'apply',      label: 'Apply',      icon: <ClipboardList size={14} /> },
   ];
 
   return (
@@ -488,7 +491,6 @@ export default function JobDetailPage() {
                   onComplete={() => toast.success('All 14 skills completed!')}
                 />
 
-                {/* Phase 1 group */}
                 <p className="text-[9px] font-black text-slate-300 uppercase tracking-widest px-1">Core Skills</p>
                 <div className="flex flex-col gap-1.5">
                   {ALL_SKILLS.slice(0, 9).map(({ name, label }) => (
@@ -503,7 +505,6 @@ export default function JobDetailPage() {
                   ))}
                 </div>
 
-                {/* Phase 2 group */}
                 <p className="text-[9px] font-black text-indigo-400 uppercase tracking-widest px-1 pt-1">Career Intelligence</p>
                 <div className="flex flex-col gap-1.5">
                   {ALL_SKILLS.slice(9).map(({ name, label }) => (
@@ -538,7 +539,6 @@ export default function JobDetailPage() {
               </div>
             </aside>
 
-            {/* Results area */}
             <div className="flex-1 min-w-0 space-y-6">
               {ALL_SKILLS
                 .filter(s => skillHooks[s.name].state.status === 'done')
@@ -563,6 +563,40 @@ export default function JobDetailPage() {
                 </div>
               )}
             </div>
+          </motion.div>
+        )}
+
+        {/* INTERVIEW */}
+        {tab === 'interview' && (
+          <motion.div key="interview"
+            initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -8 }} transition={{ duration: 0.18 }}
+            className="max-w-2xl"
+          >
+            {mockTrackId ? (
+              <div className="bg-white border border-slate-200 rounded-2xl p-6 shadow-sm">
+                <button
+                  onClick={() => setMockTrackId(null)}
+                  className="flex items-center gap-1.5 text-sm text-slate-500 hover:text-slate-700 mb-5"
+                >
+                  ← Back to Interview Tracker
+                </button>
+                <MockInterview
+                  userJobId={id!}
+                  trackId={mockTrackId}
+                  onComplete={() => setMockTrackId(null)}
+                />
+              </div>
+            ) : (
+              <div className="bg-white border border-slate-200 rounded-2xl p-6 shadow-sm">
+                <InterviewTracker
+                  userJobId={id!}
+                  companyName={job.company}
+                  roleTitle={job.title}
+                  onStartMock={(trackId) => setMockTrackId(trackId)}
+                />
+              </div>
+            )}
           </motion.div>
         )}
 
