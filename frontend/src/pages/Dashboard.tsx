@@ -6,6 +6,8 @@
  *   - PlannerWidget (sidebar) — shows overdue badge, upcoming deadlines & tasks
  *   - JobPlannerPanel (slide-over drawer) — opens when PlannerWidget item clicked
  *
+ * Section 3.3 fix: added lastSearchParams state + search pagination controls.
+ *
  * Mobile audit (task 133): header action buttons wrap on 375px, stats col=1,
  * no horizontal overflow.
  */
@@ -29,6 +31,7 @@ import SalaryRangeFilter from '@/components/jobs/SalaryRangeFilter';
 import {
   RotateCw, SlidersHorizontal, X,
   Target, Zap, AlertTriangle, Building2, Send, TrendingUp, Search,
+  ChevronLeft, ChevronRight,
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 
@@ -58,8 +61,10 @@ export default function Dashboard() {
   const [pipelineMaxSalary, setPipelineMaxSalary] = useState<number | undefined>(undefined);
 
   // ── Section 7: Search mode state ────────────────────────────────────
-  const [searchResult,  setSearchResult]  = useState<SearchResult | null>(null);
-  const [searching,     setSearching]     = useState(false);
+  const [searchResult,     setSearchResult]     = useState<SearchResult | null>(null);
+  const [searching,        setSearching]        = useState(false);
+  // Section 3.3: store last params so pagination can replay the same search
+  const [lastSearchParams, setLastSearchParams] = useState<SearchParams>({});
   const isSearchMode = searchResult !== null;
 
   // ── Planner drawer state ─────────────────────────────────────────────
@@ -115,18 +120,36 @@ export default function Dashboard() {
     }
   }
 
-  // ── Section 7: handle search bar submit ─────────────────────────────
+  // ── Section 7 + 3.3: handle search bar submit ─────────────────────────────
   async function handleSearch(params: SearchParams) {
     if (Object.keys(params).length === 0) {
       setSearchResult(null);
+      setLastSearchParams({});
       return;
     }
+    setLastSearchParams(params);
     setSearching(true);
     try {
-      const result = await discoveryApi.search(params);
+      const result = await discoveryApi.search({ ...params, page: 0 });
       setSearchResult(result);
     } catch (e: any) {
       toast.error(e.normalizedMessage || 'Search failed');
+    } finally {
+      setSearching(false);
+    }
+  }
+
+  // ── Section 3.3: paginate search results ─────────────────────────────────
+  async function goToSearchPage(page: number) {
+    if (!searchResult || page < 0 || page >= searchResult.totalPages) return;
+    setSearching(true);
+    try {
+      const result = await discoveryApi.search({ ...lastSearchParams, page });
+      setSearchResult(result);
+      // Scroll back to top of job grid
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+    } catch (e: any) {
+      toast.error(e.normalizedMessage || 'Failed to load page');
     } finally {
       setSearching(false);
     }
@@ -169,6 +192,11 @@ export default function Dashboard() {
   const displayJobs: JobCard[] = isSearchMode
     ? (searchResult?.items ?? [])
     : topJobs;
+
+  // ── Section 3.3: pagination derived values ───────────────────────────────
+  const currentPage  = searchResult?.page ?? 0;
+  const totalPages   = searchResult?.totalPages ?? 1;
+  const totalResults = searchResult?.total ?? 0;
 
   return (
     <div className="space-y-8 pb-20">
@@ -242,13 +270,13 @@ export default function Dashboard() {
           <div className="flex items-center justify-between mb-4">
             <h2 className="text-base font-semibold text-slate-800">
               {isSearchMode
-                ? `Search Results (${searchResult?.total ?? 0})`
+                ? `Search Results (${totalResults})`
                 : 'Top Targeted Matches'}
             </h2>
             <div className="flex items-center gap-3">
               {isSearchMode && (
                 <button
-                  onClick={() => setSearchResult(null)}
+                  onClick={() => { setSearchResult(null); setLastSearchParams({}); }}
                   className="flex items-center gap-1.5 text-xs font-semibold
                              text-slate-400 hover:text-rose-500 transition-colors"
                 >
@@ -405,7 +433,7 @@ export default function Dashboard() {
               </p>
               {isSearchMode && (
                 <button
-                  onClick={() => setSearchResult(null)}
+                  onClick={() => { setSearchResult(null); setLastSearchParams({}); }}
                   className="px-7 py-3 bg-slate-900 text-white rounded-xl font-bold
                              text-sm hover:bg-slate-800 transition-all"
                 >
@@ -435,6 +463,41 @@ export default function Dashboard() {
                   <JobCardUI job={j} />
                 </motion.div>
               ))}
+            </div>
+          )}
+
+          {/* ── Section 3.3: Search pagination controls ── */}
+          {isSearchMode && totalPages > 1 && (
+            <div className="flex items-center justify-between mt-8 px-1">
+              <button
+                onClick={() => goToSearchPage(currentPage - 1)}
+                disabled={searching || currentPage === 0}
+                className="flex items-center gap-1.5 h-9 px-4 bg-white border border-slate-200
+                           rounded-xl text-sm font-semibold text-slate-500
+                           hover:border-emerald-300 hover:text-emerald-700
+                           disabled:opacity-40 disabled:cursor-not-allowed transition-all"
+              >
+                <ChevronLeft size={15} /> Prev
+              </button>
+
+              <span className="text-xs text-slate-400 font-medium">
+                Page <span className="text-slate-700 font-bold">{currentPage + 1}</span>
+                {' '}of{' '}
+                <span className="text-slate-700 font-bold">{totalPages}</span>
+                <span className="text-slate-300 mx-1.5">·</span>
+                {totalResults} results
+              </span>
+
+              <button
+                onClick={() => goToSearchPage(currentPage + 1)}
+                disabled={searching || currentPage + 1 >= totalPages}
+                className="flex items-center gap-1.5 h-9 px-4 bg-slate-900 text-white
+                           rounded-xl text-sm font-semibold
+                           hover:bg-slate-800
+                           disabled:opacity-40 disabled:cursor-not-allowed transition-all"
+              >
+                Next <ChevronRight size={15} />
+              </button>
             </div>
           )}
 
