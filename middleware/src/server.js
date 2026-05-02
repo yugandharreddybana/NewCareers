@@ -12,11 +12,15 @@ import jobs          from './routes/jobs.routes.js';
 import kanban        from './routes/kanban.routes.js';
 import skills        from './routes/skills.routes.js';
 import analytics     from './routes/analytics.routes.js';
-import notifications from './routes/notifications.routes.js';  // Section 8
-import referrals     from './routes/referrals.routes.js';       // Section 9
-import interview     from './routes/interview.routes.js';       // Phase 3 — Task 13
-import networking    from './routes/networking.routes.js';      // Section 3.3 — Task 36
-import progress      from './routes/progress.routes.js';        // Section 3.5 — Task 61
+import notifications from './routes/notifications.routes.js';
+import referrals     from './routes/referrals.routes.js';
+import interview     from './routes/interview.routes.js';       // 3.1
+import planner       from './routes/planner.routes.js';         // 3.2
+import networking    from './routes/networking.routes.js';      // 3.3
+import workspace     from './routes/workspace.routes.js';       // 3.4
+import progress      from './routes/progress.routes.js';        // 3.5
+import onboarding   from './routes/onboarding.routes.js';      // 3.6
+import experiments  from './routes/experiments.routes.js';     // 3.6
 
 const app = express();
 
@@ -29,7 +33,6 @@ app.use(express.json({ limit: '2mb' }));
 app.use(cookieParser());
 app.use(morgan('dev'));
 
-// Global API rate limit (auth has its own stricter limit)
 app.use('/api', rateLimit({ windowMs: 60_000, max: 200, standardHeaders: true, legacyHeaders: false }));
 
 app.get('/health', (_req, res) => res.json({ ok: true, ts: Date.now() }));
@@ -40,11 +43,15 @@ app.use('/api/jobs',          jobs);
 app.use('/api/kanban',        kanban);
 app.use('/api/skills',        skills);
 app.use('/api/analytics',     analytics);
-app.use('/api/notifications', notifications);  // Section 8 — Task 83
-app.use('/api/referrals',     referrals);       // Section 9 — Task 98
-app.use('/api/interview',     interview);       // Phase 3 — Task 13
-app.use('/api/networking',    networking);      // Section 3.3 — Task 36
-app.use('/api/progress',      progress);        // Section 3.5 — Task 61
+app.use('/api/notifications', notifications);
+app.use('/api/referrals',     referrals);
+app.use('/api/interviews',    interview);      // 3.1
+app.use('/api/planner',       planner);        // 3.2
+app.use('/api/networking',    networking);     // 3.3
+app.use('/api/workspaces',    workspace);      // 3.4
+app.use('/api/progress',      progress);       // 3.5
+app.use('/api/onboarding',    onboarding);     // 3.6
+app.use('/api/experiments',   experiments);    // 3.6
 
 app.use((err, _req, res, _next) => {
   console.error('Middleware error:', err.message);
