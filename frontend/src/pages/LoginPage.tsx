@@ -1,2 +1,2 @@
-// LoginPage.tsx — re-exports real Login for backward-compat imports
+// LoginPage.tsx — re-export alias for backward-compat
 export { default } from './Login';

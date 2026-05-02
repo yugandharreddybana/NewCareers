@@ -1,2 +1,2 @@
-// ProfilePage.tsx — re-exports real Profile for backward-compat imports
+// ProfilePage.tsx — re-export alias for backward-compat
 export { default } from './Profile';

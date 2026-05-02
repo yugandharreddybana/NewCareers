@@ -1,2 +1,2 @@
-// RegisterPage.tsx — re-exports real Signup for backward-compat imports
+// RegisterPage.tsx — re-export alias for backward-compat
 export { default } from './Signup';

@@ -1,2 +1,2 @@
-// JobDetailPage.tsx — re-exports real JobDetail for backward-compat imports
+// JobDetailPage.tsx — re-export alias for backward-compat
 export { default } from './JobDetail';

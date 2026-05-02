@@ -1,2 +1,2 @@
-// DashboardPage.tsx — re-exports real Dashboard for backward-compat imports
+// DashboardPage.tsx — re-export alias for backward-compat
 export { default } from './Dashboard';
