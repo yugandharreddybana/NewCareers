@@ -12,6 +12,9 @@ import ProfileCompletenessAlert from '@/components/skills/ProfileCompletenessAle
 import InterviewTracker from '@/components/InterviewTracker';
 import MockInterview from '@/components/MockInterview';
 import { JobPlannerPanel } from '@/components/planner';
+import { ContextualHelpTip, HELP_TIPS } from '@/components/onboarding/ContextualHelpTip';
+import { UpgradePaywall } from '@/components/onboarding/UpgradePaywall';
+import { useAuth } from '@/context/AuthContext';
 import {
   MapPin, Calendar, Euro, ShieldCheck,
   ExternalLink, Sparkles, CheckCircle2, AlertCircle,
@@ -136,6 +139,8 @@ export default function JobDetailPage() {
   const [openSkill, setOpenSkill] = useState<SkillName | null>(null);
   const [mockTrackId, setMockTrackId] = useState<string | null>(null);
   const nav = useNavigate();
+  const { user } = useAuth();
+  const isPremium = (user as any)?.plan === 'pro' || (user as any)?.plan === 'premium';
 
   useEffect(() => {
     if (!id) return;
@@ -330,7 +335,10 @@ export default function JobDetailPage() {
                   : job.matchPercent >= 50 ? 'text-amber-500'
                   : 'text-red-500'
                 }`}>{job.matchPercent}%</span>
-                <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mt-0.5">AI Match</p>
+                <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mt-0.5 flex items-center gap-1">
+                  AI Match
+                  <ContextualHelpTip tip={HELP_TIPS.matchScore} placement="left" />
+                </p>
               </div>
             )}
             <div className="flex md:flex-col gap-2">
@@ -573,8 +581,15 @@ export default function JobDetailPage() {
           <motion.div key="interview"
             initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }}
             exit={{ opacity: 0, y: -8 }} transition={{ duration: 0.18 }}
-            className="max-w-2xl"
+            className="max-w-2xl space-y-4"
           >
+            {!isPremium && (
+              <UpgradePaywall
+                feature="mock_interview"
+                inline
+                onUpgrade={() => nav('/billing')}
+              />
+            )}
             {mockTrackId ? (
               <div className="bg-white border border-slate-200 rounded-2xl p-6 shadow-sm">
                 <button
@@ -595,7 +610,7 @@ export default function JobDetailPage() {
                   userJobId={id!}
                   companyName={job.company}
                   roleTitle={job.title}
-                  onStartMock={(trackId) => setMockTrackId(trackId)}
+                  onStartMock={isPremium ? (trackId) => setMockTrackId(trackId) : () => nav('/billing')}
                 />
               </div>
             )}

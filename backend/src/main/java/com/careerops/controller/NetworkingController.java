@@ -7,7 +7,9 @@ import com.careerops.service.NetworkingService;
 import com.careerops.util.AuthUtil;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
+import org.springframework.web.multipart.MultipartFile;
 
+import java.io.IOException;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -95,5 +97,19 @@ public class NetworkingController {
     @GetMapping("/contacts/overdue")
     public List<InteractionResponse> overdueFollowUps() {
         return networkingService.getOverdueFollowUps(AuthUtil.currentUserId());
+    }
+
+    // ── Task 43 — CSV import ────────────────────────────────────────────���──────
+
+    @PostMapping("/contacts/import")
+    public ResponseEntity<CsvImportResult> importFromCsv(
+            @RequestParam("file") MultipartFile file) throws IOException {
+        if (file.isEmpty()) {
+            return ResponseEntity.badRequest()
+                    .body(new CsvImportResult(0, 0, List.of("Uploaded file is empty")));
+        }
+        CsvImportResult result = networkingService.importContactsFromCsv(
+                AuthUtil.currentUserId(), file.getInputStream());
+        return ResponseEntity.ok(result);
     }
 }

@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useState, useCallback, useRef } from 'react';
 import {
   networkingApi,
   type NetworkContact,
@@ -8,6 +8,7 @@ import {
 import PipelineBoard from '@/components/networking/PipelineBoard';
 import AddContactModal from '@/components/networking/AddContactModal';
 import toast from 'react-hot-toast';
+import axios from '@/api/axiosInstance';
 
 const TYPE_FILTERS: { value: ContactType | ''; label: string }[] = [
   { value: '',                label: 'All' },
@@ -18,11 +19,13 @@ const TYPE_FILTERS: { value: ContactType | ''; label: string }[] = [
 ];
 
 export default function NetworkingPage() {
-  const [contacts, setContacts]     = useState<NetworkContact[]>([]);
-  const [overdue, setOverdue]       = useState<InteractionResponse[]>([]);
-  const [filter, setFilter]         = useState<ContactType | ''>('');
-  const [showAdd, setShowAdd]       = useState(false);
-  const [loading, setLoading]       = useState(true);
+  const [contacts, setContacts]       = useState<NetworkContact[]>([]);
+  const [overdue, setOverdue]         = useState<InteractionResponse[]>([]);
+  const [filter, setFilter]           = useState<ContactType | ''>('');
+  const [showAdd, setShowAdd]         = useState(false);
+  const [loading, setLoading]         = useState(true);
+  const [importing, setImporting]     = useState(false);
+  const csvInputRef                   = useRef<HTMLInputElement>(null);
 
   const load = useCallback(async () => {
     try {
@@ -41,6 +44,33 @@ export default function NetworkingPage() {
 
   useEffect(() => { load(); }, [load]);
 
+  async function handleCsvImport(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    // reset so same file can be re-selected
+    e.target.value = '';
+    setImporting(true);
+    try {
+      const fd = new FormData();
+      fd.append('file', file);
+      const res = await axios.post<{ imported: number; skipped: number; errors: string[] }>(
+        '/networking/contacts/import', fd,
+        { headers: { 'Content-Type': 'multipart/form-data' } },
+      );
+      const { imported, skipped, errors } = res.data;
+      if (imported > 0) {
+        toast.success(`Imported ${imported} contact${imported !== 1 ? 's' : ''}${skipped > 0 ? `, ${skipped} skipped` : ''}`);
+        load();
+      } else {
+        toast.error(errors[0] ?? 'No contacts were imported');
+      }
+    } catch {
+      toast.error('CSV import failed');
+    } finally {
+      setImporting(false);
+    }
+  }
+
   return (
     <div className="min-h-screen bg-bg">
       <div className="max-w-screen-xl mx-auto px-4 py-8">
@@ -57,9 +87,26 @@ export default function NetworkingPage() {
               )}
             </p>
           </div>
-          <button onClick={() => setShowAdd(true)} className="btn-primary">
-            + Add Contact
-          </button>
+          <div className="flex items-center gap-2">
+            <input
+              ref={csvInputRef}
+              type="file"
+              accept=".csv"
+              className="hidden"
+              onChange={handleCsvImport}
+            />
+            <button
+              onClick={() => csvInputRef.current?.click()}
+              disabled={importing}
+              className="btn-secondary"
+              title="Import contacts from CSV (columns: name,email,company,role_title,contact_type,linkedin_url,notes)"
+            >
+              {importing ? 'Importing…' : '⬆ Import CSV'}
+            </button>
+            <button onClick={() => setShowAdd(true)} className="btn-primary">
+              + Add Contact
+            </button>
+          </div>
         </div>
 
         {/* Overdue banner */}

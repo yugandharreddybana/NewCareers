@@ -96,4 +96,11 @@ public class NetworkingDtos {
             List<ContactResponse> contacts,
             long total
     ) {}
+
+    // ── Section 3.3 Task 43 — CSV import result ────────────────────────────────
+    public record CsvImportResult(
+            int imported,
+            int skipped,
+            List<String> errors
+    ) {}
 }

@@ -53,4 +53,8 @@ router.post('/contact/:id/log-interaction', authGuard, javaProxy);
 // GET  /api/networking/contact/:id/interactions   → history for a contact
 router.get('/contact/:id/interactions', authGuard, javaProxy);
 
+// ── Task 43 — CSV import ──────────────────────────────────────────────────
+// POST /api/networking/contacts/import  → multipart CSV upload
+router.post('/contacts/import', authGuard, javaProxy);
+
 module.exports = router;

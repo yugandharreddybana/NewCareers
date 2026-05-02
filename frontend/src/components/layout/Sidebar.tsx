@@ -6,6 +6,7 @@ import {
   LogOut, ChevronLeft, ChevronRight,
   Sparkles, HelpCircle, Gift, TrendingUp,
   Brain, FileText, CreditCard, Settings, GraduationCap,
+  BarChart2, Users, Share2,
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { cn } from '@/lib/utils';
@@ -17,6 +18,7 @@ interface NavItem {
   icon:   React.ReactNode;
   label:  string;
   badge?: string;
+  id?:    string;
 }
 
 const NAV_ITEMS: NavItem[] = [
@@ -25,8 +27,10 @@ const NAV_ITEMS: NavItem[] = [
   { to: '/analytics',  icon: <TrendingUp       size={18} />, label: 'Analytics'       },
   { to: '/skills',     icon: <Brain            size={18} />, label: 'Skills Coach'    },
   { to: '/cv',         icon: <FileText         size={18} />, label: 'CV Manager'      },
-  { to: '/interview',  icon: <GraduationCap    size={18} />, label: 'Interview Coach' },
-  { to: '/networking', icon: <User             size={18} />, label: 'Networking'      },
+  { to: '/interviews', icon: <GraduationCap    size={18} />, label: 'Interview Coach' },
+  { to: '/progress',   icon: <BarChart2        size={18} />, label: 'Progress',        id: 'nav-progress' },
+  { to: '/networking', icon: <Users            size={18} />, label: 'Networking'      },
+  { to: '/workspaces', icon: <Share2           size={18} />, label: 'Workspaces'      },
   { to: '/profile',    icon: <User             size={18} />, label: 'Profile'         },
   { to: '/refer',      icon: <Gift             size={18} />, label: 'Refer & Earn'    },
   { to: '/billing',    icon: <CreditCard       size={18} />, label: 'Billing'         },
@@ -165,6 +169,7 @@ function SidebarLink({ item, collapsed }: { item: NavItem; collapsed: boolean })
   return (
     <Tooltip content={item.label} placement="right" disabled={!collapsed}>
       <NavLink
+        id={item.id}
         to={item.to}
         className={({ isActive }) => cn(
           'flex items-center gap-3 px-2.5 py-2 rounded-lg text-sm font-medium',

@@ -28,12 +28,17 @@ import JobSearchBar from '@/components/discovery/JobSearchBar';
 import RecommendedJobsWidget from '@/components/discovery/RecommendedJobsWidget';
 import { PlannerWidget, JobPlannerPanel } from '@/components/planner';
 import SalaryRangeFilter from '@/components/jobs/SalaryRangeFilter';
+import { ProductTour, DASHBOARD_TOUR_STEPS } from '@/components/onboarding/ProductTour';
+import { FirstApplicationChecklist } from '@/components/onboarding/FirstApplicationChecklist';
+import { ContextualHelpTip, HELP_TIPS } from '@/components/onboarding/ContextualHelpTip';
 import {
   RotateCw, SlidersHorizontal, X,
   Target, Zap, AlertTriangle, Building2, Send, TrendingUp, Search,
   ChevronLeft, ChevronRight,
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
+
+const TOUR_KEY = 'careerops_dashboard_tour_done';
 
 const SOURCE_OPTIONS = [
   'All Sources', 'LinkedIn (Twin AI)', 'IrishJobs',
@@ -71,6 +76,12 @@ export default function Dashboard() {
   const [plannerJobId,    setPlannerJobId]    = useState<string | null>(null);
   const [plannerJobTitle, setPlannerJobTitle] = useState<string>('');
   const plannerOpen = plannerJobId !== null;
+
+  // ── Section 3.6 Task 71: product tour ────────────────────────────────
+  const [tourActive, setTourActive] = useState(false);
+  useEffect(() => {
+    if (!localStorage.getItem(TOUR_KEY)) setTourActive(true);
+  }, []);
 
   function openPlannerForJob(userJobId: string) {
     const allJobs: JobCard[] = data?.items || [];
@@ -201,13 +212,25 @@ export default function Dashboard() {
   return (
     <div className="space-y-8 pb-20">
 
+      {/* ── Section 3.6 Task 71: product tour overlay ── */}
+      {tourActive && (
+        <ProductTour
+          steps={DASHBOARD_TOUR_STEPS}
+          onComplete={() => { localStorage.setItem(TOUR_KEY, '1'); setTourActive(false); }}
+          onSkip={() => { localStorage.setItem(TOUR_KEY, '1'); setTourActive(false); }}
+        />
+      )}
+
+      {/* ── Section 3.6 Task 74: first application checklist ── */}
+      <FirstApplicationChecklist />
+
       {/* ── Page header ── */}
       <section className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-4 pt-2">
         <div>
           <h1 className="text-2xl font-bold text-slate-900 leading-tight">Your Daily Mission</h1>
           <p className="text-slate-400 text-sm mt-1">What should you focus on today?</p>
         </div>
-        <div className="flex flex-wrap items-center gap-2 shrink-0">
+        <div id="dashboard-skill-actions" className="flex flex-wrap items-center gap-2 shrink-0">
           <SkillButton
             label="Compare"
             icon={<Target size={15} className="mr-1.5" />}
@@ -293,7 +316,7 @@ export default function Dashboard() {
           <div className="h-px bg-slate-200 mb-5" />
 
           {/* ── Section 7: JobSearchBar ── */}
-          <div className="mb-6">
+          <div id="dashboard-search-bar" className="mb-6">
             <JobSearchBar onSearch={handleSearch} loading={searching} />
           </div>
 
@@ -518,7 +541,7 @@ export default function Dashboard() {
         </section>
 
         {/* ── Right: Planner Widget (sticky sidebar on xl) ── */}
-        <aside className="w-full xl:w-80 shrink-0 xl:sticky xl:top-6">
+        <aside id="dashboard-planner-card" className="w-full xl:w-80 shrink-0 xl:sticky xl:top-6">
           <PlannerWidget onOpenJob={openPlannerForJob} />
         </aside>
       </div>
@@ -546,6 +569,7 @@ export default function Dashboard() {
               <p className="text-[11px] font-bold text-slate-400 uppercase tracking-widest
                             flex items-center gap-1.5">
                 <Zap size={11} /> Skills Run This Week
+                <ContextualHelpTip tip={HELP_TIPS.skillRun} placement="top" />
               </p>
               <p className="text-xs text-slate-400 leading-relaxed">
                 AI career tools used against jobs in your pipeline.
@@ -574,6 +598,7 @@ export default function Dashboard() {
               <p className="text-[11px] font-bold text-slate-400 uppercase tracking-widest
                             flex items-center gap-1.5">
                 <Target size={11} /> Avg Match Score
+                <ContextualHelpTip tip={HELP_TIPS.matchScore} placement="top" />
               </p>
               <p className="text-xs text-slate-400 leading-relaxed">
                 Average AI match quality across your full pipeline.

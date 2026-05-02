@@ -14,7 +14,13 @@ import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.io.BufferedReader;
+import java.io.IOException;
+import java.io.InputStream;
+import java.io.InputStreamReader;
+import java.nio.charset.StandardCharsets;
 import java.time.LocalDate;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -166,6 +172,90 @@ public class NetworkingService {
                 .stream()
                 .map(this::toInteractionResponse)
                 .toList();
+    }
+
+    // ── Section 3.3 Task 43 — CSV import ──────────────────────────────────────
+    // Expected header: name,email,company,role_title,contact_type,linkedin_url,notes
+    // contact_type values: recruiter | hiring_manager | alumni | referral (defaults to recruiter)
+
+    @Transactional
+    public CsvImportResult importContactsFromCsv(UUID userId, InputStream csvStream) {
+        int imported = 0;
+        int skipped  = 0;
+        List<String> errors = new ArrayList<>();
+
+        try (BufferedReader reader = new BufferedReader(
+                new InputStreamReader(csvStream, StandardCharsets.UTF_8))) {
+
+            String header = reader.readLine();
+            if (header == null) return new CsvImportResult(0, 0, List.of("File is empty"));
+
+            String line;
+            int rowNum = 1;
+            while ((line = reader.readLine()) != null) {
+                rowNum++;
+                line = line.trim();
+                if (line.isEmpty()) { skipped++; continue; }
+
+                String[] cols = splitCsvLine(line);
+                String name = col(cols, 0);
+                if (name.isEmpty()) {
+                    errors.add("Row " + rowNum + ": name is required — skipped");
+                    skipped++;
+                    continue;
+                }
+
+                ContactType type;
+                try {
+                    String raw = col(cols, 4);
+                    type = raw.isEmpty() ? ContactType.recruiter : ContactType.valueOf(raw.toLowerCase());
+                } catch (IllegalArgumentException e) {
+                    type = ContactType.recruiter;
+                }
+
+                NetworkContact c = NetworkContact.builder()
+                        .userId(userId)
+                        .name(name)
+                        .email(col(cols, 1))
+                        .company(col(cols, 2))
+                        .roleTitle(col(cols, 3))
+                        .contactType(type)
+                        .linkedinUrl(col(cols, 5))
+                        .notes(col(cols, 6))
+                        .relationshipTemperature(NetworkContact.RelationshipTemperature.cold)
+                        .pipelineStage(ContactPipelineStage.identified)
+                        .build();
+
+                contacts.save(c);
+                imported++;
+            }
+        } catch (IOException e) {
+            log.error("CSV import failed for user {}: {}", userId, e.getMessage());
+            return new CsvImportResult(imported, skipped, List.of("Read error: " + e.getMessage()));
+        }
+
+        audit.log(userId, "NETWORKING_CSV_IMPORTED",
+                Map.of("imported", String.valueOf(imported), "skipped", String.valueOf(skipped)));
+        log.info("CSV import for user {}: {} imported, {} skipped", userId, imported, skipped);
+        return new CsvImportResult(imported, skipped, errors);
+    }
+
+    private String col(String[] cols, int idx) {
+        if (idx >= cols.length) return "";
+        return cols[idx].trim().replaceAll("^\"|\"$", "");
+    }
+
+    private String[] splitCsvLine(String line) {
+        List<String> fields = new ArrayList<>();
+        boolean inQuotes = false;
+        StringBuilder sb = new StringBuilder();
+        for (char ch : line.toCharArray()) {
+            if (ch == '"') { inQuotes = !inQuotes; }
+            else if (ch == ',' && !inQuotes) { fields.add(sb.toString()); sb.setLength(0); }
+            else { sb.append(ch); }
+        }
+        fields.add(sb.toString());
+        return fields.toArray(new String[0]);
     }
 
     // ── Overdue follow-ups ─────────────────────────────────────────────────────
