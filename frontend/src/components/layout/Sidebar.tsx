@@ -1,6 +1,6 @@
 import { NavLink, Link, useNavigate } from 'react-router-dom';
 import { useAuth } from '@/context/AuthContext';
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import {
   LayoutDashboard, Kanban as KanbanIcon, User,
   LogOut, ChevronLeft, ChevronRight,
@@ -19,23 +19,22 @@ interface NavItem {
   badge?: string;
 }
 
-// ── Main navigation ────────────────────────────────────────────────────────────────
 const NAV_ITEMS: NavItem[] = [
-  { to: '/dashboard',  icon: <LayoutDashboard size={18} />, label: 'Dashboard'      },
-  { to: '/kanban',     icon: <KanbanIcon       size={18} />, label: 'Tracker'        },
-  { to: '/analytics',  icon: <TrendingUp       size={18} />, label: 'Analytics'      },
-  { to: '/skills',     icon: <Brain            size={18} />, label: 'Skills Coach'   },
-  { to: '/cv',         icon: <FileText         size={18} />, label: 'CV Manager'     },
+  { to: '/dashboard',  icon: <LayoutDashboard size={18} />, label: 'Dashboard'       },
+  { to: '/kanban',     icon: <KanbanIcon       size={18} />, label: 'Tracker'         },
+  { to: '/analytics',  icon: <TrendingUp       size={18} />, label: 'Analytics'       },
+  { to: '/skills',     icon: <Brain            size={18} />, label: 'Skills Coach'    },
+  { to: '/cv',         icon: <FileText         size={18} />, label: 'CV Manager'      },
   { to: '/interview',  icon: <GraduationCap    size={18} />, label: 'Interview Coach' },
-  { to: '/profile',    icon: <User             size={18} />, label: 'Profile'        },
-  { to: '/refer',      icon: <Gift             size={18} />, label: 'Refer & Earn'   },
-  { to: '/billing',    icon: <CreditCard       size={18} />, label: 'Billing'        },
+  { to: '/networking', icon: <User             size={18} />, label: 'Networking'      },
+  { to: '/profile',    icon: <User             size={18} />, label: 'Profile'         },
+  { to: '/refer',      icon: <Gift             size={18} />, label: 'Refer & Earn'    },
+  { to: '/billing',    icon: <CreditCard       size={18} />, label: 'Billing'         },
 ];
 
-// ── Bottom / utility nav ────────────────────────────────────────────────────────────────
 const BOTTOM_ITEMS: NavItem[] = [
-  { to: '/account',       icon: <Settings    size={18} />, label: 'Account Settings' },
-  { to: '/profile#help',  icon: <HelpCircle  size={18} />, label: 'Help'             },
+  { to: '/account',      icon: <Settings   size={18} />, label: 'Account Settings' },
+  { to: '/profile#help', icon: <HelpCircle size={18} />, label: 'Help'             },
 ];
 
 export default function Sidebar() {
@@ -44,6 +43,11 @@ export default function Sidebar() {
   const [collapsed, setCollapsed] = useState(false);
 
   const width = collapsed ? 64 : 240;
+
+  // Keep CSS variable in sync so TopBar and main content offset correctly
+  useEffect(() => {
+    document.documentElement.style.setProperty('--sidebar-width', `${width}px`);
+  }, [width]);
 
   return (
     <motion.aside
@@ -79,6 +83,7 @@ export default function Sidebar() {
           className="ml-auto shrink-0 w-6 h-6 rounded-md flex items-center justify-center
                      text-text-tertiary hover:text-text-secondary hover:bg-surface-overlay
                      transition-colors"
+          aria-label={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
         >
           {collapsed
             ? <ChevronRight size={14} />
@@ -156,7 +161,6 @@ export default function Sidebar() {
   );
 }
 
-// ── SidebarLink ─────────────────────────────────────────────────────────────────────────────
 function SidebarLink({ item, collapsed }: { item: NavItem; collapsed: boolean }) {
   return (
     <Tooltip content={item.label} placement="right" disabled={!collapsed}>
@@ -194,7 +198,6 @@ function SidebarLink({ item, collapsed }: { item: NavItem; collapsed: boolean })
                 </motion.span>
               )}
             </AnimatePresence>
-            {/* Active left-rail indicator */}
             {isActive && (
               <motion.div
                 layoutId="sidebar-active"
