@@ -1,20 +1,28 @@
 package com.careerops.model;
 
 import jakarta.persistence.*;
-import lombok.*;
+import lombok.Data;
+import lombok.NoArgsConstructor;
+import lombok.AllArgsConstructor;
 import org.hibernate.annotations.CreationTimestamp;
 import org.hibernate.annotations.UpdateTimestamp;
 
-import java.time.OffsetDateTime;
+import java.time.LocalDateTime;
 import java.util.UUID;
 
+/**
+ * Task 20 — DeadlineEvent entity.
+ * Tracks important dates: application close, interview, follow-up, offer deadline.
+ */
 @Entity
 @Table(name = "deadline_events")
-@Getter @Setter @NoArgsConstructor @AllArgsConstructor @Builder
+@Data
+@NoArgsConstructor
+@AllArgsConstructor
 public class DeadlineEvent {
 
     @Id
-    @GeneratedValue(strategy = GenerationType.UUID)
+    @GeneratedValue
     private UUID id;
 
     @Column(name = "user_job_id", nullable = false)
@@ -25,34 +33,24 @@ public class DeadlineEvent {
 
     @Column(name = "event_type", nullable = false)
     private String eventType;
-    // APPLICATION_CLOSE | INTERVIEW_DATE | FOLLOW_UP | OFFER_DEADLINE | CUSTOM
 
-    @Column(nullable = false)
+    @Column(nullable = false, length = 500)
     private String title;
 
-    @Column
+    @Column(name = "event_date", nullable = false)
+    private LocalDateTime eventDate;
+
+    @Column(columnDefinition = "TEXT")
     private String notes;
 
-    @Column(name = "event_date", nullable = false)
-    private OffsetDateTime eventDate;
-
-    @Column(name = "remind_at")
-    private OffsetDateTime remindAt;
-
-    @Column(name = "reminder_sent", nullable = false)
+    @Column(name = "reminder_sent")
     private boolean reminderSent = false;
-
-    @Column(name = "is_completed", nullable = false)
-    private boolean completed = false;
-
-    @Column(name = "completed_at")
-    private OffsetDateTime completedAt;
 
     @CreationTimestamp
     @Column(name = "created_at", updatable = false)
-    private OffsetDateTime createdAt;
+    private LocalDateTime createdAt;
 
     @UpdateTimestamp
     @Column(name = "updated_at")
-    private OffsetDateTime updatedAt;
+    private LocalDateTime updatedAt;
 }

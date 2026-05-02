@@ -1,0 +1,72 @@
+/* ============================================================
+   Section 3.2 Application Planner — component styles
+   ============================================================ */
+
+/* Planner Card (Dashboard widget) */
+.planner-card { display: flex; flex-direction: column; gap: var(--space-3); background: var(--color-surface); border: 1px solid var(--color-border); border-radius: var(--radius-xl); padding: var(--space-5); }
+.planner-card__header { display: flex; align-items: center; justify-content: space-between; }
+.planner-card__title { font-size: var(--text-lg); font-weight: 700; }
+.planner-card__count { font-size: var(--text-xs); color: var(--color-text-muted); background: var(--color-surface-offset); padding: 2px 8px; border-radius: var(--radius-full); }
+.planner-card__empty { display: flex; flex-direction: column; align-items: center; gap: var(--space-2); padding: var(--space-6); text-align: center; color: var(--color-text-muted); font-size: var(--text-sm); }
+.planner-card__empty-icon { font-size: 28px; }
+
+/* Task list */
+.planner-task-list { list-style: none; display: flex; flex-direction: column; gap: var(--space-2); }
+.planner-task-item { display: flex; align-items: center; gap: var(--space-3); padding: var(--space-3) var(--space-4); background: var(--color-surface-2); border: 1px solid var(--color-border); border-radius: var(--radius-md); transition: background var(--transition-interactive); }
+.planner-task-item:hover { background: var(--color-surface-offset); }
+.planner-task-item__complete { font-size: 18px; color: var(--color-text-faint); flex-shrink: 0; width: 28px; height: 28px; display: flex; align-items: center; justify-content: center; border-radius: 50%; transition: color var(--transition-interactive), background var(--transition-interactive); }
+.planner-task-item__complete:hover { color: var(--color-success); background: var(--color-success-highlight); }
+.planner-task-item__body { flex: 1; display: flex; align-items: center; gap: var(--space-2); min-width: 0; }
+.planner-task-item__icon { flex-shrink: 0; }
+.planner-task-item__title { font-size: var(--text-sm); font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.planner-task-item__meta { display: flex; align-items: center; gap: var(--space-2); flex-shrink: 0; }
+
+/* Priority badges */
+.priority-badge { display: inline-block; padding: 2px 7px; border-radius: var(--radius-full); font-size: var(--text-xs); font-weight: 600; text-transform: uppercase; letter-spacing: 0.4px; }
+.priority-badge--urgent { background: var(--color-error-highlight); color: var(--color-error); }
+.priority-badge--high   { background: var(--color-warning-highlight); color: var(--color-warning); }
+.priority-badge--medium { background: var(--color-gold-highlight); color: var(--color-gold); }
+.priority-badge--low    { background: var(--color-success-highlight); color: var(--color-success); }
+
+/* Due date tags */
+.due-tag { font-size: var(--text-xs); font-weight: 600; padding: 2px 7px; border-radius: var(--radius-full); }
+.due-tag--overdue { background: var(--color-error-highlight); color: var(--color-error); }
+.due-tag--today   { background: var(--color-warning-highlight); color: var(--color-warning); }
+.due-tag--soon    { background: var(--color-gold-highlight); color: var(--color-gold); }
+.due-tag--normal  { background: var(--color-surface-offset); color: var(--color-text-muted); }
+
+/* Deadline Timeline */
+.deadline-timeline { display: flex; flex-direction: column; gap: var(--space-4); }
+.deadline-timeline__header { display: flex; align-items: center; justify-content: space-between; }
+.deadline-timeline__title { font-size: var(--text-lg); font-weight: 700; }
+.deadline-timeline__empty { font-size: var(--text-sm); color: var(--color-text-faint); padding: var(--space-4) 0; }
+
+.deadline-add-form { display: flex; flex-direction: column; gap: var(--space-2); padding: var(--space-4); background: var(--color-surface-offset); border-radius: var(--radius-lg); border: 1px solid var(--color-border); }
+
+/* Timeline list */
+.timeline-list { list-style: none; position: relative; padding-left: var(--space-6); }
+.timeline-item { position: relative; margin-bottom: var(--space-4); }
+.timeline-item--past .timeline-item__title { color: var(--color-text-faint); text-decoration: line-through; }
+.timeline-item__dot { position: absolute; left: calc(-1 * var(--space-6) + 1px); top: 4px; width: 10px; height: 10px; border-radius: 50%; background: var(--color-primary); border: 2px solid var(--color-bg); z-index: 1; }
+.timeline-item--past .timeline-item__dot { background: var(--color-text-faint); }
+.timeline-item__line { position: absolute; left: calc(-1 * var(--space-6) + 5px); top: 14px; bottom: calc(-1 * var(--space-4)); width: 2px; background: var(--color-divider); }
+.timeline-item__content { display: flex; align-items: flex-start; gap: var(--space-3); }
+.timeline-item__icon { font-size: 18px; flex-shrink: 0; margin-top: 1px; }
+.timeline-item__body { display: flex; flex-direction: column; gap: 2px; }
+.timeline-item__title { font-size: var(--text-sm); font-weight: 600; }
+.timeline-item__date { font-size: var(--text-xs); color: var(--color-text-muted); }
+.timeline-item__notes { font-size: var(--text-xs); color: var(--color-text-faint); }
+
+/* Kanban task badge */
+.kanban-task-badge { display: inline-flex; align-items: center; justify-content: center; min-width: 18px; height: 18px; padding: 0 5px; background: var(--color-warning); color: #fff; font-size: var(--text-xs); font-weight: 700; border-radius: var(--radius-full); line-height: 1; }
+
+/* Quick action buttons */
+.quick-actions { display: flex; align-items: center; flex-wrap: wrap; gap: var(--space-2); }
+.quick-action-btn { padding: var(--space-2) var(--space-4); border-radius: var(--radius-full); font-size: var(--text-sm); font-weight: 500; border: 1px solid var(--color-border); background: var(--color-surface); color: var(--color-text); cursor: pointer; transition: background var(--transition-interactive), border-color var(--transition-interactive), color var(--transition-interactive); white-space: nowrap; }
+.quick-action-btn:hover:not(:disabled) { background: var(--color-primary-highlight); border-color: var(--color-primary); color: var(--color-primary); }
+.quick-action-btn--done { background: var(--color-success-highlight); border-color: var(--color-success); color: var(--color-success); }
+.quick-action-btn:disabled { opacity: 0.6; cursor: not-allowed; }
+
+/* Form inputs (shared for planner forms) */
+.form-input { width: 100%; padding: var(--space-2) var(--space-3); border: 1px solid var(--color-border); border-radius: var(--radius-md); background: var(--color-surface); font-size: var(--text-sm); color: var(--color-text); transition: border-color var(--transition-interactive); }
+.form-input:focus { outline: none; border-color: var(--color-primary); }
