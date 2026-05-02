@@ -33,6 +33,7 @@ const Skills               = lazy(() => import('./pages/Skills'));
 const Analytics            = lazy(() => import('./pages/Analytics'));
 const BillingPage          = lazy(() => import('./pages/BillingPage'));
 const Refer                = lazy(() => import('./pages/Refer'));
+const PlannerPage          = lazy(() => import('./pages/PlannerPage'));
 
 const WatchlistsPage       = lazy(() => import('./pages/WatchlistsPage'));
 const AutoApplyPage        = lazy(() => import('./pages/AutoApplyPage'));
@@ -78,6 +79,7 @@ export const App: React.FC = () => (
               <Route path="/analytics"          element={<Analytics />} />
               <Route path="/billing"            element={<BillingPage />} />
               <Route path="/refer"              element={<Refer />} />
+              <Route path="/planner"            element={<PlannerPage />} />
               <Route path="/auto-apply"         element={<AutoApplyPage />} />
               <Route path="/watchlists"         element={<WatchlistsPage />} />
               <Route path="/outreach"           element={<OutreachPage />} />
