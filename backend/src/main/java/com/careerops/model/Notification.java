@@ -20,6 +20,7 @@ import java.util.UUID;
  *   WEEKLY_DIGEST       — weekly summary email sent
  *   SYSTEM              — general platform messages
  *   REFERRAL            — referral invite/signup/reward events
+ *   OVERDUE_TASK        — an application planner task has passed its due date
  */
 @Entity
 @Table(name = "notifications", schema = "career_operations")
@@ -41,6 +42,24 @@ public class Notification {
 
     @Column(columnDefinition = "TEXT")
     private String body;
+
+    /**
+     * Convenience alias — maps to the same {@code body} column.
+     * Services may call setMessage()/getMessage() interchangeably with setBody()/getBody().
+     * Stored in the single {@code body} TEXT column.
+     */
+    @Transient
+    public String getMessage() { return body; }
+    @Transient
+    public void setMessage(String message) { this.body = message; }
+
+    /** The domain entity type that triggered this notification, e.g. "application_task". */
+    @Column(name = "entity_type", length = 100)
+    private String entityType;
+
+    /** The UUID (as string) of the entity that triggered this notification. */
+    @Column(name = "entity_id", length = 100)
+    private String entityId;
 
     /** false = unread (default), true = read */
     @Builder.Default
@@ -66,4 +85,5 @@ public class Notification {
     public static final String TYPE_WEEKLY_DIGEST      = "WEEKLY_DIGEST";
     public static final String TYPE_SYSTEM             = "SYSTEM";
     public static final String TYPE_REFERRAL           = "REFERRAL";
+    public static final String TYPE_OVERDUE_TASK       = "OVERDUE_TASK";
 }

@@ -3,24 +3,27 @@ package com.careerops.service;
 import com.careerops.model.InterviewQuestionBank;
 import com.careerops.model.InterviewSession;
 import com.careerops.model.InterviewTrack;
+import com.careerops.model.Job;
 import com.careerops.model.UserJob;
 import com.careerops.repository.InterviewQuestionBankRepository;
 import com.careerops.repository.InterviewSessionRepository;
 import com.careerops.repository.InterviewTrackRepository;
+import com.careerops.repository.JobRepository;
 import com.careerops.repository.UserJobRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.time.Instant;
 import java.time.LocalDateTime;
 import java.util.List;
 import java.util.UUID;
 
 /**
- * Section 3.2 — InterviewCoachService
+ * Section 3.1 — InterviewCoachService
  * Generates company/role-specific interview kits, evaluates candidate answers,
- * scores full mock sessions, and synthesises Claude-powered feedback reports.
+ * scores full mock sessions, and synthesises Gemini-powered feedback reports.
  */
 @Service
 @RequiredArgsConstructor
@@ -28,6 +31,7 @@ import java.util.UUID;
 public class InterviewCoachService {
 
     private final UserJobRepository userJobRepo;
+    private final JobRepository jobRepo;
     private final InterviewTrackRepository interviewTrackRepo;
     private final InterviewQuestionBankRepository questionBankRepo;
     private final InterviewSessionRepository sessionRepo;
@@ -50,6 +54,17 @@ public class InterviewCoachService {
             throw new SecurityException("Access denied to userJob: " + userJobId);
         }
 
+        // Resolve underlying Job for title, company, and description (used for skill extraction)
+        Job job = jobRepo.findById(userJob.getJobId())
+                .orElseThrow(() -> new IllegalArgumentException("Job not found: " + userJob.getJobId()));
+
+        String jobTitle = nvl(job.getTitle(),   "Software Engineer");
+        String company  = nvl(job.getCompany(), "the company");
+        // Use job description as a proxy for skills context
+        String skillsContext = nvl(job.getDescription(), "general software engineering skills");
+        // Trim to avoid excessively large prompts
+        if (skillsContext.length() > 800) skillsContext = skillsContext.substring(0, 800) + "...";
+
         InterviewTrack track = interviewTrackRepo
                 .findByUserJobId(userJobId)
                 .orElseGet(() -> {
@@ -57,20 +72,19 @@ public class InterviewCoachService {
                     t.setId(UUID.randomUUID());
                     t.setUserJobId(userJobId);
                     t.setUserId(requestingUserId);
-                    t.setStage("PREP");
-                    t.setCreatedAt(LocalDateTime.now());
+                    t.setCurrentStage("PREP");
+                    t.setCompanyName(company);
+                    t.setRoleTitle(jobTitle);
+                    t.setCreatedAt(Instant.now());
+                    t.setUpdatedAt(Instant.now());
                     return t;
                 });
-        track.setUpdatedAt(LocalDateTime.now());
+        track.setUpdatedAt(Instant.now());
         interviewTrackRepo.save(track);
-
-        String jobTitle   = nvl(userJob.getJobTitle(),   "Software Engineer");
-        String company    = nvl(userJob.getCompanyName(), "the company");
-        String skillsJson = nvl(userJob.getSkillsJson(),  "[]");
 
         String prompt = """
                 You are an expert interview coach. Generate a comprehensive interview preparation kit
-                for a %s role at %s. The candidate's relevant skills are: %s.
+                for a %s role at %s. Context from the job description: %s.
                 Produce exactly 15 questions across these categories:
                   - 5 Technical/Skills questions
                   - 4 Behavioural (STAR format)
@@ -80,7 +94,7 @@ public class InterviewCoachService {
                 difficulty (Easy/Medium/Hard).
                 Return ONLY a JSON array:
                 [{"category":"","question":"","idealAnswer":[],"difficulty":""}]
-                """.formatted(jobTitle, company, skillsJson);
+                """.formatted(jobTitle, company, skillsContext);
 
         String aiResponse = geminiService.generateContent(prompt);
 
