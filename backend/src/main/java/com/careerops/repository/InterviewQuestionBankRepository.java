@@ -9,10 +9,6 @@ import java.util.UUID;
 
 @Repository
 public interface InterviewQuestionBankRepository extends JpaRepository<InterviewQuestionBank, UUID> {
-
-    List<InterviewQuestionBank> findByInterviewTrackId(UUID interviewTrackId);
-
-    List<InterviewQuestionBank> findBySessionId(UUID sessionId);
-
-    List<InterviewQuestionBank> findByInterviewTrackIdAndSkillArea(UUID interviewTrackId, String skillArea);
+    List<InterviewQuestionBank> findByUserJobId(UUID userJobId);
+    List<InterviewQuestionBank> findByTrackId(UUID trackId);
 }

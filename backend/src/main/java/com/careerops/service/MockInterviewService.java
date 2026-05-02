@@ -1,134 +1,141 @@
 package com.careerops.service;
 
-import com.careerops.model.InterviewQuestionBank;
 import com.careerops.model.InterviewSession;
-import com.careerops.model.InterviewTrack;
-import com.careerops.repository.InterviewQuestionBankRepository;
 import com.careerops.repository.InterviewSessionRepository;
 import com.careerops.repository.InterviewTrackRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
-import org.springframework.transaction.annotation.Transactional;
 
-import java.time.Instant;
+import java.time.LocalDateTime;
 import java.util.List;
-import java.util.Map;
 import java.util.UUID;
 
+/**
+ * Task 8 — MockInterviewService
+ * Runs text-based mock interviews with turn-by-turn AI scoring.
+ */
 @Service
 @RequiredArgsConstructor
 @Slf4j
 public class MockInterviewService {
 
-    private final InterviewSessionRepository sessionRepository;
-    private final InterviewQuestionBankRepository questionBankRepository;
-    private final InterviewTrackRepository interviewTrackRepository;
+    private final InterviewSessionRepository sessionRepo;
+    private final InterviewTrackRepository trackRepo;
     private final GeminiService geminiService;
 
-    @Transactional
+    /** Task 10 — Start a new mock session */
     public InterviewSession startSession(UUID userJobId, UUID userId) {
-        InterviewTrack track = interviewTrackRepository.findByUserJobId(userJobId)
-                .orElseThrow(() -> new IllegalArgumentException("No interview track found for userJobId: " + userJobId));
+        InterviewSession session = new InterviewSession();
+        session.setId(UUID.randomUUID());
+        session.setUserJobId(userJobId);
+        session.setUserId(userId);
+        session.setMode("TEXT");
+        session.setStatus("ACTIVE");
+        session.setScore(0);
+        session.setTurnCount(0);
+        session.setStartedAt(LocalDateTime.now());
 
-        InterviewSession session = InterviewSession.builder()
-                .interviewTrackId(track.getId())
-                .userId(userId)
-                .mode("TEXT")
-                .build();
-        return sessionRepository.save(session);
+        // Generate the opening question
+        String opening = geminiService.generateContent(
+            "You are a professional interviewer. Start a mock interview with a warm greeting and your first question. " +
+            "Keep it concise. Do not repeat the question number. Just ask the first question naturally."
+        );
+        session.setCurrentQuestion(opening);
+        session.setTranscriptJson("[]");
+        return sessionRepo.save(session);
     }
 
-    @Transactional
-    public Map<String, Object> processReply(UUID sessionId, UUID questionId, String userAnswer) {
-        InterviewSession session = sessionRepository.findById(sessionId)
+    /** Task 11 — Process a user reply, score it, generate next question */
+    public InterviewSession processReply(UUID sessionId, UUID userId, String userAnswer) {
+        InterviewSession session = sessionRepo.findById(sessionId)
                 .orElseThrow(() -> new IllegalArgumentException("Session not found: " + sessionId));
 
-        InterviewQuestionBank question = questionBankRepository.findById(questionId)
-                .orElseThrow(() -> new IllegalArgumentException("Question not found: " + questionId));
-
-        String prompt = buildScoringPrompt(question.getQuestion(), question.getExpectedAnswer(), userAnswer);
-        String aiResponse = geminiService.generate(prompt);
-
-        Map<String, Object> scoreResult = parseScoringResponse(aiResponse);
-
-        question.setUserAnswer(userAnswer);
-        question.setAiFeedback((String) scoreResult.get("feedback"));
-        Object rawScore = scoreResult.get("score");
-        if (rawScore instanceof Integer) {
-            question.setScore((Integer) rawScore);
-        } else if (rawScore instanceof String) {
-            try { question.setScore(Integer.parseInt((String) rawScore)); } catch (NumberFormatException ignored) {}
+        if (!session.getUserId().equals(userId)) {
+            throw new SecurityException("Access denied to session: " + sessionId);
         }
-        questionBankRepository.save(question);
-
-        return scoreResult;
-    }
-
-    @Transactional
-    public InterviewSession completeSession(UUID sessionId) {
-        InterviewSession session = sessionRepository.findById(sessionId)
-                .orElseThrow(() -> new IllegalArgumentException("Session not found: " + sessionId));
-
-        List<InterviewQuestionBank> answered = questionBankRepository
-                .findBySessionId(sessionId)
-                .stream()
-                .filter(q -> q.getScore() != null)
-                .toList();
-
-        if (!answered.isEmpty()) {
-            int avg = (int) answered.stream().mapToInt(InterviewQuestionBank::getScore).average().orElse(0);
-            session.setOverallScore(avg);
-            session.setFeedbackSummary(buildSessionSummary(answered));
+        if (!"ACTIVE".equals(session.getStatus())) {
+            throw new IllegalStateException("Session is not active.");
         }
 
-        session.setCompletedAt(Instant.now());
-        return sessionRepository.save(session);
+        int turn = session.getTurnCount() + 1;
+
+        // Score the answer
+        String scorePrompt = String.format(
+            """The interviewer asked: \"%s\"
+            The candidate answered: \"%s\"
+            Score this answer from 0-10 and provide 2 specific improvement tips.
+            Return JSON: {\"score\":0,\"tips\":[\"\",\"\"]}""",
+            session.getCurrentQuestion(), userAnswer
+        );
+        String scoreJson = geminiService.generateContent(scorePrompt);
+
+        // Update running score (parse or default)
+        int answerScore = extractScore(scoreJson);
+        int newScore = ((session.getScore() * (turn - 1)) + answerScore) / turn; // rolling avg
+
+        // Build transcript entry
+        String transcriptEntry = String.format(
+            "{\"turn\":%d,\"question\":\"%s\",\"answer\":\"%s\",\"scoreData\":%s}",
+            turn,
+            escapeJson(session.getCurrentQuestion()),
+            escapeJson(userAnswer),
+            scoreJson
+        );
+        String transcript = appendToTranscript(session.getTranscriptJson(), transcriptEntry);
+
+        // Generate next question or close session after 8 turns
+        String nextQuestion;
+        String status = session.getStatus();
+        if (turn >= 8) {
+            nextQuestion = "That concludes our mock interview. Thank you for your answers! Check your score summary below.";
+            status = "COMPLETED";
+            session.setCompletedAt(LocalDateTime.now());
+        } else {
+            nextQuestion = geminiService.generateContent(
+                "Continue the mock interview. The candidate just answered the previous question. " +
+                "Ask the next relevant interview question. Keep it natural and professional."
+            );
+        }
+
+        session.setTurnCount(turn);
+        session.setScore(newScore);
+        session.setCurrentQuestion(nextQuestion);
+        session.setTranscriptJson(transcript);
+        session.setStatus(status);
+        return sessionRepo.save(session);
     }
 
-    public List<InterviewSession> getSessionHistory(UUID userJobId) {
-        InterviewTrack track = interviewTrackRepository.findByUserJobId(userJobId)
-                .orElseThrow(() -> new IllegalArgumentException("No track found for userJobId: " + userJobId));
-        return sessionRepository.findByInterviewTrackIdOrderByStartedAtDesc(track.getId());
+    /** Task 12 — Get session history for a job */
+    public List<InterviewSession> getHistory(UUID userJobId, UUID userId) {
+        return sessionRepo.findByUserJobIdAndUserId(userJobId, userId);
     }
 
-    private String buildScoringPrompt(String question, String expectedAnswer, String userAnswer) {
-        return String.format("""
-                You are an expert interview coach. Score the following interview answer.
+    // ---- helpers ----
 
-                Question: %s
-                Expected Answer Guidance: %s
-                Candidate Answer: %s
-
-                Respond in this exact JSON format:
-                {
-                  "score": <integer 0-100>,
-                  "feedback": "<2-3 sentences of constructive feedback>",
-                  "strengths": "<what they did well>",
-                  "improvements": "<what to improve>"
-                }
-
-                Return only the JSON object, no other text.
-                """, question, expectedAnswer != null ? expectedAnswer : "N/A", userAnswer);
-    }
-
-    @SuppressWarnings("unchecked")
-    private Map<String, Object> parseScoringResponse(String aiResponse) {
+    private int extractScore(String json) {
         try {
-            String cleaned = aiResponse.trim()
-                    .replaceAll("```json", "").replaceAll("```", "").trim();
-            com.fasterxml.jackson.databind.ObjectMapper mapper = new com.fasterxml.jackson.databind.ObjectMapper();
-            return mapper.readValue(cleaned, Map.class);
+            int idx = json.indexOf("\"score\":");
+            if (idx < 0) return 5;
+            String sub = json.substring(idx + 8).trim();
+            StringBuilder num = new StringBuilder();
+            for (char c : sub.toCharArray()) {
+                if (Character.isDigit(c)) num.append(c);
+                else break;
+            }
+            return num.length() > 0 ? Integer.parseInt(num.toString()) : 5;
         } catch (Exception e) {
-            log.error("Failed to parse scoring AI response", e);
-            return Map.of("score", 0, "feedback", "Unable to score answer at this time.");
+            return 5;
         }
     }
 
-    private String buildSessionSummary(List<InterviewQuestionBank> answered) {
-        long strongCount = answered.stream().filter(q -> q.getScore() != null && q.getScore() >= 70).count();
-        long weakCount = answered.stream().filter(q -> q.getScore() != null && q.getScore() < 50).count();
-        return String.format("Completed %d questions. %d strong answers (70+), %d areas needing improvement (<50).",
-                answered.size(), strongCount, weakCount);
+    private String escapeJson(String s) {
+        if (s == null) return "";
+        return s.replace("\\", "\\\\").replace("\"", "\\\"").replace("\n", "\\n");
+    }
+
+    private String appendToTranscript(String existing, String newEntry) {
+        if (existing == null || existing.equals("[]")) return "[" + newEntry + "]";
+        return existing.substring(0, existing.length() - 1) + "," + newEntry + "]";
     }
 }

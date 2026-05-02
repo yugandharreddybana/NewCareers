@@ -9,121 +9,90 @@ import com.careerops.repository.UserJobRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
-import org.springframework.transaction.annotation.Transactional;
 
-import java.util.ArrayList;
+import java.time.LocalDateTime;
 import java.util.List;
-import java.util.Map;
 import java.util.UUID;
 
+/**
+ * Task 7 — InterviewCoachService
+ * Generates company-specific and role-specific interview kits.
+ * Uses the AI orchestration layer (GeminiService) to produce tailored question sets.
+ */
 @Service
 @RequiredArgsConstructor
 @Slf4j
 public class InterviewCoachService {
 
-    private final InterviewTrackRepository interviewTrackRepository;
-    private final InterviewQuestionBankRepository questionBankRepository;
-    private final UserJobRepository userJobRepository;
+    private final UserJobRepository userJobRepo;
+    private final InterviewTrackRepository interviewTrackRepo;
+    private final InterviewQuestionBankRepository questionBankRepo;
     private final GeminiService geminiService;
 
-    @Transactional
-    public InterviewTrack getOrCreateTrack(UUID userJobId, UUID userId) {
-        return interviewTrackRepository.findByUserJobId(userJobId)
-                .orElseGet(() -> {
-                    UserJob userJob = userJobRepository.findById(userJobId)
-                            .orElseThrow(() -> new IllegalArgumentException("UserJob not found: " + userJobId));
-                    InterviewTrack track = InterviewTrack.builder()
-                            .userJobId(userJobId)
-                            .userId(userId)
-                            .currentStage("APPLIED")
-                            .build();
-                    return interviewTrackRepository.save(track);
-                });
-    }
-
-    @Transactional
-    public List<InterviewQuestionBank> generateInterviewKit(UUID userJobId, UUID userId) {
-        InterviewTrack track = getOrCreateTrack(userJobId, userId);
-
-        UserJob userJob = userJobRepository.findById(userJobId)
+    /**
+     * Generates a full interview kit for the given userJob.
+     * Creates or updates an InterviewTrack and populates the question bank.
+     */
+    public InterviewTrack generateKit(UUID userJobId, UUID requestingUserId) {
+        UserJob userJob = userJobRepo.findById(userJobId)
                 .orElseThrow(() -> new IllegalArgumentException("UserJob not found: " + userJobId));
 
-        String prompt = buildKitPrompt(track, userJob);
-        String aiResponse = geminiService.generate(prompt);
-
-        List<InterviewQuestionBank> questions = parseQuestionsFromAiResponse(aiResponse, track);
-        return questionBankRepository.saveAll(questions);
-    }
-
-    public List<InterviewQuestionBank> getKitByTrack(UUID interviewTrackId) {
-        return questionBankRepository.findByInterviewTrackId(interviewTrackId);
-    }
-
-    public List<InterviewTrack> getTracksByUser(UUID userId) {
-        return interviewTrackRepository.findByUserIdOrderByCreatedAtDesc(userId);
-    }
-
-    @Transactional
-    public InterviewTrack updateStage(UUID trackId, String newStage) {
-        InterviewTrack track = interviewTrackRepository.findById(trackId)
-                .orElseThrow(() -> new IllegalArgumentException("Track not found: " + trackId));
-        track.setCurrentStage(newStage);
-        return interviewTrackRepository.save(track);
-    }
-
-    private String buildKitPrompt(InterviewTrack track, UserJob userJob) {
-        return String.format("""
-                Generate a structured interview preparation kit for the following role.
-                Company: %s
-                Role: %s
-                Current Stage: %s
-
-                Return exactly 10 interview questions in this JSON array format:
-                [
-                  {
-                    "question": "<question text>",
-                    "expectedAnswer": "<ideal answer guidance>",
-                    "skillArea": "<e.g. Technical, Behavioural, Situational>",
-                    "questionType": "<BEHAVIORAL|TECHNICAL|SITUATIONAL>"
-                  }
-                ]
-
-                Mix question types: 4 behavioural, 3 technical, 3 situational.
-                Make questions specific to the role and Irish job market context.
-                Return only the JSON array, no other text.
-                """,
-                track.getCompanyName() != null ? track.getCompanyName() : "the company",
-                track.getRoleTitle() != null ? track.getRoleTitle() : "the role",
-                track.getCurrentStage()
-        );
-    }
-
-    private List<InterviewQuestionBank> parseQuestionsFromAiResponse(String aiResponse, InterviewTrack track) {
-        List<InterviewQuestionBank> questions = new ArrayList<>();
-        try {
-            String cleaned = aiResponse.trim();
-            if (cleaned.startsWith("```")) {
-                cleaned = cleaned.replaceAll("```json", "").replaceAll("```", "").trim();
-            }
-            com.fasterxml.jackson.databind.ObjectMapper mapper = new com.fasterxml.jackson.databind.ObjectMapper();
-            List<Map<String, String>> parsed = mapper.readValue(cleaned,
-                    mapper.getTypeFactory().constructCollectionType(List.class, Map.class));
-
-            for (Map<String, String> item : parsed) {
-                InterviewQuestionBank q = InterviewQuestionBank.builder()
-                        .interviewTrackId(track.getId())
-                        .companyName(track.getCompanyName())
-                        .roleTitle(track.getRoleTitle())
-                        .question(item.getOrDefault("question", ""))
-                        .expectedAnswer(item.getOrDefault("expectedAnswer", ""))
-                        .skillArea(item.getOrDefault("skillArea", "General"))
-                        .questionType(item.getOrDefault("questionType", "BEHAVIORAL"))
-                        .build();
-                questions.add(q);
-            }
-        } catch (Exception e) {
-            log.error("Failed to parse interview kit AI response", e);
+        if (!userJob.getUserId().equals(requestingUserId)) {
+            throw new SecurityException("Access denied to userJob: " + userJobId);
         }
-        return questions;
+
+        // Find or create the track
+        InterviewTrack track = interviewTrackRepo
+                .findByUserJobId(userJobId)
+                .orElseGet(() -> {
+                    InterviewTrack t = new InterviewTrack();
+                    t.setId(UUID.randomUUID());
+                    t.setUserJobId(userJobId);
+                    t.setUserId(requestingUserId);
+                    t.setStage("PREP");
+                    t.setCreatedAt(LocalDateTime.now());
+                    return t;
+                });
+        track.setUpdatedAt(LocalDateTime.now());
+        interviewTrackRepo.save(track);
+
+        // Build prompt context
+        String jobTitle   = userJob.getJobTitle() != null ? userJob.getJobTitle() : "Software Engineer";
+        String company    = userJob.getCompanyName() != null ? userJob.getCompanyName() : "the company";
+        String skillsJson = userJob.getSkillsJson() != null ? userJob.getSkillsJson() : "[]";
+
+        String prompt = String.format(
+            """You are an expert interview coach. Generate a comprehensive interview preparation kit for a %s role at %s.
+            The candidate's relevant skills are: %s.
+            Produce exactly 15 questions in these categories:
+            - 5 Technical/Skills questions
+            - 4 Behavioural (STAR format)
+            - 3 Company/Culture fit
+            - 3 Role-specific scenario questions
+            For each question provide: category, question text, ideal answer outline (3 bullet points), difficulty (Easy/Medium/Hard).
+            Return as a JSON array: [{\"category\":\"\",\"question\":\"\",\"answerOutline\":[],\"difficulty\":\"\"}]""",
+            jobTitle, company, skillsJson
+        );
+
+        String aiResponse = geminiService.generateContent(prompt);
+
+        // Parse and persist question bank entries
+        // Simplified: store raw AI response as a single bank entry with full JSON
+        InterviewQuestionBank bank = new InterviewQuestionBank();
+        bank.setId(UUID.randomUUID());
+        bank.setTrackId(track.getId());
+        bank.setUserJobId(userJobId);
+        bank.setQuestionsJson(aiResponse);
+        bank.setCompany(company);
+        bank.setRoleTitle(jobTitle);
+        bank.setGeneratedAt(LocalDateTime.now());
+        questionBankRepo.save(bank);
+
+        log.info("Interview kit generated for userJobId={} trackId={}", userJobId, track.getId());
+        return track;
+    }
+
+    public List<InterviewQuestionBank> getQuestionsForJob(UUID userJobId) {
+        return questionBankRepo.findByUserJobId(userJobId);
     }
 }

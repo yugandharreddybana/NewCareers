@@ -5,8 +5,12 @@ import com.careerops.model.InterviewSession;
 import com.careerops.model.InterviewTrack;
 import com.careerops.service.InterviewCoachService;
 import com.careerops.service.MockInterviewService;
-import com.careerops.util.AuthUtil;
+import com.careerops.service.PdfExportService;
+import com.careerops.util.JwtUtil;
+import jakarta.servlet.http.HttpServletRequest;
 import lombok.RequiredArgsConstructor;
+import org.springframework.http.HttpHeaders;
+import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
@@ -14,79 +18,108 @@ import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 
+/**
+ * Tasks 9-12 — Interview endpoints.
+ * POST /api/interviews/generate-kit/:userJobId
+ * POST /api/interviews/mock/start/:userJobId
+ * POST /api/interviews/mock/reply/:sessionId
+ * GET  /api/interviews/history/:userJobId
+ * GET  /api/interviews/kit/export/:userJobId   (Task 17 — PDF export)
+ */
 @RestController
-@RequestMapping("/api/interview")
+@RequestMapping("/api/interviews")
 @RequiredArgsConstructor
 public class InterviewController {
 
-    private final InterviewCoachService interviewCoachService;
-    private final MockInterviewService mockInterviewService;
+    private final InterviewCoachService coachService;
+    private final MockInterviewService mockService;
+    private final PdfExportService pdfExportService;
+    private final JwtUtil jwtUtil;
 
-    // ─── Task 9: Get or create an interview track for a job ──────────────────
-    @PostMapping("/track")
-    public ResponseEntity<InterviewTrack> getOrCreateTrack(@RequestParam UUID userJobId) {
-        UUID userId = AuthUtil.currentUserId();
-        InterviewTrack track = interviewCoachService.getOrCreateTrack(userJobId, userId);
+    /** Task 9 — Generate interview kit */
+    @PostMapping("/generate-kit/{userJobId}")
+    public ResponseEntity<InterviewTrack> generateKit(
+            @PathVariable UUID userJobId,
+            HttpServletRequest req) {
+        UUID userId = extractUserId(req);
+        InterviewTrack track = coachService.generateKit(userJobId, userId);
         return ResponseEntity.ok(track);
     }
 
-    // ─── Task 10: Get all interview tracks for the logged-in user ────────────
-    @GetMapping("/tracks")
-    public ResponseEntity<List<InterviewTrack>> getMyTracks() {
-        UUID userId = AuthUtil.currentUserId();
-        return ResponseEntity.ok(interviewCoachService.getTracksByUser(userId));
-    }
-
-    // ─── Task 10: Update interview stage (e.g. APPLIED → PHONE_SCREEN) ───────
-    @PatchMapping("/track/{trackId}/stage")
-    public ResponseEntity<InterviewTrack> updateStage(
-            @PathVariable UUID trackId,
-            @RequestParam String stage) {
-        return ResponseEntity.ok(interviewCoachService.updateStage(trackId, stage));
-    }
-
-    // ─── Task 11: Generate AI interview kit (10 questions) for a job ─────────
-    @PostMapping("/kit")
-    public ResponseEntity<List<InterviewQuestionBank>> generateKit(@RequestParam UUID userJobId) {
-        UUID userId = AuthUtil.currentUserId();
-        List<InterviewQuestionBank> kit = interviewCoachService.generateInterviewKit(userJobId, userId);
-        return ResponseEntity.ok(kit);
-    }
-
-    // ─── Task 11: Get existing kit questions for a track ─────────────────────
-    @GetMapping("/kit/{trackId}")
-    public ResponseEntity<List<InterviewQuestionBank>> getKit(@PathVariable UUID trackId) {
-        return ResponseEntity.ok(interviewCoachService.getKitByTrack(trackId));
-    }
-
-    // ─── Task 12: Start a mock interview session ──────────────────────────────
-    @PostMapping("/session/start")
-    public ResponseEntity<InterviewSession> startSession(@RequestParam UUID userJobId) {
-        UUID userId = AuthUtil.currentUserId();
-        InterviewSession session = mockInterviewService.startSession(userJobId, userId);
+    /** Task 10 — Start mock interview session */
+    @PostMapping("/mock/start/{userJobId}")
+    public ResponseEntity<InterviewSession> startMock(
+            @PathVariable UUID userJobId,
+            HttpServletRequest req) {
+        UUID userId = extractUserId(req);
+        InterviewSession session = mockService.startSession(userJobId, userId);
         return ResponseEntity.ok(session);
     }
 
-    // ─── Task 12: Submit an answer, get AI score + feedback back ─────────────
-    @PostMapping("/session/{sessionId}/answer")
-    public ResponseEntity<Map<String, Object>> submitAnswer(
+    /** Task 11 — Submit reply in mock session */
+    @PostMapping("/mock/reply/{sessionId}")
+    public ResponseEntity<InterviewSession> reply(
             @PathVariable UUID sessionId,
-            @RequestParam UUID questionId,
-            @RequestBody Map<String, String> body) {
-        String userAnswer = body.get("answer");
-        Map<String, Object> result = mockInterviewService.processReply(sessionId, questionId, userAnswer);
-        return ResponseEntity.ok(result);
+            @RequestBody Map<String, String> body,
+            HttpServletRequest req) {
+        UUID userId = extractUserId(req);
+        String answer = body.getOrDefault("answer", "");
+        InterviewSession updated = mockService.processReply(sessionId, userId, answer);
+        return ResponseEntity.ok(updated);
     }
 
-    // ─── Task 12: Complete a session, get overall score + summary ────────────
-    @PostMapping("/session/{sessionId}/complete")
-    public ResponseEntity<InterviewSession> completeSession(@PathVariable UUID sessionId) {
-        return ResponseEntity.ok(mockInterviewService.completeSession(sessionId));
+    /** Task 12 — Get interview history for a job */
+    @GetMapping("/history/{userJobId}")
+    public ResponseEntity<List<InterviewSession>> history(
+            @PathVariable UUID userJobId,
+            HttpServletRequest req) {
+        UUID userId = extractUserId(req);
+        List<InterviewSession> sessions = mockService.getHistory(userJobId, userId);
+        return ResponseEntity.ok(sessions);
     }
 
-    // ─── Task 12: Get session history for a job ───────────────────────────────
-    @GetMapping("/session/history")
-    public ResponseEntity<List<InterviewSession>> getSessionHistory(@RequestParam UUID userJobId) {
-        return ResponseEntity.ok(mockInterviewService.getSessionHistory(userJobId));
+    /** Task 12b — Get question bank for a job */
+    @GetMapping("/kit/{userJobId}")
+    public ResponseEntity<List<InterviewQuestionBank>> getKit(
+            @PathVariable UUID userJobId,
+            HttpServletRequest req) {
+        UUID userId = extractUserId(req);
+        List<InterviewQuestionBank> questions = coachService.getQuestionsForJob(userJobId);
+        return ResponseEntity.ok(questions);
+    }
+
+    /** Task 17 — Export interview kit as PDF */
+    @GetMapping("/kit/export/{userJobId}")
+    public ResponseEntity<byte[]> exportKitPdf(
+            @PathVariable UUID userJobId,
+            HttpServletRequest req) {
+        UUID userId = extractUserId(req);
+        List<InterviewQuestionBank> questions = coachService.getQuestionsForJob(userJobId);
+        byte[] pdf = pdfExportService.generateInterviewKitPdf(questions, userJobId.toString());
+        return ResponseEntity.ok()
+                .header(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=interview-kit.pdf")
+                .contentType(MediaType.APPLICATION_PDF)
+                .body(pdf);
+    }
+
+    /** Task 17 — Export completed mock interview report as PDF */
+    @GetMapping("/mock/export/{sessionId}")
+    public ResponseEntity<byte[]> exportSessionPdf(
+            @PathVariable UUID sessionId,
+            HttpServletRequest req) {
+        // fetch session and generate PDF report
+        byte[] pdf = pdfExportService.generateMockInterviewReportPdf(sessionId.toString());
+        return ResponseEntity.ok()
+                .header(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=mock-interview-report.pdf")
+                .contentType(MediaType.APPLICATION_PDF)
+                .body(pdf);
+    }
+
+    private UUID extractUserId(HttpServletRequest req) {
+        String header = req.getHeader("Authorization");
+        if (header == null || !header.startsWith("Bearer ")) {
+            throw new SecurityException("Missing or invalid Authorization header");
+        }
+        return UUID.fromString(jwtUtil.extractUserId(header.substring(7)));
     }
 }

@@ -9,10 +9,6 @@ import java.util.UUID;
 
 @Repository
 public interface InterviewSessionRepository extends JpaRepository<InterviewSession, UUID> {
-
-    List<InterviewSession> findByInterviewTrackIdOrderByStartedAtDesc(UUID interviewTrackId);
-
+    List<InterviewSession> findByUserJobIdAndUserId(UUID userJobId, UUID userId);
     List<InterviewSession> findByUserId(UUID userId);
-
-    List<InterviewSession> findByInterviewTrackIdAndCompletedAtIsNotNull(UUID interviewTrackId);
 }
