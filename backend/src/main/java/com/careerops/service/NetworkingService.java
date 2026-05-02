@@ -16,11 +16,12 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDate;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 
 /**
- * Section 3.3 — Task 35
- * Handles contact organisation, next-step suggestions, and interaction logging.
+ * Section 3.3 — Task 35 (expanded with delete, stage-update, detail lookup,
+ * and per-contact interaction history for full CRM UX).
  */
 @Service
 public class NetworkingService {
@@ -63,12 +64,23 @@ public class NetworkingService {
 
         contacts.save(c);
         audit.log(userId, "NETWORKING_CONTACT_CREATED",
-                java.util.Map.of("contactId", c.getId().toString(), "name", c.getName()));
+                Map.of("contactId", c.getId().toString(), "name", c.getName()));
         log.info("Contact created: {} for user {}", c.getId(), userId);
         return toResponse(c, null);
     }
 
-    // ── Get all contacts (optionally filtered by type) ─────────────────────────
+    // ── Get contact detail ─────────────────────────────────────────────────────
+
+    public ContactResponse getContactDetail(UUID userId, UUID contactId) {
+        NetworkContact c = contacts.findByIdAndUserId(contactId, userId)
+                .orElseThrow(() -> new ApiException(HttpStatus.NOT_FOUND, "Contact not found"));
+        List<ContactInteraction> ci =
+                interactions.findByContactIdOrderByCreatedAtDesc(c.getId());
+        InteractionSummary last = ci.isEmpty() ? null : toSummary(ci.get(0));
+        return toResponse(c, last);
+    }
+
+    // ── List contacts (optionally filtered by type) ────────────────────────────
 
     public ContactListResponse getContacts(UUID userId, ContactType type) {
         List<NetworkContact> list = (type != null)
@@ -85,6 +97,36 @@ public class NetworkingService {
                 .toList();
 
         return new ContactListResponse(responses, responses.size());
+    }
+
+    // ── Update pipeline stage ──────────────────────────────────────────────────
+
+    @Transactional
+    public ContactResponse updatePipelineStage(UUID userId, UUID contactId,
+                                                ContactPipelineStage newStage) {
+        NetworkContact c = contacts.findByIdAndUserId(contactId, userId)
+                .orElseThrow(() -> new ApiException(HttpStatus.NOT_FOUND, "Contact not found"));
+        c.setPipelineStage(newStage);
+        contacts.save(c);
+        audit.log(userId, "NETWORKING_STAGE_UPDATED",
+                Map.of("contactId", contactId.toString(), "stage", newStage.name()));
+        List<ContactInteraction> ci =
+                interactions.findByContactIdOrderByCreatedAtDesc(c.getId());
+        InteractionSummary last = ci.isEmpty() ? null : toSummary(ci.get(0));
+        return toResponse(c, last);
+    }
+
+    // ── Delete contact ─────────────────────────────────────────────────────────
+
+    @Transactional
+    public void deleteContact(UUID userId, UUID contactId) {
+        NetworkContact c = contacts.findByIdAndUserId(contactId, userId)
+                .orElseThrow(() -> new ApiException(HttpStatus.NOT_FOUND, "Contact not found"));
+        interactions.deleteByContactId(contactId);
+        contacts.delete(c);
+        audit.log(userId, "NETWORKING_CONTACT_DELETED",
+                Map.of("contactId", contactId.toString()));
+        log.info("Contact deleted: {} by user {}", contactId, userId);
     }
 
     // ── Log interaction ────────────────────────────────────────────────────────
@@ -106,15 +148,24 @@ public class NetworkingService {
                 .build();
 
         interactions.save(ci);
-
-        // Auto-advance pipeline stage based on outcome
         advancePipelineStage(contact, ci);
         contacts.save(contact);
 
         audit.log(userId, "NETWORKING_INTERACTION_LOGGED",
-                java.util.Map.of("contactId", contactId.toString(),
+                Map.of("contactId", contactId.toString(),
                         "type", req.interactionType().name()));
         return toInteractionResponse(ci);
+    }
+
+    // ── Interaction history for a contact ─────────────────────────────────────
+
+    public List<InteractionResponse> getInteractionsForContact(UUID userId, UUID contactId) {
+        contacts.findByIdAndUserId(contactId, userId)
+                .orElseThrow(() -> new ApiException(HttpStatus.NOT_FOUND, "Contact not found"));
+        return interactions.findByContactIdOrderByCreatedAtDesc(contactId)
+                .stream()
+                .map(this::toInteractionResponse)
+                .toList();
     }
 
     // ── Overdue follow-ups ─────────────────────────────────────────────────────
@@ -136,12 +187,12 @@ public class NetworkingService {
         ContactInteraction last = history.get(0);
         return switch (last.getOutcome() != null ? last.getOutcome() :
                 ContactInteraction.InteractionOutcome.no_response) {
-            case no_response  -> "Follow up after 5–7 days with a brief, value-add message.";
-            case positive     -> "Schedule a 15-minute coffee chat or virtual call.";
+            case no_response   -> "Follow up after 5–7 days with a brief, value-add message.";
+            case positive      -> "Schedule a 15-minute coffee chat or virtual call.";
             case meeting_booked -> "Prepare for your meeting — research " +
                     (contact.getCompany() != null ? contact.getCompany() : "the company") +
                     " and prepare 3 talking points.";
-            case negative     -> "Give space for 2–3 weeks before trying a different angle.";
+            case negative      -> "Give space for 2–3 weeks before trying a different angle.";
         };
     }
 
@@ -151,20 +202,20 @@ public class NetworkingService {
         if (ci.getOutcome() == null) return;
         ContactPipelineStage current = contact.getPipelineStage();
         ContactPipelineStage next = switch (ci.getOutcome()) {
-            case positive      -> advanceFrom(current);
+            case positive       -> advanceFrom(current);
             case meeting_booked -> ContactPipelineStage.meeting_scheduled;
-            default            -> current;
+            default             -> current;
         };
         contact.setPipelineStage(next);
     }
 
     private ContactPipelineStage advanceFrom(ContactPipelineStage stage) {
         return switch (stage) {
-            case identified  -> ContactPipelineStage.connected;
-            case connected   -> ContactPipelineStage.outreached;
-            case outreached  -> ContactPipelineStage.replied;
-            case replied     -> ContactPipelineStage.meeting_scheduled;
-            default          -> stage;
+            case identified -> ContactPipelineStage.connected;
+            case connected  -> ContactPipelineStage.outreached;
+            case outreached -> ContactPipelineStage.replied;
+            case replied    -> ContactPipelineStage.meeting_scheduled;
+            default         -> stage;
         };
     }
 

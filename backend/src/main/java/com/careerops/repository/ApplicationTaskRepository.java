@@ -3,30 +3,30 @@ package com.careerops.repository;
 import com.careerops.model.ApplicationTask;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;
-import org.springframework.stereotype.Repository;
+import org.springframework.data.repository.query.Param;
 
-import java.time.LocalDateTime;
+import java.time.LocalDate;
 import java.util.List;
 import java.util.UUID;
 
-@Repository
 public interface ApplicationTaskRepository extends JpaRepository<ApplicationTask, UUID> {
 
     List<ApplicationTask> findByUserJobIdOrderByDueDateAsc(UUID userJobId);
 
-    List<ApplicationTask> findByUserIdAndStatusNotOrderByDueDateAsc(UUID userId, String status);
+    List<ApplicationTask> findByUserIdOrderByDueDateAsc(UUID userId);
 
-    // Upcoming tasks within N days for the user
-    @Query("SELECT t FROM ApplicationTask t WHERE t.userId = :userId " +
-           "AND t.status = 'PENDING' AND t.dueDate BETWEEN :from AND :to " +
-           "ORDER BY t.dueDate ASC")
-    List<ApplicationTask> findUpcomingByUser(UUID userId, LocalDateTime from, LocalDateTime to);
-
-    // Overdue tasks not yet reminded
-    List<ApplicationTask> findByStatusAndDueDateBeforeAndReminderSentFalse(
-            String status, LocalDateTime deadline);
-
-    long countByUserJobIdAndStatus(UUID userJobId, String status);
-
-    long countByUserJobIdAndStatusNot(UUID userJobId, String status);
+    /**
+     * Returns tasks whose dueDate falls within [from, to] (inclusive)
+     * that are not yet completed, so the deadline cron can send reminders.
+     */
+    @Query("""
+            SELECT t FROM ApplicationTask t
+            WHERE t.dueDate IS NOT NULL
+              AND t.dueDate >= :from
+              AND t.dueDate <= :to
+              AND t.status <> 'DONE'
+            ORDER BY t.dueDate ASC
+            """)
+    List<ApplicationTask> findUpcomingDeadlines(@Param("from") LocalDate from,
+                                                @Param("to")   LocalDate to);
 }
