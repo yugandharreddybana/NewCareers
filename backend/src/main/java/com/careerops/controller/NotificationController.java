@@ -37,6 +37,7 @@ public class NotificationController {
     @GetMapping("/unread-count")
     public ResponseEntity<Map<String, Integer>> unreadCount() {
         UUID userId = AuthUtil.currentUserId();
+        // countByUserIdAndReadFalse now returns int — no cast needed
         int count = notificationRepository.countByUserIdAndReadFalse(userId);
         return ResponseEntity.ok(Map.of("unread", count));
     }
