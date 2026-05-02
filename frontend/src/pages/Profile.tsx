@@ -2,13 +2,13 @@ import { useEffect, useRef, useState } from 'react';
 import toast from 'react-hot-toast';
 import { motion, AnimatePresence } from 'framer-motion';
 import { profileApi } from '@/services/api';
-import { ImportSummary, Portfolio Item, Profile, Stats } from '@/types';
+import { ImportSummary, PortfolioItem, Profile, Stats } from '@/types';
 import { useAuth } from '@/context/AuthContext';
 import TagInput from '@/components/ui/TagInput';
 import {
   User, Settings, FileText, Download, Upload, Lock, Euro, MapPin,
   Target, Zap, Clock, ShieldCheck, ChevronRight, CheckCircle2,
-  AlertCircle, Camera, Mail, AtSign, Briefcase, Globe, Linkedin,
+  AlertCircle, Camera, Mail, AtSign, Briefcase, Globe, Link as Linkedin,
   Plus, Pencil, Trash2, ExternalLink, X, Loader2, FolderOpen,
 } from 'lucide-react';
 

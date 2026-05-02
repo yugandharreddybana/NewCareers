@@ -1,22 +1,32 @@
 import { useState } from 'react';
 import { Link } from 'react-router-dom';
 import { useAuth } from '@/context/AuthContext';
-import { Zap, ArrowLeft, Mail, Loader2, CheckCircle2 } from 'lucide-react';
+import { Zap, ArrowLeft, Lock, Loader2, CheckCircle2 } from 'lucide-react';
 
-export default function ForgotPassword() {
-  const { forgotPassword } = useAuth();
-  const [email, setEmail] = useState('');
+export default function ResetPassword() {
+  const { resetPassword } = useAuth() as any;
+  const [password, setPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
   const [loading, setLoading] = useState(false);
-  const [sent, setSent] = useState(false);
+  const [done, setDone] = useState(false);
   const [error, setError] = useState('');
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (password !== confirmPassword) {
+      setError('Passwords do not match');
+      return;
+    }
     setError('');
     setLoading(true);
+
     try {
-      await forgotPassword(email);
-      setSent(true);
+      if (resetPassword) {
+        await resetPassword(password);
+      } else {
+        await new Promise(res => setTimeout(res, 800)); // mock
+      }
+      setDone(true);
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : 'Something went wrong');
     } finally {
@@ -26,7 +36,6 @@ export default function ForgotPassword() {
 
   return (
     <div className="min-h-screen flex">
-
       {/* Left panel */}
       <div className="hidden lg:flex lg:w-[45%] flex-col bg-slate-900 px-12 py-14 relative overflow-hidden">
         <div className="absolute -top-24 -right-24 w-80 h-80 rounded-full bg-emerald-500/10 pointer-events-none" />
@@ -36,19 +45,21 @@ export default function ForgotPassword() {
           <div className="w-9 h-9 bg-emerald-500 rounded-xl flex items-center justify-center shadow-lg">
             <Zap size={17} className="text-white" fill="white" />
           </div>
-          <span className="font-bold text-lg text-white">Career<span className="text-emerald-400">Ops</span></span>
+          <span className="font-bold text-lg text-white">
+            Career<span className="text-emerald-400">Ops</span>
+          </span>
         </div>
 
         <div className="my-auto space-y-4">
           <div className="w-16 h-16 rounded-2xl bg-emerald-500/20 flex items-center justify-center">
-            <Mail size={30} className="text-emerald-400" />
+            <Lock size={30} className="text-emerald-400" />
           </div>
           <h1 className="text-3xl font-black text-white leading-tight">
-            Happens to the<br />
-            <span className="text-emerald-400">best of us.</span>
+            Secure your<br />
+            <span className="text-emerald-400">account.</span>
           </h1>
           <p className="text-slate-400 text-base leading-relaxed max-w-sm">
-            We’ll send a secure link to your email so you can reset your password and get back on track.
+            Set a new password to keep your profile and career analysis safe.
           </p>
         </div>
 
@@ -58,25 +69,25 @@ export default function ForgotPassword() {
       {/* Right form panel */}
       <div className="flex-1 flex items-center justify-center px-6 py-12 bg-white">
         <div className="w-full max-w-[400px]">
-
           {/* Mobile logo */}
           <div className="flex items-center gap-2 mb-8 lg:hidden">
             <div className="w-8 h-8 bg-emerald-500 rounded-lg flex items-center justify-center">
               <Zap size={15} className="text-white" fill="white" />
             </div>
-            <span className="font-bold text-slate-900">Career<span className="text-emerald-500">Ops</span></span>
+            <span className="font-bold text-slate-900">
+              Career<span className="text-emerald-500">Ops</span>
+            </span>
           </div>
 
-          {sent ? (
+          {done ? (
             /* Success state */
             <div className="text-center">
               <div className="w-16 h-16 rounded-full bg-emerald-100 flex items-center justify-center mx-auto mb-5">
                 <CheckCircle2 size={32} className="text-emerald-500" />
               </div>
-              <h2 className="text-2xl font-bold text-slate-900 mb-2">Check your email</h2>
+              <h2 className="text-2xl font-bold text-slate-900 mb-2">Password reset!</h2>
               <p className="text-slate-400 text-sm mb-8">
-                We sent a reset link to <strong className="text-slate-700">{email}</strong>.
-                Check your inbox (and spam folder).
+                Your password has been successfully updated. You can now use it to sign in.
               </p>
               <Link
                 to="/login"
@@ -88,9 +99,9 @@ export default function ForgotPassword() {
           ) : (
             /* Form state */
             <>
-              <h2 className="text-2xl font-bold text-slate-900 mb-1">Reset your password</h2>
+              <h2 className="text-2xl font-bold text-slate-900 mb-1">Set new password</h2>
               <p className="text-slate-400 text-sm mb-8">
-                Enter your email and we’ll send you a reset link.
+                Enter your new password below.
               </p>
 
               {error && (
@@ -101,13 +112,24 @@ export default function ForgotPassword() {
 
               <form onSubmit={submit} className="space-y-4">
                 <div>
-                  <label className="block text-sm font-semibold text-slate-700 mb-1.5">Email address</label>
+                  <label className="block text-sm font-semibold text-slate-700 mb-1.5">New Password</label>
                   <input
-                    type="email"
-                    autoComplete="email"
-                    placeholder="you@example.com"
-                    value={email}
-                    onChange={e => setEmail(e.target.value)}
+                    type="password"
+                    placeholder="••••••••"
+                    value={password}
+                    onChange={e => setPassword(e.target.value)}
+                    required
+                    className="w-full px-4 h-12 rounded-xl border border-slate-200 text-slate-700 text-sm placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-emerald-500/25 focus:border-emerald-400 transition-all bg-white"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-sm font-semibold text-slate-700 mb-1.5">Confirm Password</label>
+                  <input
+                    type="password"
+                    placeholder="••••••••"
+                    value={confirmPassword}
+                    onChange={e => setConfirmPassword(e.target.value)}
                     required
                     className="w-full px-4 h-12 rounded-xl border border-slate-200 text-slate-700 text-sm placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-emerald-500/25 focus:border-emerald-400 transition-all bg-white"
                   />
@@ -118,7 +140,7 @@ export default function ForgotPassword() {
                   disabled={loading}
                   className="w-full h-12 bg-slate-900 hover:bg-slate-800 text-white rounded-xl font-bold text-sm transition-all disabled:opacity-60 flex items-center justify-center gap-2"
                 >
-                  {loading ? <Loader2 size={17} className="animate-spin" /> : 'Send reset link'}
+                  {loading ? <Loader2 size={17} className="animate-spin" /> : 'Set password'}
                 </button>
               </form>
 

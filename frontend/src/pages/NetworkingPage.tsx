@@ -7,7 +7,7 @@ import {
 } from '@/api/networkingApi';
 import PipelineBoard from '@/components/networking/PipelineBoard';
 import AddContactModal from '@/components/networking/AddContactModal';
-import { toast } from 'sonner';
+import toast from 'react-hot-toast';
 
 const TYPE_FILTERS: { value: ContactType | ''; label: string }[] = [
   { value: '',                label: 'All' },

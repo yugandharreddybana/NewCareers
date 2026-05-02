@@ -1,4 +1,4 @@
-import axios from './axios';
+import { api as axios } from '../services/api';
 
 // ── Dashboard summary ────────────────────────────────────────────────────────
 export const getUpcoming = () =>

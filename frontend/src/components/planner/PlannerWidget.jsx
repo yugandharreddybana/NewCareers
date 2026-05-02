@@ -1,6 +1,35 @@
 import React, { useState } from 'react';
 import { useUpcoming } from '../../hooks/usePlanner';
-import { format, isToday, isTomorrow, isPast } from 'date-fns';
+
+function isToday(d) {
+  const today = new Date();
+  return d.getDate() === today.getDate() &&
+         d.getMonth() === today.getMonth() &&
+         d.getFullYear() === today.getFullYear();
+}
+
+function isTomorrow(d) {
+  const tomorrow = new Date();
+  tomorrow.setDate(tomorrow.getDate() + 1);
+  return d.getDate() === tomorrow.getDate() &&
+         d.getMonth() === tomorrow.getMonth() &&
+         d.getFullYear() === tomorrow.getFullYear();
+}
+
+function isPast(d) {
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  return d < today;
+}
+
+function formatDate(dateStr) {
+  if (!dateStr) return '';
+  const d = new Date(dateStr);
+  if (isToday(d)) return 'Today';
+  if (isTomorrow(d)) return 'Tomorrow';
+  const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+  return `${months[d.getMonth()]} ${d.getDate()}`;
+}
 
 const PRIORITY_COLOURS = {
   HIGH:   'bg-red-100 text-red-700 border-red-200',
@@ -15,14 +44,6 @@ const EVENT_ICONS = {
   OFFER_DEADLINE:    '🤝',
   CUSTOM:            '📌',
 };
-
-function formatDate(dateStr) {
-  if (!dateStr) return '';
-  const d = new Date(dateStr);
-  if (isToday(d))    return 'Today';
-  if (isTomorrow(d)) return 'Tomorrow';
-  return format(d, 'MMM d');
-}
 
 export default function PlannerWidget({ onOpenJob }) {
   const [refreshKey, setRefreshKey] = useState(0);

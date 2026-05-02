@@ -1,7 +1,5 @@
 import { useState } from 'react';
-import { Input } from '@/components/ui/input';
-import { Button } from '@/components/ui/button';
-import { Label } from '@/components/ui/label';
+import { Input, Button } from '@/components/ui';
 import { Banknote } from 'lucide-react';
 
 /** Map ISO 4217 currency codes to symbols */
@@ -57,7 +55,7 @@ export default function SalaryRangeFilter({
       </div>
       <div className="flex items-center gap-2">
         <div className="flex-1">
-          <Label htmlFor="salary-min" className="sr-only">Min Salary</Label>
+          <label htmlFor="salary-min" className="sr-only">Min Salary</label>
           <Input
             id="salary-min"
             type="number"
@@ -69,7 +67,7 @@ export default function SalaryRangeFilter({
         </div>
         <span className="text-muted-foreground text-xs">–</span>
         <div className="flex-1">
-          <Label htmlFor="salary-max" className="sr-only">Max Salary</Label>
+          <label htmlFor="salary-max" className="sr-only">Max Salary</label>
           <Input
             id="salary-max"
             type="number"

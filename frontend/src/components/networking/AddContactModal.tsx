@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { type CreateContactPayload, networkingApi } from '@/api/networkingApi';
-import { toast } from 'sonner';
+import toast from 'react-hot-toast';
 
 interface Props {
   onClose: () => void;

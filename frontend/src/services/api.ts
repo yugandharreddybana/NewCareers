@@ -30,6 +30,9 @@ export const api = axios.create({
 
 // ── Request interceptor: attach access token as Bearer header ──────────────
 api.interceptors.request.use((config: InternalAxiosRequestConfig) => {
+  if (config.url && config.url.startsWith('/api/')) {
+    config.url = config.url.replace(/^\/api\//, '/');
+  }
   const token = tokenStore.getAccess();
   if (token && config.headers) {
     config.headers['Authorization'] = `Bearer ${token}`;

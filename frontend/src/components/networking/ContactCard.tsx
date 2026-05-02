@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { type NetworkContact, type LogInteractionPayload, networkingApi } from '@/api/networkingApi';
-import { toast } from 'sonner';
+import toast from 'react-hot-toast';
 
 const TEMP_COLOURS: Record<string, string> = {
   cold: 'bg-blue-100 text-blue-700',
