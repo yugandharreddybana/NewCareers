@@ -1,8 +1,9 @@
-const express = require('express');
-const router  = express.Router();
-const { authGuard } = require('../middleware/authGuard');
-const { createProxyMiddleware } = require('http-proxy-middleware');
-const { rateLimit } = require('express-rate-limit');
+import express from 'express';
+import { authGuard } from '../middleware/authGuard.js';
+import { createProxyMiddleware } from 'http-proxy-middleware';
+import { rateLimit } from 'express-rate-limit';
+
+const router = express.Router();
 
 const JAVA = process.env.JAVA_BACKEND_URL || 'http://localhost:8080';
 
@@ -57,4 +58,4 @@ router.get('/contact/:id/interactions', authGuard, javaProxy);
 // POST /api/networking/contacts/import  → multipart CSV upload
 router.post('/contacts/import', authGuard, javaProxy);
 
-module.exports = router;
+export default router;

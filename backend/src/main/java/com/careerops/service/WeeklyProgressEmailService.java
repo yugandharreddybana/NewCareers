@@ -44,13 +44,26 @@ public class WeeklyProgressEmailService {
             UserStreak streak) {
 
         try {
-            Map<String, Object> vars = buildTemplateVars(firstName, snap, streak);
+            String name = firstName != null ? firstName : "there";
+            String html = String.format(
+                "<h2>Your weekly CareerOps progress 📈</h2>" +
+                "<p>Hello %s,</p>" +
+                "<p>Here is your summary for the week:</p>" +
+                "<ul>" +
+                "<li>Jobs reviewed: %d</li>" +
+                "<li>Applications submitted: %d</li>" +
+                "<li>Interviews scheduled: %d</li>" +
+                "<li>Offers received: %d</li>" +
+                "</ul>" +
+                "<p>Visit your dashboard to learn more!</p>",
+                name, snap.getJobsReviewed(), snap.getApplicationsSubmitted(),
+                snap.getInterviewsScheduled(), snap.getOffersReceived()
+            );
 
-            resendEmailService.sendTemplatedEmail(
+            resendEmailService.send(
                     toEmail,
                     "Your weekly CareerOps progress 📈",
-                    "weekly-progress-email",
-                    vars
+                    html
             );
 
             log.info("[WeeklyProgressEmail] Sent to {} for week {}", toEmail, snap.getWeekStart());

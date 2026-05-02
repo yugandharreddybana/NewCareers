@@ -144,8 +144,9 @@ public class CronJobService {
                     // Fetch user email via UserRepository
                     users.findById(task.getUserId()).ifPresent(user -> {
                         email.sendDeadlineReminder(
-                                user.getEmail(),
+                                user.getId(),
                                 task.getTitle(),
+                                task.getTaskType(),
                                 task.getDueDate());
                     });
                     sent++;

@@ -54,7 +54,8 @@ public class ApplicationPlannerService {
         String stage      = job.getStatus() != null ? job.getStatus() : "SAVED";
 
         String prompt = String.format(
-            """You are a career planning assistant. Generate a list of next actions for a job application.
+            """
+            You are a career planning assistant. Generate a list of next actions for a job application.
             Role: %s at %s. Current stage: %s.
             Produce 5 to 7 prioritised action items. For each item provide:
             - title (max 80 chars)
@@ -62,7 +63,7 @@ public class ApplicationPlannerService {
             - taskType (one of: ACTION, FOLLOW_UP, PREP, REVIEW, SUBMIT)
             - priority (one of: LOW, MEDIUM, HIGH, URGENT)
             - daysFromNow (integer, how many days from today the task should be due)
-            Return as JSON array: [{\"title\":\"\",\"description\":\"\",\"taskType\":\"\",\"priority\":\"\",\"daysFromNow\":0}]""",
+            Return as JSON array: [{"title":"","description":"","taskType":"","priority":"","daysFromNow":0}]""",
             jobTitle, company, stage
         );
 

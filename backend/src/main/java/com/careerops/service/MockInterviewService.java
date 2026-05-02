@@ -62,10 +62,11 @@ public class MockInterviewService {
 
         // Score the answer
         String scorePrompt = String.format(
-            """The interviewer asked: \"%s\"
-            The candidate answered: \"%s\"
+            """
+            The interviewer asked: "%s"
+            The candidate answered: "%s"
             Score this answer from 0-10 and provide 2 specific improvement tips.
-            Return JSON: {\"score\":0,\"tips\":[\"\",\"\"]}""",
+            Return JSON: {"score":0,"tips":["",""]}""",
             session.getCurrentQuestion(), userAnswer
         );
         String scoreJson = geminiService.generateContent(scorePrompt);

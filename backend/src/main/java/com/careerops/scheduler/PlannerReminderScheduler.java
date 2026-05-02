@@ -12,8 +12,10 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 
+import java.time.Instant;
 import java.time.LocalDateTime;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 
 /**
@@ -45,11 +47,10 @@ public class PlannerReminderScheduler {
                 n.setUserId(task.getUserId());
                 n.setType("OVERDUE_TASK");
                 n.setTitle("Overdue task!");
-                n.setMessage("\"" + task.getTitle() + "\" was due and hasn't been completed yet.");
+                n.setBody("\"" + task.getTitle() + "\" was due and hasn't been completed yet.");
                 n.setRead(false);
-                n.setCreatedAt(LocalDateTime.now());
-                n.setEntityType("application_task");
-                n.setEntityId(task.getId().toString());
+                n.setCreatedAt(Instant.now());
+                n.setMetadata(Map.of("entityType", "application_task", "entityId", task.getId().toString()));
                 notificationRepo.save(n);
 
                 task.setReminderSent(true);

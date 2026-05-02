@@ -3,7 +3,7 @@ package com.careerops.controller;
 import com.careerops.model.ApplicationTask;
 import com.careerops.model.DeadlineEvent;
 import com.careerops.service.ApplicationPlannerService;
-import com.careerops.service.JwtService;
+import com.careerops.security.JwtService;
 import jakarta.servlet.http.HttpServletRequest;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.ResponseEntity;
@@ -42,7 +42,7 @@ public class PlannerController {
             @PathVariable UUID userJobId,
             HttpServletRequest request) {
         UUID userId = extractUserId(request);
-        return ResponseEntity.ok(plannerService.generateTasks(userJobId, userId));
+        return ResponseEntity.ok(plannerService.generatePlan(userJobId, userId));
     }
 
     // ── PATCH /api/planner/tasks/{taskId}/complete ────────────────────────────
@@ -51,7 +51,7 @@ public class PlannerController {
             @PathVariable UUID taskId,
             HttpServletRequest request) {
         UUID userId = extractUserId(request);
-        return ResponseEntity.ok(plannerService.completeTask(taskId, userId));
+        return ResponseEntity.ok(plannerService.markComplete(taskId, userId));
     }
 
     // ── GET /api/planner/jobs/{userJobId}/deadlines ───────────────────────────
@@ -68,10 +68,10 @@ public class PlannerController {
             @RequestBody CreateDeadlineRequest body,
             HttpServletRequest request) {
         UUID userId = extractUserId(request);
-        DeadlineEvent event = plannerService.createDeadline(
+        DeadlineEvent event = plannerService.addDeadline(
             userJobId, userId,
             body.eventType(), body.title(),
-            body.eventDate(), body.remindAt(),
+            body.eventDate() != null ? body.eventDate().toLocalDateTime() : null,
             body.notes()
         );
         return ResponseEntity.ok(event);

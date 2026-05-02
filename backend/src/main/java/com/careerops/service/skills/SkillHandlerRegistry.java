@@ -118,7 +118,6 @@ public class SkillHandlerRegistry {
         run.setUserJobId(userJobId);
         run.setSkill(skillName);
         run.setOutput(output);
-        run.setStatus("done");
         run.setExpiresAt(Instant.now().plus(ttlDays, ChronoUnit.DAYS));
         skillRuns.save(run);
 

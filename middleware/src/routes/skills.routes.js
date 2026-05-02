@@ -1,7 +1,8 @@
-const express = require('express');
-const router  = express.Router();
-const { authGuard } = require('../middleware/authGuard');
-const { createProxyMiddleware } = require('http-proxy-middleware');
+import express from 'express';
+import { authGuard } from '../middleware/authGuard.js';
+import { createProxyMiddleware } from 'http-proxy-middleware';
+
+const router = express.Router();
 
 const JAVA = process.env.JAVA_BACKEND_URL || 'http://localhost:8080';
 
@@ -86,4 +87,4 @@ phase2Skills.forEach((skillName) => {
 // POST /api/skills/cv-human-score  — returns ATS + human scores for tailored CV
 router.post('/cv-human-score', authGuard, javaProxy);
 
-module.exports = router;
+export default router;

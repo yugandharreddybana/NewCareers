@@ -1,7 +1,8 @@
-const express = require('express');
-const router  = express.Router();
-const { authGuard } = require('../middleware/authGuard');
-const { createProxyMiddleware } = require('http-proxy-middleware');
+import express from 'express';
+import { authGuard } from '../middleware/authGuard.js';
+import { createProxyMiddleware } from 'http-proxy-middleware';
+
+const router = express.Router();
 
 const JAVA = process.env.JAVA_BACKEND_URL || 'http://localhost:8080';
 
@@ -58,4 +59,4 @@ router.get('/session/history', authGuard, javaProxy);
 // POST /api/interview/track/:trackId/remind  → set interview date + trigger reminder
 router.post('/track/:trackId/remind', authGuard, javaProxy);
 
-module.exports = router;
+export default router;

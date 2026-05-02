@@ -239,7 +239,8 @@ public class CvHumanScoreService {
     private boolean isStopWord(String word) {
         return Map.of(
             "with", true, "that", true, "this", true, "from", true,
-            "your", true, "have", true, "will", true, "they", true,
+            "your", true, "have", true, "will", true, "they", true
+        ).containsKey(word) || Map.of(
             "what", true, "able", true, "been", true, "also", true
         ).containsKey(word);
     }

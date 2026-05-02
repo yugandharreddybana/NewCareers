@@ -16,7 +16,8 @@
 
     <properties>
         <java.version>21</java.version>
-        <openhtmltopdf.version>1.0.10</openhtmltopdf.version>
+        <openhtmltopdf.version>1.1.24</openhtmltopdf.version>
+
         <bucket4j.version>8.10.1</bucket4j.version>
     </properties>
 
@@ -25,7 +26,9 @@
         <dependency><groupId>org.springframework.boot</groupId><artifactId>spring-boot-starter-web</artifactId></dependency>
         <dependency><groupId>org.springframework.boot</groupId><artifactId>spring-boot-starter-data-jpa</artifactId></dependency>
         <dependency><groupId>org.springframework.boot</groupId><artifactId>spring-boot-starter-security</artifactId></dependency>
+        <dependency><groupId>org.springframework.boot</groupId><artifactId>spring-boot-starter-oauth2-resource-server</artifactId></dependency>
         <dependency><groupId>org.springframework.boot</groupId><artifactId>spring-boot-starter-validation</artifactId></dependency>
+        <dependency><groupId>org.springframework.boot</groupId><artifactId>spring-boot-starter-mail</artifactId></dependency>
 
         <!-- WebFlux / WebClient - used for Anthropic Claude API, SerpAPI, web_fetch tool -->
         <dependency><groupId>org.springframework.boot</groupId><artifactId>spring-boot-starter-webflux</artifactId></dependency>

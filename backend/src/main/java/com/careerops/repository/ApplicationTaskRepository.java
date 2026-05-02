@@ -6,10 +6,13 @@ import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
 import java.time.LocalDate;
+import java.time.LocalDateTime;
 import java.util.List;
 import java.util.UUID;
 
 public interface ApplicationTaskRepository extends JpaRepository<ApplicationTask, UUID> {
+
+    List<ApplicationTask> findByStatusAndDueDateBeforeAndReminderSentFalse(String status, LocalDateTime dueDate);
 
     List<ApplicationTask> findByUserJobIdOrderByDueDateAsc(UUID userJobId);
 

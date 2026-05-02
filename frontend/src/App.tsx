@@ -21,6 +21,7 @@ const JobDetail            = lazy(() => import('./pages/JobDetail'));
 const Profile              = lazy(() => import('./pages/Profile'));
 const AccountSettings      = lazy(() => import('./pages/AccountSettings'));
 const InterviewHistoryPage = lazy(() => import('./pages/InterviewHistoryPage'));
+
 const InterviewPage        = lazy(() => import('./pages/InterviewPage'));
 const NetworkingPage       = lazy(() => import('./pages/NetworkingPage'));
 const WorkspacePage        = lazy(() => import('./pages/WorkspacePage'));
@@ -32,6 +33,12 @@ const Skills               = lazy(() => import('./pages/Skills'));
 const Analytics            = lazy(() => import('./pages/Analytics'));
 const BillingPage          = lazy(() => import('./pages/BillingPage'));
 const Refer                = lazy(() => import('./pages/Refer'));
+
+const WatchlistsPage       = lazy(() => import('./pages/WatchlistsPage'));
+const AutoApplyPage        = lazy(() => import('./pages/AutoApplyPage'));
+const OutreachPage         = lazy(() => import('./pages/OutreachPage'));
+const AgentMemoryPage      = lazy(() => import('./pages/AgentMemoryPage'));
+const ResumeVersionsPage   = lazy(() => import('./pages/ResumeVersionsPage'));
 
 const Spinner = (
   <div className="min-h-screen flex items-center justify-center bg-slate-50">
@@ -71,6 +78,11 @@ export const App: React.FC = () => (
               <Route path="/analytics"          element={<Analytics />} />
               <Route path="/billing"            element={<BillingPage />} />
               <Route path="/refer"              element={<Refer />} />
+              <Route path="/auto-apply"         element={<AutoApplyPage />} />
+              <Route path="/watchlists"         element={<WatchlistsPage />} />
+              <Route path="/outreach"           element={<OutreachPage />} />
+              <Route path="/agent-memory"       element={<AgentMemoryPage />} />
+              <Route path="/resume-versions"    element={<ResumeVersionsPage />} />
               <Route path="/admin/experiments"  element={<ExperimentDashboard />} />
             </Route>
 

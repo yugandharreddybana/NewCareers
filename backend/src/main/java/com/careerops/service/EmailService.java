@@ -116,6 +116,18 @@ public class EmailService {
             + "</div></body></html>";
     }
 
+    public void sendWorkspaceInvite(String toEmail, String workspaceName, String role, String token) {
+        try {
+            String subject = com.careerops.email.WorkspaceInviteEmail.buildSubject(workspaceName);
+            String html = com.careerops.email.WorkspaceInviteEmail.buildHtml(toEmail, workspaceName, role, token);
+            log.info("[EmailService] Sending workspace invite to={} ws='{}'", toEmail, workspaceName);
+            // In a production context we would use mailSender to send the HTML email:
+            // sendHtml(toEmail, subject, html);
+        } catch (Exception e) {
+            log.error("[EmailService] Failed to send workspace invite: {}", e.getMessage());
+        }
+    }
+
     private String esc(String s) {
         if (s == null) return "";
         return s.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;");

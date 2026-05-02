@@ -19,8 +19,13 @@ import planner       from './routes/planner.routes.js';         // 3.2
 import networking    from './routes/networking.routes.js';      // 3.3
 import workspace     from './routes/workspace.routes.js';       // 3.4
 import progress      from './routes/progress.routes.js';        // 3.5
-import onboarding   from './routes/onboarding.routes.js';      // 3.6
-import experiments  from './routes/experiments.routes.js';     // 3.6
+import onboarding      from './routes/onboarding.routes.js';        // 3.6
+import experiments     from './routes/experiments.routes.js';      // 3.6
+import autoApply       from './routes/auto-apply.routes.js';        // 4.2
+import outreach        from './routes/outreach.routes.js';           // 4.4
+import watchlists      from './routes/watchlists.routes.js';       // 4.1
+import agentMemory     from './routes/agent-memory.routes.js';     // 4.3
+import resumeVersions  from './routes/resume-versions.routes.js';  // 4.5
 
 const app = express();
 
@@ -50,8 +55,13 @@ app.use('/api/planner',       planner);        // 3.2
 app.use('/api/networking',    networking);     // 3.3
 app.use('/api/workspaces',    workspace);      // 3.4
 app.use('/api/progress',      progress);       // 3.5
-app.use('/api/onboarding',    onboarding);     // 3.6
-app.use('/api/experiments',   experiments);    // 3.6
+app.use('/api/onboarding',       onboarding);       // 3.6
+app.use('/api/experiments',      experiments);      // 3.6
+app.use('/api/auto-apply',        autoApply);        // 4.2
+app.use('/api/outreach',          outreach);         // 4.4
+app.use('/api/watchlists',       watchlists);       // 4.1
+app.use('/api/agent-memory',     agentMemory);      // 4.3
+app.use('/api/resume-versions',  resumeVersions);   // 4.5
 
 app.use((err, _req, res, _next) => {
   console.error('Middleware error:', err.message);

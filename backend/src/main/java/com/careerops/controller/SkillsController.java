@@ -226,7 +226,7 @@ public class SkillsController {
      */
     private UUID extractUserId(String authHeader) {
         String token = authHeader.replace("Bearer ", "").trim();
-        String subject = jwtService.extractSubject(token);
+        String subject = jwtService.parseUserId(token);
         return UUID.fromString(subject);
     }
 }

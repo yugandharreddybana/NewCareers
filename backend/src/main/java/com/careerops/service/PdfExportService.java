@@ -73,6 +73,10 @@ public class PdfExportService {
         return html.toString().getBytes(StandardCharsets.UTF_8);
     }
 
+    public byte[] generateResumePdf(UUID userId, UUID userJobId) {
+        return "Not implemented".getBytes(StandardCharsets.UTF_8);
+    }
+
     private String esc(String s) {
         if (s == null) return "";
         return s.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;");

@@ -6,7 +6,7 @@ import com.careerops.model.InterviewTrack;
 import com.careerops.service.InterviewCoachService;
 import com.careerops.service.MockInterviewService;
 import com.careerops.service.PdfExportService;
-import com.careerops.util.JwtUtil;
+import com.careerops.security.JwtService;
 import jakarta.servlet.http.HttpServletRequest;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpHeaders;
@@ -34,7 +34,7 @@ public class InterviewController {
     private final InterviewCoachService coachService;
     private final MockInterviewService mockService;
     private final PdfExportService pdfExportService;
-    private final JwtUtil jwtUtil;
+    private final JwtService jwtService;
 
     /** Task 9 — Generate interview kit */
     @PostMapping("/generate-kit/{userJobId}")
@@ -120,6 +120,6 @@ public class InterviewController {
         if (header == null || !header.startsWith("Bearer ")) {
             throw new SecurityException("Missing or invalid Authorization header");
         }
-        return UUID.fromString(jwtUtil.extractUserId(header.substring(7)));
+        return UUID.fromString(jwtService.extractUserId(header.substring(7)));
     }
 }

@@ -6,7 +6,7 @@ import {
   LogOut, ChevronLeft, ChevronRight,
   Sparkles, HelpCircle, Gift, TrendingUp,
   Brain, FileText, CreditCard, Settings, GraduationCap,
-  BarChart2, Users, Share2,
+  BarChart2, Users, Share2, Bell, MemoryStick, Layers, Zap,
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { cn } from '@/lib/utils';
@@ -30,8 +30,12 @@ const NAV_ITEMS: NavItem[] = [
   { to: '/interviews', icon: <GraduationCap    size={18} />, label: 'Interview Coach' },
   { to: '/progress',   icon: <BarChart2        size={18} />, label: 'Progress',        id: 'nav-progress' },
   { to: '/networking', icon: <Users            size={18} />, label: 'Networking'      },
-  { to: '/workspaces', icon: <Share2           size={18} />, label: 'Workspaces'      },
-  { to: '/profile',    icon: <User             size={18} />, label: 'Profile'         },
+  { to: '/workspaces',      icon: <Share2           size={18} />, label: 'Workspaces'      },
+  { to: '/auto-apply',      icon: <Zap              size={18} />, label: 'Auto-Apply'      },
+  { to: '/watchlists',      icon: <Bell             size={18} />, label: 'Watchlists'      },
+  { to: '/agent-memory',    icon: <MemoryStick      size={18} />, label: 'Agent Memory'    },
+  { to: '/resume-versions', icon: <Layers            size={18} />, label: 'Resume Versions' },
+  { to: '/profile',         icon: <User             size={18} />, label: 'Profile'         },
   { to: '/refer',      icon: <Gift             size={18} />, label: 'Refer & Earn'    },
   { to: '/billing',    icon: <CreditCard       size={18} />, label: 'Billing'         },
 ];
