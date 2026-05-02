@@ -1,6 +1,8 @@
-// App.tsx — routes wired to real page components with AppShell via ProtectedRoute
+// App.tsx — single BrowserRouter owns all routing
+// AuthProvider lives inside BrowserRouter so it can use useNavigate
 import React, { Suspense, lazy } from 'react';
 import { BrowserRouter, Route, Routes } from 'react-router-dom';
+import { AuthProvider } from './context/AuthContext';
 import { ProtectedRoute } from './components/ProtectedRoute';
 import { LoadingSpinner } from './components/LoadingSpinner';
 import { ExperimentProvider } from './context/ExperimentContext';
@@ -25,36 +27,40 @@ const Analytics            = lazy(() => import('./pages/Analytics'));
 const InterviewPage        = lazy(() => import('./pages/InterviewPage'));
 
 export const App: React.FC = () => (
-  <ExperimentProvider>
-    <BrowserRouter>
-      <Suspense fallback={
-        <div className="min-h-screen flex items-center justify-center bg-slate-50">
-          <LoadingSpinner />
-        </div>
-      }>
-        <Routes>
-          {/* Public routes — no shell */}
-          <Route path="/login"    element={<Login />} />
-          <Route path="/register" element={<Signup />} />
+  <BrowserRouter>
+    <AuthProvider>
+      <ExperimentProvider>
+        <Suspense fallback={
+          <div className="min-h-screen flex items-center justify-center bg-slate-50">
+            <LoadingSpinner />
+          </div>
+        }>
+          <Routes>
+            {/* Public routes — no shell */}
+            <Route path="/login"    element={<Login />} />
+            <Route path="/register" element={<Signup />} />
 
-          {/* Protected routes — ProtectedRoute renders AppShell which renders <Outlet /> */}
-          <Route element={<ProtectedRoute />}>
-            <Route path="/"                   element={<Dashboard />} />
-            <Route path="/jobs/:id"           element={<JobDetail />} />
-            <Route path="/profile"            element={<Profile />} />
-            <Route path="/interviews"         element={<InterviewHistoryPage />} />
-            <Route path="/interview"          element={<InterviewPage />} />
-            <Route path="/networking"         element={<NetworkingPage />} />
-            <Route path="/workspaces"         element={<WorkspacePage />} />
-            <Route path="/progress"           element={<ProgressPage />} />
-            <Route path="/kanban"             element={<Kanban />} />
-            <Route path="/cv"                 element={<CvManager />} />
-            <Route path="/skills"             element={<Skills />} />
-            <Route path="/analytics"          element={<Analytics />} />
-            <Route path="/admin/experiments"  element={<ExperimentDashboard />} />
-          </Route>
-        </Routes>
-      </Suspense>
-    </BrowserRouter>
-  </ExperimentProvider>
+            {/* Protected routes — ProtectedRoute renders AppShell which renders <Outlet /> */}
+            <Route element={<ProtectedRoute />}>
+              <Route path="/"                   element={<Dashboard />} />
+              <Route path="/jobs/:id"           element={<JobDetail />} />
+              <Route path="/profile"            element={<Profile />} />
+              <Route path="/interviews"         element={<InterviewHistoryPage />} />
+              <Route path="/interview"          element={<InterviewPage />} />
+              <Route path="/networking"         element={<NetworkingPage />} />
+              <Route path="/workspaces"         element={<WorkspacePage />} />
+              <Route path="/progress"           element={<ProgressPage />} />
+              <Route path="/kanban"             element={<Kanban />} />
+              <Route path="/cv"                 element={<CvManager />} />
+              <Route path="/skills"             element={<Skills />} />
+              <Route path="/analytics"          element={<Analytics />} />
+              <Route path="/admin/experiments"  element={<ExperimentDashboard />} />
+            </Route>
+          </Routes>
+        </Suspense>
+      </ExperimentProvider>
+    </AuthProvider>
+  </BrowserRouter>
 );
+
+export default App;

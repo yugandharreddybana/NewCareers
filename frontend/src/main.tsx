@@ -1,18 +1,14 @@
 import React from 'react';
 import ReactDOM from 'react-dom/client';
-import { BrowserRouter } from 'react-router-dom';
 import { Toaster } from 'react-hot-toast';
 import App from './App';
-import { AuthProvider } from './context/AuthContext';
 import './styles/index.css';
 
+// NOTE: BrowserRouter lives in App.tsx — do NOT add another one here.
+// AuthProvider is also inside App.tsx, inside the router, so useNavigate works.
 ReactDOM.createRoot(document.getElementById('root')!).render(
   <React.StrictMode>
-    <BrowserRouter>
-      <AuthProvider>
-        <App />
-        <Toaster position="top-right" />
-      </AuthProvider>
-    </BrowserRouter>
+    <App />
+    <Toaster position="top-right" />
   </React.StrictMode>
 );
