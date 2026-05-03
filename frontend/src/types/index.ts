@@ -1,3 +1,35 @@
+/**
+ * types/index.ts — shared domain types
+ *
+ * D1 fix: User type expanded with avatarUrl, createdAt, planId fields
+ *   that BillingPage, Profile, and AccountSettings reference but were
+ *   previously missing — causing silent `undefined` accesses with no TS error.
+ *
+ * D2 fix: JobCard.kanbanColumn typed as KanbanColumn (not plain string)
+ *   so TypeScript catches invalid column names at compile time.
+ *
+ * D3 fix: ApiError type added — pages can now type catch blocks as
+ *   ApiError instead of casting `e: any` everywhere.
+ */
+
+// ── D3: Shared API error type ─────────────────────────────────────────────────────────
+export interface ApiError extends Error {
+  /** Normalised error message from the response body or Axios error */
+  normalizedMessage: string;
+  /** HTTP status code, if available */
+  status?: number;
+  response?: {
+    data?: { error?: string; message?: string; details?: unknown[] };
+    status?: number;
+  };
+}
+
+/** Type-guard: narrows `unknown` to ApiError */
+export function isApiError(e: unknown): e is ApiError {
+  return typeof e === 'object' && e !== null && 'normalizedMessage' in e;
+}
+
+// ── D1: User — expanded ─────────────────────────────────────────────────────────────
 export interface User {
   id: string;
   name: string;
@@ -5,9 +37,13 @@ export interface User {
   email: string;
   onboarded: boolean;
   role?: 'USER' | 'ADMIN';
+  // D1 fix: fields used in BillingPage / Profile / AccountSettings
+  avatarUrl?: string | null;
+  createdAt?: string;
+  planId?: string | null;
+  planName?: string | null;
 }
 
-// Section 10 — Portfolio item
 export interface PortfolioItem {
   id: string;
   title: string;
@@ -16,7 +52,6 @@ export interface PortfolioItem {
   techTags?: string[];
 }
 
-// Section 10 — LinkedIn import result
 export interface ImportSummary {
   firstName: string;
   lastName: string;
@@ -41,7 +76,6 @@ export interface Profile {
   sponsorshipRequired?: boolean;
   onboarded?: boolean;
   activeCvFileName?: string | null;
-  // Section 10
   portfolioItems?: PortfolioItem[];
   goalTitle?: string;
   goalSalaryMin?: number;
@@ -50,6 +84,11 @@ export interface Profile {
   openToRemote?: boolean;
   completenessScore?: number;
 }
+
+export const KANBAN_COLUMNS = [
+  'Discovered', 'Saved', 'Applied', 'Interview', 'Offer', 'Rejected',
+] as const;
+export type KanbanColumn = typeof KANBAN_COLUMNS[number];
 
 export interface JobCard {
   userJobId: string;
@@ -69,7 +108,8 @@ export interface JobCard {
   sourceUrl?: string;
   postedAt?: string;
   deliveredAt?: string;
-  kanbanColumn: string;
+  // D2 fix: typed as KanbanColumn (not plain string)
+  kanbanColumn: KanbanColumn;
   status: string;
   matchedSkills?: string[];
   unmatchedSkills?: string[];
@@ -106,10 +146,7 @@ export interface Stats {
 
 export type SkillName =
   | 'evaluate' | 'tailor-resume' | 'research' | 'outreach'
-  | 'apply' | 'prep-interview' | 'compare' | 'triage' | 'scan' | 'salary-negotiation' | 'culture-fit'
-  | 'linkedin-optimize' | 'cover-letter' | 'skills-gap-plan';
+  | 'apply' | 'prep-interview' | 'compare' | 'triage' | 'scan' | 'salary-negotiation'
+  | 'culture-fit' | 'linkedin-optimize' | 'cover-letter' | 'skills-gap-plan';
 
 export type SkillState = 'idle' | 'loading' | 'done' | 'locked' | 'error';
-
-export const KANBAN_COLUMNS = ['Discovered', 'Saved', 'Applied', 'Interview', 'Offer', 'Rejected'] as const;
-export type KanbanColumn = typeof KANBAN_COLUMNS[number];
