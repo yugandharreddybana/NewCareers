@@ -7,7 +7,12 @@
  *   The Java backend contract is:           { token, password }
  *   Fixed validators now match the actual contract.
  *
- * All other routes (signup, login, refresh, logout, forgot-password, me)
+ * G1 fix (Batch 7a): /auth/me now properly verifies the JWT via authGuard
+ *   and proxies to Java /auth/me to confirm session validity.
+ *   Old implementation only checked if the cookie existed — any token
+ *   (expired, tampered, fabricated) would pass the check.
+ *
+ * All other routes (signup, login, refresh, logout, forgot-password)
  * are unchanged.
  */
 import express from 'express';
@@ -112,8 +117,6 @@ router.post('/forgot-password',
 // ── Reset Password ─────────────────────────────────────────────────────────
 // A5 fix: validators now match actual frontend + Java backend contract:
 //   { token: string (the reset token from the email link), password: string }
-// Old validators were checking for { email, otp, newPassword } which would
-// cause a 422 on every single password reset attempt.
 router.post('/reset-password',
   authLimiter, trimStrings,
   body('token').isString().isLength({ min: 8 }),
@@ -127,10 +130,18 @@ router.post('/reset-password',
   });
 
 // ── Session Check ──────────────────────────────────────────────────────────
-router.get('/me', (req, res) => {
-  const token = req.cookies?.[COOKIE];
-  if (!token) return res.status(401).json({ error: 'Unauthorized' });
-  res.json({ ok: true });
-});
+// G1 fix (Batch 7a): authGuard validates + decodes the JWT before this handler
+// runs. If the token is missing, expired, or tampered the guard returns 401
+// before we reach here. We then proxy to Java /auth/me to confirm the
+// server-side session is still valid and return the live user object.
+router.get('/me',
+  authGuard,
+  async (req, res, next) => {
+    try {
+      const r = await forward({ method: 'GET', path: '/auth/me', userId: req.userId });
+      if (r.status >= 400) return res.status(r.status).json(r.data);
+      res.json(r.data);
+    } catch (e) { next(e); }
+  });
 
 export default router;

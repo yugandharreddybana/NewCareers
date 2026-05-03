@@ -1,21 +1,16 @@
 /**
  * api.ts — Axios instance, silent-refresh interceptor, and core API services.
  *
- * F1 fix: eliminated all `any` types:
- *   authApi.signup(b: any)     → SignupBody
- *   authApi.login(b: any)      → LoginBody
- *   authApi.reset(b: any)      → ResetPasswordBody (alias)
- *   skillsApi.start(req: any)  → SkillStartRequest
- *
- * F2 fix: added authApi.me() — called by AuthContext on mount to verify
- *   the session is still valid (B2 fix in Batch 2 depends on this).
- *
- * F3 fix: kanbanApi.patch body.kanbanColumn typed as KanbanColumn | undefined
- *   (not plain string) so TypeScript catches invalid column names.
- *
+ * F1 fix: eliminated all `any` types.
+ * F2 fix: added authApi.me().
+ * F3 fix: kanbanApi.patch body.kanbanColumn typed as KanbanColumn | undefined.
  * F4 fix: removed authApi.forgot / authApi.reset legacy aliases.
- *   They were only used in one place (PasswordRecovery.tsx) which already
- *   calls forgotPassword / resetPassword directly. Dead code removed.
+ *
+ * G7 fix (Batch 7a): X-CSRF-Token header is now attached on every mutating
+ *   request (POST, PUT, PATCH, DELETE). The middleware uses a double-submit
+ *   cookie pattern — it expects the header value to match the co_csrf cookie.
+ *   Without this header, every state-changing API call returns 403 in
+ *   production.
  */
 import axios, { AxiosRequestConfig, InternalAxiosRequestConfig } from 'axios';
 import toast from 'react-hot-toast';
@@ -50,7 +45,7 @@ interface SkillStartRequest {
   tone?: string;
   step?: string;
   compareJobIds?: string[];
-  [key: string]: unknown; // allow extra fields passed through to Java
+  [key: string]: unknown;
 }
 
 interface SkillResult {
@@ -67,21 +62,41 @@ const DEV_BYPASS =
 
 const delay = (ms = 800) => new Promise(res => setTimeout(res, ms));
 
+/** Read the co_csrf cookie that the middleware sets on first response. */
+function getCsrfToken(): string | null {
+  const match = document.cookie.match(/(?:^|;\s*)co_csrf=([^;]+)/);
+  return match ? decodeURIComponent(match[1]) : null;
+}
+
 export const api = axios.create({
   baseURL: `${baseURL}/api`,
   withCredentials: true,
   timeout: 90_000,
 });
 
-// ── Request interceptor: attach access token as Bearer header ────────────────
+// ── Request interceptor: attach access token + CSRF header ───────────────────
+// G7 fix: attach X-CSRF-Token on every mutating method so the double-submit
+// cookie check in server.ts passes.
+const MUTATING_METHODS = new Set(['post', 'put', 'patch', 'delete']);
+
 api.interceptors.request.use((config: InternalAxiosRequestConfig) => {
   if (config.url?.startsWith('/api/')) {
     config.url = config.url.replace(/^\/api\//, '/');
   }
+
   const token = tokenStore.getAccess();
   if (token && config.headers) {
     config.headers['Authorization'] = `Bearer ${token}`;
   }
+
+  // G7 fix: attach CSRF token for all state-changing requests
+  if (config.method && MUTATING_METHODS.has(config.method.toLowerCase())) {
+    const csrf = getCsrfToken();
+    if (csrf && config.headers) {
+      config.headers['X-CSRF-Token'] = csrf;
+    }
+  }
+
   return config;
 });
 
@@ -177,7 +192,6 @@ api.interceptors.response.use(
 
 // ── Auth API ─────────────────────────────────────────────────────────────────────
 export const authApi = {
-  // F1 fix: signup typed
   signup: async (b: SignupBody): Promise<AuthResponse> => {
     if (USE_MOCKS) { await delay(); return { user: mocks.MOCK_USER }; }
     const r = await api.post<AuthResponse>('/auth/signup', b);
@@ -186,7 +200,6 @@ export const authApi = {
     return r.data;
   },
 
-  // F1 fix: login typed
   login: async (b: LoginBody): Promise<AuthResponse> => {
     if (USE_MOCKS) { await delay(); return { user: mocks.MOCK_USER }; }
     const r = await api.post<AuthResponse>('/auth/login', b);
@@ -213,8 +226,6 @@ export const authApi = {
 
   resetPassword: (b: { token: string; password: string }) =>
     api.post<void>('/auth/reset-password', b).then(r => r.data),
-
-  // F4 fix: dead legacy aliases (forgot / reset) removed
 };
 
 // ── Profile API ───────────────────────────────────────────────────────────────────
@@ -275,7 +286,6 @@ export const jobsApi = {
 
 // ── Kanban API ────────────────────────────────────────────────────────────────────
 export const kanbanApi = {
-  // F3 fix: kanbanColumn typed as KanbanColumn (not plain string)
   patch: (id: string, body: { kanbanColumn?: KanbanColumn; status?: string }) => {
     if (USE_MOCKS) return Promise.resolve({ success: true });
     return api.patch(`/kanban/${id}`, body).then(r => r.data);
@@ -289,7 +299,6 @@ export const kanbanApi = {
 
 // ── Skills API ────────────────────────────────────────────────────────────────────
 export const skillsApi = {
-  // F1 fix: start() typed with SkillStartRequest (was `any`)
   start: async (req: SkillStartRequest): Promise<SkillResult> => {
     if (USE_MOCKS) {
       await delay(2500);
@@ -354,7 +363,6 @@ export const skillsApi = {
       });
   },
 
-  // Named skill shortcuts
   evaluate:      (userJobId: string) => skillsApi.start({ skillName: 'evaluate', userJobId }),
   tailorResume:  (userJobId: string) => skillsApi.start({ skillName: 'tailor-resume', userJobId }),
   research:      (userJobId: string) => skillsApi.start({ skillName: 'research', userJobId }),
