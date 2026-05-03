@@ -11,10 +11,22 @@
     "isolatedModules": true,
     "noEmit": true,
     "jsx": "react-jsx",
+
+    // ── Strict base ────────────────────────────────────────────────────────
     "strict": true,
     "noUnusedLocals": true,
     "noUnusedParameters": true,
     "noFallthroughCasesInSwitch": true,
+
+    // ── E3 fix: additional strict checks ──────────────────────────────────
+    // noUncheckedIndexedAccess: arr[0] is now T | undefined (not T).
+    // Catches the very common crash pattern: arr[0].property when arr is empty.
+    "noUncheckedIndexedAccess": true,
+    // exactOptionalPropertyTypes: { x?: string } rejects `{ x: undefined }`.
+    // Ensures optional prop presence is intentional, not an accidental undefined.
+    "exactOptionalPropertyTypes": true,
+
+    // ── Path aliases ────────────────────────────────────────────────────────
     "baseUrl": ".",
     "paths": { "@/*": ["src/*"] },
     "types": ["vite/client", "node"]

@@ -1,62 +1,94 @@
-# CareerOps
+# CareerOps — AI-Powered Career Intelligence Platform
 
-AI-powered job search platform. **React** ↔ **Node.js middleware** ↔ **Java Spring Boot** ↔ **Supabase + Gemini**.
-
-> Frontend never talks to Java directly. Middleware is the only door in.
+A full-stack job search acceleration platform with AI skill execution, automated job discovery, Kanban pipeline management, outreach generation, and interview coaching.
 
 ## Architecture
+
 ```
-React (Vite) ── HTTP ──▶ Node Middleware ── HTTP (internal) ──▶ Java Spring Boot ──▶ Supabase / Gemini
-   :5173                       :4000                                   :8080
+browser (React + Vite)
+    ↓ HTTPS
+Node.js Middleware (Express) — auth, rate limiting, CORS, input sanitisation
+    ↓ internal HTTP
+Java Spring Boot Backend — business logic, AI skill execution, data persistence
+    ↓
+PostgreSQL / Redis
 ```
 
-## Skills as Action Buttons
-Each skill has a markdown prompt (`backend/src/main/resources/career-ops-skills/`) and a button in the UI:
+## Quick Start
 
-| Skill          | Button             | Where         |
-| -------------- | ------------------ | ------------- |
-| evaluate       | Full Evaluation    | Job Detail    |
-| tailor-resume  | Tailor My CV       | Job Detail    |
-| research       | Research Company   | Job Detail    |
-| outreach       | Draft Outreach     | Job Detail    |
-| apply          | Apply Assistant    | Job Detail    |
-| prep-interview | Prep Interview     | Job Detail    |
-| compare        | Compare All        | Dashboard     |
-| triage         | Triage All         | Dashboard     |
-| track          | Kanban (visual)    | Kanban Page   |
+### Prerequisites
+- Node.js 20+
+- Java 21+
+- PostgreSQL 15+
+- Redis (optional — for distributed rate limiting)
 
-## Quick start
-1. **Supabase** — create a project, run `db/schema.sql` in the SQL editor, create private storage buckets `user-cvs` and `application-cvs`.
-2. **API keys** — get free keys for Gemini (Google AI Studio), Adzuna, Reed, Resend.
-3. **Backend (Java 17 + Maven)**
-   ```bash
-   cd backend
-   cp src/main/resources/application.example.properties src/main/resources/application.properties
-   # fill in values
-   ./mvnw spring-boot:run
-   ```
-4. **Middleware (Node 20)**
-   ```bash
-   cd middleware
-   cp .env.example .env
-   # fill in values
-   npm install
-   npm run dev
-   ```
-5. **Frontend (Vite + React + TS)**
-   ```bash
-   cd frontend
-   cp .env.example .env
-   npm install
-   npm run dev
-   ```
-6. Visit http://localhost:5173
+### 1. Frontend
+```bash
+cd frontend
+cp .env.example .env.local
+# Edit .env.local: set VITE_MIDDLEWARE_URL=http://localhost:4000
+npm install
+npm run dev
+```
 
-## Daily limits
-- 10 jobs per user per day, total
-- 3 delivered automatically by cron at 08:00
-- 7 available on demand via "Get More Jobs"
-- Limit resets at midnight (Europe/Dublin)
+### 2. Middleware
+```bash
+cd middleware
+cp .env.example .env
+# Edit .env: set JWT_SECRET, JAVA_BACKEND_URL
+npm install
+npm run dev
+```
 
-## Build order (matches spec §12)
-See `docs/BUILD_ORDER.md`.
+### 3. Java Backend
+```bash
+cd backend
+# Copy src/main/resources/application.example.properties to application.properties
+# Set spring.datasource.*, jwt.secret (must match middleware JWT_SECRET)
+mvn spring-boot:run
+```
+
+## Key Environment Variables
+
+| Variable | Where | Required | Description |
+|---|---|---|---|
+| `VITE_MIDDLEWARE_URL` | frontend | ✅ | Node middleware base URL |
+| `JWT_SECRET` | middleware | ✅ | Shared JWT signing secret (min 32 chars) |
+| `JAVA_BACKEND_URL` | middleware | ✅ | Java backend internal URL |
+| `ALLOWED_ORIGINS` | middleware | ✅ | Comma-separated allowed CORS origins |
+| `REDIS_URL` | middleware | ❌ | Redis for distributed rate limiting |
+| `VITE_DEV_BYPASS_GUARDS` | frontend | ❌ | Dev-only auth bypass (never in prod) |
+
+## Project Structure
+
+```
+frontend/          React + Vite + TypeScript
+  src/
+    pages/         Route-level components (lazy-loaded)
+    components/    Shared UI components
+    context/       React contexts (AuthContext, ExperimentContext)
+    services/      API service modules + barrel index
+    hooks/         Custom hooks (useAsync, ...)
+    types/         Shared TypeScript domain types
+    lib/           Utilities (tokenStore, ...)
+middleware/        Node.js + Express + TypeScript
+  src/
+    routes/        Per-domain route files
+    authGuard.ts   JWT verification middleware
+    rateLimiter.ts Express rate limiters (RedisStore aware)
+    sanitize.ts    Input sanitisation (trimStrings, stripXss)
+backend/           Java Spring Boot
+```
+
+## Batch Fix Log
+
+All code quality fixes applied in structured batches:
+
+| Batch | Scope | Fixes |
+|---|---|---|
+| Batch 1 | Security & Auth | XSS token risk, DEV_BYPASS prod guard, CSRF, Redis rate limiter, reset-password 422 |
+| Batch 2 | Frontend Architecture | Axios instance fix, auth loading flash, ErrorBoundary, useAsync hook, services barrel |
+| Batch 3 | Middleware Architecture | Multi-origin CORS, env startup validation, per-user rate limit, compression, stripXss, skillLimiter |
+| Batch 4 | Types & Contracts | User type expansion, KanbanColumn union, ApiError type, shared domain type files |
+| Batch 5 | DX & Config | Vite chunk splitting, .env.example audit, tsconfig strict+, README |
+| Batch 6 | Code Quality | `any` elimination, error handling, dead code removal |
