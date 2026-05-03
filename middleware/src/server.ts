@@ -14,6 +14,8 @@ import { rateLimit } from 'express-rate-limit';
 const REQUIRED_ENV = [
   'JWT_SECRET',
   'JAVA_BACKEND_URL',
+  'STRIPE_SECRET_KEY',      // Phase 1 fix: billing routes depend on Stripe key being present
+  'STRIPE_WEBHOOK_SECRET',  // Phase 1 fix: webhook signature verification in billing.routes.ts
 ];
 const missingEnv = REQUIRED_ENV.filter(k => !process.env[k]);
 if (missingEnv.length) {
@@ -139,7 +141,7 @@ app.use('/api', rateLimit({
   legacyHeaders: false,
   keyGenerator: (req) => {
     // Extract userId from Bearer token if present (no full JWT verify —
-    // that’s authGuard’s job; we just need a stable per-user key here).
+    // that's authGuard's job; we just need a stable per-user key here).
     try {
       const auth = req.headers.authorization;
       if (auth?.startsWith('Bearer ')) {

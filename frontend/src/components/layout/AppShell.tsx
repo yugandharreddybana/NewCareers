@@ -11,6 +11,10 @@
  *   - Full-width scrollable content
  *   - Fixed BottomNav
  *
+ * Phase 1 fix: accepts optional `children` prop so pages can be nested
+ * directly inside <AppShell> instead of requiring React Router <Outlet>.
+ * When children are provided they render instead of <Outlet>.
+ *
  * Includes DevModeBanner in development when VITE_DEV_BYPASS_GUARDS=true.
  */
 import { Suspense } from 'react';
@@ -24,7 +28,19 @@ import { Sparkles } from 'lucide-react';
 import ErrorBoundary from '@/components/ErrorBoundary';
 import { PageLoader } from '@/components/LoadingSpinner';
 
-export default function AppShell() {
+interface AppShellProps {
+  children?: React.ReactNode;
+}
+
+export default function AppShell({ children }: AppShellProps) {
+  const content = children ?? (
+    <ErrorBoundary>
+      <Suspense fallback={<PageLoader />}>
+        <Outlet />
+      </Suspense>
+    </ErrorBoundary>
+  );
+
   return (
     <div className="min-h-screen bg-[#f5f6fa]">
 
@@ -61,11 +77,7 @@ export default function AppShell() {
             animate={{ opacity: 1, y: 0 }}
             transition={{ duration: 0.2, ease: [0.16, 1, 0.3, 1] }}
           >
-            <ErrorBoundary>
-              <Suspense fallback={<PageLoader />}>
-                <Outlet />
-              </Suspense>
-            </ErrorBoundary>
+            {content}
           </motion.div>
         </div>
       </main>
@@ -78,11 +90,7 @@ export default function AppShell() {
             animate={{ opacity: 1, y: 0 }}
             transition={{ duration: 0.2, ease: [0.16, 1, 0.3, 1] }}
           >
-            <ErrorBoundary>
-              <Suspense fallback={<PageLoader />}>
-                <Outlet />
-              </Suspense>
-            </ErrorBoundary>
+            {content}
           </motion.div>
         </div>
       </main>
@@ -99,3 +107,5 @@ export default function AppShell() {
   );
 }
 
+// Named export for pages that import it as { AppShell }
+export { AppShell };
