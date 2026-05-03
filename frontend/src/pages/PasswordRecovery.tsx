@@ -123,7 +123,7 @@ export default function PasswordRecovery() {
           <p className="text-slate-400 text-base leading-relaxed max-w-sm">
             {isResetMode
               ? 'Set a strong new password to keep your profile and career analysis safe.'
-              : 'We'll send a secure link to your email so you can reset your password and get back on track.'}
+              : "We'll send a secure link to your email so you can reset your password and get back on track."}
           </p>
         </div>
 
@@ -165,7 +165,7 @@ export default function PasswordRecovery() {
                 {isResetMode ? 'Set new password' : 'Reset your password'}
               </h2>
               <p className="text-slate-400 text-sm mb-8">
-                {isResetMode ? 'Enter a strong new password below.' : 'Enter your email and we'll send you a reset link.'}
+                {isResetMode ? 'Enter a strong new password below.' : "Enter your email and we'll send you a reset link."}
               </p>
 
               {error && (
