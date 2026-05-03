@@ -1,35 +1,28 @@
 /**
- * services/index.ts — central barrel export for all API service modules
+ * services/index.ts — barrel export for all API modules.
  *
- * B6 fix: without this barrel, imports are verbose and inconsistent:
- *   import { billingApi } from '@/services/billingApi';
- *   import { progressApi } from '@/services/progressApi';
- *   import { outreachApi } from '@/services/outreachApi';
+ * G2/G3 fix (Batch 7b): all API modules that previously lived only in
+ * src/api/ are now re-exported from this barrel so pages can import
+ * from a single, stable path: @/services or @/services/index.
  *
- * With this barrel, it's one clean import:
- *   import { billingApi, progressApi, outreachApi } from '@/services';
+ * Old import pattern (still works, but deprecated):
+ *   import { autoApplyApi } from '@/api/autoApplyApi';
  *
- * mockApi and the raw api/authApi/profileApi instances are intentionally
- * NOT re-exported here to avoid circular imports in AuthContext.
+ * New import pattern (preferred):
+ *   import { autoApplyApi } from '@/services';
  */
 
-// Core
-export * from './api';            // authApi, profileApi, api (Axios instance)
+// Core services (already lived here)
+export * from './api';
+export * from './mockApi';
 
-// Domain services
-export * from './adminApi';
-export * from './agentMemoryApi';
-export * from './analyticsApi';
-export * from './autoApplyApi';
-export * from './billingApi';
-export * from './cvApi';
-export * from './discoveryApi';
-export * from './experimentsApi';
-export * from './interviewApi';
-export * from './notificationsApi';
-export * from './outreachApi';
-export * from './progressApi';
-export * from './referralsApi';
-export * from './resumeVersionsApi';
-export * from './skillsApi';
-export * from './watchlistsApi';
+// Migrated from src/api/
+export * from '../api/agentMemoryApi';
+export * from '../api/autoApplyApi';
+export * from '../api/networkingApi';
+export * from '../api/outreachApi';
+export * from '../api/plannerApi';
+export * from '../api/progressApi';
+export * from '../api/resumeVersionApi';
+export * from '../api/watchlistApi';
+export * from '../api/workspaceApi';
