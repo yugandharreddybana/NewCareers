@@ -1,10 +1,12 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { PageMeta } from '@/components/PageMeta';
 import { profileApi } from '@/services/api';
+import { cvApi } from '@/services/cvApi';
+import { useFileUpload } from '@/hooks/useFileUpload';
 import toast from 'react-hot-toast';
 import {
   Upload, FileText, Download, Trash2, CheckCircle,
-  Clock, Star, Plus, AlertCircle,
+  Clock, Star, Plus, AlertCircle, X,
 } from 'lucide-react';
 
 // ── Types ──────────────────────────────────────────────────────────────────────
@@ -71,28 +73,18 @@ const CvCard: React.FC<{
     </div>
     <div className="flex items-center gap-1 shrink-0">
       {!cv.isActive && (
-        <button
-          onClick={() => onSetActive(cv.id)}
-          title="Set as active CV"
-          className="p-2 rounded-lg text-gray-400 hover:text-indigo-600 hover:bg-indigo-50 transition-colors"
-        >
+        <button onClick={() => onSetActive(cv.id)} title="Set as active CV"
+          className="p-2 rounded-lg text-gray-400 hover:text-indigo-600 hover:bg-indigo-50 transition-colors">
           <Star size={15} />
         </button>
       )}
-      <button
-        onClick={() => onDownload(cv.id, cv.name)}
-        title="Download"
-        className="p-2 rounded-lg text-gray-400 hover:text-blue-600 hover:bg-blue-50 transition-colors"
-      >
+      <button onClick={() => onDownload(cv.id, cv.name)} title="Download"
+        className="p-2 rounded-lg text-gray-400 hover:text-blue-600 hover:bg-blue-50 transition-colors">
         <Download size={15} />
       </button>
       {!cv.isActive && (
-        <button
-          onClick={() => onDelete(cv.id)}
-          disabled={deleting}
-          title="Delete"
-          className="p-2 rounded-lg text-gray-400 hover:text-red-500 hover:bg-red-50 transition-colors disabled:opacity-40"
-        >
+        <button onClick={() => onDelete(cv.id)} disabled={deleting} title="Delete"
+          className="p-2 rounded-lg text-gray-400 hover:text-red-500 hover:bg-red-50 transition-colors disabled:opacity-40">
           <Trash2 size={15} />
         </button>
       )}
@@ -109,39 +101,46 @@ const CV_TIPS = [
   'Save a plain-text copy alongside your PDF for ATS compatibility.',
 ];
 
+// ── Upload Progress Bar ────────────────────────────────────────────────────────
+const UploadProgressBar: React.FC<{ progress: number; onAbort: () => void }> = ({ progress, onAbort }) => (
+  <div className="bg-indigo-50 border border-indigo-200 rounded-xl p-4">
+    <div className="flex items-center justify-between mb-2">
+      <p className="text-xs font-semibold text-indigo-700">Uploading… {progress}%</p>
+      <button onClick={onAbort} title="Cancel upload"
+        className="text-indigo-400 hover:text-red-500 transition-colors p-0.5 rounded">
+        <X size={14} />
+      </button>
+    </div>
+    <div className="w-full bg-indigo-100 rounded-full h-2 overflow-hidden">
+      <div
+        className="bg-indigo-500 h-2 rounded-full transition-all duration-200"
+        style={{ width: `${progress}%` }}
+      />
+    </div>
+  </div>
+);
+
 // ── Main page ──────────────────────────────────────────────────────────────────
 const CvManagerPage: React.FC = () => {
   const [versions, setVersions] = useState<CvVersion[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [uploading, setUploading] = useState(false);
+  const [loading, setLoading]   = useState(true);
   const [deleting, setDeleting] = useState<string | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
 
-  useEffect(() => {
-    if (USE_MOCKS) {
-      setTimeout(() => { setVersions(MOCK_VERSIONS); setLoading(false); }, 500);
-      return;
-    }
-    profileApi.get()
-      .then(u => {
-        // Build a single-version list from the active CV file name
-        const active = (u as Record<string, unknown>).activeCvFileName as string | null;
-        if (active) {
-          setVersions([{ id: 'active', name: active, uploadedAt: new Date().toISOString(), isActive: true, source: 'upload' }]);
+  const { upload, progress, uploading, error, abort } = useFileUpload<{ fileName: string }>({
+    uploader: USE_MOCKS
+      ? async (file, onProgress) => {
+          // Simulate progress in mock mode
+          for (let p = 0; p <= 100; p += 20) {
+            await new Promise(r => setTimeout(r, 120));
+            onProgress(p);
+          }
+          return { fileName: file.name };
         }
-      })
-      .catch(() => toast.error('Failed to load CV data.'))
-      .finally(() => setLoading(false));
-  }, []);
-
-  const handleUpload = async (file: File) => {
-    if (!file.name.match(/\.(pdf|docx)$/i)) {
-      toast.error('Only PDF and DOCX files are supported.');
-      return;
-    }
-    setUploading(true);
-    try {
-      const res = await profileApi.uploadCv(file);
+      : (file, onProgress, controller) =>
+          cvApi.uploadWithProgress(file, onProgress, controller)
+            .then(cv => ({ fileName: cv.name })),
+    onSuccess: (res, file) => {
       const newCv: CvVersion = {
         id: `cv-${Date.now()}`,
         name: res.fileName,
@@ -152,11 +151,29 @@ const CvManagerPage: React.FC = () => {
       };
       setVersions(prev => [newCv, ...prev.map(v => ({ ...v, isActive: false }))]);
       toast.success('CV uploaded and set as active!');
-    } catch {
-      toast.error('Upload failed. Please try again.');
-    } finally {
-      setUploading(false);
+    },
+    onError: () => toast.error('Upload failed. Please try again.'),
+  });
+
+  useEffect(() => {
+    if (USE_MOCKS) {
+      setTimeout(() => { setVersions(MOCK_VERSIONS); setLoading(false); }, 500);
+      return;
     }
+    profileApi.get()
+      .then(u => {
+        const active = (u as Record<string, unknown>).activeCvFileName as string | null;
+        if (active) {
+          setVersions([{ id: 'active', name: active, uploadedAt: new Date().toISOString(), isActive: true, source: 'upload' }]);
+        }
+      })
+      .catch(() => toast.error('Failed to load CV data.'))
+      .finally(() => setLoading(false));
+  }, []);
+
+  const handleFilePick = (file: File) => {
+    if (!file.name.match(/\.(pdf|docx)$/i)) { toast.error('Only PDF and DOCX files are supported.'); return; }
+    upload(file);
   };
 
   const handleSetActive = (id: string) => {
@@ -167,14 +184,11 @@ const CvManagerPage: React.FC = () => {
   const handleDelete = async (id: string) => {
     setDeleting(id);
     try {
-      if (!USE_MOCKS) await profileApi.deletePortfolioItem(id); // reuses delete endpoint pattern
+      if (!USE_MOCKS) await profileApi.deletePortfolioItem(id);
       setVersions(prev => prev.filter(v => v.id !== id));
       toast.success('CV version removed.');
-    } catch {
-      toast.error('Failed to delete CV.');
-    } finally {
-      setDeleting(null);
-    }
+    } catch { toast.error('Failed to delete CV.'); }
+    finally { setDeleting(null); }
   };
 
   const handleDownload = async (_id: string, name: string) => {
@@ -184,14 +198,10 @@ const CvManagerPage: React.FC = () => {
       const a = document.createElement('a');
       a.href = url; a.download = name;
       document.body.appendChild(a); a.click(); document.body.removeChild(a);
-    } catch {
-      toast.error('Download failed.');
-    }
+    } catch { toast.error('Download failed.'); }
   };
 
-  if (loading) return (
-    <div className="flex items-center justify-center min-h-[50vh] text-gray-400 text-sm">Loading CV Manager…</div>
-  );
+  if (loading) return <div className="flex items-center justify-center min-h-[50vh] text-gray-400 text-sm">Loading CV Manager…</div>;
 
   return (
     <>
@@ -206,44 +216,52 @@ const CvManagerPage: React.FC = () => {
           </div>
           <div>
             <input ref={fileRef} type="file" accept=".pdf,.docx" className="hidden"
-              onChange={e => { const f = e.target.files?.[0]; if (f) handleUpload(f); }}
+              onChange={e => { const f = e.target.files?.[0]; if (f) handleFilePick(f); e.target.value = ''; }}
             />
             <button
               onClick={() => fileRef.current?.click()}
               disabled={uploading}
               className="flex items-center gap-2 px-4 py-2.5 bg-indigo-500 hover:bg-indigo-600 disabled:opacity-60 text-white text-sm font-semibold rounded-lg transition-colors"
             >
-              {uploading ? <RefreshIcon /> : <Plus size={15} />}
-              {uploading ? 'Uploading…' : 'Upload CV'}
+              <Plus size={15} /> Upload CV
             </button>
           </div>
         </div>
 
-        {/* Drop zone */}
-        <div
-          onDragOver={e => e.preventDefault()}
-          onDrop={e => { e.preventDefault(); const f = e.dataTransfer.files?.[0]; if (f) handleUpload(f); }}
-          className="border-2 border-dashed border-gray-300 rounded-xl p-8 text-center hover:border-indigo-300 transition-colors cursor-pointer"
-          onClick={() => fileRef.current?.click()}
-        >
-          <Upload size={28} className="mx-auto text-gray-300 mb-2" />
-          <p className="text-sm text-gray-500">Drag &amp; drop your CV here, or <span className="text-indigo-500 font-medium">browse</span></p>
-          <p className="text-xs text-gray-400 mt-1">PDF or DOCX · Max 5 MB</p>
-        </div>
+        {/* Upload progress */}
+        {uploading && progress !== null && (
+          <UploadProgressBar progress={progress} onAbort={abort} />
+        )}
+
+        {/* Upload error */}
+        {error && (
+          <div className="flex items-center gap-2 bg-red-50 border border-red-200 rounded-xl px-4 py-3">
+            <AlertCircle size={15} className="text-red-500 shrink-0" />
+            <p className="text-xs text-red-700 flex-1">{error}</p>
+            <button onClick={() => {}} className="text-red-400 hover:text-red-600"><X size={13} /></button>
+          </div>
+        )}
+
+        {/* Drop zone (hidden while uploading) */}
+        {!uploading && (
+          <div
+            onDragOver={e => e.preventDefault()}
+            onDrop={e => { e.preventDefault(); const f = e.dataTransfer.files?.[0]; if (f) handleFilePick(f); }}
+            className="border-2 border-dashed border-gray-300 rounded-xl p-8 text-center hover:border-indigo-300 transition-colors cursor-pointer"
+            onClick={() => fileRef.current?.click()}
+          >
+            <Upload size={28} className="mx-auto text-gray-300 mb-2" />
+            <p className="text-sm text-gray-500">Drag &amp; drop your CV here, or <span className="text-indigo-500 font-medium">browse</span></p>
+            <p className="text-xs text-gray-400 mt-1">PDF or DOCX · Max 5 MB</p>
+          </div>
+        )}
 
         {/* Versions list */}
         {versions.length > 0 ? (
           <div className="space-y-3">
             <h2 className="text-sm font-semibold text-gray-700">Your CV Versions ({versions.length})</h2>
             {versions.map(cv => (
-              <CvCard
-                key={cv.id}
-                cv={cv}
-                onSetActive={handleSetActive}
-                onDelete={handleDelete}
-                onDownload={handleDownload}
-                deleting={deleting === cv.id}
-              />
+              <CvCard key={cv.id} cv={cv} onSetActive={handleSetActive} onDelete={handleDelete} onDownload={handleDownload} deleting={deleting === cv.id} />
             ))}
           </div>
         ) : (
@@ -259,23 +277,14 @@ const CvManagerPage: React.FC = () => {
           <ul className="space-y-2">
             {CV_TIPS.map((tip, i) => (
               <li key={i} className="text-xs text-blue-700 flex items-start gap-2">
-                <span className="text-blue-400 mt-0.5">•</span>
-                {tip}
+                <span className="text-blue-400 mt-0.5">•</span>{tip}
               </li>
             ))}
           </ul>
         </div>
-
       </div>
     </>
   );
 };
-
-const RefreshIcon = () => (
-  <svg className="animate-spin w-4 h-4" fill="none" viewBox="0 0 24 24">
-    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4l3-3-3-3v4a8 8 0 100 16v-4l-3 3 3 3v-4a8 8 0 01-8-8z" />
-  </svg>
-);
 
 export default CvManagerPage;

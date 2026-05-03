@@ -1,9 +1,10 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { PageMeta } from '@/components/PageMeta';
 import { resumeVersionsApi, type ResumeVersion } from '@/services/resumeVersionsApi';
+import { useFileUpload } from '@/hooks/useFileUpload';
 import * as mocks from '@/services/mockApi';
 import toast from 'react-hot-toast';
-import { FileText, Upload, Star, Trash2, CheckCircle, Plus, BarChart2, ExternalLink, Award } from 'lucide-react';
+import { FileText, Upload, Star, Trash2, CheckCircle, Plus, BarChart2, ExternalLink, Award, X, AlertCircle } from 'lucide-react';
 
 const USE_MOCKS = import.meta.env.VITE_USE_MOCKS === 'true';
 
@@ -20,16 +21,54 @@ const OUTCOME_STYLES: Record<string, string> = {
   unknown:   'bg-gray-100 text-gray-500',
 };
 
+// ── Upload Progress Bar ────────────────────────────────────────────────────────
+const UploadProgressBar: React.FC<{ progress: number; onAbort: () => void }> = ({ progress, onAbort }) => (
+  <div className="bg-indigo-50 border border-indigo-200 rounded-xl p-4">
+    <div className="flex items-center justify-between mb-2">
+      <p className="text-xs font-semibold text-indigo-700">Uploading… {progress}%</p>
+      <button onClick={onAbort} title="Cancel upload"
+        className="text-indigo-400 hover:text-red-500 transition-colors p-0.5 rounded">
+        <X size={14} />
+      </button>
+    </div>
+    <div className="w-full bg-indigo-100 rounded-full h-2 overflow-hidden">
+      <div
+        className="bg-indigo-500 h-2 rounded-full transition-all duration-200"
+        style={{ width: `${progress}%` }}
+      />
+    </div>
+  </div>
+);
+
 const ResumeVersionsPage: React.FC = () => {
   const [versions, setVersions]     = useState<ResumeVersion[]>([]);
   const [loading, setLoading]       = useState(true);
-  const [uploading, setUploading]   = useState(false);
   const [deleting, setDeleting]     = useState<string | null>(null);
   const [recommendation, setRec]    = useState<{ recommendedId: string; reason: string } | null>(null);
   const [compareA, setCompareA]     = useState<string>('');
   const [compareB, setCompareB]     = useState<string>('');
   const [showOutcomeFor, setShowOutcomeFor] = useState<string | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
+
+  const { upload, progress, uploading, error, abort } = useFileUpload<ResumeVersion>({
+    uploader: USE_MOCKS
+      ? async (file, onProgress) => {
+          for (let p = 0; p <= 100; p += 20) {
+            await new Promise(r => setTimeout(r, 120));
+            onProgress(p);
+          }
+          return { id: `rv-${Date.now()}`, label: file.name.replace(/\.(pdf|docx)$/i, ''), targetRole: null, fileUrl: null, content: null, isActive: false, createdAt: new Date().toISOString(), outcome: null, applicationCount: 0 };
+        }
+      : (file, onProgress, controller) => {
+          const label = file.name.replace(/\.(pdf|docx)$/i, '');
+          return resumeVersionsApi.uploadWithProgress(file, label, undefined, onProgress, controller);
+        },
+    onSuccess: (v) => {
+      setVersions(prev => [v, ...prev]);
+      toast.success('Resume version uploaded!');
+    },
+    onError: () => toast.error('Upload failed.'),
+  });
 
   useEffect(() => {
     const load = async () => {
@@ -47,18 +86,9 @@ const ResumeVersionsPage: React.FC = () => {
     load();
   }, []);
 
-  const handleUpload = async (file: File) => {
+  const handleFilePick = (file: File) => {
     if (!file.name.match(/\.(pdf|docx)$/i)) { toast.error('PDF or DOCX only.'); return; }
-    const label = file.name.replace(/\.(pdf|docx)$/i, '');
-    setUploading(true);
-    try {
-      const v = USE_MOCKS
-        ? { id: `rv-${Date.now()}`, label, targetRole: null, fileUrl: null, content: null, isActive: false, createdAt: new Date().toISOString(), outcome: null, applicationCount: 0 }
-        : await resumeVersionsApi.upload(file, label);
-      setVersions(prev => [v, ...prev]);
-      toast.success('Resume version uploaded!');
-    } catch { toast.error('Upload failed.'); }
-    finally { setUploading(false); }
+    upload(file);
   };
 
   const handleDelete = async (id: string) => {
@@ -94,13 +124,27 @@ const ResumeVersionsPage: React.FC = () => {
             <p className="text-sm text-gray-500 mt-1">Track multiple resume variants and their real-world outcomes.</p>
           </div>
           <div>
-            <input ref={fileRef} type="file" accept=".pdf,.docx" className="hidden" onChange={e => { const f = e.target.files?.[0]; if (f) handleUpload(f); }} />
+            <input ref={fileRef} type="file" accept=".pdf,.docx" className="hidden"
+              onChange={e => { const f = e.target.files?.[0]; if (f) handleFilePick(f); e.target.value = ''; }} />
             <button onClick={() => fileRef.current?.click()} disabled={uploading}
               className="flex items-center gap-2 px-4 py-2.5 bg-indigo-500 hover:bg-indigo-600 disabled:opacity-60 text-white text-sm font-semibold rounded-lg transition-colors">
-              <Upload size={15} /> {uploading ? 'Uploading…' : 'Upload Version'}
+              <Upload size={15} /> Upload Version
             </button>
           </div>
         </div>
+
+        {/* Upload progress */}
+        {uploading && progress !== null && (
+          <UploadProgressBar progress={progress} onAbort={abort} />
+        )}
+
+        {/* Upload error */}
+        {error && (
+          <div className="flex items-center gap-2 bg-red-50 border border-red-200 rounded-xl px-4 py-3">
+            <AlertCircle size={15} className="text-red-500 shrink-0" />
+            <p className="text-xs text-red-700 flex-1">{error}</p>
+          </div>
+        )}
 
         {/* AI Recommendation */}
         {recommendation && (
@@ -127,9 +171,7 @@ const ResumeVersionsPage: React.FC = () => {
                 <option value="">Select version B</option>
                 {versions.filter(v => v.id !== compareA).map(v => <option key={v.id} value={v.id}>{v.label}</option>)}
               </select>
-              <button
-                disabled={!compareA || !compareB}
-                onClick={() => toast('Diff view coming soon!')}
+              <button disabled={!compareA || !compareB} onClick={() => toast('Diff view coming soon!')}
                 className="px-4 py-2 bg-indigo-500 hover:bg-indigo-600 disabled:opacity-40 text-white text-sm font-semibold rounded-lg transition-colors">
                 Compare
               </button>
@@ -155,8 +197,10 @@ const ResumeVersionsPage: React.FC = () => {
                   <p className="text-xs text-gray-400 mt-0.5">{v.applicationCount} application{v.applicationCount !== 1 ? 's' : ''} · {new Date(v.createdAt).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' })}</p>
                 </div>
                 <div className="flex items-center gap-1 shrink-0">
-                  <button onClick={() => setShowOutcomeFor(showOutcomeFor === v.id ? null : v.id)} title="Record outcome" className="p-2 rounded-lg text-gray-400 hover:text-indigo-500 hover:bg-indigo-50 transition-colors"><BarChart2 size={14} /></button>
-                  {!v.isActive && <button onClick={() => handleDelete(v.id)} disabled={deleting === v.id} className="p-2 rounded-lg text-gray-400 hover:text-red-500 hover:bg-red-50 transition-colors disabled:opacity-40"><Trash2 size={14} /></button>}
+                  <button onClick={() => setShowOutcomeFor(showOutcomeFor === v.id ? null : v.id)} title="Record outcome"
+                    className="p-2 rounded-lg text-gray-400 hover:text-indigo-500 hover:bg-indigo-50 transition-colors"><BarChart2 size={14} /></button>
+                  {!v.isActive && <button onClick={() => handleDelete(v.id)} disabled={deleting === v.id}
+                    className="p-2 rounded-lg text-gray-400 hover:text-red-500 hover:bg-red-50 transition-colors disabled:opacity-40"><Trash2 size={14} /></button>}
                 </div>
               </div>
               {showOutcomeFor === v.id && (
