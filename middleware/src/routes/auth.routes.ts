@@ -1,9 +1,14 @@
 /**
- * Task 119 — auth.routes.js updated:
- *  - POST /refresh  → forwards to Java /auth/refresh, rotates co_session cookie
- *  - POST /logout   → calls Java /auth/logout (blacklist) then clears co_session cookie
+ * auth.routes.ts — authentication endpoints
  *
- * All previous routes (signup, login, forgot-password, reset-password, me) are unchanged.
+ * A5 fix: reset-password route body shape corrected.
+ *   Old validators expected: { email, otp, newPassword }
+ *   Frontend authApi.resetPassword sends:  { token, password }
+ *   The Java backend contract is:           { token, password }
+ *   Fixed validators now match the actual contract.
+ *
+ * All other routes (signup, login, refresh, logout, forgot-password, me)
+ * are unchanged.
  */
 import express from 'express';
 import { body } from 'express-validator';
@@ -39,7 +44,6 @@ router.post('/signup',
       const r = await forward({ method: 'POST', path: '/auth/register', data: req.body });
       if (r.status >= 400) return res.status(r.status).json(r.data);
       res.cookie(COOKIE, r.data.token, cookieOpts());
-      // Return token + refreshToken to frontend so tokenStore can persist them
       res.json({ user: r.data.user, token: r.data.token, refreshToken: r.data.refreshToken });
     } catch (e) { next(e); }
   });
@@ -60,7 +64,6 @@ router.post('/login',
   });
 
 // ── Refresh ────────────────────────────────────────────────────────────────
-// Accepts { refreshToken } in body, forwards to Java, rotates cookie + returns new tokens.
 router.post('/refresh',
   authLimiter, trimStrings,
   body('refreshToken').isString().isLength({ min: 10 }),
@@ -73,20 +76,16 @@ router.post('/refresh',
         data: { refreshToken: req.body.refreshToken },
       });
       if (r.status >= 400) return res.status(r.status).json(r.data);
-      // Rotate the HttpOnly session cookie with the new access token
       res.cookie(COOKIE, r.data.token, cookieOpts());
       res.json({ token: r.data.token, refreshToken: r.data.refreshToken, user: r.data.user });
     } catch (e) { next(e); }
   });
 
 // ── Logout ─────────────────────────────────────────────────────────────────
-// Calls Java /auth/logout to blacklist the refresh token, then clears the cookie.
 router.post('/logout',
   authGuard,
   async (req, res, next) => {
     try {
-      // Forward logout to Java so it blacklists the refresh token in DB.
-      // Non-fatal: even if backend call fails, we still clear the cookie.
       await forward({
         method: 'POST',
         path: '/auth/logout',
@@ -96,7 +95,6 @@ router.post('/logout',
       res.clearCookie(COOKIE, { path: '/' });
       res.json({ ok: true });
     }
-    // next() not needed — response already sent
   });
 
 // ── Forgot Password ────────────────────────────────────────────────────────
@@ -112,11 +110,14 @@ router.post('/forgot-password',
   });
 
 // ── Reset Password ─────────────────────────────────────────────────────────
+// A5 fix: validators now match actual frontend + Java backend contract:
+//   { token: string (the reset token from the email link), password: string }
+// Old validators were checking for { email, otp, newPassword } which would
+// cause a 422 on every single password reset attempt.
 router.post('/reset-password',
   authLimiter, trimStrings,
-  body('email').isEmail().normalizeEmail(),
-  body('otp').isString().isLength({ min: 4, max: 8 }),
-  body('newPassword').isString().isLength({ min: 8 }),
+  body('token').isString().isLength({ min: 8 }),
+  body('password').isString().isLength({ min: 8 }),
   checkValidation,
   async (req, res, next) => {
     try {

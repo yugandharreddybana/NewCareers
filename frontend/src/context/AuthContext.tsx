@@ -4,7 +4,12 @@
  * Provides: user, loading, signIn, signUp, signOut, updateProfile,
  *           forgotPassword, resetPassword
  *
- * DEV_BYPASS: only active when VITE_DEV_BYPASS_GUARDS=true is explicitly set.
+ * A2 fix: DEV_BYPASS now checks MODE !== 'production' (mirrors api.ts)
+ *         so it can never activate in a production build even if the
+ *         env var is accidentally set.
+ *
+ * B3 fix (pre-emptive): resetPassword arg order corrected —
+ *         authApi.resetPassword expects { token, password }, not (password, token).
  */
 import { createContext, useContext, useState, ReactNode, useEffect } from 'react';
 import * as mocks from '@/services/mockApi';
@@ -33,19 +38,25 @@ interface Ctx {
   /** Send a password-reset email. Resolves when the request is accepted. */
   forgotPassword: (email: string) => Promise<void>;
   /** Complete a password reset using the token from the email link. */
-  resetPassword: (newPassword: string, token: string) => Promise<void>;
+  resetPassword: (token: string, newPassword: string) => Promise<void>;
 }
 
 const AuthCtx = createContext<Ctx | null>(null);
 
 const USE_MOCKS = import.meta.env.VITE_USE_MOCKS === 'true';
-// Only bypass when EXPLICITLY set — never auto-activate on DEV or MODE.
-const DEV_BYPASS = import.meta.env.VITE_DEV_BYPASS_GUARDS === 'true';
+
+/**
+ * A2 fix: DEV_BYPASS is ONLY active in non-production builds.
+ * Mirrors the same guard in api.ts to keep the two in sync.
+ */
+const DEV_BYPASS =
+  import.meta.env.MODE !== 'production' &&
+  import.meta.env.VITE_DEV_BYPASS_GUARDS === 'true';
 
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null>(() => {
     if (DEV_BYPASS) return mocks.MOCK_USER;
-    if (USE_MOCKS) return mocks.MOCK_USER;
+    if (USE_MOCKS)  return mocks.MOCK_USER;
     try { return JSON.parse(localStorage.getItem('co_user') || 'null'); } catch { return null; }
   });
   const [loading, setLoading] = useState(false);
@@ -108,8 +119,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     await authApi.forgotPassword(email);
   };
 
-  const resetPassword = async (newPassword: string, token: string): Promise<void> => {
-    await authApi.resetPassword(newPassword, token);
+  /**
+   * B3 fix: arg order corrected — was (newPassword, token), now (token, newPassword)
+   * which matches the Ctx interface and authApi.resetPassword({ token, password }).
+   */
+  const resetPassword = async (token: string, newPassword: string): Promise<void> => {
+    await authApi.resetPassword({ token, password: newPassword });
   };
 
   return (
