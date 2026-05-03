@@ -16,7 +16,7 @@ function getPasswordStrength(pw: string): { score: number; label: string; color:
   if (/[^A-Za-z0-9]/.test(pw)) score++;
   const labels = ['', 'Too short', 'Weak', 'Fair', 'Strong'];
   const colors  = ['', 'bg-red-500', 'bg-orange-400', 'bg-yellow-400', 'bg-emerald-500'];
-  return { score, label: labels[score], color: colors[score] };
+  return { score, label: labels[score] ?? '', color: colors[score] ?? '' };
 }
 
 export default function PasswordRecovery() {

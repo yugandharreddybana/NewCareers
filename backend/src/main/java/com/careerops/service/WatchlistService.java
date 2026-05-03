@@ -120,7 +120,7 @@ public class WatchlistService {
             Notification n = Notification.builder()
                 .userId(w.getUserId())
                 .type(Notification.TYPE_JOB_MATCH)
-                .title(newJobs + " new match" + (newJobs > 1 ? "es" : "") + " for "" + w.getName() + """)
+                .title(newJobs + " new match" + (newJobs > 1 ? "es" : "") + " for \"" + w.getName() + "\"")
                 .body("Your watchlist found " + newJobs + " new role" + (newJobs > 1 ? "s" : "")
                       + " matching ≥" + w.getMinMatchScore() + "% of your profile.")
                 .metadata(Map.of("watchlistId", w.getId().toString(), "newCount", newJobs))

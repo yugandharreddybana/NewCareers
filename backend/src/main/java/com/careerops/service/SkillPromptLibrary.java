@@ -137,7 +137,7 @@ public class SkillPromptLibrary {
                 if (!memories.isEmpty()) {
                     sb.append("\n\n---\n## USER CAREER PREFERENCES (from Agent Memory)\n\n");
                     sb.append("Use these known preferences to personalise your output:\n");
-                    for (CareerMemoryResponse m : memories) {
+                    for (MemoryResponse m : memories) {
                         sb.append("- **").append(m.key()).append("**: ").append(m.value()).append("\n");
                     }
                 }

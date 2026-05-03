@@ -61,6 +61,12 @@ public class ResumeVersion {
     @Column(name = "best_for_role_type", length = 255)
     private String bestForRoleType;
 
+    @Column(name = "storage_path", length = 500)
+    private String storagePath;
+
+    @Column(name = "file_name", length = 255)
+    private String fileName;
+
     @Column(columnDefinition = "TEXT")
     private String notes;
 
