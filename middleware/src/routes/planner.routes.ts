@@ -20,7 +20,11 @@ const proxy = createProxyMiddleware({
   proxyTimeout: 30_000,
   timeout: 30_000,
   on: {
-    error: (_e, _r, res) => res.status(502).json({ error: 'Planner service unavailable.' }),
+    error: (_e, _r, res: any) => {
+      if (res && typeof res.status === 'function') {
+        res.status(502).json({ error: 'Planner service unavailable.' });
+      }
+    },
   },
 });
 
