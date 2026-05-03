@@ -1,3 +1,130 @@
-// @ts-nocheck — PageMeta injected
+import React, { useEffect, useState } from 'react';
 import { PageMeta } from '@/components/PageMeta';
-export { default } from './WorkspacePage';
+import { api } from '@/services/api';
+import * as mocks from '@/services/mockApi';
+import toast from 'react-hot-toast';
+import { Briefcase, Plus, Users, Settings, Trash2, Crown, X } from 'lucide-react';
+
+interface WorkspaceMember { userId: string; name: string; email: string; role: 'owner' | 'member'; }
+interface Workspace { id: string; name: string; description: string | null; createdAt: string; members: WorkspaceMember[]; ownerId: string; }
+
+const USE_MOCKS = import.meta.env.VITE_USE_MOCKS === 'true';
+const MOCK_WS: Workspace[] = mocks.MOCK_WORKSPACES as unknown as Workspace[];
+
+const CreateModal: React.FC<{ onClose: () => void; onCreate: (w: Workspace) => void }> = ({ onClose, onCreate }) => {
+  const [name, setName]   = useState('');
+  const [desc, setDesc]   = useState('');
+  const [saving, setSaving] = useState(false);
+
+  const handleSubmit = async () => {
+    if (!name.trim()) { toast.error('Workspace name required.'); return; }
+    setSaving(true);
+    try {
+      const w: Workspace = USE_MOCKS
+        ? { id: `ws-${Date.now()}`, name, description: desc || null, createdAt: new Date().toISOString(), members: [], ownerId: 'dev-user-123' }
+        : await api.post('/workspaces', { name, description: desc }).then(r => r.data);
+      onCreate(w); toast.success('Workspace created!'); onClose();
+    } catch { toast.error('Failed to create workspace.'); }
+    finally { setSaving(false); }
+  };
+
+  return (
+    <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
+      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm p-6 space-y-4">
+        <div className="flex items-center justify-between"><h2 className="text-base font-bold text-gray-900">New Workspace</h2><button onClick={onClose} className="text-gray-400 hover:text-gray-600"><X size={18}/></button></div>
+        <div><label className="block text-xs font-medium text-gray-600 mb-1.5">Name</label><input value={name} onChange={e => setName(e.target.value)} placeholder="e.g. Interview Prep Team" className="w-full px-3 py-2.5 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400" /></div>
+        <div><label className="block text-xs font-medium text-gray-600 mb-1.5">Description</label><textarea value={desc} onChange={e => setDesc(e.target.value)} rows={2} placeholder="Optional description" className="w-full px-3 py-2.5 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400 resize-none" /></div>
+        <div className="flex gap-3 pt-1">
+          <button onClick={onClose} className="flex-1 py-2.5 border border-gray-300 rounded-lg text-sm text-gray-600 hover:bg-gray-50">Cancel</button>
+          <button onClick={handleSubmit} disabled={saving} className="flex-1 py-2.5 bg-indigo-500 hover:bg-indigo-600 disabled:opacity-60 text-white text-sm font-semibold rounded-lg">{saving ? 'Creating…' : 'Create'}</button>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+const WorkspacePage: React.FC = () => {
+  const [workspaces, setWorkspaces] = useState<Workspace[]>([]);
+  const [loading, setLoading]       = useState(true);
+  const [showModal, setShowModal]   = useState(false);
+
+  useEffect(() => {
+    const load = async () => {
+      try {
+        if (USE_MOCKS) { await new Promise(r => setTimeout(r, 400)); setWorkspaces(MOCK_WS); }
+        else { const d = await api.get('/workspaces').then(r => r.data).catch(() => MOCK_WS); setWorkspaces(d as Workspace[]); }
+      } finally { setLoading(false); }
+    };
+    load();
+  }, []);
+
+  const handleDelete = async (id: string) => {
+    if (!window.confirm('Delete this workspace? This cannot be undone.')) return;
+    try {
+      if (!USE_MOCKS) await api.delete(`/workspaces/${id}`);
+      setWorkspaces(prev => prev.filter(w => w.id !== id));
+      toast.success('Workspace deleted.');
+    } catch { toast.error('Failed to delete workspace.'); }
+  };
+
+  if (loading) return <div className="flex items-center justify-center min-h-[50vh] text-gray-400 text-sm">Loading workspaces…</div>;
+
+  return (
+    <>
+      <PageMeta title="Workspace — CareerOps" />
+      {showModal && <CreateModal onClose={() => setShowModal(false)} onCreate={w => setWorkspaces(p => [w, ...p])} />}
+      <div className="max-w-3xl mx-auto px-4 sm:px-6 py-8 space-y-6">
+        <div className="flex items-center justify-between">
+          <div><h1 className="text-2xl font-semibold text-gray-900">Workspaces</h1><p className="text-sm text-gray-500 mt-1">Shared spaces to collaborate with peers or coaches on your job search.</p></div>
+          <button onClick={() => setShowModal(true)} className="flex items-center gap-2 px-4 py-2.5 bg-indigo-500 hover:bg-indigo-600 text-white text-sm font-semibold rounded-lg transition-colors"><Plus size={15} /> New Workspace</button>
+        </div>
+
+        {workspaces.length > 0 ? (
+          <div className="space-y-4">
+            {workspaces.map(w => (
+              <div key={w.id} className="bg-white border border-gray-200 rounded-xl p-5">
+                <div className="flex items-start justify-between gap-4">
+                  <div className="flex items-start gap-3">
+                    <div className="w-10 h-10 rounded-xl bg-indigo-100 text-indigo-600 flex items-center justify-center shrink-0"><Briefcase size={18} /></div>
+                    <div>
+                      <p className="text-sm font-bold text-gray-900">{w.name}</p>
+                      {w.description && <p className="text-xs text-gray-500 mt-0.5">{w.description}</p>}
+                      <p className="text-[10px] text-gray-400 mt-1">Created {new Date(w.createdAt).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' })}</p>
+                    </div>
+                  </div>
+                  <button onClick={() => handleDelete(w.id)} className="text-gray-300 hover:text-red-500 transition-colors p-1 shrink-0"><Trash2 size={14} /></button>
+                </div>
+                {w.members.length > 0 && (
+                  <div className="mt-4 pt-4 border-t border-gray-100">
+                    <p className="text-xs font-semibold text-gray-500 mb-2 flex items-center gap-1"><Users size={12} /> Members ({w.members.length})</p>
+                    <div className="flex flex-wrap gap-2">
+                      {w.members.map(m => (
+                        <div key={m.userId} className="flex items-center gap-1.5 px-2.5 py-1 bg-gray-100 rounded-full text-xs text-gray-700">
+                          {m.role === 'owner' && <Crown size={11} className="text-amber-500" />}
+                          {m.name}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+                {w.members.length === 0 && (
+                  <div className="mt-4 pt-4 border-t border-gray-100">
+                    <p className="text-xs text-gray-400">No members yet. Invite collaborators to get started.</p>
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+        ) : (
+          <div className="bg-gray-50 border border-gray-200 rounded-xl p-12 text-center">
+            <Briefcase size={28} className="mx-auto text-gray-300 mb-3" />
+            <p className="text-sm font-medium text-gray-600">No workspaces yet</p>
+            <p className="text-xs text-gray-400 mt-1">Create one to collaborate with interview buddies or a career coach.</p>
+          </div>
+        )}
+      </div>
+    </>
+  );
+};
+
+export default WorkspacePage;
