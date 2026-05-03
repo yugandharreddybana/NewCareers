@@ -1,3 +1,10 @@
+/**
+ * agent-memory.routes.ts — per-user AI agent memory store
+ *
+ * Fixed: missing GET /:id route — the UI and Java backend both support
+ * fetching a single memory by ID, but no middleware route existed for it,
+ * causing 404s on any direct memory fetch.
+ */
 import express from 'express';
 import { authGuard } from '../authGuard.js';
 import { createProxyMiddleware } from 'http-proxy-middleware';
@@ -18,16 +25,22 @@ const javaProxy = createProxyMiddleware({
   },
 });
 
-// GET    /api/agent-memory              → list memories (?category=)
+// GET    /api/agent-memory              → list memories (?category= filter supported)
 router.get('/',              authGuard, javaProxy);
 
-// POST   /api/agent-memory              → upsert memory
+// POST   /api/agent-memory              → upsert memory entry
 router.post('/',             authGuard, javaProxy);
 
-// PATCH  /api/agent-memory/:id/toggle   → enable/disable memory
+// GET    /api/agent-memory/:id          → fetch single memory by ID (was missing)
+router.get('/:id',           authGuard, javaProxy);
+
+// PATCH  /api/agent-memory/:id/toggle   → enable/disable a memory entry
 router.patch('/:id/toggle',  authGuard, javaProxy);
 
-// DELETE /api/agent-memory/:id          → delete memory
+// PUT    /api/agent-memory/:id          → update memory content
+router.put('/:id',           authGuard, javaProxy);
+
+// DELETE /api/agent-memory/:id          → delete a memory entry
 router.delete('/:id',        authGuard, javaProxy);
 
 export default router;
