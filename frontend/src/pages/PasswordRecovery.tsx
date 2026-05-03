@@ -1,12 +1,18 @@
 import { useState } from 'react';
-import { Link, useSearchParams } from 'react-router-dom';
+import { Link, useSearchParams, useLocation, Navigate } from 'react-router-dom';
 import { useAuth } from '@/context/AuthContext';
 import { Zap, ArrowLeft, Mail, Lock, Loader2, CheckCircle2 } from 'lucide-react';
 
 export default function PasswordRecovery() {
   const [searchParams] = useSearchParams();
+  const { pathname } = useLocation();
   const token = searchParams.get('token');
-  const isResetMode = !!token;
+  const isResetMode = pathname === '/reset-password';
+
+  // If someone navigates to /reset-password without a token, redirect to forgot-password
+  if (isResetMode && !token) {
+    return <Navigate to="/forgot-password" replace />;
+  }
 
   const { forgotPassword, resetPassword } = useAuth() as any;
   const [email, setEmail] = useState('');

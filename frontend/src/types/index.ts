@@ -4,6 +4,7 @@ export interface User {
   username: string;
   email: string;
   onboarded: boolean;
+  role?: 'USER' | 'ADMIN';
 }
 
 // Section 10 — Portfolio item

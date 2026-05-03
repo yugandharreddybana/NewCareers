@@ -4,13 +4,13 @@ import React, { Suspense, lazy } from 'react';
 import { BrowserRouter, Route, Routes, Navigate } from 'react-router-dom';
 import { HelmetProvider } from 'react-helmet-async';
 import { AuthProvider } from './context/AuthContext';
-import { ProtectedRoute } from './components/ProtectedRoute';
+import { ProtectedRoute, AdminRoute } from './components/ProtectedRoute';
 import { PageLoader } from './components/LoadingSpinner';
 import { ExperimentProvider } from './context/ExperimentContext';
 
-// ── Public pages ──────────────────────────────────────────────────────────
-import Login from './pages/Login';
-import NotFound from './pages/NotFound';
+// ── Public pages (lazy-loaded) ────────────────────────────────────────────
+const Login = lazy(() => import('./pages/Login'));
+const NotFound = lazy(() => import('./pages/NotFound'));
 const Signup = lazy(() => import('./pages/Signup'));
 const PasswordRecovery = lazy(() => import('./pages/PasswordRecovery'));
 const Onboarding = lazy(() => import('./pages/Onboarding'));
@@ -41,14 +41,12 @@ const OutreachPage = lazy(() => import('./pages/OutreachPage'));
 const AgentMemoryPage = lazy(() => import('./pages/AgentMemoryPage'));
 const ResumeVersionsPage = lazy(() => import('./pages/ResumeVersionsPage'));
 
-const Spinner = <PageLoader />;
-
 export const App: React.FC = () => (
   <HelmetProvider>
     <BrowserRouter>
       <AuthProvider>
       <ExperimentProvider>
-        <Suspense fallback={Spinner}>
+        <Suspense fallback={<PageLoader />}>
           <Routes>
 
             {/* ── Public routes — no shell ── */}
@@ -82,6 +80,10 @@ export const App: React.FC = () => (
               <Route path="/outreach" element={<OutreachPage />} />
               <Route path="/agent-memory" element={<AgentMemoryPage />} />
               <Route path="/resume-versions" element={<ResumeVersionsPage />} />
+            </Route>
+
+            {/* ── Admin-only routes ── */}
+            <Route element={<AdminRoute />}>
               <Route path="/admin/experiments" element={<ExperimentDashboard />} />
             </Route>
 
