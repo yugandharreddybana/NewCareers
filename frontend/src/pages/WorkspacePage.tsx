@@ -3,7 +3,8 @@ import { PageMeta } from '@/components/PageMeta';
 import { api } from '@/services/api';
 import * as mocks from '@/services/mockApi';
 import toast from 'react-hot-toast';
-import { Briefcase, Plus, Users, Settings, Trash2, Crown, X } from 'lucide-react';
+import { Briefcase, Plus, Users, Trash2, Crown, X } from 'lucide-react';
+import EmptyState from '@/components/ui/EmptyState';
 
 interface WorkspaceMember { userId: string; name: string; email: string; role: 'owner' | 'member'; }
 interface Workspace { id: string; name: string; description: string | null; createdAt: string; members: WorkspaceMember[]; ownerId: string; }
@@ -116,11 +117,13 @@ const WorkspacePage: React.FC = () => {
             ))}
           </div>
         ) : (
-          <div className="bg-gray-50 border border-gray-200 rounded-xl p-12 text-center">
-            <Briefcase size={28} className="mx-auto text-gray-300 mb-3" />
-            <p className="text-sm font-medium text-gray-600">No workspaces yet</p>
-            <p className="text-xs text-gray-400 mt-1">Create one to collaborate with interview buddies or a career coach.</p>
-          </div>
+          <EmptyState
+            icon={<Briefcase size={28} className="text-slate-300" />}
+            message="No workspaces yet"
+            description="Create a shared workspace to collaborate with interview buddies or a career coach."
+            cta="New Workspace"
+            onCta={() => setShowModal(true)}
+          />
         )}
       </div>
     </>

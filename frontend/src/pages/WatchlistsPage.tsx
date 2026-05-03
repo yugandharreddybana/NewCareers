@@ -8,6 +8,7 @@ import {
   MapPin, DollarSign, Zap, Clock, RefreshCw,
   ToggleLeft, ToggleRight, ChevronRight,
 } from 'lucide-react';
+import EmptyState from '@/components/ui/EmptyState';
 
 const USE_MOCKS = import.meta.env.VITE_USE_MOCKS === 'true';
 
@@ -239,10 +240,13 @@ const WatchlistsPage: React.FC = () => {
             ))}
           </div>
         ) : (
-          <div className="bg-gray-50 border border-gray-200 rounded-xl p-10 text-center">
-            <Bell size={24} className="mx-auto text-gray-300 mb-2" />
-            <p className="text-sm text-gray-500">No watchlists yet. Create one to get automatic job alerts.</p>
-          </div>
+          <EmptyState
+            icon={<Bell size={28} className="text-slate-300" />}
+            message="No watchlists yet"
+            description="Create a saved search to get automatic job alerts delivered to your pipeline."
+            cta="New Watchlist"
+            onCta={() => setShowModal(true)}
+          />
         )}
 
         {/* AI suggestions */}

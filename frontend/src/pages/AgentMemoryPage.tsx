@@ -4,6 +4,7 @@ import { agentMemoryApi, type AgentMemory, type MemoryCategory } from '@/service
 import * as mocks from '@/services/mockApi';
 import toast from 'react-hot-toast';
 import { Brain, Plus, Trash2, ToggleLeft, ToggleRight, Edit2, Save, X, Filter } from 'lucide-react';
+import EmptyState from '@/components/ui/EmptyState';
 
 const USE_MOCKS = import.meta.env.VITE_USE_MOCKS === 'true';
 
@@ -153,9 +154,15 @@ const AgentMemoryPage: React.FC = () => {
 
         {/* Memory list */}
         <div className="bg-white border border-gray-200 rounded-xl p-4">
-          {visible.length === 0 ? <p className="text-sm text-gray-400 text-center py-6">No memories in this category.</p> :
+          {visible.length === 0 ? (
+            <EmptyState
+              icon={<Brain size={28} className="text-slate-300" />}
+              message="No memories in this category"
+              description="Add a memory below, or switch to a different category filter."
+            />
+          ) : (
             visible.map(m => <MemoryRow key={m.id} mem={m} onToggle={handleToggle} onDelete={handleDelete} onSave={handleSave} />)
-          }
+          )}
         </div>
 
         {/* Add new */}
