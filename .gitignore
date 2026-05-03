@@ -19,16 +19,16 @@ coverage
 # nyc data
 .nyc_output
 
-# Grunt intermediate storage (http://gruntjs.com/creating-plugins#storing-task-files)
+# Grunt intermediate storage
 .grunt
 
-# Bower dependency directory (http://bower.io/)
+# Bower dependency directory
 bower_components
 
 # node-waf configuration
 .lock-wscript
 
-# Compiled binary plugins (http://nodejs.org/api/addons.html)
+# Compiled binary plugins
 build/Release
 
 # Dependency directories
@@ -83,9 +83,14 @@ bin/
 # Vite
 dist/
 
+# ── TypeScript build cache — never commit these ────────────────────────────
+*.tsbuildinfo
+frontend/*.tsbuildinfo
+frontend/tsconfig.tsbuildinfo
+
 # ── SECURITY: Never commit real credentials ────────────────────────────────
-# Use application.example.properties as the template.
-# Copy it to application.properties and fill in real values locally.
+# Use .env.example as the template.
+# Copy it to .env and fill in real values locally.
 backend/src/main/resources/application.properties
 middleware/.env
 frontend/.env
