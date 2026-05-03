@@ -13,6 +13,7 @@
  *
  * Includes DevModeBanner in development when VITE_DEV_BYPASS_GUARDS=true.
  */
+import { Suspense } from 'react';
 import { Outlet } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import Sidebar   from '@/components/layout/Sidebar';
@@ -21,6 +22,7 @@ import BottomNav from '@/components/layout/BottomNav';
 import DevModeBanner from '@/components/ui/DevModeBanner';
 import { Sparkles } from 'lucide-react';
 import ErrorBoundary from '@/components/ErrorBoundary';
+import { PageLoader } from '@/components/LoadingSpinner';
 
 export default function AppShell() {
   return (
@@ -60,7 +62,9 @@ export default function AppShell() {
             transition={{ duration: 0.2, ease: [0.16, 1, 0.3, 1] }}
           >
             <ErrorBoundary>
-              <Outlet />
+              <Suspense fallback={<PageLoader />}>
+                <Outlet />
+              </Suspense>
             </ErrorBoundary>
           </motion.div>
         </div>
@@ -75,7 +79,9 @@ export default function AppShell() {
             transition={{ duration: 0.2, ease: [0.16, 1, 0.3, 1] }}
           >
             <ErrorBoundary>
-              <Outlet />
+              <Suspense fallback={<PageLoader />}>
+                <Outlet />
+              </Suspense>
             </ErrorBoundary>
           </motion.div>
         </div>

@@ -16,61 +16,61 @@ import { Avatar } from '@/components/ui';
 import { Tooltip } from '@/components/ui';
 
 interface NavItem {
-  to:    string;
-  icon:  React.ReactNode;
+  to: string;
+  icon: React.ReactNode;
   label: string;
-  id?:   string;
+  id?: string;
 }
 
 const NAV_GROUPS: { label: string; items: NavItem[] }[] = [
   {
     label: 'Overview',
     items: [
-      { to: '/',            icon: <LayoutDashboard size={17} />, label: 'Dashboard' },
-      { to: '/kanban',      icon: <KanbanSquare    size={17} />, label: 'Tracker'   },
-      { to: '/analytics',   icon: <TrendingUp      size={17} />, label: 'Analytics' },
+      { to: '/dashboard', icon: <LayoutDashboard size={17} />, label: 'Dashboard' },
+      { to: '/kanban', icon: <KanbanSquare size={17} />, label: 'Tracker' },
+      { to: '/analytics', icon: <TrendingUp size={17} />, label: 'Analytics' },
     ],
   },
   {
     label: 'AI Skills',
     items: [
-      { to: '/skills',      icon: <Brain           size={17} />, label: 'Skills Coach'    },
-      { to: '/cv',          icon: <FileText        size={17} />, label: 'CV Manager'      },
-      { to: '/interviews',  icon: <GraduationCap   size={17} />, label: 'Interview Coach' },
-      { to: '/progress',    icon: <BarChart2       size={17} />, label: 'Progress', id: 'nav-progress' },
+      { to: '/skills', icon: <Brain size={17} />, label: 'Skills Coach' },
+      { to: '/cv', icon: <FileText size={17} />, label: 'CV Manager' },
+      { to: '/interviews', icon: <GraduationCap size={17} />, label: 'Interview Coach' },
+      { to: '/progress', icon: <BarChart2 size={17} />, label: 'Progress', id: 'nav-progress' },
     ],
   },
   {
     label: 'Career',
     items: [
-      { to: '/networking',  icon: <Users           size={17} />, label: 'Networking'  },
-      { to: '/workspaces',  icon: <Share2          size={17} />, label: 'Workspaces'  },
+      { to: '/networking', icon: <Users size={17} />, label: 'Networking' },
+      { to: '/workspaces', icon: <Share2 size={17} />, label: 'Workspaces' },
     ],
   },
   {
     label: 'Automation',
     items: [
-      { to: '/auto-apply',      icon: <Zap           size={17} />, label: 'Auto-Apply'      },
-      { to: '/outreach',        icon: <MessageSquare  size={17} />, label: 'Outreach'        },
-      { to: '/watchlists',      icon: <Bell          size={17} />, label: 'Watchlists'      },
-      { to: '/agent-memory',    icon: <MemoryStick   size={17} />, label: 'Agent Memory'    },
-      { to: '/resume-versions', icon: <Layers        size={17} />, label: 'Resume Versions' },
+      { to: '/auto-apply', icon: <Zap size={17} />, label: 'Auto-Apply' },
+      { to: '/outreach', icon: <MessageSquare size={17} />, label: 'Outreach' },
+      { to: '/watchlists', icon: <Bell size={17} />, label: 'Watchlists' },
+      { to: '/agent-memory', icon: <MemoryStick size={17} />, label: 'Agent Memory' },
+      { to: '/resume-versions', icon: <Layers size={17} />, label: 'Resume Versions' },
     ],
   },
 ];
 
 const PROFILE_MENU = [
-  { to: '/profile',  icon: <User       size={15} />, label: 'My Profile'       },
-  { to: '/account',  icon: <Settings   size={15} />, label: 'Account Settings' },
-  { to: '/billing',  icon: <CreditCard size={15} />, label: 'Billing'          },
-  { to: '/refer',    icon: <Gift       size={15} />, label: 'Refer & Earn'     },
-  { to: '/profile',  icon: <HelpCircle size={15} />, label: 'Help & Support'   },
+  { to: '/profile', icon: <User size={15} />, label: 'My Profile' },
+  { to: '/account', icon: <Settings size={15} />, label: 'Account Settings' },
+  { to: '/billing', icon: <CreditCard size={15} />, label: 'Billing' },
+  { to: '/refer', icon: <Gift size={15} />, label: 'Refer & Earn' },
+  { to: '/profile', icon: <HelpCircle size={15} />, label: 'Help & Support' },
 ];
 
 export default function Sidebar() {
   const { user, signOut } = useAuth();
   const nav = useNavigate();
-  const [collapsed, setCollapsed]     = useState(false);
+  const [collapsed, setCollapsed] = useState(false);
   const [profileOpen, setProfileOpen] = useState(false);
   const profileRef = useRef<HTMLDivElement>(null);
 
@@ -91,7 +91,7 @@ export default function Sidebar() {
   }, []);
 
   async function handleSignOut() {
-    try { await signOut(); } catch {}
+    try { await signOut(); } catch { }
     nav('/login');
   }
 

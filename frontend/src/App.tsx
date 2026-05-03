@@ -2,6 +2,7 @@
 // AuthProvider lives inside BrowserRouter so it can use useNavigate
 import React, { Suspense, lazy } from 'react';
 import { BrowserRouter, Route, Routes, Navigate } from 'react-router-dom';
+import { HelmetProvider } from 'react-helmet-async';
 import { AuthProvider } from './context/AuthContext';
 import { ProtectedRoute } from './components/ProtectedRoute';
 import { PageLoader } from './components/LoadingSpinner';
@@ -9,11 +10,10 @@ import { ExperimentProvider } from './context/ExperimentContext';
 
 // ── Public pages ──────────────────────────────────────────────────────────
 import Login from './pages/Login';
+import NotFound from './pages/NotFound';
 const Signup = lazy(() => import('./pages/Signup'));
-const ForgotPassword = lazy(() => import('./pages/ForgotPassword'));
-const ResetPassword = lazy(() => import('./pages/ResetPassword'));
+const PasswordRecovery = lazy(() => import('./pages/PasswordRecovery'));
 const Onboarding = lazy(() => import('./pages/Onboarding'));
-const NotFound = lazy(() => import('./pages/NotFound'));
 
 // ── Protected pages ───────────────────────────────────────────────────────
 const Dashboard = lazy(() => import('./pages/Dashboard'));
@@ -44,17 +44,19 @@ const ResumeVersionsPage = lazy(() => import('./pages/ResumeVersionsPage'));
 const Spinner = <PageLoader />;
 
 export const App: React.FC = () => (
-  <BrowserRouter>
-    <AuthProvider>
+  <HelmetProvider>
+    <BrowserRouter>
+      <AuthProvider>
       <ExperimentProvider>
         <Suspense fallback={Spinner}>
           <Routes>
 
             {/* ── Public routes — no shell ── */}
+            <Route path="/" element={<Navigate to="/dashboard" replace />} />
             <Route path="/login" element={<Login />} />
             <Route path="/register" element={<Signup />} />
-            <Route path="/forgot-password" element={<ForgotPassword />} />
-            <Route path="/reset-password" element={<ResetPassword />} />
+            <Route path="/forgot-password" element={<PasswordRecovery />} />
+            <Route path="/reset-password" element={<PasswordRecovery />} />
 
             {/* ── Protected routes ── */}
             <Route element={<ProtectedRoute />}>
@@ -91,6 +93,7 @@ export const App: React.FC = () => (
       </ExperimentProvider>
     </AuthProvider>
   </BrowserRouter>
+  </HelmetProvider>
 );
 
 export default App;

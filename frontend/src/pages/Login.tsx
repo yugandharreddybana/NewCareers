@@ -1,6 +1,7 @@
-import { useState } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
+import { useState, useEffect } from 'react';
+import { Link, useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from '@/context/AuthContext';
+import { PageMeta } from '@/components/PageMeta';
 import { Eye, EyeOff, Zap, ArrowRight, Loader2 } from 'lucide-react';
 
 const DEV_BYPASS = import.meta.env.VITE_DEV_BYPASS_GUARDS === 'true' || import.meta.env.DEV || import.meta.env.MODE === 'development';
@@ -12,17 +13,17 @@ const STATS = [
   { value: '500+', label: 'Job seekers onboarded' },
 ];
 
-import { useEffect } from 'react';
-
 export default function Login() {
   const { signIn, user } = useAuth();
   const nav = useNavigate();
+  const location = useLocation();
 
   useEffect(() => {
     if (user) {
-      nav(user.onboarded ? '/dashboard' : '/onboarding', { replace: true });
+      const from = location.state?.from?.pathname || (user.onboarded ? '/dashboard' : '/onboarding');
+      nav(from, { replace: true });
     }
-  }, [user, nav]);
+  }, [user, nav, location]);
 
   const [form, setForm] = useState({ email: '', password: '' });
   const [showPw, setShowPw] = useState(false);
@@ -37,13 +38,15 @@ export default function Login() {
     e.preventDefault();
     setError('');
     if (DEV_BYPASS) {
-      nav('/dashboard', { replace: true });
+      const from = location.state?.from?.pathname || '/dashboard';
+      nav(from, { replace: true });
       return;
     }
     setLoading(true);
     try {
       const u = await signIn(form.email, form.password);
-      nav(u.onboarded ? '/dashboard' : '/onboarding', { replace: true });
+      const from = location.state?.from?.pathname || (u.onboarded ? '/dashboard' : '/onboarding');
+      nav(from, { replace: true });
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : 'Invalid email or password');
     } finally {
@@ -53,6 +56,7 @@ export default function Login() {
 
   return (
     <div className="min-h-screen flex">
+      <PageMeta title="Sign In" />
 
       {/* ── Left brand panel (desktop only) ── */}
       <div className="hidden lg:flex lg:w-[45%] flex-col bg-slate-900 px-12 py-14 relative overflow-hidden">

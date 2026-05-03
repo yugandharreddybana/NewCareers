@@ -1,4 +1,4 @@
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '@/context/AuthContext';
 import { profileApi } from '@/services/api';
@@ -82,9 +82,15 @@ function StyledSelect({
 // Main onboarding flow
 // ─────────────────────────────────────────────────────────────────────────────
 export default function Onboarding() {
-  const { updateProfile } = useAuth();
+  const { updateProfile, user } = useAuth();
   const nav     = useNavigate();
   const cvRef   = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    if (user?.onboarded) {
+      nav('/dashboard', { replace: true });
+    }
+  }, [user, nav]);
 
   const [step,   setStep]   = useState(0);
   const [saving, setSaving] = useState(false);

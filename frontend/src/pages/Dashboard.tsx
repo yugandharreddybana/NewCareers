@@ -15,6 +15,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import toast from 'react-hot-toast';
 import { useAuth } from '@/context/AuthContext';
+import { PageMeta } from '@/components/PageMeta';
 import { jobsApi, skillsApi } from '@/services/api';
 import { analyticsApi, AnalyticsSummary } from '@/services/analyticsApi';
 import { discoveryApi, SearchParams, SearchResult } from '@/services/discoveryApi';
@@ -221,6 +222,7 @@ export default function Dashboard() {
 
   return (
     <div className="space-y-8 pb-20">
+      <PageMeta title="Dashboard" />
 
       {/* ── Section 3.6 Task 71: product tour overlay ── */}
       {tourActive && (

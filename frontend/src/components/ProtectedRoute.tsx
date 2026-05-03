@@ -6,7 +6,7 @@
  *
  * In development mode with VITE_DEV_BYPASS_GUARDS=true, skips auth checks.
  */
-import { Navigate, Outlet } from 'react-router-dom';
+import { Navigate, Outlet, useLocation } from 'react-router-dom';
 import { useAuth } from '@/context/AuthContext';
 import AppShell from '@/components/layout/AppShell';
 import { PageLoader } from '@/components/LoadingSpinner';
@@ -15,6 +15,7 @@ const DEV_BYPASS = import.meta.env.VITE_DEV_BYPASS_GUARDS === 'true' || import.m
 
 export function ProtectedRoute() {
   const { user, loading } = useAuth();
+  const location = useLocation();
 
   // Dev bypass: skip all auth checks, render app shell directly
   if (DEV_BYPASS) {
@@ -26,7 +27,7 @@ export function ProtectedRoute() {
   }
 
   if (!user) {
-    return <Navigate to="/login" replace />;
+    return <Navigate to="/login" replace state={{ from: location }} />;
   }
 
   // Authenticated: render the full app shell with nav/sidebar

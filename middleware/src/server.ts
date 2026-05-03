@@ -26,6 +26,8 @@ import outreach        from './routes/outreach.routes.js';           // 4.4
 import watchlists      from './routes/watchlists.routes.js';       // 4.1
 import agentMemory     from './routes/agent-memory.routes.js';     // 4.3
 import resumeVersions  from './routes/resume-versions.routes.js';  // 4.5
+import cv              from './routes/cv.routes.js';
+import billing         from './routes/billing.routes.js';
 
 const app = express();
 
@@ -62,6 +64,8 @@ app.use('/api/outreach',          outreach);         // 4.4
 app.use('/api/watchlists',       watchlists);       // 4.1
 app.use('/api/agent-memory',     agentMemory);      // 4.3
 app.use('/api/resume-versions',  resumeVersions);   // 4.5
+app.use('/api/cv',               cv);
+app.use('/api/billing',          billing);
 
 app.use((err, _req, res, _next) => {
   console.error('Middleware error:', err.message);
