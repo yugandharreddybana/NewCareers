@@ -1,7 +1,7 @@
 import express from 'express';
 import multer from 'multer';
 import FormData from 'form-data';
-import { authGuard } from '../middleware/authGuard.js';
+import { authGuard } from '../authGuard.js';
 import { forward, bubble } from '../services/backendProxy.js';
 
 const router = express.Router();

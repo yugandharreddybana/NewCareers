@@ -8,9 +8,9 @@
 import express from 'express';
 import { body } from 'express-validator';
 import { forward } from '../services/backendProxy.js';
-import { checkValidation, trimStrings } from '../middleware/sanitize.js';
-import { authLimiter } from '../middleware/rateLimiter.js';
-import { authGuard } from '../middleware/authGuard.js';
+import { checkValidation, trimStrings } from '../sanitize.js';
+import { authLimiter, loginLimiter, csrfGuard } from '../rateLimiter.js';
+import { authGuard } from '../authGuard.js';
 
 const router = express.Router();
 const COOKIE = process.env.COOKIE_NAME || 'co_session';
@@ -22,6 +22,9 @@ const cookieOpts = () => ({
   maxAge: 7 * 24 * 60 * 60 * 1000,
   path: '/'
 });
+
+// Apply CSRF protection to all auth state-changing routes
+router.use(csrfGuard);
 
 // ── Signup ─────────────────────────────────────────────────────────────────
 router.post('/signup',
@@ -43,7 +46,7 @@ router.post('/signup',
 
 // ── Login ──────────────────────────────────────────────────────────────────
 router.post('/login',
-  authLimiter, trimStrings,
+  loginLimiter, trimStrings,
   body('email').isEmail().normalizeEmail(),
   body('password').isString().isLength({ min: 8 }),
   checkValidation,

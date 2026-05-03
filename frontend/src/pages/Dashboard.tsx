@@ -38,7 +38,6 @@ import {
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 
-import { DUMMY_JOBS_LIST } from '@/services/mockData';
 
 const TOUR_KEY = 'careerops_dashboard_tour_done';
 
@@ -50,25 +49,16 @@ const SOURCE_OPTIONS = [
 export default function Dashboard() {
   const { user } = useAuth();
   const [data,     setData]     = useState<JobsListResponse>({
-    items: DUMMY_JOBS_LIST,
-    remaining: 12,
-    dailyCount: 3,
+    items: [],
+    remaining: 0,
+    dailyCount: 0,
     dailyLimit: 15,
   });
   const [loading,  setLoading]  = useState(true);
   const [fetching, setFetching] = useState(false);
 
   // Analytics stats
-  const [analyticsStats, setAnalyticsStats] = useState<AnalyticsSummary | null>({
-    skillsRunThisWeek: 4,
-    applicationsSubmitted: 12,
-    avgMatchPercent: 82,
-    skillUsage: [
-      { skill: 'Resume Match', count: 8 },
-      { skill: 'Outreach Generator', count: 5 },
-      { skill: 'Interview Coach', count: 3 },
-    ]
-  });
+  const [analyticsStats, setAnalyticsStats] = useState<AnalyticsSummary | null>(null);
   const [statsLoading,   setStatsLoading]   = useState(true);
 
   // Pipeline filters (existing)

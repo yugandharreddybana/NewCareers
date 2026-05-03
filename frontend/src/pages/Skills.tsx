@@ -65,12 +65,11 @@ const STATE_BADGE: Record<SkillRunState, { label: string; className: string; ico
   error: { label: 'Error', className: 'bg-rose-100 text-rose-600', icon: <AlertCircle size={11} /> },
 };
 
-import { DUMMY_JOBS_LIST, DUMMY_SESSIONS } from '@/services/mockData';
 
 // ── Component ──────────────────────────────────────────────────────────────
 export default function Skills() {
-  const [jobs, setJobs] = useState<JobCard[]>(DUMMY_JOBS_LIST);
-  const [sessions, setSessions] = useState<SkillSession[]>(DUMMY_SESSIONS);
+  const [jobs, setJobs] = useState<JobCard[]>([]);
+  const [sessions, setSessions] = useState<SkillSession[]>([]);
   const [loading, setLoading] = useState(true);
   const [expanded, setExpanded] = useState<string | null>(null); // "userJobId:skillName"
   const [running, setRunning] = useState<Set<string>>(new Set());

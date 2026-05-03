@@ -1,7 +1,7 @@
 // Section 3.6 Tasks 76-80 — experiment variant + admin proxy routes
 import express from 'express';
 import { createProxyMiddleware } from 'http-proxy-middleware';
-import { verifyToken } from '../middleware/auth.js';
+import { verifyToken } from '../auth.js';
 
 const router = express.Router();
 const proxy = createProxyMiddleware({

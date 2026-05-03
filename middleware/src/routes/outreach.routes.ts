@@ -1,5 +1,5 @@
 import express from 'express';
-import { authGuard } from '../middleware/authGuard.js';
+import { authGuard } from '../authGuard.js';
 import { createProxyMiddleware } from 'http-proxy-middleware';
 
 const router = express.Router();

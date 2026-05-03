@@ -116,38 +116,12 @@ function TrendTooltip({ active, payload, label }: any) {
 
 // ── Main page ──────────────────────────────────────────────────────────────
 
-const DUMMY_SUMMARY: AnalyticsSummary = {
-  skillsRunThisWeek: 4,
-  applicationsSubmitted: 12,
-  avgMatchPercent: 82,
-  skillUsage: [
-    { skill: 'Resume Match', count: 8 },
-    { skill: 'Outreach Generator', count: 5 },
-    { skill: 'Interview Coach', count: 3 },
-  ]
-};
-
-const DUMMY_FUNNEL: FunnelStage[] = [
-  { stage: 'Discovered', count: 18 },
-  { stage: 'Saved',      count: 12 },
-  { stage: 'Applied',    count: 8 },
-  { stage: 'Interview',  count: 3 },
-  { stage: 'Offer',      count: 1 },
-  { stage: 'Rejected',   count: 2 },
-];
-
-const DUMMY_TIME_SERIES: TimeSeriesPoint[] = [
-  { week: '2026-04-01', applications: 2, matchAvg: 75 },
-  { week: '2026-04-08', applications: 3, matchAvg: 78 },
-  { week: '2026-04-15', applications: 5, matchAvg: 82 },
-  { week: '2026-04-22', applications: 4, matchAvg: 80 },
-  { week: '2026-04-29', applications: 6, matchAvg: 85 },
-];
+// No dummy data — real data loads from analyticsApi
 
 export default function Analytics() {
-  const [summary,    setSummary]    = useState<AnalyticsSummary | null>(DUMMY_SUMMARY);
-  const [funnel,     setFunnel]     = useState<FunnelStage[]>(DUMMY_FUNNEL);
-  const [timeSeries, setTimeSeries] = useState<TimeSeriesPoint[]>(DUMMY_TIME_SERIES);
+  const [summary,    setSummary]    = useState<AnalyticsSummary | null>(null);
+  const [funnel,     setFunnel]     = useState<FunnelStage[]>([]);
+  const [timeSeries, setTimeSeries] = useState<TimeSeriesPoint[]>([]);
   const [loading,    setLoading]    = useState(true);
 
   useEffect(() => {

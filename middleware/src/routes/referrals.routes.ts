@@ -1,5 +1,5 @@
 import express from 'express';
-import { authGuard } from '../middleware/authGuard.js';
+import { authGuard } from '../authGuard.js';
 import { forward, bubble } from '../services/backendProxy.js';
 
 const router = express.Router();

@@ -10,47 +10,7 @@ import AddContactModal from '@/components/networking/AddContactModal';
 import toast from 'react-hot-toast';
 import { api } from '@/services/api';
 
-const DUMMY_CONTACTS: NetworkContact[] = [
-  {
-    id: 'c-1',
-    name: 'Sarah Jenkins',
-    email: 'sarah.jenkins@techwave.ie',
-    linkedinUrl: 'https://linkedin.com/in/sarahjenkins',
-    company: 'TechWave Ireland',
-    roleTitle: 'Technical Recruiter',
-    contactType: 'recruiter',
-    relationshipTemperature: 'warm',
-    pipelineStage: 'connected',
-    notes: 'Very responsive about front-end roles.',
-    linkedUserJobId: 'uj-1',
-    createdAt: new Date().toISOString(),
-    updatedAt: new Date().toISOString(),
-    lastInteraction: {
-      id: 'i-1',
-      interactionType: 'linkedin_message',
-      outcome: 'positive',
-      nextStep: 'Send tailored resume',
-      nextStepDueDate: new Date().toISOString(),
-      createdAt: new Date().toISOString(),
-    }
-  },
-  {
-    id: 'c-2',
-    name: 'Michael Chen',
-    email: 'mchen@ecogrowth.com',
-    linkedinUrl: 'https://linkedin.com/in/michaelchen',
-    company: 'EcoGrowth',
-    roleTitle: 'Engineering Manager',
-    contactType: 'hiring_manager',
-    relationshipTemperature: 'cold',
-    pipelineStage: 'identified',
-    notes: 'Looking to hire Full Stack developers.',
-    linkedUserJobId: 'uj-2',
-    createdAt: new Date().toISOString(),
-    updatedAt: new Date().toISOString(),
-    lastInteraction: null
-  }
-];
+// No dummy contacts — real data loads from the API
 
 const TYPE_FILTERS: { value: ContactType | ''; label: string }[] = [
   { value: '',                label: 'All' },
@@ -61,7 +21,7 @@ const TYPE_FILTERS: { value: ContactType | ''; label: string }[] = [
 ];
 
 export default function NetworkingPage() {
-  const [contacts, setContacts]       = useState<NetworkContact[]>(DUMMY_CONTACTS);
+  const [contacts, setContacts]       = useState<NetworkContact[]>([]);
   const [overdue, setOverdue]         = useState<InteractionResponse[]>([]);
   const [filter, setFilter]           = useState<ContactType | ''>('');
   const [showAdd, setShowAdd]         = useState(false);

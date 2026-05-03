@@ -1,7 +1,7 @@
 // Section 3.5 — progress routes: auth guard + proxy to Java backend
 import express from 'express';
 import { createProxyMiddleware } from 'http-proxy-middleware';
-import { verifyToken } from '../middleware/auth.js';
+import { verifyToken } from '../auth.js';
 
 const router = express.Router();
 const BACKEND_URL = process.env.BACKEND_URL || 'http://localhost:8080';

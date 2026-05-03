@@ -1,7 +1,7 @@
 import express from 'express';
-import { authGuard } from '../middleware/authGuard.js';
+import { authGuard } from '../authGuard.js';
 import { forward, bubble } from '../services/backendProxy.js';
-import { fetchLimiter } from '../middleware/rateLimiter.js';
+import { fetchLimiter } from '../rateLimiter.js';
 
 const router = express.Router();
 router.use(authGuard);

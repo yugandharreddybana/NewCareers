@@ -8,7 +8,7 @@
 
 import express from 'express';
 import { createProxyMiddleware } from 'http-proxy-middleware';
-import { authGuard } from '../middleware/authGuard.js';
+import { authGuard } from '../authGuard.js';
 
 const router = express.Router();
 const JAVA   = process.env.JAVA_BACKEND_URL || 'http://localhost:8080';

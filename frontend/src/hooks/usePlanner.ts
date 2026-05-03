@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
-import * as plannerApi from '../api/planner';
+import { plannerApi, DeadlinePayload } from '../api/plannerApi';
 import toast from 'react-hot-toast';
 
 /**
@@ -7,14 +7,14 @@ import toast from 'react-hot-toast';
  * Re-fetches whenever `refreshKey` changes.
  */
 export function useUpcoming(refreshKey = 0) {
-  const [data, setData]     = useState({ pendingTasks: [], upcomingEvents: [], overdueTasks: [] });
+  const [data, setData] = useState<any>({ pendingTasks: [], upcomingEvents: [], overdueTasks: [] });
   const [loading, setLoading] = useState(true);
-  const [error, setError]   = useState(null);
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     setLoading(true);
     plannerApi.getUpcoming()
-      .then(res => setData(res?.data || { pendingTasks: [], upcomingEvents: [], overdueTasks: [] }))
+      .then(res => setData(res || { pendingTasks: [], upcomingEvents: [], overdueTasks: [] }))
       .catch(err => {
         const msg = err?.response?.data?.message || 'Failed to load planner';
         setError(msg);
@@ -30,16 +30,16 @@ export function useUpcoming(refreshKey = 0) {
 /**
  * Manages tasks for a single tracked job.
  */
-export function useJobTasks(userJobId) {
-  const [tasks, setTasks]   = useState([]);
+export function useJobTasks(userJobId: string | number) {
+  const [tasks, setTasks] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
-  const [error, setError]   = useState(null);
+  const [error, setError] = useState<string | null>(null);
 
   const fetchTasks = useCallback(() => {
     if (!userJobId) return;
     setLoading(true);
     plannerApi.getTasksForJob(userJobId)
-      .then(res => setTasks(res.data))
+      .then(res => setTasks(res))
       .catch(err => setError(err?.response?.data?.message || 'Failed to load tasks'))
       .finally(() => setLoading(false));
   }, [userJobId]);
@@ -51,7 +51,7 @@ export function useJobTasks(userJobId) {
     fetchTasks();
   }, [userJobId, fetchTasks]);
 
-  const complete = useCallback(async (taskId) => {
+  const complete = useCallback(async (taskId: string | number) => {
     await plannerApi.completeTask(taskId);
     fetchTasks();
   }, [fetchTasks]);
@@ -62,23 +62,23 @@ export function useJobTasks(userJobId) {
 /**
  * Manages deadlines for a single tracked job.
  */
-export function useJobDeadlines(userJobId) {
-  const [deadlines, setDeadlines] = useState([]);
-  const [loading, setLoading]     = useState(true);
-  const [error, setError]         = useState(null);
+export function useJobDeadlines(userJobId: string | number) {
+  const [deadlines, setDeadlines] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
   const fetchDeadlines = useCallback(() => {
     if (!userJobId) return;
     setLoading(true);
     plannerApi.getDeadlinesForJob(userJobId)
-      .then(res => setDeadlines(res.data))
+      .then(res => setDeadlines(res))
       .catch(err => setError(err?.response?.data?.message || 'Failed to load deadlines'))
       .finally(() => setLoading(false));
   }, [userJobId]);
 
   useEffect(() => { fetchDeadlines(); }, [fetchDeadlines]);
 
-  const addDeadline = useCallback(async (payload) => {
+  const addDeadline = useCallback(async (payload: DeadlinePayload) => {
     await plannerApi.createDeadline(userJobId, payload);
     fetchDeadlines();
   }, [userJobId, fetchDeadlines]);
