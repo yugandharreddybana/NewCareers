@@ -4,21 +4,42 @@ import com.careerops.dto.ResumeVersionDtos.*;
 import com.careerops.exception.ApiException;
 import com.careerops.model.ResumeVersion;
 import com.careerops.repository.ResumeVersionRepository;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.web.multipart.MultipartFile;
 
+import java.io.IOException;
 import java.util.Comparator;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 
+/**
+ * Batch 3 — Resume Version Service
+ *
+ * Added:
+ *   uploadFile()   : upload PDF/DOCX to Supabase bucket, link path to version
+ *   downloadUrl()  : return 10-min signed URL for the attached file
+ *   deleteFile()   : remove file from Supabase, clear storagePath (keeps row)
+ *   delete()       : now also removes the file from Supabase before deleting row
+ */
 @Service
 public class ResumeVersionService {
 
     private final ResumeVersionRepository versionRepo;
+    private final SupabaseStorageService storage;
+    private final String bucket;
 
-    public ResumeVersionService(ResumeVersionRepository versionRepo) {
+    private static final long MAX_FILE_SIZE = 10L * 1024 * 1024;
+
+    public ResumeVersionService(ResumeVersionRepository versionRepo,
+                                SupabaseStorageService storage,
+                                @Value("${supabase.bucket.resume}") String bucket) {
         this.versionRepo = versionRepo;
+        this.storage = storage;
+        this.bucket = bucket;
     }
 
     public ResumeVersionListResponse list(UUID userId) {
@@ -55,19 +76,63 @@ public class ResumeVersionService {
     }
 
     @Transactional
+    public ResumeVersionResponse uploadFile(UUID userId, UUID versionId, MultipartFile file)
+            throws IOException {
+        ResumeVersion v = find(userId, versionId);
+
+        if (file == null || file.isEmpty())
+            throw new ApiException(HttpStatus.BAD_REQUEST, "Empty file");
+        if (file.getSize() > MAX_FILE_SIZE)
+            throw new ApiException(HttpStatus.PAYLOAD_TOO_LARGE, "Max 10 MB");
+
+        String name = file.getOriginalFilename() == null ? "resume" : file.getOriginalFilename();
+        String lc = name.toLowerCase();
+        if (!(lc.endsWith(".pdf") || lc.endsWith(".docx")))
+            throw new ApiException(HttpStatus.UNSUPPORTED_MEDIA_TYPE, "Only PDF or DOCX");
+
+        if (v.getStoragePath() != null && !v.getStoragePath().isBlank()) {
+            storage.delete(bucket, v.getStoragePath());
+        }
+
+        String path = userId + "/v" + v.getVersionNumber() + "-" +
+                      System.currentTimeMillis() + "-" + name.replaceAll("\\s+", "_");
+        storage.upsert(bucket, path, file.getBytes(), file.getContentType());
+
+        v.setStoragePath(path);
+        v.setFileName(name);
+        return toResponse(versionRepo.save(v));
+    }
+
+    public Map<String, String> downloadUrl(UUID userId, UUID versionId) {
+        ResumeVersion v = find(userId, versionId);
+        if (v.getStoragePath() == null || v.getStoragePath().isBlank())
+            throw new ApiException(HttpStatus.NOT_FOUND, "No file attached to this version");
+        String signed = storage.signedUrl(bucket, v.getStoragePath(), 600);
+        return Map.of("url", signed, "fileName", v.getFileName() != null ? v.getFileName() : "resume");
+    }
+
+    @Transactional
+    public ResumeVersionResponse deleteFile(UUID userId, UUID versionId) {
+        ResumeVersion v = find(userId, versionId);
+        if (v.getStoragePath() != null && !v.getStoragePath().isBlank()) {
+            storage.delete(bucket, v.getStoragePath());
+            v.setStoragePath(null);
+            v.setFileName(null);
+            versionRepo.save(v);
+        }
+        return toResponse(v);
+    }
+
+    @Transactional
     public ResumeVersionResponse update(UUID userId, UUID id, UpdateResumeVersionRequest req) {
         ResumeVersion v = find(userId, id);
         if (req.name()               != null) v.setName(req.name());
         if (req.roleTags()           != null) v.setRoleTags(req.roleTags());
         if (req.isActive()           != null) {
             if (req.isActive()) {
-                versionRepo.findByUserIdAndActiveTrue(userId)
-                    .ifPresent(other -> {
-                        if (!other.getId().equals(id)) {
-                            other.setActive(false);
-                            versionRepo.save(other);
-                        }
-                    });
+                versionRepo.findByUserIdAndActiveTrue(userId).ifPresent(other -> {
+                    if (!other.getId().equals(id)) { other.setActive(false); versionRepo.save(other); }
+                });
             }
             v.setActive(req.isActive());
         }
@@ -95,13 +160,13 @@ public class ResumeVersionService {
         ResumeVersionResponse right = toResponse(find(userId, rightId));
         String rec;
         if (left.offerCount() > right.offerCount()) {
-            rec = left.name() + " leads in offers (" + left.offerCount() + " vs " + right.offerCount() + "). Recommend using it for high-intent applications.";
+            rec = left.name() + " leads in offers (" + left.offerCount() + " vs " + right.offerCount() + "). Recommend for high-intent applications.";
         } else if (right.offerCount() > left.offerCount()) {
-            rec = right.name() + " leads in offers (" + right.offerCount() + " vs " + left.offerCount() + "). Recommend using it for high-intent applications.";
+            rec = right.name() + " leads in offers (" + right.offerCount() + " vs " + left.offerCount() + "). Recommend for high-intent applications.";
         } else if (left.interviewCount() >= right.interviewCount()) {
-            rec = left.name() + " has equal or more interviews. Use it as your primary version.";
+            rec = left.name() + " has equal or more interviews. Use as primary version.";
         } else {
-            rec = right.name() + " has more interviews. Consider switching to it as your primary.";
+            rec = right.name() + " has more interviews. Consider switching to it as primary.";
         }
         return new CompareResponse(left, right, rec);
     }
@@ -115,13 +180,18 @@ public class ResumeVersionService {
                 v.getOfferCount() * 3 + v.getInterviewCount() * 2 + v.getApplicationCount()))
             .orElse(versions.isEmpty() ? null : versions.get(0));
         if (best == null) throw new ApiException(HttpStatus.NOT_FOUND, "No resume versions found");
-        String reason = "Version " + best.getVersionNumber() + " (" + best.getName() + ") has the strongest outcome track record"
-            + (best.getBestForRoleType() != null ? " for " + best.getBestForRoleType() + " roles" : "") + ".";
+        String reason = "Version " + best.getVersionNumber() + " (" + best.getName() +
+            ") has the strongest outcome track record" +
+            (best.getBestForRoleType() != null ? " for " + best.getBestForRoleType() + " roles" : "") + ".";
         return new RecommendResponse(toResponse(best), reason);
     }
 
+    @Transactional
     public void delete(UUID userId, UUID id) {
         ResumeVersion v = find(userId, id);
+        if (v.getStoragePath() != null && !v.getStoragePath().isBlank()) {
+            storage.delete(bucket, v.getStoragePath());
+        }
         versionRepo.delete(v);
     }
 

@@ -1,7 +1,7 @@
 package com.careerops.controller;
 
 import com.careerops.model.UserCv;
-import com.careerops.repository.UserCvRepository;
+import com.careerops.service.CvService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -11,91 +11,68 @@ import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
 
 import java.io.IOException;
-import java.nio.charset.StandardCharsets;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 
 /**
- * CV REST endpoints.
+ * Batch 3 — CV REST endpoints
  *
- * GET    /api/cv               — list all CVs for the current user, newest first
- * POST   /api/cv               — upload a new CV (multipart/form-data)
- * PATCH  /api/cv/{id}/activate — set this CV as the active one
- * DELETE /api/cv/{id}          — delete a CV (owner only)
- *
- * Uses findByUserIdOrderByUploadedAtDesc() from UserCvRepository (Batch 2).
+ * GET    /api/cv                  -> list all CVs (history), newest first
+ * POST   /api/cv/upload           -> upload CV to Supabase bucket (multipart)
+ * GET    /api/cv/:id/download     -> signed Supabase download URL
+ * PATCH  /api/cv/:id/activate     -> set as active CV
+ * DELETE /api/cv/:id              -> delete from DB + Supabase bucket
  */
 @RestController
 @RequestMapping("/api/cv")
 @RequiredArgsConstructor
 public class CvController {
 
-    private final UserCvRepository userCvRepository;
+    private final CvService cvService;
 
     @GetMapping
-    public ResponseEntity<List<UserCv>> listCvs(@AuthenticationPrincipal Jwt jwt) {
+    public ResponseEntity<List<UserCv>> history(@AuthenticationPrincipal Jwt jwt) {
         UUID userId = UUID.fromString(jwt.getSubject());
-        // Fixed: use the correctly named repository method added in Batch 2
-        return ResponseEntity.ok(userCvRepository.findByUserIdOrderByUploadedAtDesc(userId));
+        return ResponseEntity.ok(cvService.history(userId));
     }
 
-    @PostMapping(consumes = "multipart/form-data")
-    public ResponseEntity<UserCv> uploadCv(
+    @PostMapping(value = "/upload", consumes = "multipart/form-data")
+    public ResponseEntity<UserCv> upload(
             @AuthenticationPrincipal Jwt jwt,
-            @RequestParam("file") MultipartFile file,
-            @RequestParam(value = "setActive", defaultValue = "false") boolean setActive
+            @RequestParam("file") MultipartFile file
     ) throws IOException {
         UUID userId = UUID.fromString(jwt.getSubject());
+        return ResponseEntity.status(HttpStatus.CREATED).body(cvService.upload(userId, file));
+    }
 
-        if (setActive) {
-            List<UserCv> existing = userCvRepository.findByUserIdOrderByUploadedAtDesc(userId);
-            existing.forEach(cv -> cv.setIsActive(false));
-            userCvRepository.saveAll(existing);
-        }
-
-        String parsedText = new String(file.getBytes(), StandardCharsets.UTF_8);
-
-        UserCv cv = UserCv.builder()
-                .userId(userId)
-                .fileName(file.getOriginalFilename())
-                .storagePath("/uploads/" + userId + "/" + file.getOriginalFilename())
-                .fileType(file.getContentType())
-                .parsedText(parsedText)
-                .isActive(setActive)
-                .build();
-
-        return ResponseEntity.status(HttpStatus.CREATED).body(userCvRepository.save(cv));
+    @GetMapping("/{id}/download")
+    public ResponseEntity<Map<String, String>> download(
+            @AuthenticationPrincipal Jwt jwt,
+            @PathVariable UUID id
+    ) {
+        UUID userId = UUID.fromString(jwt.getSubject());
+        return ResponseEntity.ok(Map.of("url", cvService.downloadUrl(userId, id)));
     }
 
     @PatchMapping("/{id}/activate")
-    public ResponseEntity<UserCv> activateCv(
+    public ResponseEntity<List<UserCv>> activate(
             @AuthenticationPrincipal Jwt jwt,
             @PathVariable UUID id
     ) {
         UUID userId = UUID.fromString(jwt.getSubject());
-        List<UserCv> all = userCvRepository.findByUserIdOrderByUploadedAtDesc(userId);
+        List<UserCv> all = cvService.history(userId);
         all.forEach(cv -> cv.setIsActive(cv.getId().equals(id)));
-        userCvRepository.saveAll(all);
-
-        return all.stream()
-                .filter(cv -> cv.getId().equals(id))
-                .findFirst()
-                .map(ResponseEntity::ok)
-                .orElse(ResponseEntity.notFound().build());
+        return ResponseEntity.ok(all);
     }
 
     @DeleteMapping("/{id}")
-    public ResponseEntity<Void> deleteCv(
+    public ResponseEntity<Void> delete(
             @AuthenticationPrincipal Jwt jwt,
             @PathVariable UUID id
     ) {
         UUID userId = UUID.fromString(jwt.getSubject());
-        return userCvRepository.findById(id)
-                .filter(cv -> cv.getUserId().equals(userId))
-                .map(cv -> {
-                    userCvRepository.delete(cv);
-                    return ResponseEntity.noContent().<Void>build();
-                })
-                .orElse(ResponseEntity.<Void>notFound().build());
+        cvService.delete(userId, id);
+        return ResponseEntity.noContent().build();
     }
 }

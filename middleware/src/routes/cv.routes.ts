@@ -1,8 +1,9 @@
 /**
- * cv.routes.ts — CV upload, parsing, and storage
+ * cv.routes.ts — CV upload, history, download, delete
  *
- * Handles multipart file uploads via multer (stores in memory buffer)
- * then proxies to the Java backend which handles parsing, storage, and analysis.
+ * Batch 3: wired to Supabase-backed CvService.
+ * Multer accepts PDF/DOCX up to 10 MB in memory buffer,
+ * then proxies to Java which stores in Supabase and parses text.
  */
 import express from 'express';
 import multer from 'multer';
@@ -12,7 +13,6 @@ import { createProxyMiddleware } from 'http-proxy-middleware';
 const router = express.Router();
 const JAVA = process.env.JAVA_BACKEND_URL || 'http://localhost:8080';
 
-// Multer config: 10 MB max, accept PDF/DOCX only
 const upload = multer({
   storage: multer.memoryStorage(),
   limits: { fileSize: 10 * 1024 * 1024 },
@@ -33,30 +33,24 @@ const javaProxy = createProxyMiddleware({
   timeout: 60_000,
   on: {
     error: (err, _req, res) => {
-      res.status(502).json({ error: 'CV service unavailable', details: err.message });
+      (res as express.Response).status(502).json({ error: 'CV service unavailable', details: err.message });
     },
   },
 });
 
-// GET    /api/cv                  → list uploaded CVs
-router.get('/',                   authGuard, javaProxy);
+// GET    /api/cv                   -> list all CVs (history), newest first
+router.get('/',                    authGuard, javaProxy);
 
-// POST   /api/cv/upload           → upload new CV (multipart form)
-router.post('/upload',            authGuard, upload.single('cv'), javaProxy);
+// POST   /api/cv/upload            -> upload CV to Supabase (multipart)
+router.post('/upload',             authGuard, upload.single('file'), javaProxy);
 
-// GET    /api/cv/:id              → get single CV metadata
-router.get('/:id',                authGuard, javaProxy);
+// GET    /api/cv/:id/download      -> get signed Supabase download URL
+router.get('/:id/download',        authGuard, javaProxy);
 
-// GET    /api/cv/:id/download     → download CV file
-router.get('/:id/download',       authGuard, javaProxy);
+// PATCH  /api/cv/:id/activate      -> set as active CV
+router.patch('/:id/activate',      authGuard, javaProxy);
 
-// POST   /api/cv/:id/parse        → trigger CV parsing / skill extraction
-router.post('/:id/parse',         authGuard, javaProxy);
-
-// DELETE /api/cv/:id              → delete CV
-router.delete('/:id',             authGuard, javaProxy);
-
-// PUT    /api/cv/:id/active       → set as active CV
-router.put('/:id/active',         authGuard, javaProxy);
+// DELETE /api/cv/:id               -> delete CV from DB + Supabase bucket
+router.delete('/:id',              authGuard, javaProxy);
 
 export default router;

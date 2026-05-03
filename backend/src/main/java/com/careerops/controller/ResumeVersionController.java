@@ -6,9 +6,20 @@ import com.careerops.util.AuthUtil;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
+import org.springframework.web.multipart.MultipartFile;
 
+import java.io.IOException;
+import java.util.Map;
 import java.util.UUID;
 
+/**
+ * Batch 3 — Resume Version Controller
+ *
+ * Added:
+ *   POST   /resume-versions/:id/upload    -> upload file to Supabase bucket
+ *   GET    /resume-versions/:id/download  -> get 10-min signed download URL
+ *   DELETE /resume-versions/:id/file      -> remove file from Supabase (keeps metadata row)
+ */
 @RestController
 @RequestMapping("/resume-versions")
 public class ResumeVersionController {
@@ -33,6 +44,33 @@ public class ResumeVersionController {
     public ResponseEntity<ResumeVersionResponse> create(@RequestBody CreateResumeVersionRequest req) {
         return ResponseEntity.status(HttpStatus.CREATED)
             .body(versionService.create(AuthUtil.currentUserId(), req));
+    }
+
+    // Batch 3: upload file to Supabase
+    @PostMapping(value = "/{id}/upload", consumes = "multipart/form-data")
+    public ResponseEntity<ResumeVersionResponse> uploadFile(
+            @PathVariable UUID id,
+            @RequestParam("file") MultipartFile file
+    ) throws IOException {
+        return ResponseEntity.ok(
+            versionService.uploadFile(AuthUtil.currentUserId(), id, file)
+        );
+    }
+
+    // Batch 3: signed download URL
+    @GetMapping("/{id}/download")
+    public ResponseEntity<Map<String, String>> downloadUrl(@PathVariable UUID id) {
+        return ResponseEntity.ok(
+            versionService.downloadUrl(AuthUtil.currentUserId(), id)
+        );
+    }
+
+    // Batch 3: delete attached file (keeps version metadata row)
+    @DeleteMapping("/{id}/file")
+    public ResponseEntity<ResumeVersionResponse> deleteFile(@PathVariable UUID id) {
+        return ResponseEntity.ok(
+            versionService.deleteFile(AuthUtil.currentUserId(), id)
+        );
     }
 
     @PutMapping("/{id}")
