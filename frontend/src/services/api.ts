@@ -19,7 +19,10 @@ import { tokenStore } from '@/lib/tokenStore';
 
 const baseURL = import.meta.env.VITE_MIDDLEWARE_URL || 'http://localhost:4000';
 const USE_MOCKS = import.meta.env.VITE_USE_MOCKS === 'true';
-const DEV_BYPASS = import.meta.env.VITE_DEV_BYPASS_GUARDS === 'true' || import.meta.env.DEV || import.meta.env.MODE === 'development';
+// DEV_BYPASS is ONLY allowed in non-production builds, even if the env var is set.
+const DEV_BYPASS =
+  import.meta.env.MODE !== 'production' &&
+  import.meta.env.VITE_DEV_BYPASS_GUARDS === 'true';
 
 const delay = (ms = 800) => new Promise(res => setTimeout(res, ms));
 
@@ -168,8 +171,15 @@ export const authApi = {
   },
   refresh: async (refreshToken: string) =>
     api.post('/auth/refresh', { refreshToken }).then(r => r.data),
-  forgot: (email: string) => api.post('/auth/forgot-password', { email }).then(r => r.data),
-  reset:  (b: any) => api.post('/auth/reset-password', b).then(r => r.data),
+  // forgotPassword — called by AuthContext and PasswordRecovery page
+  forgotPassword: (email: string) =>
+    api.post('/auth/forgot-password', { email }).then(r => r.data),
+  // resetPassword — called by AuthContext and PasswordRecovery page
+  resetPassword: (b: { token: string; password: string }) =>
+    api.post('/auth/reset-password', b).then(r => r.data),
+  // Legacy aliases kept for backward compatibility
+  forgot: (email: string) => authApi.forgotPassword(email),
+  reset:  (b: any)        => authApi.resetPassword(b),
 };
 
 // ── Profile API ────────────────────────────────────────────────────────────
