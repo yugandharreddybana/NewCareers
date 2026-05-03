@@ -45,56 +45,56 @@ export const App: React.FC = () => (
   <HelmetProvider>
     <BrowserRouter>
       <AuthProvider>
-      <ExperimentProvider>
-        <Suspense fallback={<PageLoader />}>
-          <Routes>
+        <ExperimentProvider>
+          <Suspense fallback={<PageLoader />}>
+            <Routes>
 
-            {/* ── Public routes — no shell ── */}
-            <Route path="/" element={<Navigate to="/dashboard" replace />} />
-            <Route path="/login" element={<Login />} />
-            <Route path="/register" element={<Signup />} />
-            <Route path="/forgot-password" element={<PasswordRecovery />} />
-            <Route path="/reset-password" element={<PasswordRecovery />} />
+              {/* ── Public routes — no shell ── */}
+              <Route path="/" element={<Navigate to="/dashboard" replace />} />
+              <Route path="/login" element={<Login />} />
+              <Route path="/register" element={<Signup />} />
+              <Route path="/forgot-password" element={<PasswordRecovery />} />
+              <Route path="/reset-password" element={<PasswordRecovery />} />
 
-            {/* ── Protected routes ── */}
-            <Route element={<ProtectedRoute />}>
-              <Route path="/onboarding" element={<Onboarding />} />
-              <Route path="/dashboard" element={<Dashboard />} />
-              <Route path="/jobs/:id" element={<JobDetail />} />
-              <Route path="/profile" element={<Profile />} />
-              <Route path="/account" element={<AccountSettings />} />
-              <Route path="/interviews" element={<InterviewHistoryPage />} />
-              <Route path="/interview" element={<InterviewPage />} />
-              <Route path="/networking" element={<NetworkingPage />} />
-              <Route path="/workspaces" element={<WorkspacePage />} />
-              <Route path="/progress" element={<ProgressPage />} />
-              <Route path="/kanban" element={<Kanban />} />
-              <Route path="/cv" element={<CvManager />} />
-              <Route path="/skills" element={<Skills />} />
-              <Route path="/analytics" element={<Analytics />} />
-              <Route path="/billing" element={<BillingPage />} />
-              <Route path="/refer" element={<Refer />} />
-              <Route path="/planner" element={<PlannerPage />} />
-              <Route path="/auto-apply" element={<AutoApplyPage />} />
-              <Route path="/watchlists" element={<WatchlistsPage />} />
-              <Route path="/outreach" element={<OutreachPage />} />
-              <Route path="/agent-memory" element={<AgentMemoryPage />} />
-              <Route path="/resume-versions" element={<ResumeVersionsPage />} />
-            </Route>
+              {/* ── Protected routes ── */}
+              <Route element={<ProtectedRoute />}>
+                <Route path="/onboarding" element={<Onboarding />} />
+                <Route path="/dashboard" element={<Dashboard />} />
+                <Route path="/jobs/:id" element={<JobDetail />} />
+                <Route path="/profile" element={<Profile />} />
+                <Route path="/account" element={<AccountSettings />} />
+                <Route path="/interviews" element={<InterviewHistoryPage />} />
+                <Route path="/interview" element={<InterviewPage />} />
+                <Route path="/networking" element={<NetworkingPage />} />
+                <Route path="/workspaces" element={<WorkspacePage />} />
+                <Route path="/progress" element={<ProgressPage />} />
+                <Route path="/kanban" element={<Kanban />} />
+                <Route path="/cv" element={<CvManager />} />
+                <Route path="/skills" element={<Skills />} />
+                <Route path="/analytics" element={<Analytics />} />
+                <Route path="/billing" element={<BillingPage />} />
+                <Route path="/refer" element={<Refer />} />
+                <Route path="/planner" element={<PlannerPage />} />
+                <Route path="/auto-apply" element={<AutoApplyPage />} />
+                <Route path="/watchlists" element={<WatchlistsPage />} />
+                <Route path="/outreach" element={<OutreachPage />} />
+                <Route path="/agent-memory" element={<AgentMemoryPage />} />
+                <Route path="/resume-versions" element={<ResumeVersionsPage />} />
+              </Route>
 
-            {/* ── Admin-only routes ── */}
-            <Route element={<AdminRoute />}>
-              <Route path="/admin/experiments" element={<ExperimentDashboard />} />
-            </Route>
+              {/* ── Admin-only routes ── */}
+              <Route element={<AdminRoute />}>
+                <Route path="/admin/experiments" element={<ExperimentDashboard />} />
+              </Route>
 
-            {/* ── Catch-all 404 ── */}
-            <Route path="*" element={<NotFound />} />
+              {/* ── Catch-all 404 ── */}
+              <Route path="*" element={<NotFound />} />
 
-          </Routes>
-        </Suspense>
-      </ExperimentProvider>
-    </AuthProvider>
-  </BrowserRouter>
+            </Routes>
+          </Suspense>
+        </ExperimentProvider>
+      </AuthProvider>
+    </BrowserRouter>
   </HelmetProvider>
 );
 
