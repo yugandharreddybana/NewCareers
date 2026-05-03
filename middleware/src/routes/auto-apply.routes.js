@@ -38,4 +38,7 @@ router.post('/start/:userJobId',    authGuard, javaProxy);
 // POST   /api/auto-apply/approve/:runId    → approve or cancel run
 router.post('/approve/:runId',      authGuard, javaProxy);
 
+// POST   /api/auto-apply/retry/:runId      → retry a failed run
+router.post('/retry/:runId',        authGuard, javaProxy);
+
 export default router;

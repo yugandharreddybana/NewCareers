@@ -94,8 +94,8 @@ public class CvController {
                 .filter(cv -> cv.getUserId().equals(userId))
                 .map(cv -> {
                     userCvRepository.delete(cv);
-                    return ResponseEntity.<Void>noContent().build();
+                    return ResponseEntity.noContent().<Void>build();
                 })
-                .orElse(ResponseEntity.notFound().build());
+                .orElse(ResponseEntity.<Void>notFound().build());
     }
 }

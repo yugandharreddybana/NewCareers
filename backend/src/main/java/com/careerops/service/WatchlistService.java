@@ -2,9 +2,13 @@ package com.careerops.service;
 
 import com.careerops.dto.WatchlistDtos.*;
 import com.careerops.exception.ApiException;
+import com.careerops.model.CareerMemory;
 import com.careerops.model.JobWatchlist;
+import com.careerops.model.Notification;
 import com.careerops.model.WatchlistRun;
+import com.careerops.repository.CareerMemoryRepository;
 import com.careerops.repository.JobWatchlistRepository;
+import com.careerops.repository.NotificationRepository;
 import com.careerops.repository.WatchlistRunRepository;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
@@ -12,6 +16,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Instant;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 
 @Service
@@ -19,11 +24,17 @@ public class WatchlistService {
 
     private final JobWatchlistRepository watchlistRepo;
     private final WatchlistRunRepository runRepo;
+    private final NotificationRepository notificationRepo;
+    private final CareerMemoryRepository memoryRepo;
 
     public WatchlistService(JobWatchlistRepository watchlistRepo,
-                            WatchlistRunRepository runRepo) {
-        this.watchlistRepo = watchlistRepo;
-        this.runRepo       = runRepo;
+                            WatchlistRunRepository runRepo,
+                            NotificationRepository notificationRepo,
+                            CareerMemoryRepository memoryRepo) {
+        this.watchlistRepo    = watchlistRepo;
+        this.runRepo          = runRepo;
+        this.notificationRepo = notificationRepo;
+        this.memoryRepo       = memoryRepo;
     }
 
     public WatchlistListResponse list(UUID userId) {
@@ -103,7 +114,33 @@ public class WatchlistService {
             .matchedCount(matched)
             .newCount(newJobs)
             .build();
-        return runRepo.save(run);
+        run = runRepo.save(run);
+        // In-app alert when new high-match jobs found
+        if (newJobs > 0 && w.isAlertInApp()) {
+            Notification n = Notification.builder()
+                .userId(w.getUserId())
+                .type(Notification.TYPE_JOB_MATCH)
+                .title(newJobs + " new match" + (newJobs > 1 ? "es" : "") + " for "" + w.getName() + """)
+                .body("Your watchlist found " + newJobs + " new role" + (newJobs > 1 ? "s" : "")
+                      + " matching ≥" + w.getMinMatchScore() + "% of your profile.")
+                .metadata(Map.of("watchlistId", w.getId().toString(), "newCount", newJobs))
+                .build();
+            notificationRepo.save(n);
+        }
+        return run;
+    }
+
+    /** Generate smart query suggestions based on career memories. */
+    public List<String> getSuggestions(UUID userId) {
+        List<CareerMemory> memories = memoryRepo.findByUserIdOrderByCategoryAscKeyAsc(userId);
+        String title    = memories.stream().filter(m -> "target_title".equals(m.getKey())).findFirst().map(CareerMemory::getValue).orElse("");
+        String industry = memories.stream().filter(m -> "preferred_industry".equals(m.getKey())).findFirst().map(CareerMemory::getValue).orElse("");
+        String company  = memories.stream().filter(m -> "company_type".equals(m.getKey())).findFirst().map(CareerMemory::getValue).orElse("");
+        return List.of(
+            (title + " " + industry).trim(),
+            (title + " " + company).trim(),
+            (title + " remote").trim()
+        ).stream().filter(s -> !s.isBlank() && !s.equals("remote")).toList();
     }
 
     private JobWatchlist find(UUID userId, UUID id) {

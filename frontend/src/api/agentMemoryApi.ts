@@ -22,4 +22,6 @@ export const agentMemoryApi = {
     axios.patch<CareerMemory>(`/agent-memory/${id}/toggle`, { memoryEnabled }).then(r => r.data),
   delete:   (id: string) =>
     axios.delete(`/agent-memory/${id}`),
+  resetAll: () =>
+    axios.delete('/agent-memory'),
 };

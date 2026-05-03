@@ -147,6 +147,30 @@ public class ApplicationAutomationService {
         return toRunResponse(runRepo.save(run), true);
     }
 
+    @Transactional
+    public ApplicationRunResponse retryRun(UUID userId, UUID runId) {
+        ApplicationRun run = findRun(userId, runId);
+        if (!run.getStatus().equals("failed")) {
+            throw new ApiException(HttpStatus.BAD_REQUEST, "Only failed runs can be retried");
+        }
+        // Reset failed steps to pending and re-execute from last completed
+        List<ApplicationRunStep> steps = stepRepo.findByRunIdOrderByStepNumberAsc(runId);
+        short lastCompleted = 0;
+        for (ApplicationRunStep s : steps) {
+            if (s.getStatus().equals("completed")) lastCompleted = s.getStepNumber();
+        }
+        for (ApplicationRunStep s : steps) {
+            if (s.getStatus().equals("failed")) {
+                s.setStatus(s.getStepNumber() <= lastCompleted + 1 ? "in_progress" : "pending");
+                s.setErrorMessage(null);
+            }
+        }
+        stepRepo.saveAll(steps);
+        run.setStatus("in_progress");
+        run.setErrorMessage(null);
+        return toRunResponse(runRepo.save(run), true);
+    }
+
     // ── Helpers ──────────────────────────────────────────────────────────────
 
     private ApplicationRun findRun(UUID userId, UUID runId) {

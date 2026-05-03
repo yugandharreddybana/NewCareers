@@ -3,6 +3,8 @@ import { Link, useNavigate } from 'react-router-dom';
 import { useAuth } from '@/context/AuthContext';
 import { Eye, EyeOff, Zap, ArrowRight, Loader2, Check } from 'lucide-react';
 
+const DEV_BYPASS = import.meta.env.VITE_DEV_BYPASS_GUARDS === 'true';
+
 const PERKS = [
   'Daily AI-matched jobs from 5+ sources',
   '14 career intelligence skills per job',
@@ -28,6 +30,11 @@ export default function Signup() {
     setError('');
     if (form.password.length < 8) {
       setError('Password must be at least 8 characters');
+      return;
+    }
+    // In dev bypass, skip auth call and go straight to onboarding
+    if (DEV_BYPASS) {
+      nav('/onboarding');
       return;
     }
     setLoading(true);

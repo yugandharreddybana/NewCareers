@@ -44,4 +44,11 @@ public class AgentMemoryController {
         memoryService.delete(AuthUtil.currentUserId(), id);
         return ResponseEntity.noContent().build();
     }
+
+    /** Reset all — deletes every memory entry for the user. */
+    @DeleteMapping
+    public ResponseEntity<Void> resetAll() {
+        memoryService.resetAll(AuthUtil.currentUserId());
+        return ResponseEntity.noContent().build();
+    }
 }

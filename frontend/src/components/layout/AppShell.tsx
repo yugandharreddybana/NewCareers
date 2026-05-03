@@ -10,17 +10,21 @@
  *   - Fixed thin top brand bar
  *   - Full-width scrollable content
  *   - Fixed BottomNav
+ *
+ * Includes DevModeBanner in development when VITE_DEV_BYPASS_GUARDS=true.
  */
 import { Outlet } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import Sidebar   from '@/components/layout/Sidebar';
 import TopBar    from '@/components/layout/TopBar';
 import BottomNav from '@/components/layout/BottomNav';
+import DevModeBanner from '@/components/ui/DevModeBanner';
 import { Sparkles } from 'lucide-react';
+import ErrorBoundary from '@/components/ErrorBoundary';
 
 export default function AppShell() {
   return (
-    <div className="min-h-screen bg-[#f8f9fc]">
+    <div className="min-h-screen bg-[#f5f6fa]">
 
       {/* ── Desktop Sidebar ── */}
       <div className="hidden md:block">
@@ -55,7 +59,9 @@ export default function AppShell() {
             animate={{ opacity: 1, y: 0 }}
             transition={{ duration: 0.2, ease: [0.16, 1, 0.3, 1] }}
           >
-            <Outlet />
+            <ErrorBoundary>
+              <Outlet />
+            </ErrorBoundary>
           </motion.div>
         </div>
       </main>
@@ -68,7 +74,9 @@ export default function AppShell() {
             animate={{ opacity: 1, y: 0 }}
             transition={{ duration: 0.2, ease: [0.16, 1, 0.3, 1] }}
           >
-            <Outlet />
+            <ErrorBoundary>
+              <Outlet />
+            </ErrorBoundary>
           </motion.div>
         </div>
       </main>
@@ -78,6 +86,10 @@ export default function AppShell() {
         <BottomNav />
       </div>
 
+      {/* ── Dev Mode Banner ── */}
+      <DevModeBanner />
+
     </div>
   );
 }
+

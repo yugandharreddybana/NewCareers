@@ -143,7 +143,7 @@ public class SkillService {
         }
 
         // Step 4: Phase 1 — Claude agentic loop
-        String systemPrompt = prompts.buildFullSystemPrompt(skill);
+        String systemPrompt = prompts.buildFullSystemPrompt(skill, userId);
         ArrayNode messages  = buildInitialMessages(req, userId);
 
         return handleAgentResult(
@@ -187,7 +187,7 @@ public class SkillService {
         toolResultMsg.set("content", toolResultContent);
         history.add(toolResultMsg);
 
-        String systemPrompt = prompts.buildFullSystemPrompt(conv.getSkill());
+        String systemPrompt = prompts.buildFullSystemPrompt(conv.getSkill(), userId);
         AgentResult result  = claude.run(systemPrompt, history, userId, conv.getUserJobId());
 
         conv.setStatus("completed");

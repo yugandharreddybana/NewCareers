@@ -51,7 +51,7 @@ export const Button = forwardRef<HTMLButtonElement, ButtonProps>(
         ? <Loader2 size={14} className="animate-spin shrink-0" />
         : leftIcon ? <span className="shrink-0 flex items-center">{leftIcon}</span> : null}
       {children && !['icon','icon-sm','icon-lg'].includes(size) && <span>{children}</span>}
-      {children && ['icon','icon-sm','icon-lg'].includes(size) && <span className="sr-only">{children}</span>}
+      {children && ['icon','icon-sm','icon-lg'].includes(size) && <>{children}</>}
       {!loading && rightIcon && <span className="shrink-0 flex items-center">{rightIcon}</span>}
     </button>
   )

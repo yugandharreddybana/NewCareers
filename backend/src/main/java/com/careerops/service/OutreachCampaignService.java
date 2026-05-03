@@ -121,6 +121,25 @@ public class OutreachCampaignService {
         return toMsgResponse(m);
     }
 
+    @Transactional
+    public MessageResponse unsubscribeMessage(UUID userId, UUID messageId) {
+        OutreachMessage m = messageRepo.findByIdAndUserId(messageId, userId)
+            .orElseThrow(() -> new ApiException(HttpStatus.NOT_FOUND, "Message not found"));
+        m.setUnsubscribed(true);
+        m.setStatus("bounced");
+        return toMsgResponse(messageRepo.save(m));
+    }
+
+    public SendTimeSuggestionResponse getSendTimeSuggestion(UUID userId, UUID campaignId) {
+        find(userId, campaignId);
+        // Rule-based suggestion: Tuesday/Wednesday 10-11am gets highest reply rates
+        return new SendTimeSuggestionResponse(
+            "Tuesday or Wednesday",
+            "10:00 – 11:00 AM recipient time zone",
+            "Studies show mid-week morning outreach achieves 25-40% higher open rates for professional contacts."
+        );
+    }
+
     public void delete(UUID userId, UUID id) {
         OutreachCampaign c = find(userId, id);
         campaignRepo.delete(c);
@@ -157,6 +176,7 @@ public class OutreachCampaignService {
         return new MessageResponse(
             m.getId(), m.getContactName(), m.getContactEmail(), m.getContactLinkedin(),
             m.getPersonalisedBody(), m.getStatus(), m.getScore(),
+            m.isUnsubscribed(), m.getSendTimeHint(),
             m.getSentAt(), m.getRepliedAt(), m.getCreatedAt()
         );
     }

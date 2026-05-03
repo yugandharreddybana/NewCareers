@@ -15,7 +15,7 @@ public class InterviewQuestionBank {
     @GeneratedValue(strategy = GenerationType.UUID)
     private UUID id;
 
-    @Column(name = "interview_track_id", nullable = false)
+    @Column(name = "interview_track_id")
     private UUID interviewTrackId;
 
     @Column(name = "session_id")
@@ -30,7 +30,7 @@ public class InterviewQuestionBank {
     @Column(name = "skill_area")
     private String skillArea;
 
-    @Column(name = "question", nullable = false, columnDefinition = "TEXT")
+    @Column(name = "question", columnDefinition = "TEXT")
     private String question;
 
     @Column(name = "expected_answer", columnDefinition = "TEXT")
@@ -48,8 +48,43 @@ public class InterviewQuestionBank {
     @Column(name = "question_type")
     private String questionType;
 
-    @Column(name = "created_at", nullable = false, updatable = false)
+    @Column(name = "user_job_id")
+    private UUID userJobId;
+
+    @Column(name = "questions_json", columnDefinition = "TEXT")
+    private String questionsJson;
+
+    @Column(name = "generated_at")
+    private Instant generatedAt;
+
+    @Column(name = "created_at")
     private Instant createdAt;
+
+    public void setTrackId(UUID trackId) {
+        this.interviewTrackId = trackId;
+    }
+    public UUID getTrackId() {
+        return this.interviewTrackId;
+    }
+
+    public void setCompany(String company) {
+        this.companyName = company;
+    }
+    public String getCompany() {
+        return this.companyName;
+    }
+
+    public void setGeneratedAt(java.time.LocalDateTime dt) {
+        if (dt != null) {
+            this.generatedAt = dt.atZone(java.time.ZoneId.systemDefault()).toInstant();
+        }
+    }
+    public java.time.LocalDateTime getGeneratedAt() {
+        if (this.generatedAt != null) {
+            return java.time.LocalDateTime.ofInstant(this.generatedAt, java.time.ZoneId.systemDefault());
+        }
+        return null;
+    }
 
     @PrePersist
     void onCreate() {

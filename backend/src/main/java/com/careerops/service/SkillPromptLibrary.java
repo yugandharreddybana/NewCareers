@@ -1,5 +1,6 @@
 package com.careerops.service;
 
+import com.careerops.dto.CareerMemoryDtos.MemoryResponse;
 import jakarta.annotation.PostConstruct;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -13,6 +14,7 @@ import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.List;
 import java.util.Map;
+import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 
 /**
@@ -65,6 +67,12 @@ public class SkillPromptLibrary {
         Map.entry("skills-gap-plan",     List.of("profile-schema.md", "scoring-rubric.md"))
     );
 
+    private final CareerMemoryService careerMemoryService;
+
+    public SkillPromptLibrary(CareerMemoryService careerMemoryService) {
+        this.careerMemoryService = careerMemoryService;
+    }
+
     @Value("${skill.prompt.upstream.owner:andrew-shwetzer}")
     private String upstreamOwner;
 
@@ -105,6 +113,10 @@ public class SkillPromptLibrary {
     // ================================================================
 
     public String buildFullSystemPrompt(String skillName) {
+        return buildFullSystemPrompt(skillName, null);
+    }
+
+    public String buildFullSystemPrompt(String skillName, UUID userId) {
         String skillMd = getSkillMd(skillName);
         List<String> refs = SKILL_REFS.getOrDefault(skillName, List.of());
 
@@ -115,6 +127,22 @@ public class SkillPromptLibrary {
             if (refContent != null && !refContent.isBlank()) {
                 sb.append("\n\n---\n## REFERENCE: ").append(ref).append("\n\n");
                 sb.append(refContent);
+            }
+        }
+
+        // Inject enabled career memories for personalisation
+        if (userId != null) {
+            try {
+                List<MemoryResponse> memories = careerMemoryService.listEnabled(userId);
+                if (!memories.isEmpty()) {
+                    sb.append("\n\n---\n## USER CAREER PREFERENCES (from Agent Memory)\n\n");
+                    sb.append("Use these known preferences to personalise your output:\n");
+                    for (CareerMemoryResponse m : memories) {
+                        sb.append("- **").append(m.key()).append("**: ").append(m.value()).append("\n");
+                    }
+                }
+            } catch (Exception e) {
+                log.debug("Could not load career memories for skill prompt: {}", e.getMessage());
             }
         }
 

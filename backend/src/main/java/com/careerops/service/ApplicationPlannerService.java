@@ -122,7 +122,7 @@ public class ApplicationPlannerService {
     public List<ApplicationTask> getUpcoming(UUID userId) {
         return taskRepo.findUpcomingByUser(
                 userId,
-                LocalDateTime.now(),
+                LocalDateTime.now().minusDays(30),
                 LocalDateTime.now().plusDays(14)
         );
     }

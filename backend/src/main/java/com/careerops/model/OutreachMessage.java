@@ -47,6 +47,13 @@ public class OutreachMessage {
     @Column
     private Short score;
 
+    @Builder.Default
+    @Column(nullable = false)
+    private boolean unsubscribed = false;
+
+    @Column(name = "send_time_hint", length = 50)
+    private String sendTimeHint;
+
     @Column(name = "created_at", nullable = false, updatable = false)
     private Instant createdAt;
 

@@ -39,6 +39,12 @@ router.post('/campaigns/:id/sequences',   authGuard, javaProxy);
 router.post('/campaigns/:id/messages',    authGuard, javaProxy);
 
 // PATCH  /api/outreach/messages/:messageId     → update message status
-router.patch('/messages/:messageId',       authGuard, javaProxy);
+router.patch('/messages/:messageId',                  authGuard, javaProxy);
+
+// PATCH  /api/outreach/messages/:messageId/unsubscribe → unsubscribe contact
+router.patch('/messages/:messageId/unsubscribe',      authGuard, javaProxy);
+
+// GET    /api/outreach/campaigns/:id/send-time → send time suggestion
+router.get('/campaigns/:id/send-time',                authGuard, javaProxy);
 
 export default router;

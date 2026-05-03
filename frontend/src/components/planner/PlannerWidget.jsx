@@ -49,7 +49,7 @@ export default function PlannerWidget({ onOpenJob }) {
   const [refreshKey, setRefreshKey] = useState(0);
   const { data, loading, error } = useUpcoming(refreshKey);
 
-  const { pendingTasks = [], upcomingEvents = [], overdueTasks = [] } = data;
+  const { pendingTasks = [], upcomingEvents = [], overdueTasks = [] } = data || {};
   const overdueCount = overdueTasks.length;
 
   if (loading) {
@@ -59,14 +59,6 @@ export default function PlannerWidget({ onOpenJob }) {
         {[...Array(3)].map((_, i) => (
           <div key={i} className="h-4 bg-gray-100 rounded mb-2" />
         ))}
-      </div>
-    );
-  }
-
-  if (error) {
-    return (
-      <div className="bg-white rounded-2xl border border-red-100 shadow-sm p-5">
-        <p className="text-red-500 text-sm">{error}</p>
       </div>
     );
   }
@@ -110,62 +102,65 @@ export default function PlannerWidget({ onOpenJob }) {
         </div>
       )}
 
-      {/* Upcoming deadlines */}
-      {upcomingEvents.length > 0 && (
-        <section>
-          <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2">Deadlines</p>
-          <ul className="space-y-2">
-            {upcomingEvents.slice(0, 4).map(ev => (
-              <li
-                key={ev.id}
-                className="flex items-center gap-3 text-sm cursor-pointer group"
-                onClick={() => onOpenJob?.(ev.userJobId)}
-              >
-                <span className="text-lg">{EVENT_ICONS[ev.eventType] ?? '📌'}</span>
-                <div className="flex-1 min-w-0">
-                  <p className="truncate text-gray-700 group-hover:text-blue-600 transition-colors">
-                    {ev.title}
-                  </p>
-                </div>
-                <span className={`text-xs font-medium ${
-                  isPast(new Date(ev.eventDate)) ? 'text-red-500' : 'text-gray-400'
-                }`}>
-                  {formatDate(ev.eventDate)}
-                </span>
-              </li>
-            ))}
-          </ul>
-        </section>
-      )}
-
-      {/* Pending tasks */}
-      {pendingTasks.length > 0 && (
-        <section>
-          <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2">Tasks</p>
-          <ul className="space-y-2">
-            {pendingTasks.slice(0, 5).map(t => (
-              <li
-                key={t.id}
-                className="flex items-center gap-3 text-sm cursor-pointer group"
-                onClick={() => onOpenJob?.(t.userJobId)}
-              >
-                <span className={`inline-block w-2 h-2 rounded-full flex-shrink-0 ${
-                  t.priority === 'HIGH' ? 'bg-red-400' :
-                  t.priority === 'MEDIUM' ? 'bg-yellow-400' : 'bg-green-400'
-                }`} />
-                <p className="flex-1 truncate text-gray-700 group-hover:text-blue-600 transition-colors">
-                  {t.title}
-                </p>
-                {t.dueDate && (
-                  <span className="text-xs text-gray-400 flex-shrink-0">
-                    {formatDate(t.dueDate)}
+      {/* Grid container for deadlines and pending tasks when side-by-side */}
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+        {/* Upcoming deadlines */}
+        {upcomingEvents.length > 0 ? (
+          <section>
+            <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2">Deadlines</p>
+            <ul className="space-y-2">
+              {upcomingEvents.slice(0, 4).map(ev => (
+                <li
+                  key={ev.id}
+                  className="flex items-center gap-3 text-sm cursor-pointer group"
+                  onClick={() => onOpenJob?.(ev.userJobId)}
+                >
+                  <span className="text-lg">{EVENT_ICONS[ev.eventType] ?? '📌'}</span>
+                  <div className="flex-1 min-w-0">
+                    <p className="truncate text-gray-700 group-hover:text-blue-600 transition-colors">
+                      {ev.title}
+                    </p>
+                  </div>
+                  <span className={`text-xs font-medium ${
+                    isPast(new Date(ev.eventDate)) ? 'text-red-500' : 'text-gray-400'
+                  }`}>
+                    {formatDate(ev.eventDate)}
                   </span>
-                )}
-              </li>
-            ))}
-          </ul>
-        </section>
-      )}
+                </li>
+              ))}
+            </ul>
+          </section>
+        ) : null}
+
+        {/* Pending tasks */}
+        {pendingTasks.length > 0 ? (
+          <section>
+            <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2">Tasks</p>
+            <ul className="space-y-2">
+              {pendingTasks.slice(0, 5).map(t => (
+                <li
+                  key={t.id}
+                  className="flex items-center gap-3 text-sm cursor-pointer group"
+                  onClick={() => onOpenJob?.(t.userJobId)}
+                >
+                  <span className={`inline-block w-2 h-2 rounded-full flex-shrink-0 ${
+                    t.priority === 'HIGH' ? 'bg-red-400' :
+                    t.priority === 'MEDIUM' ? 'bg-yellow-400' : 'bg-green-400'
+                  }`} />
+                  <p className="flex-1 truncate text-gray-700 group-hover:text-blue-600 transition-colors">
+                    {t.title}
+                  </p>
+                  {t.dueDate && (
+                    <span className="text-xs text-gray-400 flex-shrink-0">
+                      {formatDate(t.dueDate)}
+                    </span>
+                  )}
+                </li>
+              ))}
+            </ul>
+          </section>
+        ) : null}
+      </div>
 
       {/* Empty state */}
       {pendingTasks.length === 0 && upcomingEvents.length === 0 && overdueCount === 0 && (

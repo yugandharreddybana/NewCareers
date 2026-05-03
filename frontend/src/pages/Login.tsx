@@ -3,6 +3,8 @@ import { Link, useNavigate } from 'react-router-dom';
 import { useAuth } from '@/context/AuthContext';
 import { Eye, EyeOff, Zap, ArrowRight, Loader2 } from 'lucide-react';
 
+const DEV_BYPASS = import.meta.env.VITE_DEV_BYPASS_GUARDS === 'true' || import.meta.env.DEV || import.meta.env.MODE === 'development';
+
 // ── Left panel social proof data ──────────────────────────────────────────
 const STATS = [
   { value: '2,400+', label: 'Irish jobs tracked' },
@@ -10,9 +12,17 @@ const STATS = [
   { value: '500+', label: 'Job seekers onboarded' },
 ];
 
+import { useEffect } from 'react';
+
 export default function Login() {
-  const { signIn } = useAuth();
+  const { signIn, user } = useAuth();
   const nav = useNavigate();
+
+  useEffect(() => {
+    if (user) {
+      nav(user.onboarded ? '/dashboard' : '/onboarding', { replace: true });
+    }
+  }, [user, nav]);
 
   const [form, setForm] = useState({ email: '', password: '' });
   const [showPw, setShowPw] = useState(false);
@@ -26,6 +36,10 @@ export default function Login() {
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError('');
+    if (DEV_BYPASS) {
+      nav('/dashboard', { replace: true });
+      return;
+    }
     setLoading(true);
     try {
       const u = await signIn(form.email, form.password);

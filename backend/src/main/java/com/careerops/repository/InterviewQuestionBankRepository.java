@@ -10,5 +10,7 @@ import java.util.UUID;
 @Repository
 public interface InterviewQuestionBankRepository extends JpaRepository<InterviewQuestionBank, UUID> {
     List<InterviewQuestionBank> findByUserJobId(UUID userJobId);
-    List<InterviewQuestionBank> findByTrackId(UUID trackId);
+
+    @org.springframework.data.jpa.repository.Query("SELECT b FROM InterviewQuestionBank b WHERE b.interviewTrackId = :trackId")
+    List<InterviewQuestionBank> findByTrackId(@org.springframework.data.repository.query.Param("trackId") UUID trackId);
 }

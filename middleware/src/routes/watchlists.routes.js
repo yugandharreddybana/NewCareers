@@ -39,4 +39,7 @@ router.post('/:id/toggle', authGuard, javaProxy);
 // GET  /api/watchlists/:id/runs     → run history
 router.get('/:id/runs', authGuard, javaProxy);
 
+// GET  /api/watchlists/suggestions  → smart query suggestions from profile
+router.get('/suggestions', authGuard, javaProxy);
+
 export default router;

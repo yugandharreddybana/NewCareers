@@ -48,4 +48,15 @@ public class ResumeVersionDtos {
     public record ResumeVersionListResponse(List<ResumeVersionResponse> versions, int total) {}
 
     public record RecordOutcomeRequest(String outcome) {}
+
+    public record CompareResponse(
+        ResumeVersionResponse left,
+        ResumeVersionResponse right,
+        String recommendation
+    ) {}
+
+    public record RecommendResponse(
+        ResumeVersionResponse recommended,
+        String reason
+    ) {}
 }

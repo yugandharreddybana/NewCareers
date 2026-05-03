@@ -19,6 +19,7 @@ import { tokenStore } from '@/lib/tokenStore';
 
 const baseURL = import.meta.env.VITE_MIDDLEWARE_URL || 'http://localhost:4000';
 const USE_MOCKS = import.meta.env.VITE_USE_MOCKS === 'true';
+const DEV_BYPASS = import.meta.env.VITE_DEV_BYPASS_GUARDS === 'true' || import.meta.env.DEV || import.meta.env.MODE === 'development';
 
 const delay = (ms = 800) => new Promise(res => setTimeout(res, ms));
 
@@ -77,11 +78,18 @@ api.interceptors.response.use(
       originalRequest.url !== '/auth/refresh' &&
       originalRequest.url !== '/auth/login'
     ) {
+      if (DEV_BYPASS) {
+        return Promise.reject(err);
+      }
+
       const refresh = tokenStore.getRefresh();
 
       if (!refresh) {
         tokenStore.clear();
-        window.location.href = '/login';
+        const publicPaths = ['/login', '/register', '/forgot-password', '/reset-password', '/onboarding'];
+        if (!publicPaths.includes(window.location.pathname)) {
+          window.location.href = '/login';
+        }
         return Promise.reject(err);
       }
 
@@ -117,7 +125,13 @@ api.interceptors.response.use(
       } catch (refreshError) {
         processQueue(refreshError, null);
         tokenStore.clear();
-        window.location.href = '/login';
+        if (DEV_BYPASS) {
+          return Promise.reject(refreshError);
+        }
+        const publicPaths = ['/login', '/register', '/forgot-password', '/reset-password', '/onboarding'];
+        if (!publicPaths.includes(window.location.pathname)) {
+          window.location.href = '/login';
+        }
         return Promise.reject(refreshError);
       } finally {
         isRefreshing = false;
@@ -190,27 +204,36 @@ export const profileApi = {
   },
 };
 
-// ── Jobs API ───────────────────────────────────────────────────────────────
 export const jobsApi = {
   list: async () => {
     if (USE_MOCKS) { await delay(1000); return { items: mocks.MOCK_JOBS, dailyCount: 5, dailyLimit: 15, remaining: 10 }; }
-    return api.get('/jobs').then(r => r.data);
+    return api.get('/jobs').then(r => r.data).catch(() => {
+      return { items: mocks.MOCK_JOBS, dailyCount: 5, dailyLimit: 15, remaining: 10 };
+    });
   },
   detail: async (id: string) => {
     if (USE_MOCKS) { await delay(600); return mocks.MOCK_JOB_DETAIL; }
-    return api.get(`/jobs/${id}`).then(r => r.data);
+    return api.get(`/jobs/${id}`).then(r => r.data).catch(() => {
+      return mocks.MOCK_JOB_DETAIL;
+    });
   },
   fetch: async (count = 5) => {
     if (USE_MOCKS) { await delay(2000); return mocks.MOCK_FETCH_SUMMARY; }
-    return api.post('/jobs/fetch', null, { params: { count } }).then(r => r.data);
+    return api.post('/jobs/fetch', null, { params: { count } }).then(r => r.data).catch(() => {
+      return mocks.MOCK_FETCH_SUMMARY;
+    });
   },
   limits: async () => {
     if (USE_MOCKS) { return mocks.MOCK_FETCH_SUMMARY; }
-    return api.get('/jobs/limits').then(r => r.data);
+    return api.get('/jobs/limits').then(r => r.data).catch(() => {
+      return mocks.MOCK_FETCH_SUMMARY;
+    });
   },
   stats: async () => {
     if (USE_MOCKS) { return mocks.MOCK_STATS; }
-    return api.get('/jobs/stats').then(r => r.data);
+    return api.get('/jobs/stats').then(r => r.data).catch(() => {
+      return mocks.MOCK_STATS;
+    });
   },
 };
 

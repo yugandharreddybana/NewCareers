@@ -1,7 +1,7 @@
 import { useEffect, useState, useCallback } from 'react';
 import { outreachApi, type OutreachCampaign } from '@/api/outreachApi';
 import toast from 'react-hot-toast';
-import { MessageSquare, Plus, Rocket, Trash2, ChevronDown, ChevronRight, Send, MailCheck, MessageCircle } from 'lucide-react';
+import { MessageSquare, Plus, Rocket, Trash2, ChevronDown, ChevronRight, Send, MailCheck, MessageCircle, Clock, UserMinus } from 'lucide-react';
 
 const TYPE_LABELS: Record<string, string> = {
   recruiter_outreach: 'Recruiter Outreach',
@@ -33,6 +33,7 @@ export default function OutreachPage() {
   const [form, setForm]           = useState({ name: '', campaignType: 'recruiter_outreach' });
   const [expanded, setExpanded]   = useState<Record<string, boolean>>({});
   const [detail, setDetail]       = useState<Record<string, OutreachCampaign>>({});
+  const [sendTimes, setSendTimes] = useState<Record<string, { bestDay: string; bestHour: string; rationale: string }>>({});
 
   const load = useCallback(async () => {
     try {
@@ -85,6 +86,32 @@ export default function OutreachPage() {
       toast.success('Campaign launched!');
     } catch {
       toast.error('Failed to launch');
+    }
+  }
+
+  async function handleUnsubscribe(campaignId: string, messageId: string) {
+    try {
+      const updated = await outreachApi.unsubscribeMessage(messageId);
+      setDetail(prev => ({
+        ...prev,
+        [campaignId]: {
+          ...prev[campaignId],
+          messages: prev[campaignId].messages.map(m => m.id === messageId ? updated : m),
+        },
+      }));
+      toast.success('Contact unsubscribed');
+    } catch {
+      toast.error('Failed to unsubscribe');
+    }
+  }
+
+  async function handleLoadSendTime(id: string) {
+    if (sendTimes[id]) return;
+    try {
+      const st = await outreachApi.getSendTime(id);
+      setSendTimes(prev => ({ ...prev, [id]: st }));
+    } catch {
+      toast.error('Failed to load send time');
     }
   }
 
@@ -246,6 +273,13 @@ export default function OutreachPage() {
                       </button>
                     )}
                     <button
+                      onClick={() => handleLoadSendTime(c.id)}
+                      title="Best send time"
+                      className="p-1.5 text-text-tertiary hover:text-brand-500 transition-colors"
+                    >
+                      <Clock size={14} />
+                    </button>
+                    <button
                       onClick={() => handleDelete(c.id)}
                       className="p-1.5 text-text-tertiary hover:text-danger-500 transition-colors"
                     >
@@ -256,6 +290,16 @@ export default function OutreachPage() {
 
                 {expanded[c.id] && (
                   <div className="border-t border-border px-4 py-4 space-y-4">
+                    {/* Send time hint */}
+                    {sendTimes[c.id] && (
+                      <div className="bg-blue-50 border border-blue-200 rounded-lg p-3 text-xs text-blue-800">
+                        <p className="font-semibold flex items-center gap-1 mb-1">
+                          <Clock size={11} /> Best Send Time
+                        </p>
+                        <p><strong>{sendTimes[c.id].bestDay}</strong> at {sendTimes[c.id].bestHour}</p>
+                        <p className="text-blue-600 mt-0.5">{sendTimes[c.id].rationale}</p>
+                      </div>
+                    )}
                     {/* Sequences */}
                     {d.sequences?.length > 0 && (
                       <div>
@@ -300,7 +344,9 @@ export default function OutreachPage() {
                         <div className="space-y-2">
                           {d.messages.map(m => (
                             <div key={m.id}
-                                 className="flex items-center gap-3 text-sm py-2 border-b border-border last:border-0">
+                                 className={`flex items-center gap-3 text-sm py-2 border-b border-border last:border-0 ${
+                                   m.unsubscribed ? 'opacity-40' : ''
+                                 }`}>
                               <div className="flex-1 min-w-0">
                                 <span className="font-medium text-text-primary">
                                   {m.contactName ?? 'Unknown'}
@@ -308,6 +354,11 @@ export default function OutreachPage() {
                                 {m.score && (
                                   <span className="ml-2 text-[10px] text-text-tertiary">
                                     score: {m.score}
+                                  </span>
+                                )}
+                                {m.unsubscribed && (
+                                  <span className="ml-2 text-[10px] text-red-500 font-medium">
+                                    unsubscribed
                                   </span>
                                 )}
                               </div>
@@ -318,6 +369,15 @@ export default function OutreachPage() {
                                 <span className="text-[11px] text-text-tertiary">
                                   {new Date(m.sentAt).toLocaleDateString()}
                                 </span>
+                              )}
+                              {!m.unsubscribed && (
+                                <button
+                                  onClick={() => handleUnsubscribe(c.id, m.id)}
+                                  title="Mark as unsubscribed"
+                                  className="p-1 text-text-tertiary hover:text-danger-500 transition-colors"
+                                >
+                                  <UserMinus size={12} />
+                                </button>
                               )}
                             </div>
                           ))}

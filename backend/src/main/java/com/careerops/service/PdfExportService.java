@@ -73,6 +73,16 @@ public class PdfExportService {
         return html.toString().getBytes(StandardCharsets.UTF_8);
     }
 
+    public byte[] generateSkillPdf(UUID userId, UUID userJobId, String skillName) {
+        String html = "<!DOCTYPE html><html><body><h1>" + esc(skillName) + "</h1><p>User Job: " + userJobId + "</p></body></html>";
+        return html.getBytes(StandardCharsets.UTF_8);
+    }
+
+    public byte[] generateAllSkillsPdf(UUID userId, UUID userJobId) {
+        String html = "<!DOCTYPE html><html><body><h1>All Skills Report</h1><p>User Job: " + userJobId + "</p></body></html>";
+        return html.getBytes(StandardCharsets.UTF_8);
+    }
+
     public byte[] generateResumePdf(UUID userId, UUID userJobId) {
         return "Not implemented".getBytes(StandardCharsets.UTF_8);
     }

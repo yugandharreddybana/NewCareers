@@ -57,4 +57,9 @@ public class WatchlistController {
     public List<WatchlistRunResponse> getRuns(@PathVariable UUID id) {
         return watchlistService.getRuns(AuthUtil.currentUserId(), id);
     }
+
+    @GetMapping("/suggestions")
+    public List<String> getSuggestions() {
+        return watchlistService.getSuggestions(AuthUtil.currentUserId());
+    }
 }

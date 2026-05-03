@@ -61,10 +61,18 @@ public class OutreachDtos {
         String personalisedBody,
         String status,
         Short score,
+        boolean unsubscribed,
+        String sendTimeHint,
         Instant sentAt,
         Instant repliedAt,
         Instant createdAt
     ) {}
 
     public record UpdateMessageStatusRequest(String status) {}
+
+    public record SendTimeSuggestionResponse(
+        String bestDay,
+        String bestHour,
+        String rationale
+    ) {}
 }

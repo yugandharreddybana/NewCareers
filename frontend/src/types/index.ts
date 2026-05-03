@@ -105,9 +105,10 @@ export interface Stats {
 
 export type SkillName =
   | 'evaluate' | 'tailor-resume' | 'research' | 'outreach'
-  | 'apply'    | 'prep-interview' | 'compare' | 'triage';
+  | 'apply' | 'prep-interview' | 'compare' | 'triage' | 'scan' | 'salary-negotiation' | 'culture-fit'
+  | 'linkedin-optimize' | 'cover-letter' | 'skills-gap-plan';
 
 export type SkillState = 'idle' | 'loading' | 'done' | 'locked' | 'error';
 
-export const KANBAN_COLUMNS = ['Discovered','Saved','Applied','Interview','Offer','Rejected'] as const;
+export const KANBAN_COLUMNS = ['Discovered', 'Saved', 'Applied', 'Interview', 'Offer', 'Rejected'] as const;
 export type KanbanColumn = typeof KANBAN_COLUMNS[number];

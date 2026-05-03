@@ -1,7 +1,8 @@
 import { useEffect, useState, useCallback } from 'react';
 import { autoApplyApi, type AnswerBankEntry, type ApplicationRun } from '@/api/autoApplyApi';
+import { resumeVersionApi, type ResumeVersion } from '@/api/resumeVersionApi';
 import toast from 'react-hot-toast';
-import { Zap, CheckCircle2, Clock, XCircle, AlertCircle, ChevronDown, ChevronRight, Plus, Trash2, Edit2 } from 'lucide-react';
+import { Zap, CheckCircle2, Clock, XCircle, AlertCircle, ChevronDown, ChevronRight, Plus, Trash2, Edit2, FileText } from 'lucide-react';
 
 const QUESTION_LABELS: Record<string, string> = {
   work_authorization:  'Work Authorisation',
@@ -42,6 +43,7 @@ export default function AutoApplyPage() {
   const [addVal, setAddVal]         = useState('');
   const [showAdd, setShowAdd]       = useState(false);
   const [expanded, setExpanded]     = useState<Record<string, boolean>>({});
+  const [versions, setVersions]     = useState<ResumeVersion[]>([]);
 
   const load = useCallback(async () => {
     try {
@@ -59,6 +61,10 @@ export default function AutoApplyPage() {
   }, []);
 
   useEffect(() => { load(); }, [load]);
+
+  useEffect(() => {
+    resumeVersionApi.list().then(d => setVersions(d.versions)).catch(() => {});
+  }, []);
 
   async function handleSaveEdit(entry: AnswerBankEntry) {
     try {
@@ -136,24 +142,43 @@ export default function AutoApplyPage() {
       {loading ? (
         <div className="text-center py-16 text-text-tertiary">Loading…</div>
       ) : tab === 'answers' ? (
-        <AnswerBankTab
-          answers={answers}
-          editKey={editKey}
-          editVal={editVal}
-          showAdd={showAdd}
-          addKey={addKey}
-          addVal={addVal}
-          onEdit={(a) => { setEditKey(a.questionKey); setEditVal(a.answerText); }}
-          onEditChange={setEditVal}
-          onEditSave={handleSaveEdit}
-          onEditCancel={() => setEditKey(null)}
-          onDelete={handleDeleteAnswer}
-          onShowAdd={() => setShowAdd(s => !s)}
-          onAddKey={setAddKey}
-          onAddVal={setAddVal}
-          onAddSubmit={handleAddAnswer}
-          onAddCancel={() => setShowAdd(false)}
-        />
+        <>
+          {/* Active resume version banner */}
+          {versions.length > 0 && (
+            <div className="bg-surface-raised border border-border rounded-xl px-4 py-3 flex items-center gap-3 text-sm">
+              <FileText size={14} className="text-brand-500 shrink-0" />
+              <span className="text-text-secondary">Resume for auto-apply:</span>
+              <span className="font-medium text-text-primary">
+                {(() => {
+                  const active = versions.find(v => v.isActive);
+                  return active ? `v${active.versionNumber} — ${active.name}` : 'No active version set';
+                })()}
+              </span>
+              <a href="/resume-versions"
+                 className="ml-auto text-xs text-brand-500 hover:underline">
+                Change →
+              </a>
+            </div>
+          )}
+          <AnswerBankTab
+            answers={answers}
+            editKey={editKey}
+            editVal={editVal}
+            showAdd={showAdd}
+            addKey={addKey}
+            addVal={addVal}
+            onEdit={(a) => { setEditKey(a.questionKey); setEditVal(a.answerText); }}
+            onEditChange={setEditVal}
+            onEditSave={handleSaveEdit}
+            onEditCancel={() => setEditKey(null)}
+            onDelete={handleDeleteAnswer}
+            onShowAdd={() => setShowAdd(s => !s)}
+            onAddKey={setAddKey}
+            onAddVal={setAddVal}
+            onAddSubmit={handleAddAnswer}
+            onAddCancel={() => setShowAdd(false)}
+          />
+        </>
       ) : (
         <RunHistoryTab
           runs={runs}

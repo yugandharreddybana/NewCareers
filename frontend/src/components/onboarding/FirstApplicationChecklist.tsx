@@ -2,6 +2,7 @@
 import React, { useEffect, useState } from 'react';
 import axios from '../../api/axiosInstance';
 import { useOnboardingTracker } from '../../hooks/useOnboardingTracker';
+import { CheckCircle2, Circle, X, ArrowRight } from 'lucide-react';
 
 interface ChecklistStep {
   key: string;
@@ -41,59 +42,105 @@ export const FirstApplicationChecklist: React.FC = () => {
 
   return (
     <div
-      className={`checklist-panel${collapsed ? ' checklist-panel--collapsed' : ''}${allDone ? ' checklist-panel--complete' : ''}`}
+      className="bg-white border border-slate-200 rounded-2xl p-6 mb-6 shadow-sm animate-enter"
       role="region"
       aria-label="Getting started checklist"
     >
-      <div className="checklist-header">
-        <div className="checklist-header__left">
-          <span className="checklist-icon" aria-hidden="true">{allDone ? '🎉' : '🚀'}</span>
-          <div>
-            <h3 className="checklist-title">
-              {allDone ? "You're all set!" : 'Get your first application out'}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+        <div className="flex items-center gap-4">
+          <div className="w-12 h-12 rounded-xl bg-brand-50 flex items-center justify-center shrink-0 text-xl">
+            {allDone ? '🎉' : '🚀'}
+          </div>
+          <div className="flex-1">
+            <h3 className="text-base font-bold text-slate-900 flex items-center gap-2">
+              {allDone ? "You're all set!" : 'Onboarding Checklist: Get your first application out'}
+              <span className="text-xs font-medium text-slate-400 bg-slate-100 px-2.5 py-0.5 rounded-full">
+                {completedCount} / {steps.length} steps completed
+              </span>
             </h3>
-            <div
-              className="checklist-progress-bar"
-              role="progressbar"
-              aria-valuenow={completedCount}
-              aria-valuemin={0}
-              aria-valuemax={steps.length}
-              aria-label={`${completedCount} of ${steps.length} steps complete`}
-            >
-              <div className="checklist-progress-bar__fill" style={{ width: `${(completedCount / steps.length) * 100}%` }} />
-            </div>
-            <span className="checklist-progress-text">{completedCount} / {steps.length} complete</span>
+            <p className="text-sm text-slate-500 mt-0.5">
+              Follow these simple steps to supercharge your career search with AI.
+            </p>
           </div>
         </div>
-        <div className="checklist-header__actions">
-          <button className="btn-icon" onClick={() => setCollapsed(c => !c)} aria-label={collapsed ? 'Expand checklist' : 'Collapse checklist'}>
-            {collapsed ? '▲' : '▼'}
+        <div className="flex items-center gap-2 shrink-0">
+          <button
+            onClick={() => setCollapsed(c => !c)}
+            className="flex items-center gap-1 px-3 py-1.5 bg-slate-50 hover:bg-slate-100 text-slate-600 rounded-xl font-semibold text-xs border border-slate-200 transition-all select-none"
+          >
+            {collapsed ? 'Expand Checklist' : 'Collapse Checklist'}
           </button>
           {allDone && (
-            <button className="btn-icon" onClick={() => { setDismissed(true); trackStep('first_application','completed'); }} aria-label="Dismiss checklist">✕</button>
+            <button
+              onClick={() => { setDismissed(true); trackStep('first_application','completed'); }}
+              className="p-1.5 hover:bg-rose-50 text-slate-400 hover:text-rose-500 rounded-xl transition-all"
+              aria-label="Dismiss checklist"
+            >
+              <X size={16} />
+            </button>
           )}
         </div>
       </div>
 
       {!collapsed && (
-        <ul className="checklist-steps" role="list">
-          {steps.map(step => (
-            <li key={step.key} className={`checklist-step${step.completed ? ' checklist-step--done' : ''}`}>
-              <span className="checklist-step__tick" aria-hidden="true">{step.completed ? '✅' : '⬜'}</span>
-              <div className="checklist-step__content">
-                <span className="checklist-step__label">{step.label}</span>
-                {!step.completed && (
-                  <>
-                    <span className="checklist-step__desc">{step.description}</span>
-                    {step.href && (
-                      <a href={step.href} className="checklist-step__link">Go →</a>
+        <div className="mt-6 pt-5 border-t border-slate-100 space-y-4">
+          {/* Progress bar */}
+          <div className="flex items-center gap-3">
+            <div className="flex-1 bg-slate-100 h-2 rounded-full overflow-hidden">
+              <div
+                className="bg-emerald-500 h-full rounded-full transition-all duration-500"
+                style={{ width: `${(completedCount / steps.length) * 100}%` }}
+              />
+            </div>
+            <span className="text-xs font-bold text-emerald-600 shrink-0">
+              {Math.round((completedCount / steps.length) * 100)}%
+            </span>
+          </div>
+
+          {/* Steps grid */}
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mt-4">
+            {steps.map(step => (
+              <div
+                key={step.key}
+                className={`p-3.5 rounded-xl border flex items-start gap-3 transition-all ${
+                  step.completed
+                    ? 'bg-emerald-50/30 border-emerald-100/60'
+                    : 'bg-white border-slate-200 hover:border-slate-300'
+                }`}
+              >
+                <div className="shrink-0 mt-0.5">
+                  {step.completed ? (
+                    <CheckCircle2 size={18} className="text-emerald-500" />
+                  ) : (
+                    <Circle size={18} className="text-slate-300" />
+                  )}
+                </div>
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center justify-between gap-2">
+                    <span className={`text-sm font-semibold truncate ${
+                      step.completed ? 'text-slate-500 line-through' : 'text-slate-800'
+                    }`}>
+                      {step.label}
+                    </span>
+                    {step.href && !step.completed && (
+                      <a
+                        href={step.href}
+                        className="flex items-center gap-1 text-xs font-bold bg-brand-50 hover:bg-brand-100 text-brand-600 px-2.5 py-1 rounded-lg transition-all shrink-0"
+                      >
+                        Go <ArrowRight size={12} />
+                      </a>
                     )}
-                  </>
-                )}
+                  </div>
+                  <p className={`text-xs mt-1 leading-relaxed ${
+                    step.completed ? 'text-slate-400' : 'text-slate-500'
+                  }`}>
+                    {step.description}
+                  </p>
+                </div>
               </div>
-            </li>
-          ))}
-        </ul>
+            ))}
+          </div>
+        </div>
       )}
     </div>
   );

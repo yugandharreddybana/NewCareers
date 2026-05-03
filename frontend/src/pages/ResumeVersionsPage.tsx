@@ -1,7 +1,7 @@
 import { useEffect, useState, useCallback } from 'react';
-import { resumeVersionApi, type ResumeVersion } from '@/api/resumeVersionApi';
+import { resumeVersionApi, type ResumeVersion, type CompareResult } from '@/api/resumeVersionApi';
 import toast from 'react-hot-toast';
-import { FileText, Plus, Star, Trash2, CheckCircle, Tag } from 'lucide-react';
+import { FileText, Plus, Star, Trash2, CheckCircle, Tag, GitCompare, Lightbulb } from 'lucide-react';
 
 const OUTCOME_OPTS = ['unknown', 'rejection', 'interview', 'offer'];
 const OUTCOME_COLORS: Record<string, string> = {
@@ -24,6 +24,11 @@ export default function ResumeVersionsPage() {
     notes: '',
     bestForRoleType: '',
   });
+  const [compareLeft, setCompareLeft]   = useState('');
+  const [compareRight, setCompareRight] = useState('');
+  const [compareResult, setCompareResult] = useState<CompareResult | null>(null);
+  const [comparing, setComparing]       = useState(false);
+  const [recommend, setRecommend]       = useState<{ recommended: ResumeVersion; reason: string } | null>(null);
 
   const load = useCallback(async () => {
     try {
@@ -89,6 +94,32 @@ export default function ResumeVersionsPage() {
     }
   }
 
+  async function handleCompare() {
+    if (!compareLeft || !compareRight || compareLeft === compareRight) {
+      toast.error('Select two different versions to compare');
+      return;
+    }
+    try {
+      setComparing(true);
+      const r = await resumeVersionApi.compare(compareLeft, compareRight);
+      setCompareResult(r);
+    } catch {
+      toast.error('Compare failed');
+    } finally {
+      setComparing(false);
+    }
+  }
+
+  async function handleRecommend() {
+    try {
+      const r = await resumeVersionApi.recommend();
+      setRecommend(r);
+      toast.success('Recommendation loaded');
+    } catch {
+      toast.error('No versions to recommend from');
+    }
+  }
+
   async function handleDelete(id: string) {
     if (!confirm('Delete this resume version?')) return;
     try {
@@ -145,6 +176,92 @@ export default function ResumeVersionsPage() {
               <p className="text-xs text-text-tertiary mt-1">{s.label}</p>
             </div>
           ))}
+        </div>
+      )}
+
+      {/* Compare + Recommend tools */}
+      {versions.length >= 2 && (
+        <div className="bg-white border border-border rounded-xl p-5 space-y-4">
+          <div className="flex items-center justify-between">
+            <h3 className="font-semibold text-sm text-text-primary flex items-center gap-2">
+              <GitCompare size={15} className="text-brand-500" />
+              Compare Versions
+            </h3>
+            <button
+              onClick={handleRecommend}
+              className="flex items-center gap-1.5 px-3 py-1.5 bg-surface-raised text-text-secondary
+                         rounded-lg text-xs font-medium hover:bg-surface-overlay transition-colors"
+            >
+              <Lightbulb size={12} className="text-yellow-500" />
+              Recommend Best
+            </button>
+          </div>
+
+          {recommend && (
+            <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-3 text-sm">
+              <p className="font-medium text-yellow-800">
+                Recommended: v{recommend.recommended.versionNumber} — {recommend.recommended.name}
+              </p>
+              <p className="text-yellow-700 text-xs mt-1">{recommend.reason}</p>
+            </div>
+          )}
+
+          <div className="flex items-center gap-3">
+            <select
+              className="flex-1 border border-border rounded-lg px-3 py-2 text-sm"
+              value={compareLeft}
+              onChange={e => setCompareLeft(e.target.value)}
+            >
+              <option value="">Select version A</option>
+              {versions.map(v => (
+                <option key={v.id} value={v.id}>v{v.versionNumber} — {v.name}</option>
+              ))}
+            </select>
+            <span className="text-text-tertiary text-xs">vs</span>
+            <select
+              className="flex-1 border border-border rounded-lg px-3 py-2 text-sm"
+              value={compareRight}
+              onChange={e => setCompareRight(e.target.value)}
+            >
+              <option value="">Select version B</option>
+              {versions.map(v => (
+                <option key={v.id} value={v.id}>v{v.versionNumber} — {v.name}</option>
+              ))}
+            </select>
+            <button
+              onClick={handleCompare}
+              disabled={comparing}
+              className="px-4 py-2 bg-brand-500 text-white rounded-lg text-sm font-medium
+                         hover:bg-brand-600 transition-colors disabled:opacity-50"
+            >
+              {comparing ? 'Comparing…' : 'Compare'}
+            </button>
+          </div>
+
+          {compareResult && (
+            <div className="space-y-3">
+              <div className="grid grid-cols-2 gap-3 text-sm">
+                {[compareResult.left, compareResult.right].map(v => (
+                  <div key={v.id} className="bg-surface-raised rounded-lg p-3">
+                    <p className="font-semibold text-text-primary">v{v.versionNumber} — {v.name}</p>
+                    <div className="mt-2 space-y-1 text-xs text-text-secondary">
+                      <p>{v.applicationCount} apps · {v.interviewCount} interviews · {v.offerCount} offers</p>
+                      {v.applicationCount > 0 && (
+                        <p className="text-text-tertiary">
+                          {Math.round((v.interviewCount / v.applicationCount) * 100)}% interview rate
+                        </p>
+                      )}
+                      {v.bestForRoleType && <p className="text-text-tertiary">Best for: {v.bestForRoleType}</p>}
+                    </div>
+                  </div>
+                ))}
+              </div>
+              <div className="bg-brand-50 border border-brand-200 rounded-lg p-3 text-sm text-brand-800">
+                <p className="font-medium mb-1">Recommendation</p>
+                <p className="text-xs">{compareResult.recommendation}</p>
+              </div>
+            </div>
+          )}
         </div>
       )}
 

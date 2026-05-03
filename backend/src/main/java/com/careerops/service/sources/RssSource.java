@@ -32,13 +32,10 @@ public class RssSource implements JobSource {
         List<Job> out = new ArrayList<>();
         SyndFeedInput input = new SyndFeedInput();
         for (String feed : FEEDS) {
-            try (
-                // Use XmlReader(InputStream) — the XmlReader(URL) constructor is deprecated
-                // in Rome 2.x; opening the stream explicitly avoids the compiler warning.
-                var conn = new URL(feed).openConnection();
-                XmlReader r = new XmlReader(conn.getInputStream())
-            ) {
-                SyndFeed f = input.build(r);
+            try {
+                URL url = java.net.URI.create(feed).toURL();
+                try (XmlReader r = new XmlReader(url.openStream())) {
+                    SyndFeed f = input.build(r);
                 for (SyndEntry e : f.getEntries()) {
                     String title   = e.getTitle() == null ? "Untitled" : e.getTitle();
                     String desc    = e.getDescription() == null ? "" : e.getDescription().getValue();
@@ -57,6 +54,7 @@ public class RssSource implements JobSource {
                         .build();
                     j.setFingerprint(FingerprintUtil.of(j.getCompany(), j.getTitle(), j.getLocation()));
                     out.add(j);
+                }
                 }
             } catch (Exception e) {
                 log.warn("RSS feed failed {}: {}", feed, e.getMessage());

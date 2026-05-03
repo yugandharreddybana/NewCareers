@@ -1,7 +1,7 @@
 import { useEffect, useState, useCallback } from 'react';
 import { agentMemoryApi, type CareerMemory } from '@/api/agentMemoryApi';
 import toast from 'react-hot-toast';
-import { Brain, Plus, Trash2, ToggleLeft, ToggleRight, ChevronDown, ChevronRight } from 'lucide-react';
+import { Brain, Plus, Trash2, ToggleLeft, ToggleRight, ChevronDown, ChevronRight, RotateCcw } from 'lucide-react';
 
 const CATEGORIES = [
   { id: '',                  label: 'All' },
@@ -73,6 +73,17 @@ export default function AgentMemoryPage() {
     }
   }
 
+  async function handleResetAll() {
+    if (!confirm('Reset ALL memories? This cannot be undone.')) return;
+    try {
+      await agentMemoryApi.resetAll();
+      setMemories([]);
+      toast.success('All memories cleared');
+    } catch {
+      toast.error('Failed to reset');
+    }
+  }
+
   // Group by category
   const grouped = memories.reduce<Record<string, CareerMemory[]>>((acc, m) => {
     (acc[m.category] ??= []).push(m);
@@ -94,14 +105,26 @@ export default function AgentMemoryPage() {
             What the AI knows about your career preferences — toggle to exclude from context
           </p>
         </div>
-        <button
-          onClick={() => setCreating(c => !c)}
-          className="flex items-center gap-2 px-4 py-2 bg-brand-500 text-white rounded-lg
-                     text-sm font-medium hover:bg-brand-600 transition-colors"
-        >
-          <Plus size={16} />
-          Add Memory
-        </button>
+        <div className="flex items-center gap-2">
+          {memories.length > 0 && (
+            <button
+              onClick={handleResetAll}
+              className="flex items-center gap-2 px-3 py-2 border border-danger-300 text-danger-600
+                         rounded-lg text-sm font-medium hover:bg-danger-50 transition-colors"
+            >
+              <RotateCcw size={14} />
+              Reset All
+            </button>
+          )}
+          <button
+            onClick={() => setCreating(c => !c)}
+            className="flex items-center gap-2 px-4 py-2 bg-brand-500 text-white rounded-lg
+                       text-sm font-medium hover:bg-brand-600 transition-colors"
+          >
+            <Plus size={16} />
+            Add Memory
+          </button>
+        </div>
       </div>
 
       {/* Category filter */}

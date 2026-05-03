@@ -32,4 +32,15 @@ public interface ApplicationTaskRepository extends JpaRepository<ApplicationTask
             """)
     List<ApplicationTask> findUpcomingDeadlines(@Param("from") LocalDate from,
                                                 @Param("to")   LocalDate to);
+
+    @Query("""
+            SELECT t FROM ApplicationTask t
+            WHERE t.userId = :userId
+              AND t.dueDate >= :from
+              AND t.dueDate <= :to
+            ORDER BY t.dueDate ASC
+            """)
+    List<ApplicationTask> findUpcomingByUser(@Param("userId") UUID userId,
+                                             @Param("from")   LocalDateTime from,
+                                             @Param("to")     LocalDateTime to);
 }

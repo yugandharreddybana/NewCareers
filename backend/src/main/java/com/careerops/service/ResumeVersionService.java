@@ -8,6 +8,7 @@ import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.util.Comparator;
 import java.util.List;
 import java.util.UUID;
 
@@ -87,6 +88,36 @@ public class ResumeVersionService {
         }
         v.setApplicationCount(v.getApplicationCount() + 1);
         return toResponse(versionRepo.save(v));
+    }
+
+    public CompareResponse compare(UUID userId, UUID leftId, UUID rightId) {
+        ResumeVersionResponse left  = toResponse(find(userId, leftId));
+        ResumeVersionResponse right = toResponse(find(userId, rightId));
+        String rec;
+        if (left.offerCount() > right.offerCount()) {
+            rec = left.name() + " leads in offers (" + left.offerCount() + " vs " + right.offerCount() + "). Recommend using it for high-intent applications.";
+        } else if (right.offerCount() > left.offerCount()) {
+            rec = right.name() + " leads in offers (" + right.offerCount() + " vs " + left.offerCount() + "). Recommend using it for high-intent applications.";
+        } else if (left.interviewCount() >= right.interviewCount()) {
+            rec = left.name() + " has equal or more interviews. Use it as your primary version.";
+        } else {
+            rec = right.name() + " has more interviews. Consider switching to it as your primary.";
+        }
+        return new CompareResponse(left, right, rec);
+    }
+
+    public RecommendResponse recommend(UUID userId, String roleType) {
+        List<ResumeVersion> versions = versionRepo.findByUserIdOrderByVersionNumberDesc(userId);
+        ResumeVersion best = versions.stream()
+            .filter(v -> roleType == null || roleType.isBlank()
+                || roleType.equalsIgnoreCase(v.getBestForRoleType()))
+            .max(Comparator.comparingInt(v ->
+                v.getOfferCount() * 3 + v.getInterviewCount() * 2 + v.getApplicationCount()))
+            .orElse(versions.isEmpty() ? null : versions.get(0));
+        if (best == null) throw new ApiException(HttpStatus.NOT_FOUND, "No resume versions found");
+        String reason = "Version " + best.getVersionNumber() + " (" + best.getName() + ") has the strongest outcome track record"
+            + (best.getBestForRoleType() != null ? " for " + best.getBestForRoleType() + " roles" : "") + ".";
+        return new RecommendResponse(toResponse(best), reason);
     }
 
     public void delete(UUID userId, UUID id) {

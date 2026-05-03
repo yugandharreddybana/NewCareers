@@ -17,6 +17,8 @@ export interface OutreachMessage {
   personalisedBody: string;
   status: 'draft' | 'scheduled' | 'sent' | 'opened' | 'replied' | 'bounced';
   score: number | null;
+  unsubscribed: boolean;
+  sendTimeHint: string | null;
   sentAt: string | null;
   repliedAt: string | null;
   createdAt: string;
@@ -54,4 +56,8 @@ export const outreachApi = {
     axios.post<OutreachMessage>(`/outreach/campaigns/${id}/messages`, body).then(r => r.data),
   updateMessage:     (messageId: string, status: string) =>
     axios.patch<OutreachMessage>(`/outreach/messages/${messageId}`, { status }).then(r => r.data),
+  unsubscribeMessage:(messageId: string) =>
+    axios.patch<OutreachMessage>(`/outreach/messages/${messageId}/unsubscribe`).then(r => r.data),
+  getSendTime:       (campaignId: string) =>
+    axios.get<{ bestDay: string; bestHour: string; rationale: string }>(`/outreach/campaigns/${campaignId}/send-time`).then(r => r.data),
 };

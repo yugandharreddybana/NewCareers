@@ -63,4 +63,9 @@ public class AutoApplyController {
                                              @RequestBody ApproveRunRequest req) {
         return service.approveRun(AuthUtil.currentUserId(), runId, req);
     }
+
+    @PostMapping("/retry/{runId}")
+    public ApplicationRunResponse retryRun(@PathVariable UUID runId) {
+        return service.retryRun(AuthUtil.currentUserId(), runId);
+    }
 }

@@ -47,6 +47,16 @@ public class ResumeVersionController {
         return versionService.recordOutcome(AuthUtil.currentUserId(), id, req);
     }
 
+    @GetMapping("/compare/{leftId}/{rightId}")
+    public CompareResponse compare(@PathVariable UUID leftId, @PathVariable UUID rightId) {
+        return versionService.compare(AuthUtil.currentUserId(), leftId, rightId);
+    }
+
+    @GetMapping("/recommend")
+    public RecommendResponse recommend(@RequestParam(required = false) String roleType) {
+        return versionService.recommend(AuthUtil.currentUserId(), roleType);
+    }
+
     @DeleteMapping("/{id}")
     public ResponseEntity<Void> delete(@PathVariable UUID id) {
         versionService.delete(AuthUtil.currentUserId(), id);

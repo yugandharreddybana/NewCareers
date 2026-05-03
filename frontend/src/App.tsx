@@ -4,11 +4,11 @@ import React, { Suspense, lazy } from 'react';
 import { BrowserRouter, Route, Routes, Navigate } from 'react-router-dom';
 import { AuthProvider } from './context/AuthContext';
 import { ProtectedRoute } from './components/ProtectedRoute';
-import { LoadingSpinner } from './components/LoadingSpinner';
+import { PageLoader } from './components/LoadingSpinner';
 import { ExperimentProvider } from './context/ExperimentContext';
 
 // ── Public pages ──────────────────────────────────────────────────────────
-const Login          = lazy(() => import('./pages/Login'));
+import Login from './pages/Login';
 const Signup         = lazy(() => import('./pages/Signup'));
 const ForgotPassword = lazy(() => import('./pages/ForgotPassword'));
 const ResetPassword  = lazy(() => import('./pages/ResetPassword'));
@@ -41,11 +41,7 @@ const OutreachPage         = lazy(() => import('./pages/OutreachPage'));
 const AgentMemoryPage      = lazy(() => import('./pages/AgentMemoryPage'));
 const ResumeVersionsPage   = lazy(() => import('./pages/ResumeVersionsPage'));
 
-const Spinner = (
-  <div className="min-h-screen flex items-center justify-center bg-slate-50">
-    <LoadingSpinner />
-  </div>
-);
+const Spinner = <PageLoader />;
 
 export const App: React.FC = () => (
   <BrowserRouter>

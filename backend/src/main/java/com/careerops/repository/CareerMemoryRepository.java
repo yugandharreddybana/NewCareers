@@ -12,4 +12,6 @@ public interface CareerMemoryRepository extends JpaRepository<CareerMemory, UUID
     Optional<CareerMemory> findByUserIdAndCategoryAndKey(UUID userId, String category, String key);
     Optional<CareerMemory> findByIdAndUserId(UUID id, UUID userId);
     void deleteByIdAndUserId(UUID id, UUID userId);
+    void deleteByUserId(UUID userId);
+    List<CareerMemory> findByUserIdAndMemoryEnabledTrueOrderByCategoryAscKeyAsc(UUID userId);
 }

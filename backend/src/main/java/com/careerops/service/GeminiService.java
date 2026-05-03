@@ -59,6 +59,10 @@ public class GeminiService {
         }
     }
 
+    public String generateContent(String prompt) {
+        return generate("You are a helpful assistant.", prompt);
+    }
+
     /**
      * Async variant — runs on Spring's async executor so calling threads are
      * not blocked. Use this when scoring multiple jobs in a fetch batch.

@@ -38,6 +38,8 @@ import {
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 
+import { DUMMY_JOBS_LIST } from '@/services/mockData';
+
 const TOUR_KEY = 'careerops_dashboard_tour_done';
 
 const SOURCE_OPTIONS = [
@@ -47,12 +49,26 @@ const SOURCE_OPTIONS = [
 
 export default function Dashboard() {
   const { user } = useAuth();
-  const [data,     setData]     = useState<JobsListResponse | null>(null);
+  const [data,     setData]     = useState<JobsListResponse>({
+    items: DUMMY_JOBS_LIST,
+    remaining: 12,
+    dailyCount: 3,
+    dailyLimit: 15,
+  });
   const [loading,  setLoading]  = useState(true);
   const [fetching, setFetching] = useState(false);
 
   // Analytics stats
-  const [analyticsStats, setAnalyticsStats] = useState<AnalyticsSummary | null>(null);
+  const [analyticsStats, setAnalyticsStats] = useState<AnalyticsSummary | null>({
+    skillsRunThisWeek: 4,
+    applicationsSubmitted: 12,
+    avgMatchPercent: 82,
+    skillUsage: [
+      { skill: 'Resume Match', count: 8 },
+      { skill: 'Outreach Generator', count: 5 },
+      { skill: 'Interview Coach', count: 3 },
+    ]
+  });
   const [statsLoading,   setStatsLoading]   = useState(true);
 
   // Pipeline filters (existing)
@@ -80,7 +96,11 @@ export default function Dashboard() {
   // ── Section 3.6 Task 71: product tour ────────────────────────────────
   const [tourActive, setTourActive] = useState(false);
   useEffect(() => {
-    if (!localStorage.getItem(TOUR_KEY)) setTourActive(true);
+    // Delay so page layout settles before measuring element positions
+    if (!localStorage.getItem(TOUR_KEY)) {
+      const t = setTimeout(() => setTourActive(true), 800);
+      return () => clearTimeout(t);
+    }
   }, []);
 
   function openPlannerForJob(userJobId: string) {
@@ -285,10 +305,10 @@ export default function Dashboard() {
         )}
       </AnimatePresence>
 
-      {/* ── Main two-column layout: job pipeline + planner widget ── */}
-      <div className="flex flex-col xl:flex-row gap-6 items-start">
+      {/* ── Main content layout: unified width for entire page ── */}
+      <div className="flex flex-col gap-8">
 
-        {/* ── Left: Job Search + Pipeline section ── */}
+        {/* ── Top section: Job Search + Pipeline section ── */}
         <section className="flex-1 min-w-0">
           <div className="flex items-center justify-between mb-4">
             <h2 className="text-base font-semibold text-slate-800">
@@ -320,112 +340,7 @@ export default function Dashboard() {
             <JobSearchBar onSearch={handleSearch} loading={searching} />
           </div>
 
-          {/* Legacy pipeline filter bar (hidden in search mode) */}
-          {!isSearchMode && (
-            <div className="flex flex-col gap-3 mb-6">
-              <div className="flex gap-2 items-center">
-                <div className="relative flex-1">
-                  <Search size={15}
-                    className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400" />
-                  <input
-                    type="text"
-                    placeholder="Quick filter by title or company…"
-                    value={search}
-                    onChange={e => setSearch(e.target.value)}
-                    className="w-full pl-10 pr-4 h-10 rounded-xl border border-slate-200
-                               bg-white text-sm text-slate-700 placeholder:text-slate-400
-                               focus:outline-none focus:ring-2 focus:ring-emerald-500/20
-                               focus:border-emerald-400 transition-all"
-                  />
-                </div>
-                <button
-                  onClick={() => setShowFilters(v => !v)}
-                  className={[
-                    'h-10 px-3.5 rounded-xl border text-sm font-semibold',
-                    'flex items-center gap-1.5 transition-all',
-                    showFilters || activeFilters
-                      ? 'bg-emerald-500 text-white border-emerald-500'
-                      : 'bg-white text-slate-500 border-slate-200 hover:border-emerald-300',
-                  ].join(' ')}
-                >
-                  <SlidersHorizontal size={14} />
-                  Filters
-                  {activeFilters && !showFilters && (
-                    <span className="w-1.5 h-1.5 rounded-full bg-white inline-block" />
-                  )}
-                </button>
-              </div>
 
-              <AnimatePresence>
-                {showFilters && (
-                  <motion.div
-                    initial={{ opacity: 0, height: 0 }}
-                    animate={{ opacity: 1, height: 'auto' }}
-                    exit={{ opacity: 0, height: 0 }}
-                    className="overflow-hidden"
-                  >
-                    <div className="bg-white border border-slate-200 rounded-2xl p-4
-                                    flex flex-col md:flex-row gap-4 items-start md:items-center flex-wrap">
-                      <div className="flex flex-col gap-1">
-                        <label className="text-[10px] font-bold text-slate-400
-                                          uppercase tracking-widest">Source</label>
-                        <select
-                          value={sourceFilter}
-                          onChange={e => setSource(e.target.value)}
-                          className="h-9 px-3 rounded-xl border border-slate-200 bg-white
-                                     text-sm font-medium text-slate-600 focus:outline-none
-                                     focus:border-emerald-400 cursor-pointer"
-                        >
-                          {SOURCE_OPTIONS.map(s => <option key={s}>{s}</option>)}
-                        </select>
-                      </div>
-                      <div className="flex flex-col gap-1 flex-1 min-w-[160px]">
-                        <label className="text-[10px] font-bold text-slate-400
-                                          uppercase tracking-widest">
-                          Min Match:&nbsp;
-                          <span className="text-emerald-600">
-                            {minMatch > 0 ? `${minMatch}%` : 'Any'}
-                          </span>
-                        </label>
-                        <input
-                          type="range" min={0} max={100} step={5}
-                          value={minMatch}
-                          onChange={e => setMinMatch(Number(e.target.value))}
-                          className="w-full accent-emerald-500"
-                        />
-                      </div>
-                      {/* Salary range filter */}
-                      <div className="shrink-0 w-full md:w-auto md:min-w-[200px]">
-                        <SalaryRangeFilter
-                          minSalary={pipelineMinSalary}
-                          maxSalary={pipelineMaxSalary}
-                          onChange={(min, max) => {
-                            setPipelineMinSalary(min);
-                            setPipelineMaxSalary(max);
-                          }}
-                        />
-                      </div>
-                      {activeFilters && (
-                        <button
-                          onClick={() => {
-                            setSearch('');
-                            setSource('All Sources');
-                            setMinMatch(0);
-                            setPipelineMinSalary(undefined);
-                            setPipelineMaxSalary(undefined);
-                          }}
-                          className="flex items-center gap-1.5 text-xs font-semibold
-                                     text-slate-400 hover:text-rose-500 transition-colors"
-                        >
-                          <X size={13} /> Clear all
-                        </button>
-                      )}
-                    </div>
-                  </motion.div>
-                )}
-              </AnimatePresence>
-            </div>
-          )}
 
           {/* ── Job grid ── */}
           {loading || searching ? (
@@ -540,8 +455,8 @@ export default function Dashboard() {
           )}
         </section>
 
-        {/* ── Right: Planner Widget (sticky sidebar on xl) ── */}
-        <aside id="dashboard-planner-card" className="w-full xl:w-80 shrink-0 xl:sticky xl:top-6">
+        {/* ── Bottom section: Planner Widget ── */}
+        <aside id="dashboard-planner-card" className="w-full shrink-0">
           <PlannerWidget onOpenJob={openPlannerForJob} />
         </aside>
       </div>

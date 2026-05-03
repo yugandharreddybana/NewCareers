@@ -1,4 +1,4 @@
-import axios from '@/lib/axios';
+import { api } from '@/services/api';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -76,23 +76,24 @@ export interface LogInteractionPayload {
 
 export const networkingApi = {
   createContact: (payload: CreateContactPayload) =>
-    axios.post<NetworkContact>('/networking/contact', payload).then(r => r.data),
+    api.post<NetworkContact>('/networking/contact', payload).then(r => r.data),
 
   getContacts: (type?: ContactType) =>
-    axios
+    api
       .get<{ contacts: NetworkContact[]; total: number }>('/networking/contacts', {
         params: type ? { type } : {},
       })
       .then(r => r.data),
 
   getOverdue: () =>
-    axios.get<InteractionResponse[]>('/networking/contacts/overdue').then(r => r.data),
+    api.get<InteractionResponse[]>('/networking/contacts/overdue').then(r => r.data),
 
   logInteraction: (contactId: string, payload: LogInteractionPayload) =>
-    axios
+    api
       .post<InteractionResponse>(`/networking/contact/${contactId}/log-interaction`, payload)
       .then(r => r.data),
 
   deleteContact: (contactId: string) =>
-    axios.delete(`/networking/contact/${contactId}`).then(r => r.data),
+    api.delete(`/networking/contact/${contactId}`).then(r => r.data),
 };
+

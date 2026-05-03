@@ -1,7 +1,7 @@
 import { useEffect, useState, useCallback } from 'react';
 import { watchlistApi, type Watchlist } from '@/api/watchlistApi';
 import toast from 'react-hot-toast';
-import { Bell, BellOff, Plus, Trash2, Eye, MapPin, Wifi, WifiOff } from 'lucide-react';
+import { Bell, BellOff, Plus, Trash2, MapPin, Wifi, WifiOff, Sparkles } from 'lucide-react';
 
 const EMPTY: Watchlist = {
   id: '',
@@ -29,6 +29,7 @@ export default function WatchlistsPage() {
   const [loading, setLoading]       = useState(true);
   const [creating, setCreating]     = useState(false);
   const [form, setForm]             = useState(EMPTY);
+  const [suggestions, setSuggestions] = useState<string[]>([]);
 
   const load = useCallback(async () => {
     try {
@@ -42,6 +43,10 @@ export default function WatchlistsPage() {
   }, []);
 
   useEffect(() => { load(); }, [load]);
+
+  useEffect(() => {
+    watchlistApi.getSuggestions().then(setSuggestions).catch(() => {});
+  }, []);
 
   async function handleCreate(e: React.FormEvent) {
     e.preventDefault();
@@ -107,6 +112,30 @@ export default function WatchlistsPage() {
           New Watchlist
         </button>
       </div>
+
+      {/* AI Suggestions */}
+      {suggestions.length > 0 && !creating && (
+        <div className="bg-brand-50 border border-brand-200 rounded-xl p-4">
+          <p className="text-xs font-semibold text-brand-700 flex items-center gap-1.5 mb-2">
+            <Sparkles size={12} /> Smart Query Suggestions (from your profile)
+          </p>
+          <div className="flex flex-wrap gap-2">
+            {suggestions.map((s, i) => (
+              <button
+                key={i}
+                onClick={() => {
+                  setForm(f => ({ ...f, queryKeywords: s }));
+                  setCreating(true);
+                }}
+                className="px-3 py-1.5 bg-white border border-brand-200 rounded-full text-xs
+                           text-brand-700 hover:bg-brand-100 transition-colors font-medium"
+              >
+                {s}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
 
       {/* Create form */}
       {creating && (

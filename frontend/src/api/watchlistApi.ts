@@ -36,5 +36,6 @@ export const watchlistApi = {
   update:      (id: string, body: Partial<Watchlist>) => axios.put<Watchlist>(`/watchlists/${id}`, body).then(r => r.data),
   delete:      (id: string)            => axios.delete(`/watchlists/${id}`),
   toggle:      (id: string)            => axios.post<Watchlist>(`/watchlists/${id}/toggle`).then(r => r.data),
-  getRuns:     (id: string)            => axios.get<WatchlistRun[]>(`/watchlists/${id}/runs`).then(r => r.data),
+  getRuns:        (id: string)         => axios.get<WatchlistRun[]>(`/watchlists/${id}/runs`).then(r => r.data),
+  getSuggestions: ()                   => axios.get<string[]>('/watchlists/suggestions').then(r => r.data),
 };

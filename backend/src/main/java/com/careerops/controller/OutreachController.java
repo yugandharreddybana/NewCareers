@@ -64,4 +64,14 @@ public class OutreachController {
                                                @RequestBody UpdateMessageStatusRequest req) {
         return service.updateMessageStatus(AuthUtil.currentUserId(), messageId, req);
     }
+
+    @PatchMapping("/messages/{messageId}/unsubscribe")
+    public MessageResponse unsubscribe(@PathVariable UUID messageId) {
+        return service.unsubscribeMessage(AuthUtil.currentUserId(), messageId);
+    }
+
+    @GetMapping("/campaigns/{id}/send-time")
+    public SendTimeSuggestionResponse getSendTime(@PathVariable UUID id) {
+        return service.getSendTimeSuggestion(AuthUtil.currentUserId(), id);
+    }
 }

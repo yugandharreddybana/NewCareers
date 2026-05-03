@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import * as plannerApi from '../api/planner';
+import toast from 'react-hot-toast';
 
 /**
  * Fetches upcoming tasks + deadlines for the logged-in user.
@@ -13,8 +14,13 @@ export function useUpcoming(refreshKey = 0) {
   useEffect(() => {
     setLoading(true);
     plannerApi.getUpcoming()
-      .then(res => setData(res.data))
-      .catch(err => setError(err?.response?.data?.message || 'Failed to load planner'))
+      .then(res => setData(res?.data || { pendingTasks: [], upcomingEvents: [], overdueTasks: [] }))
+      .catch(err => {
+        const msg = err?.response?.data?.message || 'Failed to load planner';
+        setError(msg);
+        toast.error(msg);
+        setData({ pendingTasks: [], upcomingEvents: [], overdueTasks: [] });
+      })
       .finally(() => setLoading(false));
   }, [refreshKey]);
 

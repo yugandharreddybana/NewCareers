@@ -24,6 +24,12 @@ router.get('/',                authGuard, javaProxy);
 // POST   /api/resume-versions              → create version
 router.post('/',               authGuard, javaProxy);
 
+// GET    /api/resume-versions/compare/:leftId/:rightId → compare two versions
+router.get('/compare/:leftId/:rightId', authGuard, javaProxy);
+
+// GET    /api/resume-versions/recommend    → recommend best version
+router.get('/recommend',       authGuard, javaProxy);
+
 // GET    /api/resume-versions/:id          → get single version
 router.get('/:id',             authGuard, javaProxy);
 

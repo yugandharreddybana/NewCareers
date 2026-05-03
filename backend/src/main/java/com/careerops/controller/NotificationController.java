@@ -59,8 +59,8 @@ public class NotificationController {
             .map(n -> {
                 n.setRead(true);
                 notificationRepository.save(n);
-                return ResponseEntity.<Void>noContent().build();
+                return ResponseEntity.noContent().<Void>build();
             })
-            .orElse(ResponseEntity.notFound().build());
+            .orElse(ResponseEntity.<Void>notFound().build());
     }
 }

@@ -1,6 +1,7 @@
 package com.careerops.service;
 
 import com.careerops.dto.CareerMemoryDtos.*;
+import com.careerops.model.CareerMemory;
 import com.careerops.exception.ApiException;
 import com.careerops.model.CareerMemory;
 import com.careerops.repository.CareerMemoryRepository;
@@ -60,6 +61,41 @@ public class CareerMemoryService {
     public void delete(UUID userId, UUID id) {
         find(userId, id);
         memoryRepo.deleteByIdAndUserId(id, userId);
+    }
+
+    @Transactional
+    public void resetAll(UUID userId) {
+        memoryRepo.deleteByUserId(userId);
+    }
+
+    /** Returns only enabled memories — used by skill prompts for personalisation. */
+    public List<MemoryResponse> listEnabled(UUID userId) {
+        return memoryRepo.findByUserIdAndMemoryEnabledTrueOrderByCategoryAscKeyAsc(userId)
+            .stream().map(this::toResponse).toList();
+    }
+
+    /**
+     * Upserts a memory entry on behalf of the AI (e.g. after a skill run).
+     * Lower confidence than user-set entries; will not overwrite if already exists with higher confidence.
+     */
+    @Transactional
+    public void extractFromSkillRun(UUID userId, String category, String key, String value,
+                                    String source, short confidence) {
+        memoryRepo.findByUserIdAndCategoryAndKey(userId, category, key)
+            .ifPresentOrElse(
+                existing -> {
+                    if (existing.getConfidence() <= confidence) {
+                        existing.setValue(value);
+                        existing.setSource(source);
+                        existing.setConfidence(confidence);
+                        memoryRepo.save(existing);
+                    }
+                },
+                () -> memoryRepo.save(CareerMemory.builder()
+                    .userId(userId).category(category).key(key)
+                    .value(value).source(source).confidence(confidence)
+                    .whySuggested("Inferred from a skill run.").build())
+            );
     }
 
     private CareerMemory find(UUID userId, UUID id) {

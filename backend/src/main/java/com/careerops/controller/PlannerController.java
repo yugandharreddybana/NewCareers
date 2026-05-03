@@ -20,12 +20,32 @@ public class PlannerController {
     private final ApplicationPlannerService plannerService;
     private final JwtService jwtService;
 
-    // ── GET /api/planner/upcoming ──────────────────────────────────────────────
-    // Returns pending tasks + upcoming deadlines (14-day window) + overdue tasks
     @GetMapping("/upcoming")
     public ResponseEntity<Map<String, Object>> getUpcoming(HttpServletRequest request) {
         UUID userId = extractUserId(request);
-        return ResponseEntity.ok(plannerService.getUpcoming(userId));
+        List<ApplicationTask> tasks = plannerService.getUpcoming(userId);
+        List<ApplicationTask> pending = new ArrayList<>();
+        List<ApplicationTask> overdue = new ArrayList<>();
+
+        for (ApplicationTask t : tasks) {
+            if ("COMPLETED".equalsIgnoreCase(t.getStatus())) {
+                continue;
+            }
+            if (t.getDueDate() != null && t.getDueDate().isBefore(java.time.LocalDateTime.now())) {
+                overdue.add(t);
+            } else {
+                pending.add(t);
+            }
+        }
+
+        List<DeadlineEvent> upcomingEvents = plannerService.getUpcomingDeadlines(userId);
+
+        Map<String, Object> response = new HashMap<>();
+        response.put("pendingTasks", pending);
+        response.put("upcomingEvents", upcomingEvents);
+        response.put("overdueTasks", overdue);
+
+        return ResponseEntity.ok(response);
     }
 
     // ── GET /api/planner/jobs/{userJobId}/tasks ────────────────────────────────

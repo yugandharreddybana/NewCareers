@@ -11,4 +11,7 @@ import java.util.UUID;
 public interface InterviewSessionRepository extends JpaRepository<InterviewSession, UUID> {
     List<InterviewSession> findByUserJobIdAndUserId(UUID userJobId, UUID userId);
     List<InterviewSession> findByUserId(UUID userId);
+
+    @org.springframework.data.jpa.repository.Query("SELECT s FROM InterviewSession s WHERE s.interviewTrackId = :trackId ORDER BY s.completedAt DESC")
+    List<InterviewSession> findByTrackIdOrderByCompletedAtDesc(@org.springframework.data.repository.query.Param("trackId") UUID trackId);
 }
