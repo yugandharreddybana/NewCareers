@@ -3,103 +3,56 @@ package com.careerops.model;
 import jakarta.persistence.*;
 import lombok.*;
 
+import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.UUID;
 
 @Entity
-@Table(name = "interview_sessions", schema = "career_operations")
-@Getter @Setter @NoArgsConstructor @AllArgsConstructor @Builder
+@Table(name = "interview_sessions")
+@Data
+@Builder
+@NoArgsConstructor
+@AllArgsConstructor
 public class InterviewSession {
 
     @Id
-    @GeneratedValue(strategy = GenerationType.UUID)
+    @GeneratedValue
     private UUID id;
 
-    @Column(name = "interview_track_id")
-    private UUID interviewTrackId;
-
-    @Column(name = "user_id")
+    @Column(name = "user_id", nullable = false)
     private UUID userId;
 
-    @Column(name = "mode")
-    private String mode;
-
-    @Column(name = "overall_score")
-    private Integer overallScore;
-
-    @Column(name = "feedback_summary", columnDefinition = "TEXT")
-    private String feedbackSummary;
-
-    @Column(name = "started_at")
-    private Instant startedAt;
-
-    @Column(name = "completed_at")
-    private Instant completedAt;
-
-    @Column(name = "created_at")
-    private Instant createdAt;
+    @Column(name = "track_id")
+    private UUID trackId;
 
     @Column(name = "user_job_id")
     private UUID userJobId;
 
-    @Column(name = "status")
-    private String status;
+    @Column(nullable = false)
+    @Builder.Default
+    private String mode = "text";
 
-    @Column(name = "turn_count")
-    private Integer turnCount;
+    @Column(nullable = false)
+    @Builder.Default
+    private String status = "in_progress";
 
-    @Column(name = "current_question", columnDefinition = "TEXT")
-    private String currentQuestion;
+    @Column(name = "overall_score", precision = 5, scale = 2)
+    private BigDecimal overallScore;
 
-    @Column(name = "transcript_json", columnDefinition = "TEXT")
-    private String transcriptJson;
+    @Column(columnDefinition = "text")
+    private String strengths;
 
-    @Column(name = "answers_json", columnDefinition = "TEXT")
-    private String answersJson;
+    @Column(columnDefinition = "text")
+    private String weaknesses;
 
-    public void setTrackId(UUID trackId) {
-        this.interviewTrackId = trackId;
-    }
-    public UUID getTrackId() {
-        return this.interviewTrackId;
-    }
+    @Column(name = "started_at")
+    @Builder.Default
+    private Instant startedAt = Instant.now();
 
-    public void setScore(int score) {
-        this.overallScore = score;
-    }
-    public int getScore() {
-        return this.overallScore != null ? this.overallScore : 0;
-    }
+    @Column(name = "completed_at")
+    private Instant completedAt;
 
-    public void setFeedback(String feedback) {
-        this.feedbackSummary = feedback;
-    }
-    public String getFeedback() {
-        return this.feedbackSummary;
-    }
-
-    public void setCompletedAt(java.time.LocalDateTime dt) {
-        if (dt != null) {
-            this.completedAt = dt.atZone(java.time.ZoneId.systemDefault()).toInstant();
-        }
-    }
-    public void setCompletedAt(Instant completedAt) {
-        this.completedAt = completedAt;
-    }
-
-    public void setStartedAt(java.time.LocalDateTime dt) {
-        if (dt != null) {
-            this.startedAt = dt.atZone(java.time.ZoneId.systemDefault()).toInstant();
-        }
-    }
-    public void setStartedAt(Instant startedAt) {
-        this.startedAt = startedAt;
-    }
-
-    @PrePersist
-    void onCreate() {
-        if (createdAt == null) createdAt = Instant.now();
-        if (startedAt == null) startedAt = Instant.now();
-        if (mode == null) mode = "TEXT";
-    }
+    @Column(name = "created_at", updatable = false)
+    @Builder.Default
+    private Instant createdAt = Instant.now();
 }

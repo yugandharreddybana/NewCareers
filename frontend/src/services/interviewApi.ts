@@ -1,40 +1,91 @@
-import { api } from './api';
-import type {
-  InterviewTrack,
-  InterviewSession,
-  InterviewQuestion,
-  AnswerResult,
-} from '../types/interview';
+/**
+ * interviewApi.ts — Phase 3.1 Interview Command Center API service
+ */
+import api from '../lib/api';
+
+export interface InterviewQuestion {
+  id: string;
+  question: string;
+  modelAnswer?: string;
+  userAnswer?: string;
+  score?: number;
+  skillArea?: string;
+  companyName?: string;
+  roleTitle?: string;
+  turnNumber: number;
+  createdAt: string;
+}
+
+export interface InterviewSession {
+  id: string;
+  userJobId: string;
+  trackId?: string;
+  mode: string;
+  status: 'in_progress' | 'completed';
+  overallScore?: number;
+  strengths?: string;
+  weaknesses?: string;
+  startedAt: string;
+  completedAt?: string;
+}
+
+export interface InterviewTrack {
+  id: string;
+  userJobId: string;
+  companyName?: string;
+  roleTitle?: string;
+  currentStage: string;
+  interviewDate?: string;
+  notes?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface MockStartResponse {
+  sessionId: string;
+  totalQuestions: number;
+  currentTurn: number;
+  question: string;
+  questionId: string;
+  skillArea: string;
+}
+
+export interface MockReplyResponse {
+  score: number;
+  feedback: string;
+  sessionComplete: boolean;
+  overallScore: number;
+  nextQuestion: string;
+  nextQuestionId: string;
+  answeredCount: number;
+}
+
+const BASE = '/interviews';
 
 export const interviewApi = {
+  generateKit: (userJobId: string, companyName: string, roleTitle: string, jobDescription: string) =>
+    api.post<InterviewQuestion[]>(`${BASE}/generate-kit/${userJobId}`, {
+      companyName, roleTitle, jobDescription,
+    }).then(r => r.data),
 
-  // ── Track ──────────────────────────────────────────────────
-  getOrCreateTrack: (userJobId: string): Promise<InterviewTrack> =>
-    api.post(`/api/interview/track?userJobId=${userJobId}`).then(r => r.data),
+  getKit: (userJobId: string) =>
+    api.get<InterviewQuestion[]>(`${BASE}/kit/${userJobId}`).then(r => r.data),
 
-  getMyTracks: (): Promise<InterviewTrack[]> =>
-    api.get('/api/interview/tracks').then(r => r.data),
+  startMock: (userJobId: string, trackId?: string) =>
+    api.post<MockStartResponse>(`${BASE}/mock/start/${userJobId}`, { trackId }).then(r => r.data),
 
-  updateStage: (trackId: string, stage: string): Promise<InterviewTrack> =>
-    api.patch(`/api/interview/track/${trackId}/stage?stage=${stage}`).then(r => r.data),
+  replyMock: (sessionId: string, questionId: string, answer: string) =>
+    api.post<MockReplyResponse>(`${BASE}/mock/reply/${sessionId}`, { questionId, answer }).then(r => r.data),
 
-  // ── Question Kit ───────────────────────────────────────────
-  generateKit: (userJobId: string): Promise<InterviewQuestion[]> =>
-    api.post(`/api/interview/kit?userJobId=${userJobId}`, null, { timeout: 60_000 }).then(r => r.data),
+  historyForJob: (userJobId: string) =>
+    api.get<InterviewSession[]>(`${BASE}/history/${userJobId}`).then(r => r.data),
 
-  getKit: (trackId: string): Promise<InterviewQuestion[]> =>
-    api.get(`/api/interview/kit/${trackId}`).then(r => r.data),
+  historyForUser: () =>
+    api.get<InterviewSession[]>(`${BASE}/history`).then(r => r.data),
 
-  // ── Mock Session ───────────────────────────────────────────
-  startSession: (userJobId: string): Promise<InterviewSession> =>
-    api.post(`/api/interview/session/start?userJobId=${userJobId}`).then(r => r.data),
+  listTracks: () =>
+    api.get<InterviewTrack[]>(`${BASE}/tracks`).then(r => r.data),
 
-  submitAnswer: (sessionId: string, questionId: string, answer: string): Promise<AnswerResult> =>
-    api.post(`/api/interview/session/${sessionId}/answer?questionId=${questionId}`, { answer }, { timeout: 30_000 }).then(r => r.data),
-
-  completeSession: (sessionId: string): Promise<InterviewSession> =>
-    api.post(`/api/interview/session/${sessionId}/complete`).then(r => r.data),
-
-  getSessionHistory: (userJobId: string): Promise<InterviewSession[]> =>
-    api.get(`/api/interview/session/history?userJobId=${userJobId}`).then(r => r.data),
+  updateStage: (userJobId: string, stage: string) =>
+    api.patch<InterviewTrack>(`${BASE}/tracks/${userJobId}/stage`, { stage }).then(r => r.data),
 };

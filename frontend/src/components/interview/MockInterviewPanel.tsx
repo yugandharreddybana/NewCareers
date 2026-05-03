@@ -1,169 +1,151 @@
-// Task 15 — MockInterviewPanel: conversational mock interview UI with live score badges
-import React, { useEffect, useRef, useState } from 'react';
-import axios from '../../api/axiosInstance';
+/**
+ * MockInterviewPanel.tsx — Phase 3.1
+ *
+ * Conversational mock interview UI with live score badges.
+ * Receives initial session data from InterviewKitPanel and runs turn-by-turn.
+ */
+import React, { useState, useRef, useEffect } from 'react';
+import { useMutation } from '@tanstack/react-query';
+import { interviewApi, MockReplyResponse } from '../../services/interviewApi';
 
-interface SessionState {
-  id: string;
-  status: 'ACTIVE' | 'COMPLETED';
-  score: number;
-  turnCount: number;
-  currentQuestion: string;
-  transcriptJson: string;
+interface Turn {
+  question: string;
+  answer?: string;
+  score?: number;
+  feedback?: string;
 }
 
 interface Props {
-  userJobId: string;
+  sessionId: string;
+  firstQuestion: string;
+  firstQuestionId: string;
+  onComplete?: (overallScore: number) => void;
 }
 
-const SCORE_COLOR = (s: number) =>
-  s >= 8 ? 'score-badge--high' : s >= 5 ? 'score-badge--mid' : 'score-badge--low';
-
-export const MockInterviewPanel: React.FC<Props> = ({ userJobId }) => {
-  const [session, setSession]     = useState<SessionState | null>(null);
-  const [answer, setAnswer]       = useState('');
-  const [loading, setLoading]     = useState(false);
-  const [starting, setStarting]   = useState(false);
-  const [error, setError]         = useState<string | null>(null);
+export default function MockInterviewPanel({
+  sessionId, firstQuestion, firstQuestionId, onComplete,
+}: Props) {
+  const [turns, setTurns] = useState<Turn[]>([{ question: firstQuestion }]);
+  const [currentAnswer, setCurrentAnswer] = useState('');
+  const [currentQuestionId, setCurrentQuestionId] = useState(firstQuestionId);
+  const [isComplete, setIsComplete] = useState(false);
+  const [finalScore, setFinalScore] = useState<number>(0);
   const bottomRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [session?.transcriptJson]);
+  }, [turns]);
 
-  const startSession = async () => {
-    setStarting(true);
-    setError(null);
-    try {
-      const r = await axios.post<SessionState>(`/interviews/mock/start/${userJobId}`);
-      setSession(r.data);
-    } catch {
-      setError('Could not start session. Please try again.');
-    } finally {
-      setStarting(false);
-    }
+  const replyMutation = useMutation({
+    mutationFn: (answer: string) =>
+      interviewApi.replyMock(sessionId, currentQuestionId, answer),
+    onSuccess: (data: MockReplyResponse) => {
+      setTurns(prev => {
+        const updated = [...prev];
+        updated[updated.length - 1] = {
+          ...updated[updated.length - 1],
+          answer: currentAnswer,
+          score: data.score,
+          feedback: data.feedback,
+        };
+        if (!data.sessionComplete && data.nextQuestion) {
+          updated.push({ question: data.nextQuestion });
+        }
+        return updated;
+      });
+      setCurrentAnswer('');
+      if (data.sessionComplete) {
+        setIsComplete(true);
+        setFinalScore(data.overallScore);
+        onComplete?.(data.overallScore);
+      } else {
+        setCurrentQuestionId(data.nextQuestionId);
+      }
+    },
+  });
+
+  const handleSubmit = () => {
+    if (!currentAnswer.trim() || replyMutation.isPending) return;
+    replyMutation.mutate(currentAnswer.trim());
   };
-
-  const submitAnswer = async () => {
-    if (!answer.trim() || !session) return;
-    setLoading(true);
-    setError(null);
-    try {
-      const r = await axios.post<SessionState>(`/interviews/mock/reply/${session.id}`, { answer });
-      setSession(r.data);
-      setAnswer('');
-    } catch {
-      setError('Failed to submit answer. Try again.');
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const handleExport = () => {
-    if (session) window.open(`/api/interviews/mock/export/${session.id}`, '_blank');
-  };
-
-  const parseTranscript = (json: string) => {
-    try { return JSON.parse(json); } catch { return []; }
-  };
-
-  if (!session) return (
-    <section className="mock-panel" aria-label="Mock Interview">
-      <div className="mock-panel__start">
-        <div className="empty-state-card empty-state-card--subtle">
-          <div className="empty-state-card__icon">🎙️</div>
-          <h4 className="empty-state-card__title">Mock Interview</h4>
-          <p className="empty-state-card__desc">Practice answering interview questions with real-time AI scoring and feedback on each answer.</p>
-          <button className="btn btn-primary" onClick={startSession} disabled={starting}>
-            {starting ? 'Starting…' : 'Start Mock Interview'}
-          </button>
-        </div>
-        {error && <div className="alert alert-error">{error}</div>}
-      </div>
-    </section>
-  );
-
-  const transcript = parseTranscript(session.transcriptJson);
 
   return (
-    <section className="mock-panel" aria-label="Mock Interview Session">
-      <div className="mock-panel__header">
-        <h3 className="mock-panel__title">🎙️ Mock Interview</h3>
-        <div className="mock-panel__meta">
-          <span className={`score-badge ${SCORE_COLOR(session.score)}`}>
-            Score: {session.score}/10
-          </span>
-          <span className="mock-panel__turns">Turn {session.turnCount}/8</span>
-          {session.status === 'COMPLETED' && (
-            <button className="btn btn-secondary btn-sm" onClick={handleExport}>↓ Export Report</button>
-          )}
-        </div>
+    <div className="flex flex-col h-full max-h-[600px]">
+      <div className="flex items-center justify-between px-4 py-3 border-b border-gray-200 bg-gray-50 rounded-t-lg">
+        <h3 className="text-sm font-semibold text-gray-800">Mock Interview</h3>
+        <span className="text-xs text-gray-500">{turns.length} question{turns.length !== 1 ? 's' : ''}</span>
       </div>
 
-      <div className="mock-panel__transcript" role="log" aria-live="polite">
-        {transcript.map((turn: any, i: number) => (
-          <div key={i} className="mock-turn">
-            <div className="mock-turn__question">
-              <span className="mock-role mock-role--interviewer">Interviewer</span>
-              <p>{turn.question}</p>
-            </div>
-            <div className="mock-turn__answer">
-              <span className="mock-role mock-role--you">You</span>
-              <p>{turn.answer}</p>
-            </div>
-            {turn.scoreData && (
-              <div className="mock-turn__feedback">
-                <span className={`score-badge ${SCORE_COLOR(turn.scoreData?.score || 5)}`}>
-                  {turn.scoreData?.score}/10
-                </span>
-                {turn.scoreData?.tips?.map((tip: string, j: number) => (
-                  <span key={j} className="mock-tip">💡 {tip}</span>
-                ))}
+      <div className="flex-1 overflow-y-auto px-4 py-4 space-y-4">
+        {turns.map((turn, idx) => (
+          <div key={idx} className="space-y-2">
+            {/* Question */}
+            <div className="flex gap-3">
+              <span className="shrink-0 w-7 h-7 rounded-full bg-indigo-600 text-white text-xs flex items-center justify-center font-bold">
+                AI
+              </span>
+              <div className="bg-indigo-50 rounded-xl rounded-tl-none px-4 py-3 text-sm text-gray-800 max-w-prose">
+                {turn.question}
               </div>
+            </div>
+
+            {/* Answer */}
+            {turn.answer && (
+              <div className="flex gap-3 justify-end">
+                <div className="bg-white border border-gray-200 rounded-xl rounded-tr-none px-4 py-3 text-sm text-gray-800 max-w-prose">
+                  {turn.answer}
+                </div>
+                {turn.score != null && (
+                  <span className={`shrink-0 self-end mb-1 text-xs font-bold px-2 py-0.5 rounded-full ${
+                    turn.score >= 7 ? 'bg-green-100 text-green-700'
+                    : turn.score >= 4 ? 'bg-amber-100 text-amber-700'
+                    : 'bg-red-100 text-red-700'
+                  }`}>
+                    {turn.score}/10
+                  </span>
+                )}
+              </div>
+            )}
+
+            {/* Feedback */}
+            {turn.feedback && (
+              <p className="ml-10 text-xs text-gray-500 italic">{turn.feedback}</p>
             )}
           </div>
         ))}
+
+        {isComplete && (
+          <div className="rounded-xl bg-green-50 border border-green-200 p-4 text-center">
+            <p className="text-sm font-semibold text-green-800">Session complete!</p>
+            <p className="text-2xl font-bold text-green-700 mt-1">{finalScore.toFixed(1)} / 10</p>
+            <p className="text-xs text-green-600 mt-1">Overall score</p>
+          </div>
+        )}
+
         <div ref={bottomRef} />
       </div>
 
-      {session.status === 'ACTIVE' && (
-        <>
-          <div className="mock-panel__question" aria-live="polite">
-            <span className="mock-role mock-role--interviewer">Interviewer</span>
-            <p className="mock-panel__current-q">{session.currentQuestion}</p>
-          </div>
-          <div className="mock-panel__input-area">
+      {!isComplete && (
+        <div className="px-4 py-3 border-t border-gray-200 bg-white rounded-b-lg">
+          <div className="flex gap-2">
             <textarea
-              className="mock-panel__textarea"
-              rows={4}
-              placeholder="Type your answer here…"
-              value={answer}
-              onChange={e => setAnswer(e.target.value)}
-              onKeyDown={e => { if (e.key === 'Enter' && e.ctrlKey) submitAnswer(); }}
-              aria-label="Your answer"
+              value={currentAnswer}
+              onChange={e => setCurrentAnswer(e.target.value)}
+              onKeyDown={e => { if (e.key === 'Enter' && e.metaKey) handleSubmit(); }}
+              placeholder="Type your answer… (⌘ + Enter to submit)"
+              rows={3}
+              className="flex-1 resize-none rounded-lg border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
             />
-            <div className="mock-panel__input-footer">
-              <span className="mock-panel__hint">Ctrl+Enter to submit</span>
-              <button
-                className="btn btn-primary"
-                onClick={submitAnswer}
-                disabled={loading || !answer.trim()}
-              >
-                {loading ? 'Scoring…' : 'Submit Answer'}
-              </button>
-            </div>
+            <button
+              onClick={handleSubmit}
+              disabled={!currentAnswer.trim() || replyMutation.isPending}
+              className="self-end px-4 py-2 bg-indigo-600 text-white text-sm rounded-lg hover:bg-indigo-700 disabled:opacity-50"
+            >
+              {replyMutation.isPending ? '…' : 'Send'}
+            </button>
           </div>
-          {error && <div className="alert alert-error">{error}</div>}
-        </>
-      )}
-
-      {session.status === 'COMPLETED' && (
-        <div className="mock-panel__complete">
-          <div className={`score-badge score-badge--lg ${SCORE_COLOR(session.score)}`}>
-            Final Score: {session.score}/10
-          </div>
-          <p className="mock-panel__complete-msg">Interview complete! Download your full report to review all feedback.</p>
         </div>
       )}
-    </section>
+    </div>
   );
-};
+}

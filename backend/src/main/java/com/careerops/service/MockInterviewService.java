@@ -1,142 +1,169 @@
 package com.careerops.service;
 
+import com.careerops.exception.ApiException;
+import com.careerops.model.InterviewQuestionBank;
 import com.careerops.model.InterviewSession;
+import com.careerops.repository.InterviewQuestionBankRepository;
 import com.careerops.repository.InterviewSessionRepository;
-import com.careerops.repository.InterviewTrackRepository;
-import lombok.RequiredArgsConstructor;
-import lombok.extern.slf4j.Slf4j;
+import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
-import java.time.LocalDateTime;
+import java.math.BigDecimal;
+import java.time.Instant;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 
 /**
- * Task 8 — MockInterviewService
- * Runs text-based mock interviews with turn-by-turn AI scoring.
+ * Phase 3.1 — Mock Interview Service
+ *
+ * Runs turn-by-turn text-based mock interviews.
+ * Each reply is scored by Gemini and stored in interview_question_bank.
+ * When all questions are answered, the session is completed with a summary.
  */
 @Service
-@RequiredArgsConstructor
-@Slf4j
 public class MockInterviewService {
 
     private final InterviewSessionRepository sessionRepo;
-    private final InterviewTrackRepository trackRepo;
-    private final GeminiService geminiService;
+    private final InterviewQuestionBankRepository questionRepo;
+    private final GeminiService gemini;
 
-    /** Task 10 — Start a new mock session */
-    public InterviewSession startSession(UUID userJobId, UUID userId) {
-        InterviewSession session = new InterviewSession();
-        session.setId(UUID.randomUUID());
-        session.setUserJobId(userJobId);
-        session.setUserId(userId);
-        session.setMode("TEXT");
-        session.setStatus("ACTIVE");
-        session.setScore(0);
-        session.setTurnCount(0);
-        session.setStartedAt(LocalDateTime.now());
-
-        // Generate the opening question
-        String opening = geminiService.generateContent(
-            "You are a professional interviewer. Start a mock interview with a warm greeting and your first question. " +
-            "Keep it concise. Do not repeat the question number. Just ask the first question naturally."
-        );
-        session.setCurrentQuestion(opening);
-        session.setTranscriptJson("[]");
-        return sessionRepo.save(session);
+    public MockInterviewService(InterviewSessionRepository sessionRepo,
+                                 InterviewQuestionBankRepository questionRepo,
+                                 GeminiService gemini) {
+        this.sessionRepo = sessionRepo;
+        this.questionRepo = questionRepo;
+        this.gemini = gemini;
     }
 
-    /** Task 11 — Process a user reply, score it, generate next question */
-    public InterviewSession processReply(UUID sessionId, UUID userId, String userAnswer) {
+    // ── Start a new mock interview session ────────────────────────────────────
+    @Transactional
+    public Map<String, Object> start(UUID userId, UUID userJobId, UUID trackId) {
+        // Load kit questions for this job
+        List<InterviewQuestionBank> kit = questionRepo.findByUserJobIdOrderByCreatedAtDesc(userJobId);
+        if (kit.isEmpty())
+            throw new ApiException(HttpStatus.BAD_REQUEST,
+                "Generate an interview kit first before starting a mock session.");
+
+        InterviewSession session = sessionRepo.save(
+            InterviewSession.builder()
+                .userId(userId)
+                .userJobId(userJobId)
+                .trackId(trackId)
+                .mode("text")
+                .status("in_progress")
+                .build()
+        );
+
+        // Return session + first question
+        InterviewQuestionBank first = kit.get(kit.size() - 1); // oldest question first
+        return Map.of(
+            "sessionId", session.getId(),
+            "totalQuestions", kit.size(),
+            "currentTurn", 0,
+            "question", first.getQuestion(),
+            "questionId", first.getId(),
+            "skillArea", first.getSkillArea() != null ? first.getSkillArea() : "general"
+        );
+    }
+
+    // ── Submit a reply for scoring ─────────────────────────────────────────────
+    @Transactional
+    public Map<String, Object> reply(UUID userId, UUID sessionId, UUID questionId, String userAnswer) {
         InterviewSession session = sessionRepo.findById(sessionId)
-                .orElseThrow(() -> new IllegalArgumentException("Session not found: " + sessionId));
+            .filter(s -> s.getUserId().equals(userId))
+            .orElseThrow(() -> new ApiException(HttpStatus.NOT_FOUND, "Session not found"));
 
-        if (!session.getUserId().equals(userId)) {
-            throw new SecurityException("Access denied to session: " + sessionId);
+        if ("completed".equals(session.getStatus()))
+            throw new ApiException(HttpStatus.BAD_REQUEST, "Session already completed");
+
+        InterviewQuestionBank question = questionRepo.findById(questionId)
+            .orElseThrow(() -> new ApiException(HttpStatus.NOT_FOUND, "Question not found"));
+
+        // Score the answer via Gemini
+        String scorePrompt = String.format("""
+            Rate this interview answer on a scale of 0 to 10.
+            Question: %s
+            Model answer: %s
+            Candidate answer: %s
+
+            Respond ONLY with:
+            SCORE: [0-10]
+            FEEDBACK: [one sentence of constructive feedback]
+            """, question.getQuestion(), question.getModelAnswer(), userAnswer);
+
+        String aiResp = gemini.generate(scorePrompt);
+        BigDecimal score = parseScore(aiResp);
+        String feedback = parseFeedback(aiResp);
+
+        question.setUserAnswer(userAnswer);
+        question.setScore(score);
+        questionRepo.save(question);
+
+        // Check if all questions for this session's job are answered
+        List<InterviewQuestionBank> allQs = questionRepo
+            .findByUserJobIdOrderByCreatedAtDesc(session.getUserJobId());
+        long answered = allQs.stream()
+            .filter(q -> q.getUserAnswer() != null && !q.getUserAnswer().isBlank()).count();
+        boolean done = answered >= allQs.size();
+
+        if (done) {
+            double avg = allQs.stream()
+                .filter(q -> q.getScore() != null)
+                .mapToDouble(q -> q.getScore().doubleValue())
+                .average().orElse(0);
+            session.setOverallScore(BigDecimal.valueOf(avg));
+            session.setStatus("completed");
+            session.setCompletedAt(Instant.now());
+            sessionRepo.save(session);
         }
-        if (!"ACTIVE".equals(session.getStatus())) {
-            throw new IllegalStateException("Session is not active.");
-        }
 
-        int turn = session.getTurnCount() + 1;
+        // Determine next question
+        InterviewQuestionBank next = allQs.stream()
+            .filter(q -> q.getUserAnswer() == null || q.getUserAnswer().isBlank())
+            .findFirst().orElse(null);
 
-        // Score the answer
-        String scorePrompt = String.format(
-            """
-            The interviewer asked: "%s"
-            The candidate answered: "%s"
-            Score this answer from 0-10 and provide 2 specific improvement tips.
-            Return JSON: {"score":0,"tips":["",""]}""",
-            session.getCurrentQuestion(), userAnswer
+        return Map.of(
+            "score", score,
+            "feedback", feedback,
+            "sessionComplete", done,
+            "overallScore", done ? session.getOverallScore() : BigDecimal.ZERO,
+            "nextQuestion", next != null ? next.getQuestion() : "",
+            "nextQuestionId", next != null ? next.getId().toString() : "",
+            "answeredCount", answered
         );
-        String scoreJson = geminiService.generateContent(scorePrompt);
-
-        // Update running score (parse or default)
-        int answerScore = extractScore(scoreJson);
-        int newScore = ((session.getScore() * (turn - 1)) + answerScore) / turn; // rolling avg
-
-        // Build transcript entry
-        String transcriptEntry = String.format(
-            "{\"turn\":%d,\"question\":\"%s\",\"answer\":\"%s\",\"scoreData\":%s}",
-            turn,
-            escapeJson(session.getCurrentQuestion()),
-            escapeJson(userAnswer),
-            scoreJson
-        );
-        String transcript = appendToTranscript(session.getTranscriptJson(), transcriptEntry);
-
-        // Generate next question or close session after 8 turns
-        String nextQuestion;
-        String status = session.getStatus();
-        if (turn >= 8) {
-            nextQuestion = "That concludes our mock interview. Thank you for your answers! Check your score summary below.";
-            status = "COMPLETED";
-            session.setCompletedAt(LocalDateTime.now());
-        } else {
-            nextQuestion = geminiService.generateContent(
-                "Continue the mock interview. The candidate just answered the previous question. " +
-                "Ask the next relevant interview question. Keep it natural and professional."
-            );
-        }
-
-        session.setTurnCount(turn);
-        session.setScore(newScore);
-        session.setCurrentQuestion(nextQuestion);
-        session.setTranscriptJson(transcript);
-        session.setStatus(status);
-        return sessionRepo.save(session);
     }
 
-    /** Task 12 — Get session history for a job */
-    public List<InterviewSession> getHistory(UUID userJobId, UUID userId) {
-        return sessionRepo.findByUserJobIdAndUserId(userJobId, userId);
+    // ── Get session history for a job ─────────────────────────────────────────
+    public List<InterviewSession> historyForJob(UUID userJobId) {
+        return sessionRepo.findByUserJobIdOrderByStartedAtDesc(userJobId);
     }
 
-    // ---- helpers ----
+    public List<InterviewSession> historyForUser(UUID userId) {
+        return sessionRepo.findByUserIdOrderByStartedAtDesc(userId);
+    }
 
-    private int extractScore(String json) {
-        try {
-            int idx = json.indexOf("\"score\":");
-            if (idx < 0) return 5;
-            String sub = json.substring(idx + 8).trim();
-            StringBuilder num = new StringBuilder();
-            for (char c : sub.toCharArray()) {
-                if (Character.isDigit(c)) num.append(c);
-                else break;
+    // ── Parse Gemini score response ───────────────────────────────────────────
+    private BigDecimal parseScore(String resp) {
+        if (resp == null) return BigDecimal.ZERO;
+        for (String line : resp.split("\n")) {
+            if (line.trim().startsWith("SCORE:")) {
+                try {
+                    return new BigDecimal(line.replace("SCORE:", "").trim());
+                } catch (NumberFormatException ignored) {}
             }
-            return num.length() > 0 ? Integer.parseInt(num.toString()) : 5;
-        } catch (Exception e) {
-            return 5;
         }
+        return BigDecimal.ZERO;
     }
 
-    private String escapeJson(String s) {
-        if (s == null) return "";
-        return s.replace("\\", "\\\\").replace("\"", "\\\"").replace("\n", "\\n");
-    }
-
-    private String appendToTranscript(String existing, String newEntry) {
-        if (existing == null || existing.equals("[]")) return "[" + newEntry + "]";
-        return existing.substring(0, existing.length() - 1) + "," + newEntry + "]";
+    private String parseFeedback(String resp) {
+        if (resp == null) return "";
+        for (String line : resp.split("\n")) {
+            if (line.trim().startsWith("FEEDBACK:")) {
+                return line.replace("FEEDBACK:", "").trim();
+            }
+        }
+        return "";
     }
 }

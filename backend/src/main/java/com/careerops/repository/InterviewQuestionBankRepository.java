@@ -9,8 +9,7 @@ import java.util.UUID;
 
 @Repository
 public interface InterviewQuestionBankRepository extends JpaRepository<InterviewQuestionBank, UUID> {
-    List<InterviewQuestionBank> findByUserJobId(UUID userJobId);
-
-    @org.springframework.data.jpa.repository.Query("SELECT b FROM InterviewQuestionBank b WHERE b.interviewTrackId = :trackId")
-    List<InterviewQuestionBank> findByTrackId(@org.springframework.data.repository.query.Param("trackId") UUID trackId);
+    List<InterviewQuestionBank> findBySessionIdOrderByTurnNumberAsc(UUID sessionId);
+    List<InterviewQuestionBank> findByUserJobIdOrderByCreatedAtDesc(UUID userJobId);
+    List<InterviewQuestionBank> findByUserIdAndCompanyNameOrderByCreatedAtDesc(UUID userId, String companyName);
 }

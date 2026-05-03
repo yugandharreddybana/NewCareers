@@ -1,136 +1,166 @@
-// Task 14 — InterviewKitPanel: shows generated interview questions on Job Detail page
-import React, { useCallback, useEffect, useState } from 'react';
-import axios from '../../api/axiosInstance';
+/**
+ * InterviewKitPanel.tsx — Phase 3.1
+ *
+ * Shows the AI-generated interview kit for a job.
+ * Placed on JobDetail page.
+ * Lets user generate kit, browse questions by skill area, and start a mock.
+ */
+import React, { useState } from 'react';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { interviewApi, InterviewQuestion } from '../../services/interviewApi';
 
-interface Question {
-  category: string;
-  question: string;
-  answerOutline: string[];
-  difficulty: 'Easy' | 'Medium' | 'Hard';
-}
-
-interface QuestionBank {
-  id: string;
-  company: string;
-  roleTitle: string;
-  questionsJson: string;
-  generatedAt: string;
-}
+const SKILL_COLOURS: Record<string, string> = {
+  behavioural:  'bg-blue-100 text-blue-800',
+  technical:    'bg-purple-100 text-purple-800',
+  situational:  'bg-amber-100 text-amber-800',
+  motivational: 'bg-green-100 text-green-800',
+  culture:      'bg-pink-100 text-pink-800',
+  general:      'bg-gray-100 text-gray-700',
+};
 
 interface Props {
   userJobId: string;
+  companyName?: string;
+  roleTitle?: string;
+  jobDescription?: string;
+  onStartMock?: (sessionId: string, firstQuestion: string, questionId: string) => void;
 }
 
-const DIFFICULTY_CLASS: Record<string, string> = {
-  Easy: 'badge--success',
-  Medium: 'badge--warning',
-  Hard: 'badge--error',
-};
+export default function InterviewKitPanel({
+  userJobId, companyName, roleTitle, jobDescription, onStartMock,
+}: Props) {
+  const qc = useQueryClient();
+  const [expanded, setExpanded] = useState<string | null>(null);
+  const [activeFilter, setActiveFilter] = useState<string>('all');
 
-export const InterviewKitPanel: React.FC<Props> = ({ userJobId }) => {
-  const [banks, setBanks]         = useState<QuestionBank[]>([]);
-  const [loading, setLoading]     = useState(false);
-  const [generating, setGenerating] = useState(false);
-  const [expanded, setExpanded]   = useState<Record<number, boolean>>({});
-  const [error, setError]         = useState<string | null>(null);
+  const { data: questions = [], isLoading } = useQuery({
+    queryKey: ['interview-kit', userJobId],
+    queryFn: () => interviewApi.getKit(userJobId),
+  });
 
-  const fetchKit = useCallback(() => {
-    setLoading(true);
-    axios.get<QuestionBank[]>(`/interviews/kit/${userJobId}`)
-      .then(r => setBanks(r.data))
-      .catch(() => {})
-      .finally(() => setLoading(false));
-  }, [userJobId]);
+  const generateMutation = useMutation({
+    mutationFn: () => interviewApi.generateKit(
+      userJobId,
+      companyName ?? '',
+      roleTitle ?? '',
+      jobDescription ?? ''
+    ),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['interview-kit', userJobId] }),
+  });
 
-  useEffect(() => { fetchKit(); }, [fetchKit]);
+  const startMockMutation = useMutation({
+    mutationFn: () => interviewApi.startMock(userJobId),
+    onSuccess: (data) => onStartMock?.(data.sessionId, data.question, data.questionId),
+  });
 
-  const handleGenerate = async () => {
-    setGenerating(true);
-    setError(null);
-    try {
-      await axios.post(`/interviews/generate-kit/${userJobId}`);
-      await fetchKit();
-    } catch {
-      setError('Failed to generate kit. Please try again.');
-    } finally {
-      setGenerating(false);
-    }
-  };
-
-  const handleExport = () => {
-    window.open(`/api/interviews/kit/export/${userJobId}`, '_blank');
-  };
-
-  const parseQuestions = (json: string): Question[] => {
-    try { return JSON.parse(json); } catch { return []; }
-  };
-
-  if (loading) return (
-    <div className="interview-kit-panel">
-      <div className="skeleton skeleton-heading" />
-      {[1,2,3].map(i => <div key={i} className="skeleton skeleton-text" />)}
-    </div>
-  );
+  const skillAreas = ['all', ...Array.from(new Set(questions.map(q => q.skillArea ?? 'general')))];
+  const filtered = activeFilter === 'all'
+    ? questions
+    : questions.filter(q => (q.skillArea ?? 'general') === activeFilter);
 
   return (
-    <section className="interview-kit-panel" aria-label="Interview Preparation Kit">
-      <div className="kit-header">
-        <h3 className="kit-title">🎯 Interview Kit</h3>
-        <div className="kit-actions">
-          {banks.length > 0 && (
-            <button className="btn btn-secondary btn-sm" onClick={handleExport}>
-              ↓ Export PDF
+    <div className="space-y-4">
+      <div className="flex items-center justify-between">
+        <h3 className="text-lg font-semibold text-gray-900">Interview Kit</h3>
+        <div className="flex gap-2">
+          {questions.length > 0 && (
+            <button
+              onClick={() => startMockMutation.mutate()}
+              disabled={startMockMutation.isPending}
+              className="px-3 py-1.5 text-sm bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:opacity-50"
+            >
+              {startMockMutation.isPending ? 'Starting…' : '▶ Start Mock'}
             </button>
           )}
           <button
-            className="btn btn-primary btn-sm"
-            onClick={handleGenerate}
-            disabled={generating}
+            onClick={() => generateMutation.mutate()}
+            disabled={generateMutation.isPending}
+            className="px-3 py-1.5 text-sm bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 disabled:opacity-50"
           >
-            {generating ? 'Generating…' : banks.length > 0 ? '↺ Regenerate' : '✦ Generate Kit'}
+            {generateMutation.isPending ? 'Generating…' : questions.length > 0 ? '↻ Regenerate' : '✦ Generate Kit'}
           </button>
         </div>
       </div>
 
-      {error && <div className="alert alert-error">{error}</div>}
-
-      {banks.length === 0 && !generating && (
-        <div className="empty-state-card empty-state-card--subtle">
-          <div className="empty-state-card__icon">📋</div>
-          <h4 className="empty-state-card__title">No kit yet</h4>
-          <p className="empty-state-card__desc">Generate a personalised interview kit tailored to this role and company.</p>
+      {generateMutation.isPending && (
+        <div className="rounded-lg bg-indigo-50 border border-indigo-200 p-4 text-sm text-indigo-700 animate-pulse">
+          AI is building your interview kit — this takes about 10 seconds…
         </div>
       )}
 
-      {banks.map(bank => {
-        const questions = parseQuestions(bank.questionsJson);
-        return (
-          <div key={bank.id} className="kit-bank">
-            <p className="kit-meta">{bank.company} — {bank.roleTitle}</p>
-            {questions.map((q, i) => (
-              <div key={i} className="kit-question">
-                <button
-                  className="kit-question__toggle"
-                  onClick={() => setExpanded(prev => ({ ...prev, [i]: !prev[i] }))}
-                  aria-expanded={!!expanded[i]}
-                >
-                  <span className="kit-question__text">{q.question}</span>
-                  <span className={`badge ${DIFFICULTY_CLASS[q.difficulty] || ''}`}>{q.difficulty}</span>
-                  <span className="kit-question__chevron">{expanded[i] ? '▲' : '▼'}</span>
-                </button>
-                {expanded[i] && (
-                  <div className="kit-question__outline">
-                    <p className="kit-category">Category: {q.category}</p>
-                    <ul>
-                      {q.answerOutline.map((point, j) => <li key={j}>{point}</li>)}
-                    </ul>
+      {isLoading && <p className="text-sm text-gray-500">Loading kit…</p>}
+
+      {questions.length > 0 && (
+        <div className="flex gap-2 flex-wrap">
+          {skillAreas.map(area => (
+            <button
+              key={area}
+              onClick={() => setActiveFilter(area)}
+              className={`px-2.5 py-1 rounded-full text-xs font-medium transition-colors ${
+                activeFilter === area
+                  ? 'bg-indigo-600 text-white'
+                  : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+              }`}
+            >
+              {area.charAt(0).toUpperCase() + area.slice(1)}
+            </button>
+          ))}
+        </div>
+      )}
+
+      {filtered.length === 0 && !isLoading && !generateMutation.isPending && (
+        <div className="rounded-lg border-2 border-dashed border-gray-200 p-8 text-center">
+          <p className="text-gray-500 text-sm">No interview kit yet. Click Generate Kit to create one.</p>
+        </div>
+      )}
+
+      <div className="space-y-2">
+        {filtered.map((q, i) => (
+          <div key={q.id} className="rounded-lg border border-gray-200 bg-white">
+            <button
+              className="w-full flex items-start gap-3 p-4 text-left"
+              onClick={() => setExpanded(expanded === q.id ? null : q.id)}
+            >
+              <span className="text-gray-400 text-sm font-mono w-5 shrink-0">{i + 1}</span>
+              <div className="flex-1 min-w-0">
+                <p className="text-sm font-medium text-gray-900">{q.question}</p>
+                {q.score != null && (
+                  <span className={`mt-1 inline-block text-xs font-semibold px-2 py-0.5 rounded-full ${
+                    q.score >= 7 ? 'bg-green-100 text-green-700'
+                    : q.score >= 4 ? 'bg-amber-100 text-amber-700'
+                    : 'bg-red-100 text-red-700'
+                  }`}>
+                    Score: {q.score}/10
+                  </span>
+                )}
+              </div>
+              <span className={`shrink-0 text-xs px-2 py-0.5 rounded-full font-medium ${
+                SKILL_COLOURS[q.skillArea ?? 'general'] ?? SKILL_COLOURS.general
+              }`}>
+                {q.skillArea ?? 'general'}
+              </span>
+              <span className="text-gray-400 text-xs">{expanded === q.id ? '▲' : '▼'}</span>
+            </button>
+
+            {expanded === q.id && (
+              <div className="px-4 pb-4 border-t border-gray-100 pt-3 space-y-3">
+                {q.modelAnswer && (
+                  <div>
+                    <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1">Model Answer</p>
+                    <p className="text-sm text-gray-700 leading-relaxed">{q.modelAnswer}</p>
+                  </div>
+                )}
+                {q.userAnswer && (
+                  <div>
+                    <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1">Your Answer</p>
+                    <p className="text-sm text-gray-600 leading-relaxed">{q.userAnswer}</p>
                   </div>
                 )}
               </div>
-            ))}
+            )}
           </div>
-        );
-      })}
-    </section>
+        ))}
+      </div>
+    </div>
   );
-};
+}

@@ -1,62 +1,42 @@
+/**
+ * interview.routes.ts — Phase 3.1 Interview Command Center
+ *
+ * POST /api/interviews/generate-kit/:userJobId  — generate AI interview kit
+ * GET  /api/interviews/kit/:userJobId           — fetch questions for job
+ * POST /api/interviews/mock/start/:userJobId    — start mock session
+ * POST /api/interviews/mock/reply/:sessionId    — submit answer + get score
+ * GET  /api/interviews/history/:userJobId       — sessions for a job
+ * GET  /api/interviews/history                  — all sessions for user
+ * GET  /api/interviews/tracks                   — all interview tracks
+ * PATCH /api/interviews/tracks/:userJobId/stage — update stage
+ */
 import express from 'express';
 import { authGuard } from '../authGuard.js';
 import { createProxyMiddleware } from 'http-proxy-middleware';
 
 const router = express.Router();
-
 const JAVA = process.env.JAVA_BACKEND_URL || 'http://localhost:8080';
 
 const javaProxy = createProxyMiddleware({
   target: JAVA,
   changeOrigin: true,
-  proxyTimeout: 60_000,
-  timeout: 60_000,
+  proxyTimeout: 90_000, // AI generation can be slow
+  timeout: 90_000,
   on: {
-    error: (err, req, res) => {
-      res.status(502).json({ error: 'Backend unavailable', details: err.message });
+    error: (err, _req, res) => {
+      (res as any).status(502).json({ error: 'Interview service unavailable', details: err.message });
     },
   },
 });
 
-// ── Track ──────────────────────────────────────────────────────────────────
-// POST /api/interview/track?userJobId=   → get or create interview track
-router.post('/track', authGuard, javaProxy);
-
-// GET  /api/interview/tracks             → list all tracks for current user
-router.get('/tracks', authGuard, javaProxy);
-
-// PATCH /api/interview/track/:trackId/stage?stage=   → update interview stage
-router.patch('/track/:trackId/stage', authGuard, javaProxy);
-
-// ── Question Kit ───────────────────────────────────────────────────────────
-// POST /api/interview/kit?userJobId=     → generate AI question kit (slow — 60s timeout)
-router.post('/kit', authGuard, javaProxy);
-
-// GET  /api/interview/kit/:trackId       → fetch existing kit questions
-router.get('/kit/:trackId', authGuard, javaProxy);
-
-// ── PDF Export ─────────────────────────────────────────────────────────────
-// GET  /api/interview/pdf/:trackId       → export interview kit as PDF
-router.get('/pdf/:trackId', authGuard, javaProxy);
-
-// GET  /api/interview/pdf/session/:sessionId → export mock interview report as PDF
-router.get('/pdf/session/:sessionId', authGuard, javaProxy);
-
-// ── Mock Session ───────────────────────────────────────────────────────────
-// POST /api/interview/session/start?userJobId=
-router.post('/session/start', authGuard, javaProxy);
-
-// POST /api/interview/session/:sessionId/answer?questionId=
-router.post('/session/:sessionId/answer', authGuard, javaProxy);
-
-// POST /api/interview/session/:sessionId/complete
-router.post('/session/:sessionId/complete', authGuard, javaProxy);
-
-// GET  /api/interview/session/history?userJobId=
-router.get('/session/history', authGuard, javaProxy);
-
-// ── Reminder Notification ──────────────────────────────────────────────────
-// POST /api/interview/track/:trackId/remind  → set interview date + trigger reminder
-router.post('/track/:trackId/remind', authGuard, javaProxy);
+// Specific routes before parameterised ones
+router.get('/history',                     authGuard, javaProxy);
+router.get('/tracks',                      authGuard, javaProxy);
+router.post('/generate-kit/:userJobId',    authGuard, javaProxy);
+router.get('/kit/:userJobId',              authGuard, javaProxy);
+router.post('/mock/start/:userJobId',      authGuard, javaProxy);
+router.post('/mock/reply/:sessionId',      authGuard, javaProxy);
+router.get('/history/:userJobId',          authGuard, javaProxy);
+router.patch('/tracks/:userJobId/stage',   authGuard, javaProxy);
 
 export default router;
