@@ -6,20 +6,23 @@
  *
  * AdminRoute extends ProtectedRoute with role === 'ADMIN' enforcement.
  *
- * In development mode with VITE_DEV_BYPASS_GUARDS=true, skips auth checks.
+ * DEV_BYPASS: only active when VITE_DEV_BYPASS_GUARDS=true is explicitly set.
+ * Does NOT auto-activate on import.meta.env.DEV or MODE=development.
  */
 import { Navigate, Outlet, useLocation } from 'react-router-dom';
 import { useAuth } from '@/context/AuthContext';
 import AppShell from '@/components/layout/AppShell';
 import { PageLoader } from '@/components/LoadingSpinner';
 
-const DEV_BYPASS = import.meta.env.VITE_DEV_BYPASS_GUARDS === 'true' || import.meta.env.DEV || import.meta.env.MODE === 'development';
+// IMPORTANT: Only bypass guards when the flag is EXPLICITLY set to the string 'true'.
+// Do NOT use import.meta.env.DEV or MODE === 'development' — those would silently
+// disable auth for every developer running the dev server, including AdminRoute.
+const DEV_BYPASS = import.meta.env.VITE_DEV_BYPASS_GUARDS === 'true';
 
 export function ProtectedRoute() {
   const { user, loading } = useAuth();
   const location = useLocation();
 
-  // Dev bypass: skip all auth checks, render app shell directly
   if (DEV_BYPASS) {
     return <AppShell />;
   }
@@ -29,17 +32,16 @@ export function ProtectedRoute() {
   }
 
   if (!user) {
-    // Fix #5: Capture the full location (pathname + search + hash) for post-login redirect
     return <Navigate to="/login" replace state={{ from: location }} />;
   }
 
-  // Authenticated: render the full app shell with nav/sidebar
   return <AppShell />;
 }
 
 /**
- * AdminRoute — wraps ProtectedRoute logic + requires role === 'ADMIN'.
- * Non-admin users are redirected to /dashboard with a notification.
+ * AdminRoute — requires role === 'ADMIN'.
+ * Non-admin authenticated users are redirected to /dashboard.
+ * Unauthenticated users are redirected to /login with return path preserved.
  */
 export function AdminRoute() {
   const { user, loading } = useAuth();

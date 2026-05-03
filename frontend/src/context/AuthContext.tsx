@@ -1,11 +1,10 @@
 /**
- * Task 121 — AuthContext updated to wire refresh tokens through tokenStore.
+ * AuthContext — single source of truth for auth state.
  *
- * Changes from previous version:
- *  - signIn / signUp store both access token + refresh token via tokenStore
- *  - signOut calls /auth/logout (backend blacklist) then clears tokenStore
- *  - Initial load reads user from localStorage (unchanged)
- *  - tokenStore is the single source of truth for tokens; AuthContext owns user state
+ * Provides: user, loading, signIn, signUp, signOut, updateProfile,
+ *           forgotPassword, resetPassword
+ *
+ * DEV_BYPASS: only active when VITE_DEV_BYPASS_GUARDS=true is explicitly set.
  */
 import { createContext, useContext, useState, ReactNode, useEffect } from 'react';
 import * as mocks from '@/services/mockApi';
@@ -31,41 +30,39 @@ interface Ctx {
   signIn: (email: string, password: string) => Promise<User>;
   signUp: (name: string, email: string, password: string) => Promise<User>;
   updateProfile: (data: UpdateProfilePayload) => Promise<void>;
+  /** Send a password-reset email. Resolves when the request is accepted. */
+  forgotPassword: (email: string) => Promise<void>;
+  /** Complete a password reset using the token from the email link. */
+  resetPassword: (newPassword: string, token: string) => Promise<void>;
 }
 
 const AuthCtx = createContext<Ctx | null>(null);
 
 const USE_MOCKS = import.meta.env.VITE_USE_MOCKS === 'true';
-const DEV_BYPASS = import.meta.env.VITE_DEV_BYPASS_GUARDS === 'true' || import.meta.env.DEV || import.meta.env.MODE === 'development';
+// Only bypass when EXPLICITLY set — never auto-activate on DEV or MODE.
+const DEV_BYPASS = import.meta.env.VITE_DEV_BYPASS_GUARDS === 'true';
 
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null>(() => {
-    // In dev bypass mode, use mock user immediately - no localStorage reads
     if (DEV_BYPASS) return mocks.MOCK_USER;
     if (USE_MOCKS) return mocks.MOCK_USER;
     try { return JSON.parse(localStorage.getItem('co_user') || 'null'); } catch { return null; }
   });
   const [loading, setLoading] = useState(false);
 
-  // Persist user object to localStorage whenever it changes (skip in dev bypass)
   useEffect(() => {
     if (DEV_BYPASS) return;
     if (user) localStorage.setItem('co_user', JSON.stringify(user));
     else {
       localStorage.removeItem('co_user');
-      tokenStore.clear(); // Ensure tokens are also wiped when user is cleared
+      tokenStore.clear();
     }
   }, [user]);
 
   const signIn = async (email: string, password: string): Promise<User> => {
-    // In dev bypass, short-circuit
-    if (DEV_BYPASS) {
-      setUser(mocks.MOCK_USER);
-      return mocks.MOCK_USER;
-    }
+    if (DEV_BYPASS) { setUser(mocks.MOCK_USER); return mocks.MOCK_USER; }
     setLoading(true);
     try {
-      // authApi.login already stores tokens in tokenStore
       const data = await authApi.login({ email, password });
       const u: User = data.user;
       setUser(u);
@@ -76,15 +73,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   };
 
   const signUp = async (name: string, email: string, password: string): Promise<User> => {
-    // In dev bypass, short-circuit
-    if (DEV_BYPASS) {
-      setUser(mocks.MOCK_USER);
-      return mocks.MOCK_USER;
-    }
+    if (DEV_BYPASS) { setUser(mocks.MOCK_USER); return mocks.MOCK_USER; }
     setLoading(true);
     try {
       const username = email.split('@')[0].toLowerCase().replace(/[^a-z0-9._-]/g, '');
-      // authApi.signup already stores tokens in tokenStore
       const data = await authApi.signup({ name, username, email, password });
       const u: User = data.user;
       setUser(u);
@@ -95,17 +87,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   };
 
   const signOut = async () => {
-    // In dev bypass, just clear user without backend call
-    if (DEV_BYPASS) {
-      setUser(null);
-      return;
-    }
+    if (DEV_BYPASS) { setUser(null); return; }
     setLoading(true);
     try {
-      // Blacklists refresh token on the backend, clears tokenStore
       await authApi.logout();
     } finally {
-      setUser(null); // triggers useEffect → clears localStorage
+      setUser(null);
       setLoading(false);
     }
   };
@@ -117,8 +104,20 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   };
 
+  const forgotPassword = async (email: string): Promise<void> => {
+    await authApi.forgotPassword(email);
+  };
+
+  const resetPassword = async (newPassword: string, token: string): Promise<void> => {
+    await authApi.resetPassword(newPassword, token);
+  };
+
   return (
-    <AuthCtx.Provider value={{ user, loading, setUser, signOut, signIn, signUp, updateProfile }}>
+    <AuthCtx.Provider value={{
+      user, loading, setUser,
+      signOut, signIn, signUp, updateProfile,
+      forgotPassword, resetPassword,
+    }}>
       {children}
     </AuthCtx.Provider>
   );
