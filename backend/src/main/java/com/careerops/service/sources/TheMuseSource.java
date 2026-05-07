@@ -16,7 +16,7 @@ import java.util.List;
 public class TheMuseSource implements JobSource {
     private static final Logger log = LoggerFactory.getLogger(TheMuseSource.class);
     private final WebClient client;
-    public TheMuseSource(WebClient.Builder b) { this.client = b.baseUrl("https://www.themuse.com").build(); }
+    public TheMuseSource(JobApiHttpClient httpClient) { this.client = httpClient.createClient("https://www.themuse.com"); }
 
     @Override public String name() { return "themuse"; }
 

@@ -1,8 +1,8 @@
-import { useState, useCallback } from 'react';
+import { useCallback, useState } from 'react';
+import toast from 'react-hot-toast';
 import { skillsApi } from '../services/skillsApi';
 import type {
   SkillName,
-  SkillState,
   UseSkillState,
   SkillStartRequest,
   SkillRunResponse,
@@ -36,13 +36,17 @@ export function useSkill() {
     setSkillState(prev => ({
       ...prev,
       state:     'loading',
+      data:      null,
+      question:  null,
+      conversationId: null,
+      missingFields: [],
       error:     null,
       skillName: req.skillName,
     }));
 
     try {
       const res = await skillsApi.start(req);
-      applyResponse(res, req.skillName);
+      applyResponse(res);
     } catch (err: unknown) {
       const msg = (err as { normalizedMessage?: string })?.normalizedMessage
                || 'Something went wrong. Please try again.';
@@ -55,24 +59,15 @@ export function useSkill() {
     const { conversationId, skillName } = skillState;
     if (!conversationId || !skillName) return;
 
-    setSkillState(prev => ({ ...prev, state: 'loading', error: null }));
+    setSkillState(prev => ({
+      ...prev,
+      state: 'loading',
+      question: null,
+      error: null,
+    }));
 
     try {
-      // Loop until Claude stops asking questions
-      let res: SkillRunResponse = await skillsApi.reply({ conversationId, answer });
-
-      // Handle chained questions (Claude may ask more than once)
-      while (res.type === 'QUESTION') {
-        setSkillState(prev => ({
-          ...prev,
-          state:          'waiting_answer',
-          question:       res.question ?? null,
-          conversationId: res.conversationId ?? null,
-        }));
-        // Return to let the user answer the next question via UI
-        return;
-      }
-
+      const res = await skillsApi.reply({ conversationId, answer });
       applyResponse(res, skillName);
     } catch (err: unknown) {
       const msg = (err as { normalizedMessage?: string })?.normalizedMessage
@@ -88,8 +83,11 @@ export function useSkill() {
   ) => {
     try {
       await skillsApi.downloadSkillPdf(userJobId, skillName);
+      setSkillState(prev => ({ ...prev, error: null }));
     } catch {
-      console.error('PDF download failed');
+      const message = 'PDF download failed. Please try again.';
+      setSkillState(prev => ({ ...prev, error: message }));
+      toast.error(message);
     }
   }, []);
 
@@ -107,7 +105,7 @@ export function useSkill() {
   }, []);
 
   // ── Internal response handler ───────────────────────────────
-  function applyResponse(res: SkillRunResponse, skillName: SkillName) {
+  function applyResponse(res: SkillRunResponse, activeSkillName: SkillName | null = null) {
     switch (res.type) {
       case 'RESULT':
         setSkillState(prev => ({
@@ -116,6 +114,9 @@ export function useSkill() {
           data:     (res.data as Record<string, unknown>) ?? null,
           question: null,
           conversationId: null,
+          missingFields: [],
+          error: null,
+          skillName: activeSkillName ?? prev.skillName,
         }));
         break;
 
@@ -125,6 +126,8 @@ export function useSkill() {
           state:          'waiting_answer',
           question:       res.question ?? null,
           conversationId: res.conversationId ?? null,
+          error:          null,
+          skillName:      activeSkillName ?? prev.skillName,
         }));
         break;
 
@@ -132,17 +135,31 @@ export function useSkill() {
         setSkillState(prev => ({
           ...prev,
           state:         'profile_incomplete',
+          data:          null,
+          question:      null,
+          conversationId: null,
           missingFields: res.missingFields ?? [],
+          error:         null,
+          skillName:     activeSkillName ?? prev.skillName,
         }));
         break;
 
       case 'ERROR':
         setSkillState(prev => ({
           ...prev,
-          state: 'error',
-          error: res.errorMessage ?? 'An error occurred.',
+          state:    'error',
+          data:     null,
+          question: null,
+          conversationId: null,
+          error:    res.errorMessage ?? 'An error occurred.',
+          skillName: activeSkillName ?? prev.skillName,
         }));
         break;
+
+      default: {
+        const exhaustiveCheck: never = res.type;
+        throw new Error(`Unhandled skill response type: ${exhaustiveCheck}`);
+      }
     }
   }
 

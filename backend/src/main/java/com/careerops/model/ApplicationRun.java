@@ -20,8 +20,9 @@ public class ApplicationRun {
     private UUID userJobId;
 
     @Builder.Default
+    @Enumerated(EnumType.STRING)
     @Column(nullable = false, length = 30)
-    private String status = "pending";
+    private ApplicationRunStatus status = ApplicationRunStatus.pending;
 
     @Builder.Default
     @Column(name = "total_steps", nullable = false)

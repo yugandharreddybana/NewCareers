@@ -20,7 +20,7 @@ const SOURCE_STYLES: Record<string, string> = {
 function getSourceStyle(name?: string): string {
   if (!name) return 'bg-slate-50 text-slate-500 border-slate-200';
   const key = Object.keys(SOURCE_STYLES).find(k => name.toLowerCase().includes(k.toLowerCase()));
-  return key ? SOURCE_STYLES[key] : 'bg-slate-50 text-slate-500 border-slate-200';
+  return key ? (SOURCE_STYLES[key] ?? 'bg-slate-50 text-slate-500 border-slate-200') : 'bg-slate-50 text-slate-500 border-slate-200';
 }
 
 function sourceLabel(name?: string): string {
@@ -50,7 +50,7 @@ function companyInitials(company: string): string {
 function avatarColor(company: string): string {
   let hash = 0;
   for (let i = 0; i < company.length; i++) hash = company.charCodeAt(i) + ((hash << 5) - hash);
-  return AVATAR_COLORS[Math.abs(hash) % AVATAR_COLORS.length];
+  return AVATAR_COLORS[Math.abs(hash) % AVATAR_COLORS.length] ?? AVATAR_COLORS[0] ?? 'bg-slate-100 text-slate-700';
 }
 
 // ── Match bar colours ───────────────────────────────────────────────────────
@@ -90,7 +90,11 @@ export default function JobCardUI({ job }: { job: JC }) {
   const overflow    = allSkills.length - visibleSkills.length;
 
   return (
-    <div className="group relative bg-white border border-slate-200 rounded-2xl p-5 h-full flex flex-col gap-4 hover:shadow-md hover:border-slate-300 transition-all duration-200">
+    <div
+      role="article"
+      aria-label={`${job.title} at ${job.company}${job.matchPercent != null ? `, ${job.matchPercent}% match` : ''}`}
+      className="group relative bg-white border border-slate-200 rounded-2xl p-5 h-full flex flex-col gap-4 hover:shadow-md hover:border-slate-300 transition-all duration-200"
+    >
 
       {/* Left accent bar on hover */}
       <div className="absolute left-0 top-4 bottom-4 w-0.5 rounded-full bg-emerald-500 opacity-0 group-hover:opacity-100 transition-opacity duration-200" />
@@ -219,3 +223,5 @@ export default function JobCardUI({ job }: { job: JC }) {
     </div>
   );
 }
+
+JobCardUI.displayName = 'JobCard';

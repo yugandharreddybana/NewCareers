@@ -8,7 +8,10 @@ import java.util.Objects;
 import java.util.UUID;
 
 @Entity
-@Table(name = "seen_jobs", schema = "career_operations")
+@Table(name = "seen_jobs", schema = "career_operations",
+       indexes = {
+           @Index(name = "idx_seen_jobs_seen_at", columnList = "seen_at")
+       })
 @IdClass(SeenJob.PK.class)
 @Getter @Setter @NoArgsConstructor @AllArgsConstructor @Builder
 public class SeenJob {
@@ -20,6 +23,7 @@ public class SeenJob {
 
     @Getter @Setter @NoArgsConstructor @AllArgsConstructor
     public static class PK implements Serializable {
+        private static final long serialVersionUID = 1L;
         private UUID userId;
         private String fingerprint;
         @Override public boolean equals(Object o){

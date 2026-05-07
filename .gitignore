@@ -90,7 +90,6 @@ frontend/tsconfig.tsbuildinfo
 
 # ── SECURITY: Never commit real credentials ────────────────────────────────
 # Use .env.example as the template.
-# Copy it to .env and fill in real values locally.
-backend/src/main/resources/application.properties
+# backend/src/main/resources/application.properties
 middleware/.env
 frontend/.env

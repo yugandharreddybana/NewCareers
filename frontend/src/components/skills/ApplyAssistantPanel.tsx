@@ -2,8 +2,9 @@ import { useState } from 'react';
 import SkillPanel from './SkillPanel';
 import toast from 'react-hot-toast';
 import { kanbanApi } from '@/services/api';
+import type { ApplyAssistantData } from '@/types/skills-data';
 
-interface Props { data: any; open: boolean; onClose: () => void; userJobId: string; onApplied?: () => void; }
+interface Props { data: ApplyAssistantData | null; open: boolean; onClose: () => void; userJobId: string; onApplied?: () => void; }
 
 export default function ApplyAssistantPanel({ data, open, onClose, userJobId, onApplied }: Props) {
   const [step, setStep] = useState(0);
@@ -49,7 +50,7 @@ export default function ApplyAssistantPanel({ data, open, onClose, userJobId, on
       {step === 1 && (
         <div className="space-y-4">
           <div className="text-xs font-semibold text-slate-400 uppercase tracking-wider">Application Questions</div>
-          {(data.questionAnswers || []).map((qa: any, i: number) => (
+          {(data.questionAnswers || []).map((qa, i) => (
             <div key={i} className="space-y-1">
               <div className="font-medium text-ink-900">{qa.question}</div>
               <div className="bg-slate-50 border border-slate-100 rounded-lg p-3 text-sm text-slate-700 leading-relaxed">

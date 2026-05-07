@@ -7,6 +7,8 @@ import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 import org.springframework.stereotype.Repository;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.data.jpa.repository.Lock;
+import jakarta.persistence.LockModeType;
 
 import java.time.Instant;
 import java.util.List;
@@ -20,6 +22,13 @@ public interface SkillConversationRepository extends JpaRepository<SkillConversa
      * Secure fetch — always includes userId to prevent cross-user access.
      */
     Optional<SkillConversation> findByIdAndUserId(UUID id, UUID userId);
+
+    /**
+     * Pessimistic lock for race condition protection (3.059).
+     */
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("SELECT sc FROM SkillConversation sc WHERE sc.id = :id AND sc.userId = :userId")
+    Optional<SkillConversation> findByIdAndUserIdForUpdate(@Param("id") UUID id, @Param("userId") UUID userId);
 
     /**
      * Find all pending conversations for a user (should rarely be more than a few).

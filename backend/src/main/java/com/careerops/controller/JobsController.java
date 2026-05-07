@@ -9,15 +9,27 @@ import com.careerops.repository.UserJobRepository;
 import com.careerops.service.DailyLimitService;
 import com.careerops.service.JobDeliveryService;
 import com.careerops.service.JobRecommendationService;
+import com.careerops.service.KanbanService;
 import com.careerops.util.AuthUtil;
+import jakarta.persistence.criteria.*;
+import org.springframework.data.domain.*;
+import org.springframework.data.jpa.domain.Specification;
 import org.springframework.http.HttpStatus;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.*;
 
+/**
+ * CORS Policy:
+ * - Allowed Origins: from ${cors.allowed.origins}
+ * - Methods: GET, POST, PUT, PATCH, DELETE, OPTIONS
+ * - Headers: Content-Type, Authorization, X-Requested-With, X-CSRF-Token, X-Internal-Secret, X-Internal-User-Id
+ * - Exposed: X-RateLimit-Remaining, X-RateLimit-Reset, Retry-After
+ */
 @RestController
 @RequestMapping("/jobs")
+@io.micrometer.core.annotation.Timed
 public class JobsController {
 
     private final UserJobRepository        userJobs;
@@ -25,41 +37,44 @@ public class JobsController {
     private final JobDeliveryService       delivery;
     private final DailyLimitService        limits;
     private final JobRecommendationService recommendations;
+    private final KanbanService           kanban;
 
     public JobsController(UserJobRepository u, JobRepository j, JobDeliveryService d,
-                          DailyLimitService l, JobRecommendationService r) {
+                          DailyLimitService l, JobRecommendationService r, KanbanService k) {
         this.userJobs        = u;
         this.jobs            = j;
         this.delivery        = d;
         this.limits          = l;
         this.recommendations = r;
+        this.kanban          = k;
     }
-
-    // ── Existing endpoints (Phase 1 — unchanged) ────────────────────────────────
 
     @GetMapping
     @Transactional(readOnly = true)
-    public Map<String, Object> list() {
+    public JobListResponse list(
+            @RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "20") int size) {
         UUID uid = AuthUtil.currentUserId();
-        List<JobCardResponse> cards = userJobs.findByUserIdOrderByDeliveredAtDesc(uid).stream()
-                .map(uj -> {
-                    Job j = jobs.findById(uj.getJobId()).orElse(null);
-                    if (j == null) return null;
-                    return new JobCardResponse(
-                        uj.getId(), j.getId(), j.getTitle(), j.getCompany(), j.getLocation(),
-                        j.getSalaryMin(), j.getSalaryMax(), j.getCurrency(), j.getSponsorship(),
-                        uj.getMatchPercent(), uj.getVerdict(),
-                        uj.getHumanSummary(), j.getSourceName(),
-                        j.getPostedAt(), uj.getDeliveredAt(),
-                        uj.getKanbanColumn(), uj.getStatus(), j.getSourceUrl(),
-                        uj.getMatchedSkills(), uj.getUnmatchedSkills()
-                    );
-                }).filter(java.util.Objects::nonNull).toList();
-        return Map.of(
-            "items",      cards,
-            "dailyCount", limits.getCount(uid),
-            "dailyLimit", limits.max(),
-            "remaining",  limits.remaining(uid)
+        int safeSize = Math.max(1, Math.min(size, 50));
+        Pageable pageable = PageRequest.of(page, safeSize);
+        Page<UserJob> userJobPage = userJobs.findByUserIdOrderByDeliveredAtDesc(uid, pageable);
+        List<UserJob> userJobList = userJobPage.getContent();
+        Set<UUID> jobIds = userJobList.stream().map(UserJob::getJobId).collect(java.util.stream.Collectors.toSet());
+        Map<UUID, Job> jobMap = new HashMap<>();
+        if (!jobIds.isEmpty()) {
+            for (Job j : jobs.findAllById(jobIds)) {
+                jobMap.put(j.getId(), j);
+            }
+        }
+        List<JobCardResponse> cards = userJobList.stream()
+                .map(uj -> JobCardResponse.from(uj, jobMap.get(uj.getJobId())))
+                .filter(java.util.Objects::nonNull)
+                .toList();
+        return new JobListResponse(
+            cards,
+            limits.getCount(uid),
+            limits.max(),
+            limits.remaining(uid)
         );
     }
 
@@ -71,52 +86,33 @@ public class JobsController {
                 .orElseThrow(() -> new ApiException(HttpStatus.NOT_FOUND, "Not found"));
         Job j = jobs.findById(uj.getJobId())
                 .orElseThrow(() -> new ApiException(HttpStatus.NOT_FOUND, "Job missing"));
-        return new JobDetailResponse(
-            uj.getId(), j.getId(), j.getTitle(), j.getCompany(), j.getLocation(),
-            j.getSalaryMin(), j.getSalaryMax(), j.getCurrency(), j.getSponsorship(),
-            j.getDescription(), j.getSourceUrl(), j.getSourceName(), j.getSector(),
-            j.getPostedAt(), uj.getMatchPercent(), uj.getAiScore(),
-            uj.getMatchedSkills(), uj.getUnmatchedSkills(), uj.getCvImprovementTips(),
-            uj.getHumanSummary(), uj.getVerdict(), uj.getKanbanColumn(), uj.getStatus()
-        );
+        return JobDetailResponse.from(uj, j);
     }
 
     @PostMapping("/fetch")
     public FetchSummary fetchMore(@RequestParam(defaultValue = "5") int count) {
+        if (count < 1 || count > 10) {
+            throw new ApiException(HttpStatus.BAD_REQUEST, "Count must be between 1 and 10");
+        }
         return delivery.deliver(AuthUtil.currentUserId(), count);
     }
 
     @GetMapping("/limits")
     @Transactional(readOnly = true)
-    public Map<String, Integer> limits() {
+    public FetchSummary limits() {
         UUID uid = AuthUtil.currentUserId();
-        return Map.of(
-            "dailyCount", limits.getCount(uid),
-            "dailyLimit", limits.max(),
-            "remaining",  limits.remaining(uid)
+        return new FetchSummary(
+            0,
+            limits.getCount(uid),
+            limits.max(),
+            limits.remaining(uid)
         );
     }
 
     @GetMapping("/stats")
     @Transactional(readOnly = true)
-    public Map<String, Object> stats() {
-        UUID uid = AuthUtil.currentUserId();
-        Map<String, Long> byColumn = new HashMap<>();
-        for (Object[] row : userJobs.countByColumnForUser(uid)) {
-            byColumn.put((String) row[0], (Long) row[1]);
-        }
-        long total      = byColumn.values().stream().mapToLong(Long::longValue).sum();
-        long applied    = byColumn.getOrDefault("Applied",   0L);
-        long interviews = byColumn.getOrDefault("Interview", 0L);
-        long offers     = byColumn.getOrDefault("Offer",     0L);
-        double avgMatch = userJobs.avgMatchPercentForUser(uid);
-        return Map.of(
-            "total",      total,
-            "applied",    applied,
-            "interviews", interviews,
-            "offers",     offers,
-            "avgMatch",   Math.round(avgMatch * 10.0) / 10.0
-        );
+    public KanbanStatsResponse stats() {
+        return kanban.getStats(AuthUtil.currentUserId());
     }
 
     // ── Section 7 — Task 71: GET /jobs/recommended ─────────────────────────────
@@ -129,7 +125,7 @@ public class JobsController {
      */
     @GetMapping("/recommended")
     @Transactional(readOnly = true)
-    public List<Map<String, Object>> recommended() {
+    public List<RecommendationResponse> recommended() {
         return recommendations.getRecommendations(AuthUtil.currentUserId());
     }
 
@@ -144,7 +140,7 @@ public class JobsController {
      */
     @GetMapping("/search")
     @Transactional(readOnly = true)
-    public Map<String, Object> search(
+    public JobSearchResponse search(
             @RequestParam(required = false)       String  q,
             @RequestParam(required = false)       String  location,
             @RequestParam(required = false)       Integer minSalary,
@@ -155,73 +151,65 @@ public class JobsController {
             @RequestParam(defaultValue = "20")    int     size) {
 
         UUID uid = AuthUtil.currentUserId();
+        int safeSize = Math.max(1, Math.min(size, 50));
+        Pageable pageable = PageRequest.of(page, safeSize, Sort.by("deliveredAt").descending());
 
-        List<JobCardResponse> filtered = userJobs
-                .findByUserIdOrderByDeliveredAtDesc(uid)
-                .stream()
-                .map(uj -> {
-                    Job j = jobs.findById(uj.getJobId()).orElse(null);
-                    if (j == null) return null;
-                    return new JobCardResponse(
-                        uj.getId(), j.getId(), j.getTitle(), j.getCompany(), j.getLocation(),
-                        j.getSalaryMin(), j.getSalaryMax(), j.getCurrency(), j.getSponsorship(),
-                        uj.getMatchPercent(), uj.getVerdict(),
-                        uj.getHumanSummary(), j.getSourceName(),
-                        j.getPostedAt(), uj.getDeliveredAt(),
-                        uj.getKanbanColumn(), uj.getStatus(), j.getSourceUrl(),
-                        uj.getMatchedSkills(), uj.getUnmatchedSkills()
-                    );
-                })
+        Specification<UserJob> spec = buildSearchSpec(uid, q, location, minSalary, maxSalary, sponsorship, remote);
+        Page<UserJob> userJobPage = userJobs.findAll(spec, pageable);
+
+        List<JobCardResponse> cards = userJobPage.getContent().stream()
+                .map(uj -> JobCardResponse.from(uj, uj.getJob()))
                 .filter(Objects::nonNull)
-                .filter(c -> matchSearch(c, q, location, minSalary, maxSalary, sponsorship, remote))
                 .toList();
 
-        int total    = filtered.size();
-        int safeSize = Math.max(1, Math.min(size, 50));
-        int from     = Math.min(page * safeSize, total);
-        int to       = Math.min(from + safeSize, total);
-
-        return Map.of(
-            "items",      filtered.subList(from, to),
-            "total",      total,
-            "page",       page,
-            "size",       safeSize,
-            "totalPages", (int) Math.ceil((double) total / safeSize)
+        return new JobSearchResponse(
+            cards,
+            userJobPage.getTotalElements(),
+            page,
+            safeSize,
+            userJobPage.getTotalPages()
         );
     }
 
-    // ── Search filter helper ───────────────────────────────────────────────────
+    private Specification<UserJob> buildSearchSpec(UUID uid, String q, String loc, Integer minS, Integer maxS, Boolean spons, Boolean rem) {
+        return (root, query, cb) -> {
+            List<Predicate> p = new ArrayList<>();
+            p.add(cb.equal(root.get("userId"), uid));
 
-    private boolean matchSearch(JobCardResponse c, String q, String location,
-                                Integer minSalary, Integer maxSalary,
-                                Boolean sponsorship, Boolean remote) {
-        // Keyword filter (title OR company)
-        if (q != null && !q.isBlank()) {
-            String ql = q.toLowerCase();
-            boolean hit = (c.title()   != null && c.title().toLowerCase().contains(ql))
-                       || (c.company() != null && c.company().toLowerCase().contains(ql));
-            if (!hit) return false;
-        }
-        // Location filter
-        if (location != null && !location.isBlank() && !"All Ireland".equalsIgnoreCase(location)) {
-            String locL = c.location() != null ? c.location().toLowerCase() : "";
-            if ("Remote".equalsIgnoreCase(location)) {
-                if (!locL.contains("remote")) return false;
-            } else {
-                if (!locL.contains(location.toLowerCase())) return false;
+            // Eager fetch Job to avoid N+1, but only for the data query (not count)
+            if (query.getResultType() != Long.class && query.getResultType() != long.class) {
+                root.fetch("job", JoinType.INNER);
             }
-        }
-        // Remote toggle
-        if (Boolean.TRUE.equals(remote)) {
-            String locL = c.location() != null ? c.location().toLowerCase() : "";
-            if (!locL.contains("remote")) return false;
-        }
-        // Salary range
-        if (minSalary != null && c.salaryMax() != null && c.salaryMax() < minSalary) return false;
-        if (maxSalary != null && c.salaryMin() != null && c.salaryMin() > maxSalary) return false;
-        // Sponsorship toggle
-        if (Boolean.TRUE.equals(sponsorship) && !Boolean.TRUE.equals(c.sponsorship())) return false;
+            Join<UserJob, Job> job = root.join("job");
 
-        return true;
+            if (q != null && !q.isBlank()) {
+                String pat = "%" + q.toLowerCase() + "%";
+                p.add(cb.or(
+                    cb.like(cb.lower(job.get("title")), pat),
+                    cb.like(cb.lower(job.get("company")), pat)
+                ));
+            }
+            if (loc != null && !loc.isBlank() && !"All Ireland".equalsIgnoreCase(loc)) {
+                if ("Remote".equalsIgnoreCase(loc)) {
+                    p.add(cb.like(cb.lower(job.get("location")), "%remote%"));
+                } else {
+                    p.add(cb.like(cb.lower(job.get("location")), "%" + loc.toLowerCase() + "%"));
+                }
+            }
+            if (Boolean.TRUE.equals(rem)) {
+                p.add(cb.like(cb.lower(job.get("location")), "%remote%"));
+            }
+            if (minS != null) {
+                p.add(cb.or(cb.isNull(job.get("salaryMax")), cb.greaterThanOrEqualTo(job.get("salaryMax"), minS)));
+            }
+            if (maxS != null) {
+                p.add(cb.or(cb.isNull(job.get("salaryMin")), cb.lessThanOrEqualTo(job.get("salaryMin"), maxS)));
+            }
+            if (Boolean.TRUE.equals(spons)) {
+                p.add(cb.equal(job.get("sponsorship"), true));
+            }
+
+            return cb.and(p.toArray(new Predicate[0]));
+        };
     }
 }

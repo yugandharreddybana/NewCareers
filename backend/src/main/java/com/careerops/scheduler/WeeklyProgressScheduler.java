@@ -29,7 +29,10 @@ public class WeeklyProgressScheduler {
     private final UserStreakRepository streakRepo;
     private final WeeklyProgressEmailService progressEmailService;
 
-    @Scheduled(cron = "0 0 8 * * MON", zone = "UTC")
+    /**
+     * This is the CANONICAL and sole source-of-truth scheduler for weekly performance progress emails.
+     */
+    @Scheduled(cron = "0 0 8 * * MON", zone = "Europe/Dublin")
     public void generateAndSendWeeklyProgress() {
         log.info("[WeeklyProgressScheduler] Starting weekly progress email dispatch");
 

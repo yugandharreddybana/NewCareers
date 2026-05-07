@@ -13,20 +13,30 @@ public class WorkspaceDTO {
 
     @Data @Builder @NoArgsConstructor @AllArgsConstructor
     public static class CreateRequest {
+        @jakarta.validation.constraints.NotBlank(message = "Name is required")
+        @jakarta.validation.constraints.Size(max = 100, message = "Name too long")
         private String name;
+        @jakarta.validation.constraints.Size(max = 500, message = "Description too long")
         private String description;
     }
 
     @Data @Builder @NoArgsConstructor @AllArgsConstructor
     public static class InviteRequest {
+        @jakarta.validation.constraints.NotBlank(message = "Email is required")
+        @jakarta.validation.constraints.Email(message = "Invalid email format")
         private String email;
+        @jakarta.validation.constraints.NotBlank(message = "Role is required")
         private String role; // mentor | reviewer
     }
 
     @Data @Builder @NoArgsConstructor @AllArgsConstructor
     public static class NoteRequest {
+        @jakarta.validation.constraints.NotBlank(message = "Target type is required")
         private String targetType;
+        @jakarta.validation.constraints.NotNull(message = "Target ID is required")
         private UUID targetId;
+        @jakarta.validation.constraints.NotBlank(message = "Content is required")
+        @jakarta.validation.constraints.Size(max = 2000, message = "Content too long")
         private String content;
         private UUID parentNoteId;
     }

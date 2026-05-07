@@ -1,13 +1,11 @@
 package com.careerops.model;
 
 import jakarta.persistence.*;
-import lombok.Data;
-import lombok.NoArgsConstructor;
-import lombok.AllArgsConstructor;
+import lombok.*;
 import org.hibernate.annotations.CreationTimestamp;
 import org.hibernate.annotations.UpdateTimestamp;
 
-import java.time.LocalDateTime;
+import java.time.Instant;
 import java.util.UUID;
 
 /**
@@ -15,10 +13,8 @@ import java.util.UUID;
  * Tracks important dates: application close, interview, follow-up, offer deadline.
  */
 @Entity
-@Table(name = "deadline_events")
-@Data
-@NoArgsConstructor
-@AllArgsConstructor
+@Table(name = "deadline_events", schema = "career_operations")
+@Getter @Setter @NoArgsConstructor @AllArgsConstructor @Builder
 public class DeadlineEvent {
 
     @Id
@@ -38,19 +34,20 @@ public class DeadlineEvent {
     private String title;
 
     @Column(name = "event_date", nullable = false)
-    private LocalDateTime eventDate;
+    private Instant eventDate;
 
     @Column(columnDefinition = "TEXT")
     private String notes;
 
     @Column(name = "reminder_sent")
+    @Builder.Default
     private boolean reminderSent = false;
 
     @CreationTimestamp
     @Column(name = "created_at", updatable = false)
-    private LocalDateTime createdAt;
+    private Instant createdAt;
 
     @UpdateTimestamp
     @Column(name = "updated_at")
-    private LocalDateTime updatedAt;
+    private Instant updatedAt;
 }

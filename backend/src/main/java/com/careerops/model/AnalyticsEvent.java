@@ -2,6 +2,7 @@ package com.careerops.model;
 
 import io.hypersistence.utils.hibernate.type.json.JsonType;
 import jakarta.persistence.*;
+import lombok.*;
 import org.hibernate.annotations.Type;
 
 import java.time.Instant;
@@ -16,10 +17,11 @@ import java.util.UUID;
  * with flexible JSONB metadata for per-event context.
  */
 @Entity
-@Table(name = "analytics_events", indexes = {
+@Table(name = "analytics_events", schema = "career_operations", indexes = {
     @Index(name = "idx_analytics_user_type_created",
            columnList = "user_id, event_type, created_at DESC")
 })
+@Getter @Setter @NoArgsConstructor @AllArgsConstructor @Builder
 public class AnalyticsEvent {
 
     @Id
@@ -35,12 +37,11 @@ public class AnalyticsEvent {
 
     @Type(JsonType.class)
     @Column(name = "metadata", columnDefinition = "jsonb", nullable = false)
+    @Builder.Default
     private Map<String, Object> metadata = new HashMap<>();
 
     @Column(name = "created_at", nullable = false, updatable = false)
     private Instant createdAt;
-
-    public AnalyticsEvent() {}
 
     public AnalyticsEvent(UUID userId, String eventType, Map<String, Object> metadata) {
         this.userId    = userId;
@@ -53,18 +54,4 @@ public class AnalyticsEvent {
         if (createdAt == null) createdAt = Instant.now();
         if (metadata  == null) metadata  = new HashMap<>();
     }
-
-    // ── Getters ───────────────────────────────────────────────────────────────
-
-    public UUID getId()                        { return id; }
-    public UUID getUserId()                    { return userId; }
-    public String getEventType()               { return eventType; }
-    public Map<String, Object> getMetadata()   { return metadata; }
-    public Instant getCreatedAt()              { return createdAt; }
-
-    // ── Setters ───────────────────────────────────────────────────────────────
-
-    public void setUserId(UUID userId)                        { this.userId    = userId; }
-    public void setEventType(String eventType)                { this.eventType = eventType; }
-    public void setMetadata(Map<String, Object> metadata)     { this.metadata  = metadata; }
 }

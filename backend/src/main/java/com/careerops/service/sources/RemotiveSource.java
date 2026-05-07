@@ -16,7 +16,7 @@ import java.util.List;
 public class RemotiveSource implements JobSource {
     private static final Logger log = LoggerFactory.getLogger(RemotiveSource.class);
     private final WebClient client;
-    public RemotiveSource(WebClient.Builder b) { this.client = b.baseUrl("https://remotive.com").build(); }
+    public RemotiveSource(JobApiHttpClient httpClient) { this.client = httpClient.createClient("https://remotive.com"); }
 
     @Override public String name() { return "remotive"; }
 

@@ -1,12 +1,15 @@
 package com.careerops.service;
 
+import org.jspecify.annotations.Nullable;
+
 import com.careerops.email.WeeklyDigestEmailTemplate;
 import com.careerops.email.WeeklyDigestEmailTemplate.TopJob;
 import com.careerops.email.WeeklyDigestEmailTemplate.WeekStats;
 import com.careerops.model.Notification;
 import com.careerops.repository.UserProfileRepository;
-import jakarta.persistence.EntityManager;
-import jakarta.persistence.PersistenceContext;
+import com.careerops.repository.SkillRunRepository;
+import com.careerops.repository.UserJobRepository;
+import com.careerops.repository.UserRepository;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
@@ -40,10 +43,10 @@ public class WeeklyDigestService {
 
     private static final Logger log = LoggerFactory.getLogger(WeeklyDigestService.class);
 
-    @PersistenceContext
-    private EntityManager em;
-
     private final UserProfileRepository   profiles;
+    private final UserRepository          users;
+    private final UserJobRepository       userJobs;
+    private final SkillRunRepository      skillRuns;
     private final ResendEmailService      emailService;
     private final NotificationService     notificationService;
 
@@ -51,9 +54,15 @@ public class WeeklyDigestService {
     private String appBaseUrl;
 
     public WeeklyDigestService(UserProfileRepository profiles,
+                               UserRepository users,
+                               UserJobRepository userJobs,
+                               SkillRunRepository skillRuns,
                                ResendEmailService emailService,
                                NotificationService notificationService) {
         this.profiles            = profiles;
+        this.users               = users;
+        this.userJobs            = userJobs;
+        this.skillRuns           = skillRuns;
         this.emailService        = emailService;
         this.notificationService = notificationService;
     }
@@ -76,7 +85,7 @@ public class WeeklyDigestService {
 
     // ── Per-user digest ─────────────────────────────────────────────────
 
-    @Transactional(readOnly = true)
+    @Transactional(timeout = 10, readOnly = true)
     public boolean sendDigestForUser(UUID userId) {
         // Step 1 — Resolve contact
         UserContact contact = resolveContact(userId);
@@ -122,81 +131,35 @@ public class WeeklyDigestService {
     // ── Queries ─────────────────────────────────────────────────────────
 
     private WeekStats queryWeekStats(UUID userId) {
-        // Jobs matched this week
-        Number jobsMatched = (Number) em.createNativeQuery("""
-                SELECT COUNT(*) FROM career_operations.user_jobs
-                WHERE user_id = :uid AND created_at >= NOW() - INTERVAL '7 days'
-                """)
-                .setParameter("uid", userId)
-                .getSingleResult();
+        java.time.Instant since = java.time.Instant.now().minus(7, java.time.temporal.ChronoUnit.DAYS);
 
-        // Skills run this week
-        Number skillsRun = (Number) em.createNativeQuery("""
-                SELECT COUNT(*) FROM career_operations.skill_runs
-                WHERE user_id = :uid AND created_at >= NOW() - INTERVAL '7 days'
-                """)
-                .setParameter("uid", userId)
-                .getSingleResult();
+        long jobsMatched = userJobs.countByUserIdAndDeliveredAtAfter(userId, since);
+        long skillsRun   = skillRuns.countByUserIdAndCreatedAtAfter(userId, since);
+        long appsSent    = userJobs.countByUserIdAndKanbanColumnAndDeliveredAtAfter(userId, "Applied", since);
 
-        // Applications sent this week (cards moved to Applied)
-        Number appsSent = (Number) em.createNativeQuery("""
-                SELECT COUNT(*) FROM career_operations.user_jobs
-                WHERE user_id       = :uid
-                  AND kanban_column = 'Applied'
-                  AND updated_at   >= NOW() - INTERVAL '7 days'
-                """)
-                .setParameter("uid", userId)
-                .getSingleResult();
-
-        return new WeekStats(
-                jobsMatched.intValue(),
-                skillsRun.intValue(),
-                appsSent.intValue()
-        );
+        return new WeekStats((int)jobsMatched, (int)skillsRun, (int)appsSent);
     }
 
     @SuppressWarnings("unchecked")
     private List<TopJob> queryTopJobs(UUID userId) {
-        List<Object[]> rows = em.createNativeQuery("""
-                SELECT uj.id, j.title, j.company, j.location, uj.match_percent
-                FROM career_operations.user_jobs uj
-                JOIN career_operations.jobs j ON j.id = uj.job_id
-                WHERE uj.user_id        = :uid
-                  AND uj.created_at    >= NOW() - INTERVAL '7 days'
-                  AND uj.match_percent  IS NOT NULL
-                ORDER BY uj.match_percent DESC
-                LIMIT 3
-                """)
-                .setParameter("uid", userId)
-                .getResultList();
-
-        List<TopJob> result = new ArrayList<>();
-        for (Object[] row : rows) {
-            result.add(new TopJob(
-                row[0] != null ? row[0].toString() : "",
-                row[1] instanceof String s ? s : "",
-                row[2] instanceof String s ? s : "",
-                row[3] instanceof String s ? s : null,
-                row[4] != null ? ((Number) row[4]).intValue() : 0
-            ));
-        }
-        return result;
+        java.time.Instant since = java.time.Instant.now().minus(7, java.time.temporal.ChronoUnit.DAYS);
+        
+        return userJobs.findTop3ByUserIdAndDeliveredAtAfterAndMatchPercentIsNotNullOrderByMatchPercentDesc(userId, since)
+            .stream()
+            .map(uj -> new TopJob(
+                uj.getId().toString(),
+                uj.getJob() != null ? uj.getJob().getTitle() : "",
+                uj.getJob() != null ? uj.getJob().getCompany() : "",
+                uj.getJob() != null ? uj.getJob().getLocation() : null,
+                uj.getMatchPercent() != null ? uj.getMatchPercent() : 0
+            ))
+            .toList();
     }
 
-    private UserContact resolveContact(UUID userId) {
-        try {
-            Object[] row = (Object[]) em.createNativeQuery(
-                    "SELECT email, first_name FROM career_operations.users WHERE id = :uid")
-                    .setParameter("uid", userId)
-                    .getSingleResult();
-            String email     = row[0] instanceof String s ? s : null;
-            String firstName = row[1] instanceof String n ? n : "there";
-            if (email == null || email.isBlank()) return null;
-            return new UserContact(email, firstName);
-        } catch (Exception e) {
-            log.warn("resolveContact failed for userId={}: {}", userId, e.getMessage());
-            return null;
-        }
+    private @Nullable UserContact resolveContact(UUID userId) {
+        return users.findById(userId)
+                .map(u -> new UserContact(u.getEmail(), u.getName() != null ? u.getName().split(" ")[0] : "there"))
+                .orElse(null);
     }
 
     // Package-private so ResendEmailService can also use the pattern

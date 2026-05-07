@@ -69,4 +69,9 @@ export function CardFooter({ className, children, ...props }: HTMLAttributes<HTM
   );
 }
 
+Card.displayName = 'Card';
+CardHeader.displayName = 'CardHeader';
+CardContent.displayName = 'CardContent';
+CardFooter.displayName = 'CardFooter';
+
 export default Card;

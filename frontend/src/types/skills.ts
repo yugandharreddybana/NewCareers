@@ -6,13 +6,18 @@
 export type SkillName =
   | 'evaluate'
   | 'tailor-resume'
+  | 'cover-letter'
   | 'apply'
   | 'outreach'
   | 'research'
   | 'prep-interview'
   | 'compare'
   | 'triage'
-  | 'scan';
+  | 'scan'
+  | 'salary-negotiation'
+  | 'culture-fit'
+  | 'linkedin-optimize'
+  | 'skills-gap-plan';
 
 export type SkillResponseType =
   | 'RESULT'
@@ -62,7 +67,17 @@ export interface RunAllSkillsResponse {
   succeeded: number;
   failed: number;
   pendingAnswers: number;
-  results: Record<SkillName, SkillRunResponse>;
+  results: Record<string, SkillRunResponse>;
+}
+
+export interface RunAllSkillsBatchStatus {
+  id: string;
+  userJobId: string;
+  status: 'in_progress' | 'completed' | 'failed';
+  total: number;
+  completed: number;
+  createdAt: string;
+  results: Record<string, SkillRunResponse>;
 }
 
 // ── Hook State ──────────────────────────────────────────────

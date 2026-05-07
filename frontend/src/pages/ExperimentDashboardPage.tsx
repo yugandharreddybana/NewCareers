@@ -1,8 +1,8 @@
-import React, { useEffect, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { PageMeta } from '@/components/PageMeta';
 import { experimentsApi, type Experiment, type ExperimentResults } from '@/services/experimentsApi';
 import toast from 'react-hot-toast';
-import { FlaskConical, Play, Pause, CheckCircle, BarChart2, Users, TrendingUp, RefreshCw } from 'lucide-react';
+import { FlaskConical, Play, Pause, CheckCircle, BarChart2, Users, RefreshCw } from 'lucide-react';
 
 const USE_MOCKS = import.meta.env.VITE_USE_MOCKS === 'true';
 
@@ -83,10 +83,7 @@ const ExperimentDashboardPage: React.FC = () => {
           setExperiments(MOCK_EXPERIMENTS);
           setResults(MOCK_RESULTS);
         } else {
-          const [exps, res] = await Promise.all([
-            experimentsApi.getAllVariants().catch(() => [] as never[]),
-            experimentsApi.getAdminResults().catch(() => MOCK_RESULTS),
-          ]);
+          const res = await experimentsApi.getAdminResults().catch(() => MOCK_RESULTS);
           setExperiments(MOCK_EXPERIMENTS); // fallback — variants endpoint is user-facing
           setResults(res as ExperimentResults[]);
         }

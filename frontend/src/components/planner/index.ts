@@ -1,8 +1,16 @@
-import React from 'react';
-// @ts-ignore
-import PlannerWidgetComponent from './PlannerWidget';
-// @ts-ignore
-import JobPlannerPanelComponent from './JobPlannerPanel';
+import type { ComponentType } from 'react';
+import PlannerWidgetComponent from './PlannerWidget.jsx';
+import JobPlannerPanelComponent from './JobPlannerPanel.jsx';
 
-export const PlannerWidget = PlannerWidgetComponent as React.FC<any>;
-export const JobPlannerPanel = JobPlannerPanelComponent as React.FC<any>;
+interface PlannerWidgetProps {
+	onOpenJob?: (userJobId: string) => void;
+}
+
+interface JobPlannerPanelProps {
+	userJobId: string;
+	jobTitle?: string;
+	onClose: () => void;
+}
+
+export const PlannerWidget = PlannerWidgetComponent as ComponentType<PlannerWidgetProps>;
+export const JobPlannerPanel = JobPlannerPanelComponent as ComponentType<JobPlannerPanelProps>;

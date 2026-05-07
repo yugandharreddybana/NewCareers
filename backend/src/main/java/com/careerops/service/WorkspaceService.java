@@ -1,5 +1,7 @@
 package com.careerops.service;
 
+import org.jspecify.annotations.Nullable;
+
 import com.careerops.dto.WorkspaceDTO;
 import com.careerops.model.SharedNote;
 import com.careerops.model.SharedWorkspace;
@@ -10,6 +12,7 @@ import com.careerops.repository.SharedNoteRepository;
 import com.careerops.repository.SharedWorkspaceRepository;
 import com.careerops.repository.WorkspaceMemberRepository;
 import lombok.RequiredArgsConstructor;
+import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -27,14 +30,24 @@ public class WorkspaceService {
     private final WorkspaceMemberRepository memberRepo;
     private final SharedNoteRepository noteRepo;
     private final EmailService emailService;
+    private final com.careerops.repository.OrgRepository orgRepo;
+    private final com.careerops.repository.OrgMemberRepository orgMemberRepo;
 
     // ----------------------------------------------------------------
     // Task 49 — Create workspace
     // ----------------------------------------------------------------
-    @Transactional
+    @Transactional(timeout = 10)
     public WorkspaceDTO.WorkspaceResponse createWorkspace(UUID ownerId, WorkspaceDTO.CreateRequest req) {
+        // Find owner's primary organization to link
+        @Nullable UUID orgId = orgMemberRepo.findByUserId(ownerId).stream()
+                .filter(m -> "owner".equals(m.getRole()))
+                .map(com.careerops.model.OrgMember::getOrgId)
+                .findFirst()
+                .orElse(null);
+
         SharedWorkspace ws = SharedWorkspace.builder()
                 .ownerId(ownerId)
+                .orgId(orgId)
                 .name(req.getName())
                 .description(req.getDescription())
                 .build();
@@ -56,10 +69,27 @@ public class WorkspaceService {
     // ----------------------------------------------------------------
     // Task 50 — Invite member (only owner can invite)
     // ----------------------------------------------------------------
-    @Transactional
+    @Transactional(timeout = 10)
     public WorkspaceDTO.MemberResponse inviteMember(UUID workspaceId, UUID requestingUserId,
                                                      WorkspaceDTO.InviteRequest req) {
         assertOwner(workspaceId, requestingUserId);
+
+        SharedWorkspace ws = workspaceRepo.findById(workspaceId)
+                .orElseThrow(() -> new IllegalArgumentException("Workspace not found"));
+
+        // 2.055 — Security: Check membership-quota / org plan
+        if (ws.getOrgId() != null) {
+            com.careerops.model.Organization organization = orgRepo.findById(ws.getOrgId()).orElse(null);
+            if (organization != null) {
+                int currentMembers = memberRepo.findByWorkspaceId(workspaceId).size();
+                if (currentMembers >= organization.getSeatLimit()) {
+                    throw new com.careerops.exception.ApiException(
+                        HttpStatus.PAYMENT_REQUIRED, // 402
+                        "Organization seat limit reached (" + organization.getSeatLimit() + "). Please upgrade your plan."
+                    );
+                }
+            }
+        }
 
         Role role = Role.valueOf(req.getRole());
         if (role == Role.owner) throw new IllegalArgumentException("Cannot assign owner role via invite.");
@@ -76,8 +106,6 @@ public class WorkspaceService {
         member = memberRepo.save(member);
 
         // Task 58 — send email invite
-        SharedWorkspace ws = workspaceRepo.findById(workspaceId)
-                .orElseThrow(() -> new IllegalArgumentException("Workspace not found"));
         emailService.sendWorkspaceInvite(req.getEmail(), ws.getName(), role.name(), token);
 
         return toMemberResponse(member);
@@ -86,7 +114,7 @@ public class WorkspaceService {
     // ----------------------------------------------------------------
     // Accept invite via token
     // ----------------------------------------------------------------
-    @Transactional
+    @Transactional(timeout = 10)
     public WorkspaceDTO.MemberResponse acceptInvite(String token, UUID acceptingUserId) {
         WorkspaceMember member = memberRepo.findByInviteToken(token)
                 .orElseThrow(() -> new IllegalArgumentException("Invalid or expired invite token."));
@@ -130,7 +158,7 @@ public class WorkspaceService {
     // ----------------------------------------------------------------
     // Task 52 — Add shared note
     // ----------------------------------------------------------------
-    @Transactional
+    @Transactional(timeout = 10)
     public WorkspaceDTO.NoteResponse addNote(UUID workspaceId, UUID authorId, WorkspaceDTO.NoteRequest req) {
         assertMember(workspaceId, authorId);
         SharedNote note = SharedNote.builder()

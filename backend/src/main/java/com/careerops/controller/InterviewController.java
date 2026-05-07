@@ -1,13 +1,9 @@
 package com.careerops.controller;
 
-import com.careerops.model.InterviewQuestionBank;
-import com.careerops.model.InterviewSession;
-import com.careerops.model.InterviewTrack;
 import com.careerops.service.InterviewCoachService;
 import com.careerops.service.MockInterviewService;
 import com.careerops.util.AuthUtil;
 import org.springframework.http.HttpStatus;
-import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
@@ -17,17 +13,15 @@ import java.util.UUID;
 /**
  * Phase 3.1 — Interview Command Center
  *
- * POST /interviews/generate-kit/:userJobId      — generate AI interview kit
- * GET  /interviews/kit/:userJobId               — fetch kit questions for a job
- * POST /interviews/mock/start/:userJobId        — start a mock interview session
- * POST /interviews/mock/reply/:sessionId        — submit answer for scoring
- * GET  /interviews/history/:userJobId           — session history for a job
- * GET  /interviews/history                      — all sessions for current user
- * GET  /interviews/tracks                       — all tracks for current user
- * PATCH /interviews/tracks/:userJobId/stage     — update interview stage
+ * CORS Policy:
+ * - Allowed Origins: from ${cors.allowed.origins}
+ * - Methods: GET, POST, PUT, PATCH, DELETE, OPTIONS
+ * - Headers: Content-Type, Authorization, X-Requested-With, X-CSRF-Token, X-Internal-Secret, X-Internal-User-Id
+ * - Exposed: X-RateLimit-Remaining, X-RateLimit-Reset, Retry-After
  */
 @RestController
 @RequestMapping("/interviews")
+@io.micrometer.core.annotation.Timed
 public class InterviewController {
 
     private final InterviewCoachService coachService;
@@ -39,71 +33,93 @@ public class InterviewController {
         this.mockService = mockService;
     }
 
+    public record GenerateKitRequest(
+        @jakarta.validation.constraints.NotBlank(message = "companyName is required") String companyName,
+        @jakarta.validation.constraints.NotBlank(message = "roleTitle is required") String roleTitle,
+        String jobDescription
+    ) {}
+
+    public record StartMockRequest(String trackId) {}
+
+    public record ReplyRequest(
+        @jakarta.validation.constraints.NotBlank(message = "questionId is required") String questionId,
+        @jakarta.validation.constraints.NotBlank(message = "answer is required") String answer
+    ) {}
+
+    public record UpdateStageRequest(
+        @jakarta.validation.constraints.NotBlank(message = "stage is required") String stage
+    ) {}
+
     @PostMapping("/generate-kit/{userJobId}")
-    public ResponseEntity<List<InterviewQuestionBank>> generateKit(
+    @ResponseStatus(HttpStatus.CREATED)
+    public List<com.careerops.dto.InterviewDTO.QuestionResponse> generateKit(
             @PathVariable UUID userJobId,
-            @RequestBody Map<String, String> body
+            @jakarta.validation.Valid @RequestBody GenerateKitRequest req
     ) {
         UUID userId = AuthUtil.currentUserId();
-        List<InterviewQuestionBank> kit = coachService.generateKit(
+        List<com.careerops.model.InterviewQuestionBank> kit = coachService.generateKit(
             userId, userJobId,
-            body.get("companyName"),
-            body.get("roleTitle"),
-            body.get("jobDescription")
+            req.companyName(),
+            req.roleTitle(),
+            req.jobDescription()
         );
-        return ResponseEntity.status(HttpStatus.CREATED).body(kit);
+        return kit.stream().map(coachService::toQuestionResponse).toList();
     }
 
     @GetMapping("/kit/{userJobId}")
-    public ResponseEntity<List<InterviewQuestionBank>> getKit(@PathVariable UUID userJobId) {
-        return ResponseEntity.ok(coachService.getKitForJob(userJobId));
+    public List<com.careerops.dto.InterviewDTO.QuestionResponse> getKit(@PathVariable UUID userJobId) {
+        UUID userId = AuthUtil.currentUserId();
+        return coachService.getKitForJob(userJobId, userId).stream()
+                .map(coachService::toQuestionResponse).toList();
     }
 
     @PostMapping("/mock/start/{userJobId}")
-    public ResponseEntity<Map<String, Object>> startMock(
+    @ResponseStatus(HttpStatus.CREATED)
+    public Map<String, Object> startMock(
             @PathVariable UUID userJobId,
-            @RequestBody(required = false) Map<String, String> body
+            @jakarta.validation.Valid @jakarta.validation.constraints.NotNull @RequestBody StartMockRequest req
     ) {
         UUID userId = AuthUtil.currentUserId();
-        UUID trackId = body != null && body.get("trackId") != null
-            ? UUID.fromString(body.get("trackId")) : null;
-        return ResponseEntity.status(HttpStatus.CREATED)
-            .body(mockService.start(userId, userJobId, trackId));
+        UUID trackId = (req != null && req.trackId() != null)
+            ? UUID.fromString(req.trackId()) : null;
+        return mockService.start(userId, userJobId, trackId);
     }
 
     @PostMapping("/mock/reply/{sessionId}")
-    public ResponseEntity<Map<String, Object>> replyMock(
+    public Map<String, Object> replyMock(
             @PathVariable UUID sessionId,
-            @RequestBody Map<String, String> body
+            @jakarta.validation.Valid @RequestBody ReplyRequest req
     ) {
         UUID userId = AuthUtil.currentUserId();
-        UUID questionId = UUID.fromString(body.get("questionId"));
-        String answer = body.get("answer");
-        return ResponseEntity.ok(mockService.reply(userId, sessionId, questionId, answer));
+        UUID questionId = UUID.fromString(req.questionId());
+        String answer = req.answer();
+        return mockService.reply(userId, sessionId, questionId, answer);
     }
 
     @GetMapping("/history/{userJobId}")
-    public ResponseEntity<List<InterviewSession>> historyForJob(@PathVariable UUID userJobId) {
-        return ResponseEntity.ok(mockService.historyForJob(userJobId));
+    public List<com.careerops.dto.InterviewDTO.SessionResponse> historyForJob(@PathVariable UUID userJobId) {
+        UUID userId = AuthUtil.currentUserId();
+        return mockService.historyForJob(userJobId, userId).stream()
+                .map(mockService::toSessionResponse).toList();
     }
 
     @GetMapping("/history")
-    public ResponseEntity<List<InterviewSession>> historyForUser() {
-        return ResponseEntity.ok(mockService.historyForUser(AuthUtil.currentUserId()));
+    public List<com.careerops.dto.InterviewDTO.SessionResponse> historyForUser() {
+        return mockService.historyForUser(AuthUtil.currentUserId()).stream()
+                .map(mockService::toSessionResponse).toList();
     }
 
     @GetMapping("/tracks")
-    public ResponseEntity<List<InterviewTrack>> listTracks() {
-        return ResponseEntity.ok(coachService.listTracks(AuthUtil.currentUserId()));
+    public List<com.careerops.dto.InterviewDTO.TrackResponse> listTracks() {
+        return coachService.listTracks(AuthUtil.currentUserId()).stream()
+                .map(coachService::toTrackResponse).toList();
     }
 
     @PatchMapping("/tracks/{userJobId}/stage")
-    public ResponseEntity<InterviewTrack> updateStage(
+    public com.careerops.dto.InterviewDTO.TrackResponse updateStage(
             @PathVariable UUID userJobId,
-            @RequestBody Map<String, String> body
+            @jakarta.validation.Valid @RequestBody UpdateStageRequest req
     ) {
-        return ResponseEntity.ok(
-            coachService.updateStage(AuthUtil.currentUserId(), userJobId, body.get("stage"))
-        );
+        return coachService.toTrackResponse(coachService.updateStage(AuthUtil.currentUserId(), userJobId, req.stage()));
     }
 }

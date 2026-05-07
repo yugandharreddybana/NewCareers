@@ -1,5 +1,7 @@
 package com.careerops.service;
 
+import org.jspecify.annotations.Nullable;
+
 import com.careerops.dto.CareerMemoryDtos.MemoryResponse;
 import jakarta.annotation.PostConstruct;
 import org.slf4j.Logger;
@@ -85,8 +87,8 @@ public class SkillPromptLibrary {
     @Value("${skill.prompt.fork.repo:career-ops-plugin}")
     private String forkRepo;
 
-    @Value("${skill.prompt.github.branch:main}")
-    private String branch;
+    @Value("${skill.prompt.github.commit-sha:45f8f8b8098c1b67104d49d973cb8bc3e430489c}")
+    private String commitSha;
 
     private final ConcurrentHashMap<String, String> cache = new ConcurrentHashMap<>();
 
@@ -116,7 +118,7 @@ public class SkillPromptLibrary {
         return buildFullSystemPrompt(skillName, null);
     }
 
-    public String buildFullSystemPrompt(String skillName, UUID userId) {
+    public String buildFullSystemPrompt(String skillName, @Nullable UUID userId) {
         String skillMd = getSkillMd(skillName);
         List<String> refs = SKILL_REFS.getOrDefault(skillName, List.of());
 
@@ -200,7 +202,7 @@ Apply ALL of the following rules when generating the tailored resume:\n
         }
     }
 
-    private String fetchWithFallback(String filePath) {
+    private @Nullable String fetchWithFallback(String filePath) {
         String content = fetchFromGitHub(upstreamOwner, upstreamRepo, filePath);
         if (content != null) {
             log.debug("[Layer 1-upstream] loaded: {}", filePath);
@@ -231,10 +233,10 @@ Apply ALL of the following rules when generating the tailored resume:\n
         return null;
     }
 
-    private String fetchFromGitHub(String owner, String repo, String filePath) {
+    private @Nullable String fetchFromGitHub(String owner, String repo, String filePath) {
         try {
             String url = "https://raw.githubusercontent.com/" +
-                    owner + "/" + repo + "/" + branch + "/" + filePath;
+                    owner + "/" + repo + "/" + commitSha + "/" + filePath;
             return webClient.get()
                     .uri(url)
                     .retrieve()
@@ -247,7 +249,7 @@ Apply ALL of the following rules when generating the tailored resume:\n
         }
     }
 
-    private String loadFromClasspath(String filePath) {
+    private @Nullable String loadFromClasspath(String filePath) {
         try {
             String resource = "/career-ops-skills/" + filePath;
             InputStream is = getClass().getResourceAsStream(resource);
@@ -259,7 +261,7 @@ Apply ALL of the following rules when generating the tailored resume:\n
         }
     }
 
-    private String extractSkillName(String filePath) {
+    private @Nullable String extractSkillName(String filePath) {
         String[] parts = filePath.split("/");
         if (parts.length >= 2 && "skills".equals(parts[0])) return parts[1];
         return null;

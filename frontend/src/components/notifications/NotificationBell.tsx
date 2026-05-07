@@ -16,7 +16,7 @@ import { notificationsApi } from '@/services/notificationsApi';
 import NotificationDrawer from './NotificationDrawer';
 import { Button } from '@/components/ui';
 
-const POLL_INTERVAL_MS = 60_000; // 60 seconds
+const POLL_INTERVAL_MS = 60_000;
 
 export default function NotificationBell() {
   const [unreadCount, setUnreadCount] = useState(0);
@@ -31,15 +31,34 @@ export default function NotificationBell() {
 
   // Initial fetch + 60s polling
   useEffect(() => {
-    fetchCount();
-    const id = setInterval(fetchCount, POLL_INTERVAL_MS);
-    return () => clearInterval(id);
+    void fetchCount();
+
+    const refreshWhenVisible = () => {
+      if (document.visibilityState === 'visible') {
+        void fetchCount();
+      }
+    };
+
+    const id = setInterval(() => {
+      if (document.visibilityState === 'visible') {
+        void fetchCount();
+      }
+    }, POLL_INTERVAL_MS);
+
+    document.addEventListener('visibilitychange', refreshWhenVisible);
+    window.addEventListener('focus', refreshWhenVisible);
+
+    return () => {
+      clearInterval(id);
+      document.removeEventListener('visibilitychange', refreshWhenVisible);
+      window.removeEventListener('focus', refreshWhenVisible);
+    };
   }, [fetchCount]);
 
   // Re-fetch count when drawer closes (user may have read things)
   function handleDrawerClose() {
     setDrawerOpen(false);
-    fetchCount();
+    void fetchCount();
   }
 
   const badgeLabel = unreadCount > 99 ? '99+' : String(unreadCount);

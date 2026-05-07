@@ -1,6 +1,6 @@
 package com.careerops.service;
 
-import com.careerops.dto.AnalyticsDtos2.*;
+import com.careerops.dto.AnalyticsDtos.*;
 import com.careerops.model.AiTokenUsage;
 import com.careerops.repository.AiTokenUsageRepository;
 import org.springframework.stereotype.Service;
@@ -72,5 +72,11 @@ public class TokenUsageService {
         double  cost     = ((Number) row[3]).doubleValue();
         long    requests = ((Number) row[4]).longValue();
         return new TokenUsageSummary(feature, model, tokens, cost, requests);
+    }
+
+    public boolean hasExceededBudget(UUID userId, long dailyBudget) {
+        java.time.Instant since = java.time.Instant.now().minus(java.time.Duration.ofDays(1));
+        long tokensUsedToday = repo.sumTokensByUserSince(userId, since);
+        return tokensUsedToday >= dailyBudget;
     }
 }

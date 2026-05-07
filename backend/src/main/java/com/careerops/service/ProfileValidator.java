@@ -103,4 +103,35 @@ public class ProfileValidator {
 
         return missing;
     }
+
+    public static final int WEIGHT_CV = 30;
+    public static final int WEIGHT_TARGET_ROLES = 20;
+    public static final int WEIGHT_TECH_STACK = 20;
+    public static final int WEIGHT_LOCATION = 10;
+    public static final int WEIGHT_PORTFOLIO = 10;
+    public static final int WEIGHT_CAREER_GOAL = 10;
+
+    /**
+     * Computes the completeness score for a user profile based on defined weights.
+     */
+    public static int computeScore(UserProfile profile, String cvName) {
+        int score = 0;
+
+        if (cvName != null && !cvName.isBlank()) score += WEIGHT_CV;
+
+        if (profile.getTargetRoles() != null && profile.getTargetRoles().length > 0) score += WEIGHT_TARGET_ROLES;
+
+        if (profile.getTechStack() != null && profile.getTechStack().length > 0) score += WEIGHT_TECH_STACK;
+
+        if (profile.getLocation() != null && !profile.getLocation().isBlank()) score += WEIGHT_LOCATION;
+
+        if (profile.getPortfolioItems() != null && !profile.getPortfolioItems().isEmpty()) score += WEIGHT_PORTFOLIO;
+
+        boolean hasGoalTitle  = profile.getGoalTitle()     != null && !profile.getGoalTitle().isBlank();
+        boolean hasGoalSalary = profile.getGoalSalaryMin() != null && profile.getGoalSalaryMax() != null
+                             && profile.getGoalSalaryMin() > 0     && profile.getGoalSalaryMax() > 0;
+        if (hasGoalTitle && hasGoalSalary) score += WEIGHT_CAREER_GOAL;
+
+        return Math.min(score, 100);
+    }
 }

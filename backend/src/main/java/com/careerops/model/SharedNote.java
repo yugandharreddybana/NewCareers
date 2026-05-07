@@ -2,13 +2,12 @@ package com.careerops.model;
 
 import jakarta.persistence.*;
 import lombok.*;
-import org.hibernate.annotations.GenericGenerator;
 
 import java.time.Instant;
 import java.util.UUID;
 
 @Entity
-@Table(name = "shared_notes")
+@Table(name = "shared_notes", schema = "career_operations")
 @Getter
 @Setter
 @NoArgsConstructor
@@ -17,8 +16,7 @@ import java.util.UUID;
 public class SharedNote {
 
     @Id
-    @GeneratedValue(generator = "UUID")
-    @GenericGenerator(name = "UUID", strategy = "org.hibernate.id.UUIDGenerator")
+    @GeneratedValue(strategy = GenerationType.UUID)
     @Column(updatable = false, nullable = false)
     private UUID id;
 
@@ -40,6 +38,7 @@ public class SharedNote {
     @Column(name = "parent_note_id")
     private UUID parentNoteId;
 
+    @Builder.Default
     @Column(nullable = false)
     private Boolean resolved = false;
 

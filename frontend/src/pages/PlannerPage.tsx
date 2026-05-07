@@ -1,11 +1,10 @@
 import React, { useEffect, useState } from 'react';
 import { PageMeta } from '@/components/PageMeta';
 import { api } from '@/services/api';
-import * as mocks from '@/services/mockApi';
 import toast from 'react-hot-toast';
 import {
   Calendar, CheckCircle, Circle, Plus, Trash2,
-  Clock, Flag, ChevronRight, RefreshCw,
+  Clock, Flag,
 } from 'lucide-react';
 
 interface Task {
@@ -147,13 +146,13 @@ const PlannerPage: React.FC = () => {
             <input value={newTitle} onChange={e => setNewTitle(e.target.value)} placeholder="What needs to be done?"
               className="w-full px-3 py-2.5 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400" />
             <div className="flex gap-3">
-              <select value={newPriority} onChange={e => setNewPriority(e.target.value as Task['priority'])}
+              <select aria-label="Priority" value={newPriority} onChange={e => setNewPriority(e.target.value as Task['priority'])}
                 className="px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400">
                 <option value="high">High</option>
                 <option value="medium">Medium</option>
                 <option value="low">Low</option>
               </select>
-              <input type="date" value={newDue} onChange={e => setNewDue(e.target.value)}
+              <input aria-label="Due Date" type="date" value={newDue} onChange={e => setNewDue(e.target.value)}
                 className="flex-1 px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400" />
             </div>
             <div className="flex gap-2">
@@ -197,7 +196,7 @@ const PlannerPage: React.FC = () => {
               const due = t.dueDate ? fmtDate(t.dueDate) : null;
               return (
                 <div key={t.id} className="flex items-center gap-3 px-2 py-2.5 rounded-lg hover:bg-gray-50 group">
-                  <button onClick={() => handleToggle(t.id)} className="shrink-0 text-gray-300 hover:text-indigo-500 transition-colors">
+                  <button aria-label="Mark as complete" onClick={() => handleToggle(t.id)} className="shrink-0 text-gray-300 hover:text-indigo-500 transition-colors">
                     <Circle size={18} />
                   </button>
                   <div className="flex-1 min-w-0">
@@ -206,7 +205,7 @@ const PlannerPage: React.FC = () => {
                   </div>
                   <div className="flex items-center gap-2">
                     <span className={`w-2 h-2 rounded-full shrink-0 ${PRIORITY_STYLES[t.priority].dot}`} />
-                    <button onClick={() => handleDelete(t.id)} className="opacity-0 group-hover:opacity-100 transition-opacity text-gray-300 hover:text-red-500">
+                    <button aria-label="Delete task" onClick={() => handleDelete(t.id)} className="opacity-0 group-hover:opacity-100 transition-opacity text-gray-300 hover:text-red-500">
                       <Trash2 size={13} />
                     </button>
                   </div>
@@ -223,7 +222,7 @@ const PlannerPage: React.FC = () => {
             <div className="space-y-1">
               {completed.map(t => (
                 <div key={t.id} className="flex items-center gap-3 px-2 py-2 rounded-lg opacity-50">
-                  <button onClick={() => handleToggle(t.id)} className="shrink-0 text-emerald-400">
+                  <button aria-label="Mark as incomplete" onClick={() => handleToggle(t.id)} className="shrink-0 text-emerald-400">
                     <CheckCircle size={18} />
                   </button>
                   <p className="text-sm text-gray-500 line-through">{t.title}</p>

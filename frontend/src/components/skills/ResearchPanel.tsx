@@ -1,6 +1,7 @@
 import SkillPanel from './SkillPanel';
+import type { ResearchData } from '@/types/skills-data';
 
-interface Props { data: any; open: boolean; onClose: () => void; }
+interface Props { data: ResearchData | null; open: boolean; onClose: () => void; }
 
 export default function ResearchPanel({ data, open, onClose }: Props) {
   if (!data) return null;
@@ -25,23 +26,23 @@ export default function ResearchPanel({ data, open, onClose }: Props) {
             </div>
           </Section>
         )}
-        {data.greenFlags?.length > 0 && (
+        {data.greenFlags && data.greenFlags.length > 0 && (
           <Section title="Green flags">
-            <ul className="space-y-1">{data.greenFlags.map((f: string, i: number) => (
+            <ul className="space-y-1">{data.greenFlags.map((f, i) => (
               <li key={i} className="flex gap-2"><span className="text-emerald-500 shrink-0">✓</span>{f}</li>
             ))}</ul>
           </Section>
         )}
-        {data.redFlags?.length > 0 && (
+        {data.redFlags && data.redFlags.length > 0 && (
           <Section title="Red flags">
-            <ul className="space-y-1">{data.redFlags.map((f: string, i: number) => (
+            <ul className="space-y-1">{data.redFlags.map((f, i) => (
               <li key={i} className="flex gap-2"><span className="text-rose-500 shrink-0">✗</span>{f}</li>
             ))}</ul>
           </Section>
         )}
-        {data.recentNews?.length > 0 && (
+        {data.recentNews && data.recentNews.length > 0 && (
           <Section title="Recent news">
-            <ul className="space-y-1">{data.recentNews.map((n: string, i: number) => (
+            <ul className="space-y-1">{data.recentNews.map((n, i) => (
               <li key={i} className="flex gap-2"><span className="text-slate-400 shrink-0">•</span>{n}</li>
             ))}</ul>
           </Section>
@@ -51,9 +52,9 @@ export default function ResearchPanel({ data, open, onClose }: Props) {
             <p className="text-slate-700">{data.interviewStyle}</p>
           </Section>
         )}
-        {data.questionsToAsk?.length > 0 && (
+        {data.questionsToAsk && data.questionsToAsk.length > 0 && (
           <Section title="Questions to ask them">
-            <ol className="space-y-1 list-decimal list-inside">{data.questionsToAsk.map((q: string, i: number) => (
+            <ol className="space-y-1 list-decimal list-inside">{data.questionsToAsk.map((q, i) => (
               <li key={i} className="text-slate-700">{q}</li>
             ))}</ol>
           </Section>

@@ -83,6 +83,7 @@ export interface Profile {
   goalLocation?: string;
   openToRemote?: boolean;
   completenessScore?: number;
+  version?: number;
 }
 
 export const KANBAN_COLUMNS = [
@@ -150,3 +151,10 @@ export type SkillName =
   | 'culture-fit' | 'linkedin-optimize' | 'cover-letter' | 'skills-gap-plan';
 
 export type SkillState = 'idle' | 'loading' | 'done' | 'locked' | 'error';
+
+export interface PlannerTask {
+  id: string;
+  userJobId: string;
+  title: string;
+  status: 'PENDING' | 'COMPLETED';
+}

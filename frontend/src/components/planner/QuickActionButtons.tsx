@@ -1,6 +1,6 @@
 // Task 32 — QuickActionButtons: Follow up / Schedule prep / Final review buttons on Job Detail
 import React, { useState } from 'react';
-import axios from '../../api/axiosInstance';
+import { api as axios } from '@/services/api';
 
 interface Props {
   userJobId: string;

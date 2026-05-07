@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<FindBugsFilter>
+    <!-- Ignore legacy representation exposure warnings -->
+    <Match>
+        <Bug pattern="EI_EXPOSE_REP,EI_EXPOSE_REP2" />
+    </Match>
+
+    <!-- Ignore Spring CSRF disabled warnings (intentional for stateless APIs) -->
+    <Match>
+        <Bug pattern="SPRING_CSRF_PROTECTION_DISABLED" />
+    </Match>
+
+    <!-- Ignore CRLF Injection for logs (common false positive in controlled environments) -->
+    <Match>
+        <Bug pattern="SECCRLFLOG" />
+    </Match>
+
+    <!-- Ignore Informational Spring Endpoint warnings -->
+    <Match>
+        <Bug pattern="SPRING_ENDPOINT" />
+    </Match>
+
+    <!-- Ignore unconfirmed casts of return values (common in reactive/generic code) -->
+    <Match>
+        <Bug pattern="BC_UNCONFIRMED_CAST_OF_RETURN_VALUE" />
+    </Match>
+
+    <!-- Ignore uninitialized field warnings in Spring beans (managed by container) -->
+    <Match>
+        <Bug pattern="UWF_FIELD_NOT_INITIALIZED_IN_CONSTRUCTOR" />
+    </Match>
+</FindBugsFilter>

@@ -1,38 +1,16 @@
 import React, { useEffect, useState } from 'react';
 import { PageMeta } from '@/components/PageMeta';
 import * as mocks from '@/services/mockApi';
-import { api } from '@/services/api';
+import { progressApi, type StreakResponse, type WeeklySummaryResponse } from '@/services/progressApi';
+import toast from 'react-hot-toast';
 import { Flame, Trophy, Target, TrendingUp, CheckCircle, Lock, RefreshCw } from 'lucide-react';
 
-// ── Types ──────────────────────────────────────────────────────────────────────
-interface WeeklySummary {
-  weekStart: string;
-  weekEnd: string;
-  jobsReviewed: number;
-  applicationsSubmitted: number;
-  interviewsScheduled: number;
-  responsesReceived: number;
-  offersReceived: number;
-  dailyUseStreak: number;
-  winsSummary: string | null;
-  bottlenecksSummary: string | null;
-  recommendations: string | null;
-  responseRate: number;
-  interviewRate: number;
-}
-
-interface Streaks {
-  currentDailyStreak: number;
-  longestDailyStreak: number;
-  totalJobsReviewed: number;
-  totalAppsSubmitted: number;
-  badges: { key: string; label: string; icon: string; earned: boolean }[];
-}
-
 const USE_MOCKS = import.meta.env.VITE_USE_MOCKS === 'true';
+const MOCK_WEEKLY: WeeklySummaryResponse = mocks.MOCK_WEEKLY_SUMMARY;
+const MOCK_STREAKS: StreakResponse = mocks.MOCK_STREAKS;
 
 // ── Badge card ─────────────────────────────────────────────────────────────────
-const BadgeCard: React.FC<{ badge: Streaks['badges'][0] }> = ({ badge }) => (
+const BadgeCard: React.FC<{ badge: StreakResponse['badges'][number] }> = ({ badge }) => (
   <div className={`flex flex-col items-center gap-2 p-4 rounded-xl border transition-all ${
     badge.earned
       ? 'bg-white border-amber-200 shadow-sm'
@@ -48,7 +26,7 @@ const BadgeCard: React.FC<{ badge: Streaks['badges'][0] }> = ({ badge }) => (
 );
 
 // ── Metric row ─────────────────────────────────────────────────────────────────
-const MetricRow: React.FC<{ label: string; value: string | number; good?: boolean }> = ({ label, value, good }) => (
+const MetricRow: React.FC<{ label: string; value: string | number; good?: boolean | undefined }> = ({ label, value, good }) => (
   <div className="flex items-center justify-between py-2.5 border-b border-gray-100 last:border-0">
     <span className="text-sm text-gray-600">{label}</span>
     <span className={`text-sm font-bold ${ good === true ? 'text-emerald-600' : good === false ? 'text-red-500' : 'text-gray-900'}`}>
@@ -59,42 +37,68 @@ const MetricRow: React.FC<{ label: string; value: string | number; good?: boolea
 
 // ── Main page ──────────────────────────────────────────────────────────────────
 const ProgressPage: React.FC = () => {
-  const [weekly, setWeekly] = useState<WeeklySummary | null>(null);
-  const [streaks, setStreaks] = useState<Streaks | null>(null);
+  const [weekly, setWeekly] = useState<WeeklySummaryResponse | null>(null);
+  const [streaks, setStreaks] = useState<StreakResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  const [loadError, setLoadError] = useState<string | null>(null);
 
   const load = async (silent = false) => {
     if (!silent) setLoading(true);
     else setRefreshing(true);
     try {
+      setLoadError(null);
       if (USE_MOCKS) {
         await new Promise(r => setTimeout(r, 500));
-        setWeekly(mocks.MOCK_WEEKLY_SUMMARY as unknown as WeeklySummary);
-        setStreaks(mocks.MOCK_STREAKS as unknown as Streaks);
+        setWeekly(MOCK_WEEKLY);
+        setStreaks(MOCK_STREAKS);
       } else {
         const [w, s] = await Promise.all([
-          api.get('/progress/weekly').then(r => r.data).catch(() => mocks.MOCK_WEEKLY_SUMMARY),
-          api.get('/progress/streaks').then(r => r.data).catch(() => mocks.MOCK_STREAKS),
+          progressApi.getWeeklySummary(),
+          progressApi.getStreaks(),
         ]);
-        setWeekly(w as WeeklySummary);
-        setStreaks(s as Streaks);
+        setWeekly(w);
+        setStreaks(s);
       }
+    } catch {
+      const message = 'Failed to load progress.';
+      setLoadError(message);
+      toast.error(message);
     } finally {
       setLoading(false);
       setRefreshing(false);
     }
   };
 
-  useEffect(() => { load(); }, []);
+  useEffect(() => { void load(); }, []);
 
   if (loading) return (
     <div className="flex items-center justify-center min-h-[50vh] text-gray-400 text-sm">Loading progress…</div>
   );
 
+  if (!weekly || !streaks) return (
+    <>
+      <PageMeta title="Progress — CareerOps" />
+      <div className="max-w-3xl mx-auto px-4 sm:px-6 py-8">
+        <div className="bg-white border border-gray-200 rounded-xl p-6 text-center space-y-3">
+          <h1 className="text-lg font-semibold text-gray-900">Progress unavailable</h1>
+          <p className="text-sm text-gray-500">{loadError ?? 'Progress data is not available yet.'}</p>
+          <button
+            onClick={() => { void load(); }}
+            className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-indigo-500 text-white text-sm font-semibold hover:bg-indigo-600 transition-colors"
+          >
+            <RefreshCw size={14} />
+            Retry
+          </button>
+        </div>
+      </div>
+    </>
+  );
+
   const w = weekly!;
   const s = streaks!;
   const weekLabel = `${new Date(w.weekStart).toLocaleDateString('en-GB', { day: '2-digit', month: 'short' })} – ${new Date(w.weekEnd).toLocaleDateString('en-GB', { day: '2-digit', month: 'short' })}`;
+  const formatRate = (value: number | null): string => value === null ? 'N/A' : `${Math.round(value * 100)}%`;
 
   return (
     <>
@@ -158,8 +162,8 @@ const ProgressPage: React.FC = () => {
             ))}
           </div>
           <div>
-            <MetricRow label="Response Rate" value={`${Math.round(w.responseRate * 100)}%`} good={w.responseRate > 0.2} />
-            <MetricRow label="Interview Rate" value={`${Math.round(w.interviewRate * 100)}%`} good={w.interviewRate > 0.05} />
+            <MetricRow label="Response Rate" value={formatRate(w.responseRate)} good={w.responseRate !== null ? w.responseRate > 0.2 : undefined} />
+            <MetricRow label="Interview Rate" value={formatRate(w.interviewRate)} good={w.interviewRate !== null ? w.interviewRate > 0.05 : undefined} />
             <MetricRow label="Offers Received" value={w.offersReceived} good={w.offersReceived > 0} />
           </div>
         </div>

@@ -1,7 +1,7 @@
 /**
  * interviewApi.ts — Phase 3.1 Interview Command Center API service
  */
-import api from '../lib/api';
+import { api } from './api';
 
 export interface InterviewQuestion {
   id: string;

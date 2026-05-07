@@ -1,7 +1,7 @@
 // Section 3.6 Tasks 69+70 — hook to fire onboarding/feature analytics events
 // Usage: const { trackStep, trackFeature } = useOnboardingTracker();
 import { useCallback } from 'react';
-import axios from '../api/axiosInstance';
+import { api as axios } from '@/services/api';
 
 type OnboardingStep =
   | 'profile_complete'

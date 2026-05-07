@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { type CreateContactPayload, networkingApi } from '@/api/networkingApi';
+import { type CreateContactPayload, networkingApi } from '@/services/networkingApi';
 import toast from 'react-hot-toast';
 
 interface Props {

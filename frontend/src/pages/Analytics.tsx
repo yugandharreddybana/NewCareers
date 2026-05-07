@@ -1,8 +1,9 @@
 import React, { useEffect, useState } from 'react';
+import toast from 'react-hot-toast';
 import { PageMeta } from '@/components/PageMeta';
 import { jobsApi } from '@/services/api';
-import { api } from '@/services/api';
-import type { Stats } from '@/types';
+import { analyticsApi, type TimeSeriesPoint } from '@/services/analyticsApi';
+import type { JobCard, JobsListResponse, Stats } from '@/types';
 import {
   TrendingUp, Target, MessageSquare, Award,
   BarChart2, RefreshCw, ChevronRight,
@@ -17,6 +18,8 @@ interface AnalyticsData {
   topSources: { name: string; count: number }[];
   topRoles: { title: string; count: number; avgMatch: number }[];
 }
+
+const EMPTY_STATS: Stats = { total: 0, applied: 0, interviews: 0, offers: 0, avgMatch: 0 };
 
 // ── Helpers ────────────────────────────────────────────────────────────────────
 const USE_MOCKS = import.meta.env.VITE_USE_MOCKS === 'true';
@@ -43,6 +46,94 @@ function buildMockData(): AnalyticsData {
       { title: 'Software Architect', count: 5, avgMatch: 68 },
     ],
   };
+}
+
+function formatChartDate(input: string): string {
+  const parsed = new Date(input);
+  if (Number.isNaN(parsed.getTime())) return input;
+  return parsed.toLocaleDateString('en-GB', { day: '2-digit', month: 'short' });
+}
+
+function buildTrendSeries(points: TimeSeriesPoint[]): DailyPoint[] {
+  return points.map(point => ({
+    date: formatChartDate(point.week),
+    applications: point.applications,
+    responses: 0,
+  }));
+}
+
+function buildTrendSeriesFromJobs(jobs: JobCard[]): DailyPoint[] {
+  const counts = new Map<string, number>();
+  for (const job of jobs) {
+    const rawDate = job.deliveredAt ?? job.postedAt;
+    if (!rawDate) continue;
+    const parsed = new Date(rawDate);
+    if (Number.isNaN(parsed.getTime())) continue;
+    const key = parsed.toISOString().slice(0, 10);
+    counts.set(key, (counts.get(key) ?? 0) + 1);
+  }
+
+  return Array.from({ length: 14 }, (_, index) => {
+    const date = new Date();
+    date.setHours(0, 0, 0, 0);
+    date.setDate(date.getDate() - (13 - index));
+    const key = date.toISOString().slice(0, 10);
+    return {
+      date: formatChartDate(key),
+      applications: counts.get(key) ?? 0,
+      responses: 0,
+    };
+  });
+}
+
+function buildTopSources(jobs: JobCard[]): AnalyticsData['topSources'] {
+  const counts = new Map<string, number>();
+  for (const job of jobs) {
+    const source = job.sourceName?.trim() || 'Unknown';
+    counts.set(source, (counts.get(source) ?? 0) + 1);
+  }
+
+  return Array.from(counts.entries())
+    .map(([name, count]) => ({ name, count }))
+    .sort((left, right) => right.count - left.count || left.name.localeCompare(right.name))
+    .slice(0, 5);
+}
+
+function buildTopRoles(jobs: JobCard[]): AnalyticsData['topRoles'] {
+  const totals = new Map<string, { count: number; matchTotal: number; matchCount: number }>();
+  for (const job of jobs) {
+    const title = job.title?.trim();
+    if (!title) continue;
+    const current = totals.get(title) ?? { count: 0, matchTotal: 0, matchCount: 0 };
+    current.count += 1;
+    if (typeof job.matchPercent === 'number') {
+      current.matchTotal += job.matchPercent;
+      current.matchCount += 1;
+    }
+    totals.set(title, current);
+  }
+
+  return Array.from(totals.entries())
+    .map(([title, summary]) => ({
+      title,
+      count: summary.count,
+      avgMatch: summary.matchCount > 0 ? Math.round(summary.matchTotal / summary.matchCount) : 0,
+    }))
+    .sort((left, right) => right.count - left.count || right.avgMatch - left.avgMatch || left.title.localeCompare(right.title))
+    .slice(0, 5);
+}
+
+function deriveStatsFromJobs(jobs: JobCard[]): Stats {
+  const total = jobs.length;
+  const applied = jobs.filter(job => !['Discovered', 'Saved'].includes(job.kanbanColumn)).length;
+  const interviews = jobs.filter(job => ['Interview', 'Offer'].includes(job.kanbanColumn)).length;
+  const offers = jobs.filter(job => job.kanbanColumn === 'Offer').length;
+  const matchedJobs = jobs.filter(job => typeof job.matchPercent === 'number');
+  const avgMatch = matchedJobs.length > 0
+    ? Math.round(matchedJobs.reduce((sum, job) => sum + (job.matchPercent ?? 0), 0) / matchedJobs.length)
+    : 0;
+
+  return { total, applied, interviews, offers, avgMatch };
 }
 
 // ── Mini bar chart (pure CSS) ──────────────────────────────────────────────────
@@ -120,17 +211,38 @@ const AnalyticsPage: React.FC = () => {
         await new Promise(r => setTimeout(r, 600));
         setData(buildMockData());
       } else {
-        const [stats, analytics] = await Promise.all([
-          jobsApi.stats(),
-          api.get('/analytics').then(r => r.data).catch(() => null),
+        const [statsResult, jobsResult, trendResult] = await Promise.allSettled([
+          jobsApi.stats() as Promise<Stats>,
+          jobsApi.list() as Promise<JobsListResponse>,
+          analyticsApi.getTimeSeries(8),
         ]);
+
+        const jobs = jobsResult.status === 'fulfilled' ? jobsResult.value.items : [];
+        const stats = statsResult.status === 'fulfilled'
+          ? statsResult.value
+          : (jobsResult.status === 'fulfilled' ? deriveStatsFromJobs(jobs) : null);
+
+        if (!stats) {
+          throw new Error('Analytics data unavailable');
+        }
+
         setData({
-          stats: stats as Stats,
-          dailySeries: (analytics as AnalyticsData | null)?.dailySeries ?? buildMockData().dailySeries,
-          topSources: (analytics as AnalyticsData | null)?.topSources ?? buildMockData().topSources,
-          topRoles: (analytics as AnalyticsData | null)?.topRoles ?? buildMockData().topRoles,
+          stats,
+          dailySeries: trendResult.status === 'fulfilled' && trendResult.value.length > 0
+            ? buildTrendSeries(trendResult.value)
+            : buildTrendSeriesFromJobs(jobs),
+          topSources: buildTopSources(jobs),
+          topRoles: buildTopRoles(jobs),
         });
       }
+    } catch {
+      if (!data) setData({
+        stats: EMPTY_STATS,
+        dailySeries: [],
+        topSources: [],
+        topRoles: [],
+      });
+      toast.error('Failed to load analytics.');
     } finally {
       setLoading(false);
       setRefreshing(false);
@@ -143,9 +255,14 @@ const AnalyticsPage: React.FC = () => {
     <div className="flex items-center justify-center min-h-[50vh] text-gray-400 text-sm">Loading analytics…</div>
   );
 
-  const s = data!.stats;
+  if (!data) return (
+    <div className="flex items-center justify-center min-h-[50vh] text-gray-400 text-sm">Analytics are unavailable right now.</div>
+  );
+
+  const s = data.stats;
   const responseRate = s.applied > 0 ? Math.round((s.interviews / s.applied) * 100) : 0;
   const offerRate    = s.applied > 0 ? Math.round((s.offers / s.applied) * 100) : 0;
+  const hasResponses = data.dailySeries.some(point => point.responses > 0);
 
   const funnel: FunnelStage[] = [
     { label: 'Jobs Discovered', count: s.total,      color: 'bg-gray-400' },
@@ -186,16 +303,16 @@ const AnalyticsPage: React.FC = () => {
         {/* Applications trend */}
         <div className="bg-white border border-gray-200 rounded-xl p-5">
           <div className="flex items-center justify-between mb-4">
-            <h2 className="text-sm font-semibold text-gray-900">Applications Over Time (14d)</h2>
+            <h2 className="text-sm font-semibold text-gray-900">Application Trend</h2>
             <div className="flex items-center gap-3 text-[11px] text-gray-500">
               <span className="flex items-center gap-1"><span className="w-2.5 h-2.5 rounded-sm bg-indigo-400 inline-block" /> Applications</span>
-              <span className="flex items-center gap-1"><span className="w-2.5 h-2.5 rounded-sm bg-emerald-400/60 inline-block" /> Responses</span>
+              {hasResponses && <span className="flex items-center gap-1"><span className="w-2.5 h-2.5 rounded-sm bg-emerald-400/60 inline-block" /> Responses</span>}
             </div>
           </div>
-          <MiniBarChart data={data!.dailySeries} />
+          <MiniBarChart data={data.dailySeries} />
           <div className="flex justify-between mt-1">
-            <span className="text-[10px] text-gray-400">{data!.dailySeries[0]?.date}</span>
-            <span className="text-[10px] text-gray-400">{data!.dailySeries[data!.dailySeries.length - 1]?.date}</span>
+            <span className="text-[10px] text-gray-400">{data.dailySeries[0]?.date}</span>
+            <span className="text-[10px] text-gray-400">{data.dailySeries[data.dailySeries.length - 1]?.date}</span>
           </div>
         </div>
 
@@ -218,8 +335,11 @@ const AnalyticsPage: React.FC = () => {
           <div className="bg-white border border-gray-200 rounded-xl p-5">
             <h2 className="text-sm font-semibold text-gray-900 mb-4">Top Job Sources</h2>
             <div className="space-y-3">
-              {data!.topSources.map((src, i) => {
-                const maxC = data!.topSources[0].count;
+              {data.topSources.length === 0 && (
+                <p className="text-sm text-gray-500">No tracked job sources yet.</p>
+              )}
+              {data.topSources.map((src, i) => {
+                const maxC = data.topSources[0]?.count ?? 0;
                 return (
                   <div key={i} className="space-y-1">
                     <div className="flex justify-between text-xs">
@@ -227,7 +347,7 @@ const AnalyticsPage: React.FC = () => {
                       <span className="font-bold text-gray-900">{src.count}</span>
                     </div>
                     <div className="h-2 bg-gray-100 rounded-full overflow-hidden">
-                      <div className="h-full bg-indigo-400 rounded-full" style={{ width: `${(src.count / maxC) * 100}%` }} />
+                      <div className="h-full bg-indigo-400 rounded-full" style={{ width: `${maxC > 0 ? (src.count / maxC) * 100 : 0}%` }} />
                     </div>
                   </div>
                 );
@@ -238,9 +358,12 @@ const AnalyticsPage: React.FC = () => {
 
         {/* Top role types */}
         <div className="bg-white border border-gray-200 rounded-xl p-5">
-          <h2 className="text-sm font-semibold text-gray-900 mb-4">Top Role Categories</h2>
+          <h2 className="text-sm font-semibold text-gray-900 mb-4">Top Role Titles</h2>
           <div className="divide-y divide-gray-100">
-            {data!.topRoles.map((r, i) => (
+            {data.topRoles.length === 0 && (
+              <p className="py-3 text-sm text-gray-500">No tracked role data yet.</p>
+            )}
+            {data.topRoles.map((r, i) => (
               <div key={i} className="flex items-center justify-between py-3">
                 <div className="flex items-center gap-3">
                   <span className="text-xs font-bold text-gray-400 w-4">{i + 1}</span>

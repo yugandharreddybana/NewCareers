@@ -12,12 +12,15 @@ import java.util.UUID;
 /**
  * Section 9 — Task 97.
  *
- * POST  /referrals            → create referral + send invite email
- * GET   /referrals/my         → list referrals for current user + stats
- * GET   /referrals/validate/:token → validate a referral token (public, used on signup page)
+ * CORS Policy:
+ * - Allowed Origins: from ${cors.allowed.origins}
+ * - Methods: GET, POST, PUT, PATCH, DELETE, OPTIONS
+ * - Headers: Content-Type, Authorization, X-Requested-With, X-CSRF-Token, X-Internal-Secret, X-Internal-User-Id
+ * - Exposed: X-RateLimit-Remaining, X-RateLimit-Reset, Retry-After
  */
 @RestController
 @RequestMapping("/referrals")
+@io.micrometer.core.annotation.Timed
 public class ReferralController {
 
     private final ReferralService referralService;
@@ -26,14 +29,16 @@ public class ReferralController {
         this.referralService = referralService;
     }
 
+    public record CreateReferralRequest(
+        @jakarta.validation.constraints.NotBlank(message = "email is required")
+        @jakarta.validation.constraints.Email(message = "invalid email format")
+        String email
+    ) {}
+
     /** POST /referrals  — body: { "email": "friend@example.com" } */
     @PostMapping
-    public ReferralDto create(@RequestBody Map<String, String> body) {
-        String email = body.getOrDefault("email", "").trim();
-        if (email.isEmpty())
-            throw new com.careerops.exception.ApiException(
-                org.springframework.http.HttpStatus.BAD_REQUEST, "email is required");
-        return referralService.createReferral(AuthUtil.currentUserId(), email);
+    public ReferralDto create(@jakarta.validation.Valid @RequestBody CreateReferralRequest req) {
+        return referralService.createReferral(AuthUtil.currentUserId(), req.email().trim());
     }
 
     /** GET /referrals/my  — returns { referrals: [...], stats: {...} } */

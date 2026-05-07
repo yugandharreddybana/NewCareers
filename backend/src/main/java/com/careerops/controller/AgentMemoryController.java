@@ -4,13 +4,20 @@ import com.careerops.dto.CareerMemoryDtos.*;
 import com.careerops.service.CareerMemoryService;
 import com.careerops.util.AuthUtil;
 import org.springframework.http.HttpStatus;
-import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.UUID;
 
+/**
+ * CORS Policy:
+ * - Allowed Origins: from ${cors.allowed.origins}
+ * - Methods: GET, POST, PUT, PATCH, DELETE, OPTIONS
+ * - Headers: Content-Type, Authorization, X-Requested-With, X-CSRF-Token, X-Internal-Secret, X-Internal-User-Id
+ * - Exposed: X-RateLimit-Remaining, X-RateLimit-Reset, Retry-After
+ */
 @RestController
 @RequestMapping("/agent-memory")
+@io.micrometer.core.annotation.Timed
 public class AgentMemoryController {
 
     private final CareerMemoryService memoryService;
@@ -28,9 +35,8 @@ public class AgentMemoryController {
     }
 
     @PostMapping
-    public ResponseEntity<MemoryResponse> upsert(@RequestBody UpsertMemoryRequest req) {
-        return ResponseEntity.status(HttpStatus.OK)
-            .body(memoryService.upsert(AuthUtil.currentUserId(), req));
+    public MemoryResponse upsert(@RequestBody UpsertMemoryRequest req) {
+        return memoryService.upsert(AuthUtil.currentUserId(), req);
     }
 
     @PatchMapping("/{id}/toggle")
@@ -40,15 +46,15 @@ public class AgentMemoryController {
     }
 
     @DeleteMapping("/{id}")
-    public ResponseEntity<Void> delete(@PathVariable UUID id) {
+    @ResponseStatus(HttpStatus.NO_CONTENT)
+    public void delete(@PathVariable UUID id) {
         memoryService.delete(AuthUtil.currentUserId(), id);
-        return ResponseEntity.noContent().build();
     }
 
     /** Reset all — deletes every memory entry for the user. */
     @DeleteMapping
-    public ResponseEntity<Void> resetAll() {
+    @ResponseStatus(HttpStatus.NO_CONTENT)
+    public void resetAll() {
         memoryService.resetAll(AuthUtil.currentUserId());
-        return ResponseEntity.noContent().build();
     }
 }

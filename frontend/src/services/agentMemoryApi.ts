@@ -1,51 +1,43 @@
 /**
- * agentMemoryApi.ts — typed service layer for /api/agent-memory
+ * agentMemoryApi.ts — typed client for /agent-memory.
  *
- * Agent memory stores persistent context facts the AI uses when
- * generating cover letters, outreach messages, and skill evaluations.
+ * Pass 6 #6.011 — consolidated from src/api/agentMemoryApi.ts. The shape
+ * preserved here is the one actually consumed by AgentMemoryPage.tsx
+ * (CareerMemory). The earlier services/ duplicate (AgentMemory) was a
+ * scaffolded stub; it is replaced by this canonical implementation.
  */
 import { api } from './api';
 
-export type MemoryCategory =
-  | 'skills'
-  | 'experience'
-  | 'preferences'
-  | 'personal'
-  | 'goals'
-  | 'other';
-
-export interface AgentMemory {
+export interface CareerMemory {
   id: string;
-  content: string;
-  category: MemoryCategory;
-  isEnabled: boolean;
-  source: 'manual' | 'auto' | 'cv';
+  category: string;
+  key: string;
+  value: string;
+  source: string | null;
+  whySuggested: string | null;
+  confidence: number;
+  memoryEnabled: boolean;
   createdAt: string;
   updatedAt: string;
 }
 
+export type AgentMemorySearchResult = Record<string, unknown>;
+
 export const agentMemoryApi = {
-  /** List all memories, optionally filtered by category */
-  getAll: (category?: MemoryCategory) =>
-    api.get<AgentMemory[]>('/agent-memory', { params: category ? { category } : {} }).then(r => r.data),
-
-  /** Fetch a single memory entry by ID */
-  getOne: (id: string) =>
-    api.get<AgentMemory>(`/agent-memory/${id}`).then(r => r.data),
-
-  /** Create or update a memory entry */
-  upsert: (body: { content: string; category: MemoryCategory; id?: string }) =>
-    api.post<AgentMemory>('/agent-memory', body).then(r => r.data),
-
-  /** Update memory content */
-  update: (id: string, body: { content?: string; category?: MemoryCategory }) =>
-    api.put<AgentMemory>(`/agent-memory/${id}`, body).then(r => r.data),
-
-  /** Toggle a memory entry enabled/disabled */
-  toggle: (id: string) =>
-    api.patch<AgentMemory>(`/agent-memory/${id}/toggle`).then(r => r.data),
-
-  /** Permanently delete a memory entry */
-  delete: (id: string) =>
-    api.delete(`/agent-memory/${id}`).then(r => r.data),
+  list:     (category?: string) =>
+    api.get<{ memories: CareerMemory[]; total: number }>('/agent-memory', {
+      params: category ? { category } : {},
+    }).then(r => r.data),
+  upsert:   (body: Partial<CareerMemory>) =>
+    api.post<CareerMemory>('/agent-memory', body).then(r => r.data),
+  search:   (query: string) =>
+    api.get<AgentMemorySearchResult[] | { results: AgentMemorySearchResult[] }>('/agent-memory/search', {
+      params: { query },
+    }).then(r => r.data),
+  toggle:   (id: string, memoryEnabled: boolean) =>
+    api.patch<CareerMemory>(`/agent-memory/${id}/toggle`, { memoryEnabled }).then(r => r.data),
+  delete:   (id: string) =>
+    api.delete(`/agent-memory/${id}`),
+  resetAll: () =>
+    api.delete('/agent-memory'),
 };

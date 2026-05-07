@@ -4,7 +4,7 @@ import { createProxyMiddleware } from 'http-proxy-middleware';
 import { verifyToken } from '../auth.js';
 
 const router = express.Router();
-const BACKEND_URL = process.env.BACKEND_URL || 'http://localhost:8080';
+const BACKEND_URL = process.env.JAVA_BACKEND_URL || process.env.BACKEND_URL || 'http://localhost:8080';
 
 const proxy = createProxyMiddleware({
   target: BACKEND_URL,

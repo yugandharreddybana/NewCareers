@@ -4,14 +4,21 @@ import com.careerops.dto.WatchlistDtos.*;
 import com.careerops.service.WatchlistService;
 import com.careerops.util.AuthUtil;
 import org.springframework.http.HttpStatus;
-import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
 import java.util.UUID;
 
+/**
+ * CORS Policy:
+ * - Allowed Origins: from ${cors.allowed.origins}
+ * - Methods: GET, POST, PUT, PATCH, DELETE, OPTIONS
+ * - Headers: Content-Type, Authorization, X-Requested-With, X-CSRF-Token, X-Internal-Secret, X-Internal-User-Id
+ * - Exposed: X-RateLimit-Remaining, X-RateLimit-Reset, Retry-After
+ */
 @RestController
 @RequestMapping("/watchlists")
+@io.micrometer.core.annotation.Timed
 public class WatchlistController {
 
     private final WatchlistService watchlistService;
@@ -26,9 +33,9 @@ public class WatchlistController {
     }
 
     @PostMapping
-    public ResponseEntity<WatchlistResponse> create(@RequestBody CreateWatchlistRequest req) {
-        return ResponseEntity.status(HttpStatus.CREATED)
-            .body(watchlistService.create(AuthUtil.currentUserId(), req));
+    @ResponseStatus(HttpStatus.CREATED)
+    public WatchlistResponse create(@RequestBody CreateWatchlistRequest req) {
+        return watchlistService.create(AuthUtil.currentUserId(), req);
     }
 
     @GetMapping("/{id}")
@@ -43,9 +50,9 @@ public class WatchlistController {
     }
 
     @DeleteMapping("/{id}")
-    public ResponseEntity<Void> delete(@PathVariable UUID id) {
+    @ResponseStatus(HttpStatus.NO_CONTENT)
+    public void delete(@PathVariable UUID id) {
         watchlistService.delete(AuthUtil.currentUserId(), id);
-        return ResponseEntity.noContent().build();
     }
 
     @PostMapping("/{id}/toggle")
@@ -59,7 +66,8 @@ public class WatchlistController {
     }
 
     @GetMapping("/suggestions")
-    public List<String> getSuggestions() {
+    public List<String> getSuggestions(jakarta.servlet.http.HttpServletResponse response) {
+        response.setHeader(org.springframework.http.HttpHeaders.CACHE_CONTROL, "private, max-age=60");
         return watchlistService.getSuggestions(AuthUtil.currentUserId());
     }
 }

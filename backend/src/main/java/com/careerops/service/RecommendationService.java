@@ -1,6 +1,6 @@
 package com.careerops.service;
 
-import com.careerops.dto.AnalyticsDtos2.*;
+import com.careerops.dto.AnalyticsDtos.*;
 import com.careerops.model.RecommendationFeedback;
 import com.careerops.repository.RecommendationFeedbackRepository;
 import org.springframework.stereotype.Service;

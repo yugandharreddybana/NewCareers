@@ -32,7 +32,9 @@ public class ContactInteraction {
     private InteractionType interactionType;
 
     @Enumerated(EnumType.STRING)
-    private InteractionOutcome outcome;
+    @Column(nullable = false)
+    @Builder.Default
+    private InteractionOutcome outcome = InteractionOutcome.no_response;
 
     @Column(columnDefinition = "TEXT")
     private String notes;

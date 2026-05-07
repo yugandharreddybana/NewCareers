@@ -2,13 +2,12 @@ package com.careerops.model;
 
 import jakarta.persistence.*;
 import lombok.*;
-import org.hibernate.annotations.GenericGenerator;
 
 import java.time.Instant;
 import java.util.UUID;
 
 @Entity
-@Table(name = "shared_workspaces")
+@Table(name = "shared_workspaces", schema = "career_operations")
 @Getter
 @Setter
 @NoArgsConstructor
@@ -17,13 +16,15 @@ import java.util.UUID;
 public class SharedWorkspace {
 
     @Id
-    @GeneratedValue(generator = "UUID")
-    @GenericGenerator(name = "UUID", strategy = "org.hibernate.id.UUIDGenerator")
+    @GeneratedValue(strategy = GenerationType.UUID)
     @Column(updatable = false, nullable = false)
     private UUID id;
 
     @Column(name = "owner_id", nullable = false)
     private UUID ownerId;
+
+    @Column(name = "org_id")
+    private UUID orgId;
 
     @Column(nullable = false)
     private String name;

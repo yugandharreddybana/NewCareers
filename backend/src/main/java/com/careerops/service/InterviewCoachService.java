@@ -13,7 +13,6 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Map;
 import java.util.UUID;
 
 /**
@@ -41,7 +40,7 @@ public class InterviewCoachService {
     }
 
     // ── Generate interview kit for a job ──────────────────────────────────────
-    @Transactional
+    @Transactional(timeout = 10)
     public List<InterviewQuestionBank> generateKit(UUID userId, UUID userJobId,
                                                     String companyName, String roleTitle,
                                                     String jobDescription) {
@@ -59,7 +58,7 @@ public class InterviewCoachService {
 
         // Build Gemini prompt
         String prompt = buildKitPrompt(companyName, roleTitle, jobDescription);
-        String aiResponse = gemini.generate(prompt);
+        String aiResponse = gemini.generate(prompt, userId, "interview-kit");
 
         // Parse AI response into questions
         List<InterviewQuestionBank> questions = parseKitResponse(
@@ -69,12 +68,14 @@ public class InterviewCoachService {
     }
 
     // ── Get history for a job ─────────────────────────────────────────────────
-    public List<InterviewQuestionBank> getKitForJob(UUID userJobId) {
+    public List<InterviewQuestionBank> getKitForJob(UUID userJobId, UUID userId) {
+        InterviewTrack track = trackRepo.findByUserJobIdAndUserId(userJobId, userId)
+            .orElseThrow(() -> new ApiException(HttpStatus.NOT_FOUND, "Interview track not found"));
         return questionRepo.findByUserJobIdOrderByCreatedAtDesc(userJobId);
     }
 
     // ── Update track stage ────────────────────────────────────────────────────
-    @Transactional
+    @Transactional(timeout = 10)
     public InterviewTrack updateStage(UUID userId, UUID userJobId, String stage) {
         InterviewTrack track = trackRepo.findByUserJobIdAndUserId(userJobId, userId)
             .orElseThrow(() -> new ApiException(HttpStatus.NOT_FOUND, "Interview track not found"));
@@ -145,5 +146,38 @@ public class InterviewCoachService {
             }
         }
         return list;
+    }
+
+    // ---- Mappers for 2.056 ----
+
+    public com.careerops.dto.InterviewDTO.QuestionResponse toQuestionResponse(InterviewQuestionBank q) {
+        return com.careerops.dto.InterviewDTO.QuestionResponse.builder()
+                .id(q.getId())
+                .sessionId(q.getSessionId())
+                .userJobId(q.getUserJobId())
+                .companyName(q.getCompanyName())
+                .roleTitle(q.getRoleTitle())
+                .skillArea(q.getSkillArea())
+                .question(q.getQuestion())
+                .modelAnswer(q.getModelAnswer())
+                .userAnswer(q.getUserAnswer())
+                .score(q.getScore())
+                .turnNumber(q.getTurnNumber())
+                .createdAt(q.getCreatedAt())
+                .build();
+    }
+
+    public com.careerops.dto.InterviewDTO.TrackResponse toTrackResponse(InterviewTrack t) {
+        return com.careerops.dto.InterviewDTO.TrackResponse.builder()
+                .id(t.getId())
+                .userJobId(t.getUserJobId())
+                .companyName(t.getCompanyName())
+                .roleTitle(t.getRoleTitle())
+                .currentStage(t.getCurrentStage())
+                .interviewDate(t.getInterviewDate())
+                .notes(t.getNotes())
+                .createdAt(t.getCreatedAt())
+                .updatedAt(t.getUpdatedAt())
+                .build();
     }
 }

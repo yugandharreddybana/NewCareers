@@ -1,5 +1,5 @@
-import { type ReactNode, useEffect } from 'react';
-import { createPortal } from 'react-dom';
+import { forwardRef, type ReactNode, useEffect } from 'react';
+import * as Dialog from '@radix-ui/react-dialog';
 import { motion, AnimatePresence } from 'framer-motion';
 import { X } from 'lucide-react';
 import { cn } from '@/lib/utils';
@@ -26,68 +26,95 @@ const sizes: Record<Size, string> = {
   full: 'max-w-5xl',
 };
 
-export function Modal({ open, onClose, title, description, children, footer, size = 'md', hideCloseButton, className }: ModalProps) {
+export const Modal = forwardRef<HTMLDivElement, ModalProps>(function Modal(
+  { open, onClose, title, description, children, footer, size = 'md', hideCloseButton, className },
+  ref,
+) {
   useEffect(() => {
-    if (open) document.body.style.overflow = 'hidden';
-    return () => { document.body.style.overflow = ''; };
+    if (!open) return undefined;
+
+    const { style } = document.body;
+    const previousOverflow = style.overflow;
+    style.overflow = 'hidden';
+
+    return () => {
+      style.overflow = previousOverflow;
+    };
   }, [open]);
 
-  useEffect(() => {
-    const fn = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose(); };
-    if (open) window.addEventListener('keydown', fn);
-    return () => window.removeEventListener('keydown', fn);
-  }, [open, onClose]);
+  return (
+    <Dialog.Root open={open} onOpenChange={nextOpen => { if (!nextOpen) onClose(); }}>
+      <AnimatePresence>
+        {open && (
+          <Dialog.Portal forceMount>
+            <Dialog.Overlay asChild>
+              <motion.div
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                exit={{ opacity: 0 }}
+                transition={{ duration: 0.15 }}
+                className="fixed inset-0 z-50 bg-slate-900/50 backdrop-blur-[3px]"
+              />
+            </Dialog.Overlay>
 
-  return createPortal(
-    <AnimatePresence>
-      {open && (
-        <motion.div
-          initial={{ opacity: 0 }}
-          animate={{ opacity: 1 }}
-          exit={{ opacity: 0 }}
-          transition={{ duration: 0.15 }}
-          className="fixed inset-0 z-50 flex items-center justify-center p-4"
-          onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}
-        >
-          <div className="absolute inset-0 bg-slate-900/50 backdrop-blur-[3px]" />
-          <motion.div
-            initial={{ scale: 0.96, opacity: 0, y: 8 }}
-            animate={{ scale: 1,    opacity: 1, y: 0 }}
-            exit={{   scale: 0.96, opacity: 0, y: 8 }}
-            transition={{ duration: 0.2, ease: [0.16, 1, 0.3, 1] }}
-            className={cn(
-              'relative w-full bg-white rounded-2xl shadow-modal overflow-hidden z-10',
-              sizes[size],
-              className,
-            )}
-          >
-            {(title || !hideCloseButton) && (
-              <div className="flex items-start justify-between px-6 pt-6 pb-4">
-                <div>
-                  {title       && <h2 className="text-base font-bold text-text-primary">{title}</h2>}
-                  {description && <p  className="text-sm text-text-secondary mt-1">{description}</p>}
-                </div>
-                {!hideCloseButton && (
-                  <button
-                    onClick={onClose}
-                    className="ml-4 shrink-0 p-1.5 rounded-lg text-text-tertiary hover:text-text-primary hover:bg-surface-overlay transition-colors"
-                  >
-                    <X size={16} />
-                  </button>
+            <Dialog.Content asChild>
+              <motion.div
+                ref={ref}
+                initial={{ scale: 0.96, opacity: 0, y: 8 }}
+                animate={{ scale: 1, opacity: 1, y: 0 }}
+                exit={{ scale: 0.96, opacity: 0, y: 8 }}
+                transition={{ duration: 0.2, ease: [0.16, 1, 0.3, 1] }}
+                className={cn(
+                  'fixed left-1/2 top-1/2 z-50 w-[calc(100%-2rem)] max-h-[calc(100vh-2rem)] -translate-x-1/2 -translate-y-1/2 overflow-auto rounded-2xl bg-white shadow-modal',
+                  sizes[size],
+                  className,
                 )}
-              </div>
-            )}
-            <div className="px-6 pb-6">{children}</div>
-            {footer && (
-              <div className="px-6 py-4 bg-surface-raised/60 border-t border-border flex justify-end gap-3">
-                {footer}
-              </div>
-            )}
-          </motion.div>
-        </motion.div>
-      )}
-    </AnimatePresence>,
-    document.body,
+              >
+                {(title || description || !hideCloseButton) && (
+                  <div className="flex items-start justify-between px-6 pt-6 pb-4">
+                    <div>
+                      {title && (
+                        <Dialog.Title className="text-base font-bold text-text-primary">
+                          {title}
+                        </Dialog.Title>
+                      )}
+                      {description ? (
+                        <Dialog.Description className="mt-1 text-sm text-text-secondary">
+                          {description}
+                        </Dialog.Description>
+                      ) : (
+                        <Dialog.Description className="sr-only">
+                          {title ? `${title} dialog` : 'Modal dialog'}
+                        </Dialog.Description>
+                      )}
+                    </div>
+                    {!hideCloseButton && (
+                      <Dialog.Close asChild>
+                        <button
+                          type="button"
+                          aria-label="Close modal"
+                          className="ml-4 shrink-0 rounded-lg p-1.5 text-text-tertiary transition-colors hover:bg-surface-overlay hover:text-text-primary"
+                        >
+                          <X size={16} />
+                        </button>
+                      </Dialog.Close>
+                    )}
+                  </div>
+                )}
+                <div className="px-6 pb-6">{children}</div>
+                {footer && (
+                  <div className="flex justify-end gap-3 border-t border-border bg-surface-raised/60 px-6 py-4">
+                    {footer}
+                  </div>
+                )}
+              </motion.div>
+            </Dialog.Content>
+          </Dialog.Portal>
+        )}
+      </AnimatePresence>
+    </Dialog.Root>
   );
-}
+});
+
+Modal.displayName = 'Modal';
 export default Modal;

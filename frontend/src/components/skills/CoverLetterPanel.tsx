@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import { useState } from 'react';
 import { Copy, CheckCircle2, FileText, FileDown } from 'lucide-react';
 
 interface CoverLetterOutput {
@@ -82,3 +82,5 @@ export function CoverLetterPanel({ data, onDownloadPdf }: Props) {
     </div>
   );
 }
+
+export default CoverLetterPanel;

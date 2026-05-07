@@ -6,6 +6,7 @@
  */
 interface ImportMetaEnv {
   // Core
+  readonly VITE_API_URL: string
   readonly VITE_MIDDLEWARE_URL: string
   readonly VITE_DEV_BYPASS_GUARDS: string
   readonly VITE_USE_MOCKS: string

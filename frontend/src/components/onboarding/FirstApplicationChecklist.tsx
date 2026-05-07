@@ -1,6 +1,6 @@
 // Section 3.6 Task 74 — In-app checklist for first application success milestone
 import React, { useEffect, useState } from 'react';
-import axios from '../../api/axiosInstance';
+import { api as axios } from '@/services/api';
 import { useOnboardingTracker } from '../../hooks/useOnboardingTracker';
 import { CheckCircle2, Circle, X, ArrowRight } from 'lucide-react';
 

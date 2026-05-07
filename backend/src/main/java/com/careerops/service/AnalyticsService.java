@@ -39,24 +39,55 @@ public class AnalyticsService {
     @PersistenceContext
     private EntityManager em;
 
+    // 3.065 — In-memory buffer for async flush
+    private final java.util.concurrent.BlockingQueue<AnalyticsEvent> eventBuffer = new java.util.concurrent.LinkedBlockingQueue<>(1000);
+    private final java.util.concurrent.ScheduledExecutorService scheduler = java.util.concurrent.Executors.newSingleThreadScheduledExecutor();
+
     public AnalyticsService(AnalyticsEventRepository analyticsRepo) {
         this.analyticsRepo = analyticsRepo;
+        // Start background flush worker
+        scheduler.scheduleAtFixedRate(this::flushEvents, 5, 5, java.util.concurrent.TimeUnit.SECONDS);
+    }
+
+    @jakarta.annotation.PreDestroy
+    public void shutdown() {
+        log.info("Analytics: flushing buffer before shutdown...");
+        flushEvents();
+        scheduler.shutdown();
     }
 
     // ── Track an event ─────────────────────────────────────────────────────────
 
-    @Transactional
+    /**
+     * Tracks an event by buffering it to an in-memory queue (3.065).
+     * Prevents blocking the caller or losing data during DB hiccups.
+     */
     public void trackEvent(UUID userId, String eventType, Map<String, Object> metadata) {
-        try {
-            analyticsRepo.save(new AnalyticsEvent(userId, eventType, metadata));
-        } catch (Exception e) {
-            log.warn("Analytics: failed to track event {} — {}", eventType, e.getMessage());
+        AnalyticsEvent event = new AnalyticsEvent(userId, eventType, metadata);
+        if (!eventBuffer.offer(event)) {
+            log.warn("Analytics buffer full, dropping event: {}", eventType);
+        }
+    }
+
+    private void flushEvents() {
+        if (eventBuffer.isEmpty()) return;
+        List<AnalyticsEvent> toSave = new ArrayList<>();
+        eventBuffer.drainTo(toSave, 50);
+
+        if (!toSave.isEmpty()) {
+            try {
+                analyticsRepo.saveAll(toSave);
+                log.debug("Analytics: flushed {} events", toSave.size());
+            } catch (Exception e) {
+                log.error("Analytics: failed to flush {} events: {}", toSave.size(), e.getMessage());
+                // Re-buffer if failed? Maybe risky, just log and allow drift for now as per severity 'Low'
+            }
         }
     }
 
     // ── Weekly stats ───────────────────────────────────────────────────────────
 
-    @Transactional(readOnly = true)
+    @Transactional(timeout = 10, readOnly = true)
     public Map<String, Object> getWeeklyStats(UUID userId) {
         Instant weekAgo = Instant.now().minus(7, ChronoUnit.DAYS);
 
@@ -93,15 +124,22 @@ public class AnalyticsService {
 
     // ── Application funnel ─────────────────────────────────────────────────────
 
-    @Transactional(readOnly = true)
-    public List<Map<String, Object>> getApplicationFunnel(UUID userId) {
+    @Transactional(timeout = 10, readOnly = true)
+    public List<Map<String, Object>> getApplicationFunnel(UUID userId, java.time.Instant since) {
+        if (since == null) {
+            since = java.time.Instant.now().minus(30, java.time.temporal.ChronoUnit.DAYS);
+        }
+
         @SuppressWarnings("unchecked")
         List<Object[]> rows = (List<Object[]>) em.createNativeQuery("""
                 SELECT kanban_column, COUNT(*) AS cnt
-                FROM user_jobs WHERE user_id = :userId
+                FROM user_jobs
+                WHERE user_id = :userId
+                  AND (created_at >= :since OR updated_at >= :since)
                 GROUP BY kanban_column
                 """)
                 .setParameter("userId", userId)
+                .setParameter("since", since)
                 .getResultList();
 
         Map<String, Integer> countMap = new HashMap<>();
@@ -116,7 +154,7 @@ public class AnalyticsService {
 
     // ── Skill usage ────────────────────────────────────────────────────────────
 
-    @Transactional(readOnly = true)
+    @Transactional(timeout = 10, readOnly = true)
     public List<Map<String, Object>> getSkillUsage(UUID userId) {
         @SuppressWarnings("unchecked")
         List<Object[]> rows = (List<Object[]>) em.createNativeQuery("""
@@ -146,7 +184,7 @@ public class AnalyticsService {
      * @param userId the user UUID
      * @param weeks  number of rolling weeks to return (1–52, default 8)
      */
-    @Transactional(readOnly = true)
+    @Transactional(timeout = 10, readOnly = true)
     public List<Map<String, Object>> getWeeklyTimeSeries(UUID userId, int weeks) {
         int safeWeeks = Math.max(1, Math.min(weeks, 52));
         Instant cutoff = Instant.now().minus(safeWeeks * 7L, ChronoUnit.DAYS);

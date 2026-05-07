@@ -4,7 +4,7 @@
  * Conversational mock interview UI with live score badges.
  * Receives initial session data from InterviewKitPanel and runs turn-by-turn.
  */
-import React, { useState, useRef, useEffect } from 'react';
+import { useState, useRef, useEffect } from 'react';
 import { useMutation } from '@tanstack/react-query';
 import { interviewApi, MockReplyResponse } from '../../services/interviewApi';
 
@@ -42,8 +42,14 @@ export default function MockInterviewPanel({
     onSuccess: (data: MockReplyResponse) => {
       setTurns(prev => {
         const updated = [...prev];
-        updated[updated.length - 1] = {
-          ...updated[updated.length - 1],
+        const lastIndex = updated.length - 1;
+        const lastTurn = updated[lastIndex];
+        if (!lastTurn) {
+          return prev;
+        }
+
+        updated[lastIndex] = {
+          ...lastTurn,
           answer: currentAnswer,
           score: data.score,
           feedback: data.feedback,

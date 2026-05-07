@@ -39,7 +39,7 @@ const TagInput: React.FC<{
         {tags.map(t => (
           <span key={t} className="inline-flex items-center gap-1 px-2 py-0.5 bg-indigo-100 text-indigo-700 text-xs rounded-full">
             {t}
-            <button onClick={() => onChange(tags.filter(x => x !== t))} className="hover:text-red-500 transition-colors">&times;</button>
+            <button aria-label={`Remove tag ${t}`} onClick={() => onChange(tags.filter(x => x !== t))} className="hover:text-red-500 transition-colors">&times;</button>
           </span>
         ))}
       </div>
@@ -51,7 +51,7 @@ const TagInput: React.FC<{
           placeholder={placeholder ?? 'Type and press Enter'}
           className="flex-1 px-3 py-2 border border-gray-300 rounded-lg text-xs focus:outline-none focus:ring-2 focus:ring-indigo-400"
         />
-        <button onClick={add} className="px-3 py-2 bg-indigo-500 hover:bg-indigo-600 text-white text-xs rounded-lg transition-colors">
+        <button aria-label="Add tag" onClick={add} className="px-3 py-2 bg-indigo-500 hover:bg-indigo-600 text-white text-xs rounded-lg transition-colors">
           <Plus size={13} />
         </button>
       </div>
@@ -78,8 +78,7 @@ const ProfilePage: React.FC = () => {
   useEffect(() => {
     profileApi.get()
       .then(u => {
-        // profileApi.get() returns the User which embeds the Profile fields
-        setProfile(u as unknown as ProfileType);
+        setProfile(u);
       })
       .catch(() => toast.error('Failed to load profile.'))
       .finally(() => setLoading(false));
@@ -118,7 +117,7 @@ const ProfilePage: React.FC = () => {
     try {
       await profileApi.addPortfolioItem(newItem);
       const updated = await profileApi.get();
-      setProfile(updated as unknown as ProfileType);
+      setProfile(updated);
       setNewItem({ title: '', url: '', description: '' });
       setAddingPortfolio(false);
       toast.success('Portfolio item added!');
@@ -130,7 +129,7 @@ const ProfilePage: React.FC = () => {
   const removePortfolioItem = async (itemId: string) => {
     try {
       await profileApi.deletePortfolioItem(itemId);
-      setProfile(p => p ? { ...p, portfolioItems: p.portfolioItems?.filter(i => i.id !== itemId) } : p);
+      setProfile(p => p ? { ...p, portfolioItems: (p.portfolioItems ?? []).filter(i => i.id !== itemId) } : p);
       toast.success('Item removed.');
     } catch {
       toast.error('Failed to remove item.');
@@ -203,6 +202,7 @@ const ProfilePage: React.FC = () => {
               <div>
                 <label className="block text-xs font-medium text-gray-600 mb-1.5">Email</label>
                 <input
+                  aria-label="User Email"
                   type="email"
                   readOnly
                   value={user?.email ?? ''}
@@ -321,6 +321,7 @@ const ProfilePage: React.FC = () => {
                 )}
               </div>
               <input
+                aria-label='File Type'
                 ref={cvInputRef}
                 type="file"
                 accept=".pdf,.docx"
@@ -351,7 +352,7 @@ const ProfilePage: React.FC = () => {
                     )}
                     {item.description && <p className="text-xs text-gray-500 mt-0.5">{item.description}</p>}
                   </div>
-                  <button onClick={() => removePortfolioItem(item.id)} className="text-gray-400 hover:text-red-500 transition-colors flex-shrink-0">
+                  <button  aria-label={`Remove portfolio item ${item.title}`} onClick={() => removePortfolioItem(item.id)} className="text-gray-400 hover:text-red-500 transition-colors flex-shrink-0">
                     <Trash2 size={14} />
                   </button>
                 </div>

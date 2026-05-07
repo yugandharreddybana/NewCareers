@@ -11,6 +11,6 @@ import java.util.UUID;
 @Repository
 public interface OrgInvitationRepository extends JpaRepository<OrgInvitation, UUID> {
     List<OrgInvitation> findByOrgId(UUID orgId);
-    Optional<OrgInvitation> findByToken(String token);
+    Optional<OrgInvitation> findByTokenHash(String tokenHash);
     boolean existsByOrgIdAndEmailAndStatus(UUID orgId, String email, String status);
 }

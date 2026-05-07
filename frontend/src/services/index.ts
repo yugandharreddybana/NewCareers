@@ -1,28 +1,34 @@
 /**
- * services/index.ts — barrel export for all API modules.
+ * services/index.ts — barrel export for the entire API layer.
  *
- * G2/G3 fix (Batch 7b): all API modules that previously lived only in
- * src/api/ are now re-exported from this barrel so pages can import
- * from a single, stable path: @/services or @/services/index.
+ * Pass 6 #6.011 — `src/api/` has been deleted; every typed client now lives
+ * under `src/services/`. Import via either the barrel or the specific file:
  *
- * Old import pattern (still works, but deprecated):
- *   import { autoApplyApi } from '@/api/autoApplyApi';
- *
- * New import pattern (preferred):
- *   import { autoApplyApi } from '@/services';
+ *   import { jobsApi, authApi } from '@/services';
+ *   import { workspaceApi }     from '@/services/workspaceApi';
  */
 
-// Core services (already lived here)
+// Core
 export * from './api';
 export * from './mockApi';
+export * from './skillsApi';
 
-// Migrated from src/api/
-export * from '../api/agentMemoryApi';
-export * from '../api/autoApplyApi';
-export * from '../api/networkingApi';
-export * from '../api/outreachApi';
-export * from '../api/plannerApi';
-export * from '../api/progressApi';
-export * from '../api/resumeVersionApi';
-export * from '../api/watchlistApi';
-export * from '../api/workspaceApi';
+// Domain clients (alphabetical)
+export * from './adminApi';
+export * from './agentMemoryApi';
+export * from './analyticsApi';
+export * from './autoApplyApi';
+export * from './billingApi';
+export * from './cvApi';
+export * from './discoveryApi';
+export * from './experimentsApi';
+export * from './interviewApi';
+export * from './networkingApi';
+export * from './notificationsApi';
+export * from './outreachApi';
+export * from './plannerApi';
+export * from './progressApi';
+export * from './referralsApi';
+export * from './resumeVersionsApi';
+export * from './watchlistsApi';
+export * from './workspaceApi';

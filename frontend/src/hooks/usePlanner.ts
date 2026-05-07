@@ -1,25 +1,39 @@
 import { useState, useEffect, useCallback } from 'react';
-import { plannerApi, DeadlinePayload } from '../api/plannerApi';
+import { plannerApi, type DeadlinePayload } from '@/services/plannerApi';
+import type {
+  PlannerDeadline,
+  PlannerDashboardTask,
+  PlannerUpcomingSummary,
+} from '@/types/planner';
 import toast from 'react-hot-toast';
+
+const EMPTY_UPCOMING: PlannerUpcomingSummary = {
+  pendingTasks: [],
+  upcomingEvents: [],
+  overdueTasks: [],
+};
+
+const getPlannerErrorMessage = (error: unknown, fallback: string) =>
+  (error as { response?: { data?: { message?: string } } })?.response?.data?.message ?? fallback;
 
 /**
  * Fetches upcoming tasks + deadlines for the logged-in user.
  * Re-fetches whenever `refreshKey` changes.
  */
 export function useUpcoming(refreshKey = 0) {
-  const [data, setData] = useState<any>({ pendingTasks: [], upcomingEvents: [], overdueTasks: [] });
+  const [data, setData] = useState<PlannerUpcomingSummary>(EMPTY_UPCOMING);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     setLoading(true);
     plannerApi.getUpcoming()
-      .then(res => setData(res || { pendingTasks: [], upcomingEvents: [], overdueTasks: [] }))
-      .catch(err => {
-        const msg = err?.response?.data?.message || 'Failed to load planner';
+      .then(res => setData(res ?? EMPTY_UPCOMING))
+      .catch((error: unknown) => {
+        const msg = getPlannerErrorMessage(error, 'Failed to load planner');
         setError(msg);
         toast.error(msg);
-        setData({ pendingTasks: [], upcomingEvents: [], overdueTasks: [] });
+        setData(EMPTY_UPCOMING);
       })
       .finally(() => setLoading(false));
   }, [refreshKey]);
@@ -31,7 +45,7 @@ export function useUpcoming(refreshKey = 0) {
  * Manages tasks for a single tracked job.
  */
 export function useJobTasks(userJobId: string | number) {
-  const [tasks, setTasks] = useState<any[]>([]);
+  const [tasks, setTasks] = useState<PlannerDashboardTask[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -40,7 +54,7 @@ export function useJobTasks(userJobId: string | number) {
     setLoading(true);
     plannerApi.getTasksForJob(userJobId)
       .then(res => setTasks(res))
-      .catch(err => setError(err?.response?.data?.message || 'Failed to load tasks'))
+      .catch((error: unknown) => setError(getPlannerErrorMessage(error, 'Failed to load tasks')))
       .finally(() => setLoading(false));
   }, [userJobId]);
 
@@ -63,7 +77,7 @@ export function useJobTasks(userJobId: string | number) {
  * Manages deadlines for a single tracked job.
  */
 export function useJobDeadlines(userJobId: string | number) {
-  const [deadlines, setDeadlines] = useState<any[]>([]);
+  const [deadlines, setDeadlines] = useState<PlannerDeadline[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -72,7 +86,7 @@ export function useJobDeadlines(userJobId: string | number) {
     setLoading(true);
     plannerApi.getDeadlinesForJob(userJobId)
       .then(res => setDeadlines(res))
-      .catch(err => setError(err?.response?.data?.message || 'Failed to load deadlines'))
+      .catch((error: unknown) => setError(getPlannerErrorMessage(error, 'Failed to load deadlines')))
       .finally(() => setLoading(false));
   }, [userJobId]);
 

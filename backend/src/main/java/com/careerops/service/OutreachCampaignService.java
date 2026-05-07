@@ -1,5 +1,7 @@
 package com.careerops.service;
 
+import org.jspecify.annotations.Nullable;
+
 import com.careerops.dto.OutreachDtos.*;
 import com.careerops.exception.ApiException;
 import com.careerops.model.OutreachCampaign;
@@ -42,7 +44,7 @@ public class OutreachCampaignService {
         return toResponse(find(userId, id), true);
     }
 
-    @Transactional
+    @Transactional(timeout = 10)
     public CampaignResponse create(UUID userId, CreateCampaignRequest req) {
         OutreachCampaign c = OutreachCampaign.builder()
             .userId(userId)
@@ -53,7 +55,7 @@ public class OutreachCampaignService {
         return toResponse(campaignRepo.save(c), false);
     }
 
-    @Transactional
+    @Transactional(timeout = 10)
     public CampaignResponse launch(UUID userId, UUID id) {
         OutreachCampaign c = find(userId, id);
         if (!c.getStatus().equals("draft") && !c.getStatus().equals("paused")) {
@@ -70,7 +72,7 @@ public class OutreachCampaignService {
         return toResponse(campaignRepo.save(c), true);
     }
 
-    @Transactional
+    @Transactional(timeout = 10)
     public SequenceResponse addSequence(UUID userId, UUID campaignId, CreateSequenceRequest req) {
         find(userId, campaignId);
         OutreachSequence s = OutreachSequence.builder()
@@ -85,7 +87,7 @@ public class OutreachCampaignService {
         return toSeqResponse(sequenceRepo.save(s));
     }
 
-    @Transactional
+    @Transactional(timeout = 10)
     public MessageResponse addMessage(UUID userId, UUID campaignId, AddMessageRequest req) {
         find(userId, campaignId);
         OutreachMessage m = OutreachMessage.builder()
@@ -101,7 +103,7 @@ public class OutreachCampaignService {
         return toMsgResponse(messageRepo.save(m));
     }
 
-    @Transactional
+    @Transactional(timeout = 10)
     public MessageResponse updateMessageStatus(UUID userId, UUID messageId,
                                                UpdateMessageStatusRequest req) {
         OutreachMessage m = messageRepo.findByIdAndUserId(messageId, userId)
@@ -112,7 +114,7 @@ public class OutreachCampaignService {
         m = messageRepo.save(m);
 
         // Update campaign counters
-        OutreachCampaign c = campaignRepo.findByIdAndUserId(m.getCampaignId(), userId).orElse(null);
+        @Nullable OutreachCampaign c = campaignRepo.findByIdAndUserId(m.getCampaignId(), userId).orElse(null);
         if (c != null) {
             c.setSentCount((int) messageRepo.countByCampaignIdAndStatus(c.getId(), "sent"));
             c.setRepliedCount((int) messageRepo.countByCampaignIdAndStatus(c.getId(), "replied"));
@@ -121,7 +123,7 @@ public class OutreachCampaignService {
         return toMsgResponse(m);
     }
 
-    @Transactional
+    @Transactional(timeout = 10)
     public MessageResponse unsubscribeMessage(UUID userId, UUID messageId) {
         OutreachMessage m = messageRepo.findByIdAndUserId(messageId, userId)
             .orElseThrow(() -> new ApiException(HttpStatus.NOT_FOUND, "Message not found"));

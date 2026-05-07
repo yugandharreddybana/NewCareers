@@ -8,7 +8,6 @@ import org.springframework.mail.javamail.MimeMessageHelper;
 import org.springframework.stereotype.Service;
 
 import jakarta.mail.internet.MimeMessage;
-import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.UUID;
 
@@ -32,9 +31,10 @@ public class EmailService {
 
     /** Task 29 — Deadline reminder email */
     public void sendDeadlineReminder(UUID userId, String eventTitle,
-                                      String eventType, LocalDateTime eventDate) {
+                                      String eventType, java.time.Instant eventDate) {
         try {
-            String formatted = eventDate.format(DateTimeFormatter.ofPattern("EEE, d MMM yyyy 'at' HH:mm"));
+            String formatted = java.time.ZonedDateTime.ofInstant(eventDate, java.time.ZoneId.of("Europe/Dublin"))
+                    .format(DateTimeFormatter.ofPattern("EEE, d MMM yyyy 'at' HH:mm"));
             String subject = "Reminder: " + eventTitle + " — " + formatted;
 
             String html = buildDeadlineEmailHtml(eventTitle, eventType, formatted);

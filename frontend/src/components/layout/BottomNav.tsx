@@ -23,8 +23,7 @@ export default function BottomNav() {
   return (
     <nav
       aria-label="Main navigation"
-      className="md:hidden fixed bottom-0 left-0 right-0 z-40 bg-white border-t border-border"
-      style={{ paddingBottom: 'env(safe-area-inset-bottom)' }}
+      className="bottom-nav-safe md:hidden fixed bottom-0 left-0 right-0 z-40 bg-white border-t border-border"
     >
       <div className="flex items-stretch h-16">
         {NAV.map(({ to, label, icon: Icon }) => (

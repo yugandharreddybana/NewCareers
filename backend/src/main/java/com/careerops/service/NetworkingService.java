@@ -48,8 +48,13 @@ public class NetworkingService {
 
     // ── Create contact ─────────────────────────────────────────────────────────
 
-    @Transactional
+    @Transactional(timeout = 10)
     public ContactResponse createContact(UUID userId, CreateContactRequest req) {
+        // 2.046 — Security: Prevent duplicate contact names for the same user
+        if (contacts.existsByUserIdAndName(userId, req.name())) {
+            throw new ApiException(HttpStatus.CONFLICT, "A contact with this name already exists");
+        }
+
         NetworkContact c = NetworkContact.builder()
                 .userId(userId)
                 .name(req.name())
@@ -107,7 +112,7 @@ public class NetworkingService {
 
     // ── Update pipeline stage ──────────────────────────────────────────────────
 
-    @Transactional
+    @Transactional(timeout = 10)
     public ContactResponse updatePipelineStage(UUID userId, UUID contactId,
                                                 ContactPipelineStage newStage) {
         NetworkContact c = contacts.findByIdAndUserId(contactId, userId)
@@ -124,7 +129,7 @@ public class NetworkingService {
 
     // ── Delete contact ─────────────────────────────────────────────────────────
 
-    @Transactional
+    @Transactional(timeout = 10)
     public void deleteContact(UUID userId, UUID contactId) {
         NetworkContact c = contacts.findByIdAndUserId(contactId, userId)
                 .orElseThrow(() -> new ApiException(HttpStatus.NOT_FOUND, "Contact not found"));
@@ -137,7 +142,7 @@ public class NetworkingService {
 
     // ── Log interaction ────────────────────────────────────────────────────────
 
-    @Transactional
+    @Transactional(timeout = 10)
     public InteractionResponse logInteraction(UUID userId, UUID contactId,
                                                LogInteractionRequest req) {
         NetworkContact contact = contacts.findByIdAndUserId(contactId, userId)
@@ -147,7 +152,7 @@ public class NetworkingService {
                 .contactId(contactId)
                 .userId(userId)
                 .interactionType(req.interactionType())
-                .outcome(req.outcome())
+                .outcome(req.outcome() != null ? req.outcome() : ContactInteraction.InteractionOutcome.no_response)
                 .notes(req.notes())
                 .nextStep(req.nextStep())
                 .nextStepDueDate(req.nextStepDueDate())
@@ -178,7 +183,7 @@ public class NetworkingService {
     // Expected header: name,email,company,role_title,contact_type,linkedin_url,notes
     // contact_type values: recruiter | hiring_manager | alumni | referral (defaults to recruiter)
 
-    @Transactional
+    @Transactional(timeout = 10)
     public CsvImportResult importContactsFromCsv(UUID userId, InputStream csvStream) {
         int imported = 0;
         int skipped  = 0;

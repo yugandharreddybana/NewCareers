@@ -17,15 +17,25 @@ import java.util.UUID;
  *        goal_location, open_to_remote
  */
 @Entity
-@Table(name = "user_profiles", schema = "career_operations")
+@Table(name = "user_profiles", schema = "career_operations",
+       uniqueConstraints = @UniqueConstraint(columnNames = "user_id"))
 @Getter @Setter @NoArgsConstructor @AllArgsConstructor @Builder
 public class UserProfile {
+
+    public static final int DEFAULT_MIN_MATCH_PERCENT = 60;
 
     @Id @GeneratedValue(strategy = GenerationType.UUID)
     private UUID id;
 
+    @Version
+    private Long version;
+
     @Column(name = "user_id", nullable = false, unique = true)
     private UUID userId;
+
+    @OneToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "user_id", insertable = false, updatable = false)
+    private User user;
 
     // ── Existing matching prefs ──────────────────────────────────────────
 
@@ -41,9 +51,11 @@ public class UserProfile {
 
     @Column(name = "salary_min")     private Integer salaryMin;
     @Column(name = "salary_max")     private Integer salaryMax;
+    @Builder.Default
+    @Column(name = "salary_currency") private String salaryCurrency = "EUR";
 
     @Type(StringArrayType.class)
-    @Column(columnDefinition = "text[]")
+    @Column(name = "sectors", columnDefinition = "text[]")
     private String[] sectors;
 
     @Column(name = "freshness_hours")   private Integer freshnessHours;
@@ -60,6 +72,7 @@ public class UserProfile {
     @Type(JsonType.class)
     @Column(name = "portfolio_items", columnDefinition = "jsonb")
     @Builder.Default
+    @jakarta.validation.Valid
     private List<PortfolioItem> portfolioItems = new ArrayList<>();
 
     // ── Section 10: Career Goal fields ──────────────────────────────────
@@ -84,9 +97,18 @@ public class UserProfile {
     @Getter @Setter @NoArgsConstructor @AllArgsConstructor @Builder
     public static class PortfolioItem {
         private String       id;          // client-generated UUID string
+
+        @jakarta.validation.constraints.NotBlank(message = "Title is required")
+        @jakarta.validation.constraints.Size(max = 100, message = "Title cannot exceed 100 characters")
         private String       title;
+
+        @jakarta.validation.constraints.Size(max = 255, message = "URL cannot exceed 255 characters")
+        @org.hibernate.validator.constraints.URL(message = "Invalid URL format")
         private String       url;
+
+        @jakarta.validation.constraints.Size(max = 1000, message = "Description cannot exceed 1000 characters")
         private String       description;
+
         private List<String> techTags;
     }
 }

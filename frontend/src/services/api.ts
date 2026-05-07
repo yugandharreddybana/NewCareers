@@ -1,86 +1,89 @@
 /**
  * api.ts — Axios instance, silent-refresh interceptor, and core API services.
  *
- * F1 fix: eliminated all `any` types.
- * F2 fix: added authApi.me().
- * F3 fix: kanbanApi.patch body.kanbanColumn typed as KanbanColumn | undefined.
- * F4 fix: removed authApi.forgot / authApi.reset legacy aliases.
+ * Pass 6 fixes folded in here:
+ *   #6.017 / #6.026 — refresh path no longer duplicates `/api`; baseURL is
+ *                    `<host>/api/v1` and the refresh helper uses a relative URL.
+ *   #6.022 / #6.037 — env vars now come from `lib/env.ts`. Single source of
+ *                    truth for VITE_API_URL (legacy VITE_MIDDLEWARE_URL still
+ *                    honoured but deprecated).
+ *   #6.023         — request URL rewriter scoped strictly to the legacy
+ *                    `/api/` and `/api/v1/` prefixes; new code uses bare paths
+ *                    like `/auth/login`.
+ *   #6.024         — CSRF reads from the `co_csrf` cookie which is JS-readable
+ *                    by contract (server.ts:108); broken if anyone makes it
+ *                    HttpOnly.
+ *   #6.025         — silent-refresh now uses a WeakSet keyed on the request
+ *                    config so the retry flag cannot leak across React Query
+ *                    invocations.
+ *   #6.027         — on successful silent refresh we emit a `co:auth:refreshed`
+ *                    custom event so AuthContext can re-fetch /auth/me.
+ *   #8.010         — removed `.catch(() => mock)` fallbacks that masked
+ *                    backend outages with fake data. Mocks are now strictly
+ *                    gated behind `USE_MOCKS` (VITE_USE_MOCKS=true).
  *
- * G7 fix (Batch 7a): X-CSRF-Token header is now attached on every mutating
- *   request (POST, PUT, PATCH, DELETE). The middleware uses a double-submit
- *   cookie pattern — it expects the header value to match the co_csrf cookie.
- *   Without this header, every state-changing API call returns 403 in
- *   production.
+ * F1 / F2 / F3 / F4 / G7 fixes preserved.
  */
-import axios, { AxiosRequestConfig, InternalAxiosRequestConfig } from 'axios';
+import axios, { AxiosError, AxiosRequestConfig, InternalAxiosRequestConfig } from 'axios';
 import toast from 'react-hot-toast';
 import * as mocks from './mockApi';
 import { tokenStore } from '@/lib/tokenStore';
-import type { User, KanbanColumn } from '@/types';
+import { reportError } from '@/lib/telemetry';
+import { API_V1_URL, USE_MOCKS, DEV_BYPASS } from '@/lib/env';
+import type { User, Profile, KanbanColumn } from '@/types';
 
-// ── F1: typed request bodies ──────────────────────────────────────────────────────────
-
+// ── Typed request bodies ────────────────────────────────────────────────────
 interface SignupBody {
   name: string;
   username: string;
   email: string;
   password: string;
 }
-
 interface LoginBody {
   email: string;
   password: string;
 }
-
 interface AuthResponse {
   user: User;
   token?: string;
   refreshToken?: string;
 }
-
-interface SkillStartRequest {
-  skillName: string;
-  userJobId?: string;
-  channel?: string;
-  tone?: string;
-  step?: string;
-  compareJobIds?: string[];
-  [key: string]: unknown;
+interface PublicStats {
+  jobs: number;
+  users: number;
+  skills: number;
 }
 
-interface SkillResult {
-  state: 'idle' | 'loading' | 'done' | 'error';
-  data?: Record<string, unknown>;
-}
+// ── Public events ──────────────────────────────────────────────────────────
+export const AUTH_REFRESHED_EVENT = 'co:auth:refreshed';
+export const AUTH_LOGGED_OUT_EVENT = 'co:auth:logged-out';
 
-// ── Env ───────────────────────────────────────────────────────────────────────
-const baseURL = import.meta.env.VITE_MIDDLEWARE_URL || 'http://localhost:4000';
-const USE_MOCKS = import.meta.env.VITE_USE_MOCKS === 'true';
-const DEV_BYPASS =
-  import.meta.env.MODE !== 'production' &&
-  import.meta.env.VITE_DEV_BYPASS_GUARDS === 'true';
-
-const delay = (ms = 800) => new Promise(res => setTimeout(res, ms));
+const IS_TEST = import.meta.env.MODE === 'test';
+const delay = (ms = 800) => IS_TEST ? Promise.resolve() : new Promise(res => setTimeout(res, ms));
 
 /** Read the co_csrf cookie that the middleware sets on first response. */
 function getCsrfToken(): string | null {
+  if (typeof document === 'undefined') return null;
   const match = document.cookie.match(/(?:^|;\s*)co_csrf=([^;]+)/);
-  return match ? decodeURIComponent(match[1]) : null;
+  return match && match[1] ? decodeURIComponent(match[1]) : null;
 }
 
+// ── Axios instance ─────────────────────────────────────────────────────────
 export const api = axios.create({
-  baseURL: `${baseURL}/api`,
+  baseURL: API_V1_URL,
   withCredentials: true,
   timeout: 90_000,
 });
 
-// ── Request interceptor: attach access token + CSRF header ───────────────────
-// G7 fix: attach X-CSRF-Token on every mutating method so the double-submit
-// cookie check in server.ts passes.
+// ── Request interceptor: bearer token + CSRF + path normalisation ─────────
 const MUTATING_METHODS = new Set(['post', 'put', 'patch', 'delete']);
 
 api.interceptors.request.use((config: InternalAxiosRequestConfig) => {
-  if (config.url?.startsWith('/api/')) {
+  // Pass 6 #6.023 — normalise legacy `/api/v1/...` and `/api/...` prefixes.
+  // New code is expected to call `api.get('/auth/me')` directly.
+  if (config.url?.startsWith('/api/v1/')) {
+    config.url = config.url.replace(/^\/api\/v1\//, '/');
+  } else if (config.url?.startsWith('/api/')) {
     config.url = config.url.replace(/^\/api\//, '/');
   }
 
@@ -89,7 +92,11 @@ api.interceptors.request.use((config: InternalAxiosRequestConfig) => {
     config.headers['Authorization'] = `Bearer ${token}`;
   }
 
-  // G7 fix: attach CSRF token for all state-changing requests
+  // Custom header that browsers will not auto-attach cross-origin — this is
+  // what middleware/rateLimiter.ts:csrfGuard checks for as defence-in-depth.
+  if (config.headers) config.headers['X-Requested-With'] = 'XMLHttpRequest';
+
+  // Double-submit CSRF for mutating verbs.
   if (config.method && MUTATING_METHODS.has(config.method.toLowerCase())) {
     const csrf = getCsrfToken();
     if (csrf && config.headers) {
@@ -100,100 +107,164 @@ api.interceptors.request.use((config: InternalAxiosRequestConfig) => {
   return config;
 });
 
-// ── Refresh-token machinery ─────────────────────────────────────────────────────
+// ── Refresh-token machinery ────────────────────────────────────────────────
 let isRefreshing = false;
-type FailedQueueItem = { resolve: (value: string) => void; reject: (reason?: unknown) => void };
+type FailedQueueItem = { resolve: (token: string) => void; reject: (reason?: unknown) => void };
 let failedQueue: FailedQueueItem[] = [];
 
+// Pass 6 #6.025 — replace the `_retry` flag-on-config with a WeakSet so each
+// request is only ever retried once even when React Query retries it.
+const retriedConfigs = new WeakSet<AxiosRequestConfig>();
+
 function processQueue(error: unknown, token: string | null = null) {
-  failedQueue.forEach(({ resolve, reject }) => {
-    if (error) reject(error);
-    else resolve(token as string);
-  });
+  for (const { resolve, reject } of failedQueue) {
+    if (error || token === null) reject(error);
+    else                         resolve(token);
+  }
   failedQueue = [];
 }
 
-// ── Response interceptor: 401 → silent refresh → retry, 429 → toast ───────────
+function emit(eventName: string, detail?: unknown): void {
+  if (typeof window === 'undefined') return;
+  try { window.dispatchEvent(new CustomEvent(eventName, { detail })); }
+  catch { /* CustomEvent unavailable in some test envs */ }
+}
+
+const PUBLIC_PATHS_FRONTEND = new Set([
+  '/login',
+  '/signup',
+  '/forgot-password',
+  '/reset-password',
+]);
+
+function redirectToLoginIfNeeded(): void {
+  if (typeof window === 'undefined') return;
+  const here = window.location.pathname;
+  if (DEV_BYPASS || PUBLIC_PATHS_FRONTEND.has(here)) return;
+  const target = '/login?reason=session_expired';
+  const current = `${window.location.pathname}${window.location.search}`;
+  if (current === target) return;
+  window.history.replaceState({ reason: 'session_expired' }, '', target);
+  window.dispatchEvent(new PopStateEvent('popstate'));
+}
+
+// ── Response interceptor: 401 → silent refresh, 429 → toast, others → normalise ──
 api.interceptors.response.use(
   r => r,
-  async (err) => {
-    const originalRequest: AxiosRequestConfig & { _retry?: boolean } = err.config;
+  async (err: AxiosError<{ error?: string; message?: string }>) => {
+    const originalRequest = err.config as AxiosRequestConfig | undefined;
 
+    // 429 → user-facing toast
     if (err.response?.status === 429) {
       const msg =
         err.response?.data?.error ||
         err.response?.data?.message ||
         'Too many requests — please slow down.';
       toast.error(msg, { id: 'rate-limit', duration: 4000 });
-      err.normalizedMessage = msg;
+      (err as AxiosError & { normalizedMessage: string }).normalizedMessage = msg;
       return Promise.reject(err);
     }
 
-    if (
+    // 401 → silent refresh + retry once.
+    const isRefreshableRequest =
+      originalRequest &&
       err.response?.status === 401 &&
-      !originalRequest._retry &&
+      !retriedConfigs.has(originalRequest) &&
       originalRequest.url !== '/auth/refresh' &&
-      originalRequest.url !== '/auth/login'
-    ) {
+      originalRequest.url !== '/auth/login';
+
+    if (isRefreshableRequest) {
       if (DEV_BYPASS) return Promise.reject(err);
 
       const refresh = tokenStore.getRefresh();
-      const publicPaths = ['/login', '/register', '/forgot-password', '/reset-password', '/onboarding'];
-
       if (!refresh) {
         tokenStore.clear();
-        if (!publicPaths.includes(window.location.pathname)) window.location.href = '/login';
+        emit(AUTH_LOGGED_OUT_EVENT);
+        redirectToLoginIfNeeded();
         return Promise.reject(err);
       }
 
       if (isRefreshing) {
         return new Promise<string>((resolve, reject) => {
           failedQueue.push({ resolve, reject });
-        }).then(token => {
+        }).then(newToken => {
           if (originalRequest.headers) {
-            (originalRequest.headers as Record<string, string>)['Authorization'] = `Bearer ${token}`;
+            (originalRequest.headers as Record<string, string>)['Authorization'] = `Bearer ${newToken}`;
           }
           return api(originalRequest);
         });
       }
 
-      originalRequest._retry = true;
+      retriedConfigs.add(originalRequest);
       isRefreshing = true;
 
       try {
+        // Use a clean axios call (NOT the instance) so the interceptor doesn't
+        // recurse on its own 401.
         const resp = await axios.post(
-          `${baseURL}/api/auth/refresh`,
+          `${API_V1_URL}/auth/refresh`,
           { refreshToken: refresh },
-          { withCredentials: true },
+          { 
+            withCredentials: true, 
+            timeout: 30_000,
+            headers: { 'X-Requested-With': 'XMLHttpRequest' }
+          },
         );
-        const { token: newAccess, refreshToken: newRefresh } = resp.data as { token: string; refreshToken: string };
-        tokenStore.set(newAccess, newRefresh);
-        processQueue(null, newAccess);
+        const data = resp.data as { token: string; refreshToken: string };
+        tokenStore.set(data.token, data.refreshToken);
+        processQueue(null, data.token);
+        emit(AUTH_REFRESHED_EVENT);
         if (originalRequest.headers) {
-          (originalRequest.headers as Record<string, string>)['Authorization'] = `Bearer ${newAccess}`;
+          (originalRequest.headers as Record<string, string>)['Authorization'] = `Bearer ${data.token}`;
         }
         return api(originalRequest);
       } catch (refreshError) {
         processQueue(refreshError, null);
         tokenStore.clear();
-        if (!DEV_BYPASS && !publicPaths.includes(window.location.pathname)) {
-          window.location.href = '/login';
-        }
+        emit(AUTH_LOGGED_OUT_EVENT);
+        redirectToLoginIfNeeded();
         return Promise.reject(refreshError);
       } finally {
         isRefreshing = false;
       }
     }
 
-    err.normalizedMessage = err.response?.data?.error || err.message || 'Request failed';
+    // For any other error, attach a normalised message + report 5xx to telemetry.
+    const normalized = err.response?.data?.error
+      || err.response?.data?.message
+      || err.message
+      || 'Request failed';
+    (err as AxiosError & { normalizedMessage: string }).normalizedMessage = normalized;
+
+    if (err.response && err.response.status >= 500) {
+      reportError({
+        message: `[axios ${err.response.status}] ${normalized}`,
+        source: 'axios',
+        context: { url: originalRequest?.url, method: originalRequest?.method },
+      });
+    }
     return Promise.reject(err);
   },
 );
 
-// ── Auth API ─────────────────────────────────────────────────────────────────────
+// ── Public API ─────────────────────────────────────────────────────────────
+export const publicApi = {
+  /** Pass 6 #6.016 — real social-proof numbers for the Login page. */
+  stats: async (): Promise<PublicStats> => {
+    if (USE_MOCKS) {
+      await delay(150);
+      return { jobs: 0, users: 0, skills: 14 };
+    }
+    const r = await api.get<PublicStats>('/public/stats');
+    return r.data;
+  },
+};
+
+// ── Auth API ──────────────────────────────────────────────────────────────
 export const authApi = {
   signup: async (b: SignupBody): Promise<AuthResponse> => {
     if (USE_MOCKS) { await delay(); return { user: mocks.MOCK_USER }; }
+    // Backend convention: POST /auth/register; middleware aliases /auth/signup → /auth/register.
     const r = await api.post<AuthResponse>('/auth/signup', b);
     if (r.data.token)        tokenStore.setAccess(r.data.token);
     if (r.data.refreshToken) tokenStore.setRefresh(r.data.refreshToken);
@@ -209,32 +280,31 @@ export const authApi = {
   },
 
   logout: async (): Promise<{ success: boolean }> => {
-    if (USE_MOCKS) { await delay(); return { success: true }; }
-    try { await api.post('/auth/logout'); } finally { tokenStore.clear(); }
+    if (USE_MOCKS) { await delay(200); return { success: true }; }
+    try { await api.post('/auth/logout'); }
+    finally { tokenStore.clear(); emit(AUTH_LOGGED_OUT_EVENT); }
     return { success: true };
   },
 
-  refresh: (refreshToken: string) =>
+  refresh: (refreshToken: string): Promise<AuthResponse> =>
     api.post<AuthResponse>('/auth/refresh', { refreshToken }).then(r => r.data),
 
-  // F2 fix: authApi.me() — called by AuthContext on mount (B2 fix)
-  me: (): Promise<User> =>
-    api.get<User>('/auth/me').then(r => r.data),
+  me: (): Promise<User> => api.get<User>('/auth/me').then(r => r.data),
 
-  forgotPassword: (email: string) =>
+  forgotPassword: (email: string): Promise<void> =>
     api.post<void>('/auth/forgot-password', { email }).then(r => r.data),
 
-  resetPassword: (b: { token: string; password: string }) =>
+  resetPassword: (b: { token: string; password: string }): Promise<void> =>
     api.post<void>('/auth/reset-password', b).then(r => r.data),
 };
 
-// ── Profile API ───────────────────────────────────────────────────────────────────
+// ── Profile API ───────────────────────────────────────────────────────────
 export const profileApi = {
-  get: async (): Promise<User> => {
+  get: async (): Promise<Profile> => {
     if (USE_MOCKS) { await delay(400); return mocks.MOCK_USER; }
-    return api.get<User>('/profile').then(r => r.data);
+    return api.get<Profile>('/profile').then(r => r.data);
   },
-  update: (b: object) => api.put<User>('/profile', b).then(r => r.data),
+  update: (b: object) => api.put<Profile>('/profile', b).then(r => r.data),
   uploadCv: (file: File) => {
     const fd = new FormData();
     fd.append('file', file);
@@ -258,33 +328,37 @@ export const profileApi = {
   },
 };
 
-// ── Jobs API ──────────────────────────────────────────────────────────────────────
+// ── Jobs API ──────────────────────────────────────────────────────────────
+// Pass 6 #8.010 — silent mock fallbacks removed. If USE_MOCKS is off and the
+// backend errors, the error propagates so the UI can show a real failure
+// state instead of fake data.
 export const jobsApi = {
   list: async () => {
-    if (USE_MOCKS) { await delay(1000); return { items: mocks.MOCK_JOBS, dailyCount: 5, dailyLimit: 15, remaining: 10 }; }
-    return api.get('/jobs').then(r => r.data).catch(() =>
-      ({ items: mocks.MOCK_JOBS, dailyCount: 5, dailyLimit: 15, remaining: 10 })
-    );
+    if (USE_MOCKS) {
+      await delay(500);
+      return { items: mocks.MOCK_JOBS, dailyCount: 5, dailyLimit: 15, remaining: 10 };
+    }
+    return api.get('/jobs').then(r => r.data);
   },
   detail: async (id: string) => {
-    if (USE_MOCKS) { await delay(600); return mocks.MOCK_JOB_DETAIL; }
-    return api.get(`/jobs/${id}`).then(r => r.data).catch(() => mocks.MOCK_JOB_DETAIL);
+    if (USE_MOCKS) { await delay(300); return mocks.MOCK_JOB_DETAIL; }
+    return api.get(`/jobs/${id}`).then(r => r.data);
   },
   fetch: async (count = 5) => {
-    if (USE_MOCKS) { await delay(2000); return mocks.MOCK_FETCH_SUMMARY; }
-    return api.post('/jobs/fetch', null, { params: { count } }).then(r => r.data).catch(() => mocks.MOCK_FETCH_SUMMARY);
+    if (USE_MOCKS) { await delay(800); return mocks.MOCK_FETCH_SUMMARY; }
+    return api.post('/jobs/fetch', null, { params: { count } }).then(r => r.data);
   },
   limits: async () => {
     if (USE_MOCKS) return mocks.MOCK_FETCH_SUMMARY;
-    return api.get('/jobs/limits').then(r => r.data).catch(() => mocks.MOCK_FETCH_SUMMARY);
+    return api.get('/jobs/limits').then(r => r.data);
   },
   stats: async () => {
     if (USE_MOCKS) return mocks.MOCK_STATS;
-    return api.get('/jobs/stats').then(r => r.data).catch(() => mocks.MOCK_STATS);
+    return api.get('/jobs/stats').then(r => r.data);
   },
 };
 
-// ── Kanban API ────────────────────────────────────────────────────────────────────
+// ── Kanban API ────────────────────────────────────────────────────────────
 export const kanbanApi = {
   patch: (id: string, body: { kanbanColumn?: KanbanColumn; status?: string }) => {
     if (USE_MOCKS) return Promise.resolve({ success: true });
@@ -297,83 +371,5 @@ export const kanbanApi = {
   },
 };
 
-// ── Skills API ────────────────────────────────────────────────────────────────────
-export const skillsApi = {
-  start: async (req: SkillStartRequest): Promise<SkillResult> => {
-    if (USE_MOCKS) {
-      await delay(2500);
-      return {
-        state: 'done',
-        data: (mocks.MOCK_SKILL_RESULTS[req.skillName] as Record<string, unknown>) ??
-              { text: 'Skill execution complete.' },
-      };
-    }
-    return api.post<SkillResult>('/skills/start', req, { timeout: 180_000 }).then(r => r.data);
-  },
-
-  reply: (req: { conversationId: string; answer: string }) =>
-    api.post('/skills/conversation/reply', req, { timeout: 180_000 }).then(r => r.data),
-
-  runAll: async (userJobId: string) => {
-    if (USE_MOCKS) { await delay(4000); return { success: true }; }
-    return api.post(`/skills/run-all/${userJobId}`, null, { timeout: 600_000 }).then(r => r.data);
-  },
-
-  getLastRun: async (userJobId: string, skill: string): Promise<SkillResult> => {
-    if (USE_MOCKS) return { state: 'done', data: mocks.MOCK_SKILL_RESULTS[skill] as Record<string, unknown> };
-    return api.get<SkillResult>(`/skills/last-run/${userJobId}/${skill}`).then(r => r.data);
-  },
-
-  downloadSkillPdf: (userJobId: string, skillName: string): Promise<void> => {
-    if (USE_MOCKS) { alert('MOCK: Downloading PDF...'); return Promise.resolve(); }
-    return api.get(`/skills/pdf/${userJobId}/${skillName}`, { responseType: 'blob', timeout: 60_000 })
-      .then(r => {
-        const url = window.URL.createObjectURL(r.data as Blob);
-        const link = document.createElement('a');
-        link.href = url; link.download = `${skillName}-report.pdf`;
-        document.body.appendChild(link); link.click();
-        document.body.removeChild(link);
-        window.URL.revokeObjectURL(url);
-      });
-  },
-
-  downloadAllPdf: (userJobId: string): Promise<void> => {
-    if (USE_MOCKS) { alert('MOCK: Downloading complete pack...'); return Promise.resolve(); }
-    return api.get(`/skills/pdf/${userJobId}/all`, { responseType: 'blob', timeout: 120_000 })
-      .then(r => {
-        const url = window.URL.createObjectURL(r.data as Blob);
-        const link = document.createElement('a');
-        link.href = url; link.download = 'careerops-complete-pack.pdf';
-        document.body.appendChild(link); link.click();
-        document.body.removeChild(link);
-        window.URL.revokeObjectURL(url);
-      });
-  },
-
-  downloadResumePdf: (userJobId: string): Promise<void> => {
-    if (USE_MOCKS) { alert('MOCK: Downloading resume...'); return Promise.resolve(); }
-    return api.get(`/skills/pdf/${userJobId}/resume`, { responseType: 'blob', timeout: 60_000 })
-      .then(r => {
-        const url = window.URL.createObjectURL(r.data as Blob);
-        const link = document.createElement('a');
-        link.href = url; link.download = 'tailored-resume.pdf';
-        document.body.appendChild(link); link.click();
-        document.body.removeChild(link);
-        window.URL.revokeObjectURL(url);
-      });
-  },
-
-  evaluate:      (userJobId: string) => skillsApi.start({ skillName: 'evaluate', userJobId }),
-  tailorResume:  (userJobId: string) => skillsApi.start({ skillName: 'tailor-resume', userJobId }),
-  research:      (userJobId: string) => skillsApi.start({ skillName: 'research', userJobId }),
-  outreach:      (userJobId: string, channel = 'linkedin', tone = 'professional') =>
-    skillsApi.start({ skillName: 'outreach', userJobId, channel, tone }),
-  apply:         (userJobId: string, step = 'all') =>
-    skillsApi.start({ skillName: 'apply', userJobId, step }),
-  prepInterview: (userJobId: string) =>
-    skillsApi.start({ skillName: 'prep-interview', userJobId }),
-  compare:       (userJobIds: string[]) =>
-    skillsApi.start({ skillName: 'compare', compareJobIds: userJobIds }),
-  triage:        () => skillsApi.start({ skillName: 'triage' }),
-  last:          (userJobId: string, skill: string) => skillsApi.getLastRun(userJobId, skill),
-};
+// Pass 6 #6.012 — canonical SkillStartRequest / SkillRunResponse and
+// the `skillsApi` client live in `services/skillsApi.ts`.

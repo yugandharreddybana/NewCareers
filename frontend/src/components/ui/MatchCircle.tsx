@@ -36,3 +36,5 @@ export default function MatchCircle({ percent, size = 64 }: Props) {
     </div>
   );
 }
+
+MatchCircle.displayName = 'MatchCircle';

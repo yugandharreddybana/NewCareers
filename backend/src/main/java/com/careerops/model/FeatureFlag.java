@@ -11,12 +11,16 @@ import java.util.UUID;
  * Managed via GET/PUT /admin/flags.
  */
 @Entity
+@EntityListeners(AuditEntityListener.class)
 @Table(name = "feature_flags", schema = "career_operations")
 @Getter @Setter @NoArgsConstructor @AllArgsConstructor @Builder
 public class FeatureFlag {
 
     @Id @GeneratedValue(strategy = GenerationType.UUID)
     private UUID id;
+
+    @Version
+    private Long version;
 
     @Column(name = "flag_key", nullable = false, unique = true)
     private String flagKey;

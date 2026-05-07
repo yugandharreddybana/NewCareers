@@ -9,9 +9,11 @@ import org.mockito.Mock;
 import org.mockito.Spy;
 import org.mockito.junit.jupiter.MockitoExtension;
 import com.careerops.service.CvHumanScoreService.CvScoreResult;
+import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.within;
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.when;
 
@@ -21,8 +23,7 @@ class CvHumanScoreServiceTest {
     @Mock
     private ClaudeDirectService claude;
 
-    @Spy
-    private ObjectMapper mapper = new ObjectMapper();
+    private final ObjectMapper mapper = new ObjectMapper();
 
     @InjectMocks
     private CvHumanScoreService service;
@@ -32,9 +33,9 @@ class CvHumanScoreServiceTest {
     void atsScore_inRange() throws Exception {
         String cv = "Experienced Java developer with Spring Boot and Microservices expertise.";
         String jd = "Looking for Java Spring Boot developer with microservices experience.";
-        when(claude.generateJson(anyString(), anyString())).thenReturn(mapper.readTree("{\"atsScore\":78,\"humanScore\":65,\"flaggedPhrases\":[]}"));
+        when(claude.generateJson(anyString(), anyString(), any(UUID.class), anyString())).thenReturn(mapper.readTree("{\"atsScore\":78,\"humanScore\":65,\"flaggedPhrases\":[]}"));
 
-        CvScoreResult result = service.score(cv, jd);
+        CvScoreResult result = service.score(cv, jd, UUID.randomUUID());
 
         assertThat(result.atsScore()).isBetween(0, 100);
     }
@@ -42,9 +43,9 @@ class CvHumanScoreServiceTest {
     @Test
     @DisplayName("human score — returned correctly from Gemini response")
     void humanScore_returnedCorrectly() throws Exception {
-        when(claude.generateJson(anyString(), anyString())).thenReturn(mapper.readTree("{\"atsScore\":80,\"humanScore\":70,\"flaggedPhrases\":[]}"));
+        when(claude.generateJson(anyString(), anyString(), any(UUID.class), anyString())).thenReturn(mapper.readTree("{\"atsScore\":80,\"humanScore\":70,\"flaggedPhrases\":[]}"));
 
-        CvScoreResult result = service.score("cv text", "jd text");
+        CvScoreResult result = service.score("cv text", "jd text", UUID.randomUUID());
 
         assertThat(result.humanScore()).isEqualTo(70);
     }
@@ -52,7 +53,7 @@ class CvHumanScoreServiceTest {
     @Test
     @DisplayName("empty CV — returns zero scores gracefully")
     void emptyCv_returnsZeroScores() {
-        CvScoreResult result = service.score("", "some job description");
+        CvScoreResult result = service.score("", "some job description", UUID.randomUUID());
         assertThat(result.atsScore()).isEqualTo(0);
     }
 }

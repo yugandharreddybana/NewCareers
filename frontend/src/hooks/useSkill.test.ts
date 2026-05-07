@@ -1,91 +1,120 @@
 /**
  * Task 144 — useSkill hook state machine tests
- *
- * State transitions covered:
- *  ✓ idle → loading → done
- *  ✓ idle → loading → pending_answer → reply → done
- *  ✓ error state
- *  ✓ invalidateCache resets to idle
  */
-import { renderHook, act, waitFor } from '@testing-library/react';
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { act, renderHook, waitFor } from '@testing-library/react';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { useSkill } from '@/hooks/useSkill';
+import type { SkillRunResponse } from '@/types/skills';
 
-// ── API mock ─────────────────────────────────────────────────────────────────
 const mockStart = vi.fn();
 const mockReply = vi.fn();
 
-vi.mock('@/services/api', () => ({
+vi.mock('@/services/skillsApi', () => ({
   skillsApi: {
-    start: (...args: any[]) => mockStart(...args),
-    reply:  (...args: any[]) => mockReply(...args),
+    start: (...args: unknown[]) => mockStart(...args),
+    reply: (...args: unknown[]) => mockReply(...args),
+    downloadSkillPdf: vi.fn(),
   },
 }));
+
+const createDeferred = <T,>() => {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>(promiseResolve => {
+    resolve = promiseResolve;
+  });
+  return { promise, resolve };
+};
 
 describe('useSkill', () => {
   beforeEach(() => {
     vi.clearAllMocks();
   });
 
-  // ──────────────────────────────────────────────────────────────
   it('starts in idle state', () => {
-    const { result } = renderHook(() => useSkill('evaluate', 'job-1'));
-    expect(result.current.state.status).toBe('idle');
+    const { result } = renderHook(() => useSkill());
+    expect(result.current.state).toBe('idle');
   });
 
-  it('transitions idle → loading → done', async () => {
-    mockStart.mockResolvedValueOnce({ status: 'done', result: { summary: 'Great fit' } });
+  it('transitions idle to loading to done', async () => {
+    const deferred = createDeferred<SkillRunResponse>();
+    mockStart.mockImplementationOnce(() => deferred.promise);
 
-    const { result } = renderHook(() => useSkill('evaluate', 'job-1'));
-    expect(result.current.state.status).toBe('idle');
+    const { result } = renderHook(() => useSkill());
+    expect(result.current.state).toBe('idle');
 
-    act(() => { result.current.run(); });
-    expect(result.current.state.status).toBe('loading');
+    act(() => {
+      void result.current.startSkill({ skillName: 'evaluate', userJobId: 'job-1' });
+    });
+    expect(result.current.state).toBe('loading');
 
-    await waitFor(() => expect(result.current.state.status).toBe('done'));
-    expect(result.current.state.result).toEqual({ summary: 'Great fit' });
+    deferred.resolve({ type: 'RESULT', skillName: 'evaluate', data: { summary: 'Great fit' } });
+
+    await waitFor(() => expect(result.current.state).toBe('done'));
+    expect(result.current.data).toEqual({ summary: 'Great fit' });
   });
 
-  it('transitions idle → loading → pending_answer → reply → done', async () => {
-    // First call returns pending_answer
+  it('transitions idle to waiting_answer to done', async () => {
     mockStart.mockResolvedValueOnce({
-      status: 'pending_answer',
+      type: 'QUESTION',
       question: 'What is your experience with React?',
       conversationId: 'conv-123',
     });
-    // Reply returns done
-    mockReply.mockResolvedValueOnce({ status: 'done', result: { summary: '5 years' } });
+    mockReply.mockResolvedValueOnce({
+      type: 'RESULT',
+      skillName: 'evaluate',
+      data: { summary: '5 years' },
+    });
 
-    const { result } = renderHook(() => useSkill('evaluate', 'job-1'));
+    const { result } = renderHook(() => useSkill());
 
-    act(() => { result.current.run(); });
-    await waitFor(() => expect(result.current.state.status).toBe('pending_answer'));
-    expect(result.current.state.question).toBe('What is your experience with React?');
+    act(() => {
+      void result.current.startSkill({ skillName: 'evaluate', userJobId: 'job-1' });
+    });
 
-    act(() => { result.current.reply('5 years'); });
-    await waitFor(() => expect(result.current.state.status).toBe('done'));
-    expect(result.current.state.result).toEqual({ summary: '5 years' });
+    await waitFor(() => expect(result.current.state).toBe('waiting_answer'));
+    expect(result.current.question).toBe('What is your experience with React?');
+
+    act(() => {
+      void result.current.handleAnswer('5 years');
+    });
+
+    await waitFor(() => expect(result.current.state).toBe('done'));
+    expect(result.current.data).toEqual({ summary: '5 years' });
   });
 
   it('transitions to error state when API throws', async () => {
-    mockStart.mockRejectedValueOnce(new Error('API down'));
+    mockStart.mockRejectedValueOnce({ normalizedMessage: 'API down' });
 
-    const { result } = renderHook(() => useSkill('evaluate', 'job-1'));
+    const { result } = renderHook(() => useSkill());
 
-    act(() => { result.current.run(); });
-    await waitFor(() => expect(result.current.state.status).toBe('error'));
-    expect(result.current.state.error).toContain('API down');
+    act(() => {
+      void result.current.startSkill({ skillName: 'evaluate', userJobId: 'job-1' });
+    });
+
+    await waitFor(() => expect(result.current.state).toBe('error'));
+    expect(result.current.error).toContain('API down');
   });
 
-  it('invalidateCache / reset returns to idle', async () => {
-    mockStart.mockResolvedValueOnce({ status: 'done', result: { summary: 'ok' } });
+  it('reset returns to idle', async () => {
+    mockStart.mockResolvedValueOnce({
+      type: 'RESULT',
+      skillName: 'evaluate',
+      data: { summary: 'ok' },
+    });
 
-    const { result } = renderHook(() => useSkill('evaluate', 'job-1'));
-    act(() => { result.current.run(); });
-    await waitFor(() => expect(result.current.state.status).toBe('done'));
+    const { result } = renderHook(() => useSkill());
 
-    act(() => { result.current.reset(); });
-    expect(result.current.state.status).toBe('idle');
-    expect(result.current.state.result).toBeUndefined();
+    act(() => {
+      void result.current.startSkill({ skillName: 'evaluate', userJobId: 'job-1' });
+    });
+
+    await waitFor(() => expect(result.current.state).toBe('done'));
+
+    act(() => {
+      result.current.reset();
+    });
+
+    expect(result.current.state).toBe('idle');
+    expect(result.current.data).toBeNull();
   });
 });

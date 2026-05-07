@@ -1,3 +1,6 @@
+CREATE SCHEMA IF NOT EXISTS career_operations;
+SET search_path TO career_operations;
+
 -- V1 — Base schema: users, jobs, user_jobs
 -- Created retroactively so the DB can be rebuilt from scratch.
 -- All columns here reflect the state BEFORE any V5+ migrations ran.

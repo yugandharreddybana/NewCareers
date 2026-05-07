@@ -72,4 +72,10 @@ export function StatRowSkeleton() {
   );
 }
 
+Skeleton.displayName = 'Skeleton';
+JobCardSkeleton.displayName = 'JobCardSkeleton';
+SkillPanelSkeleton.displayName = 'SkillPanelSkeleton';
+KanbanCardSkeleton.displayName = 'KanbanCardSkeleton';
+StatRowSkeleton.displayName = 'StatRowSkeleton';
+
 export default Skeleton;

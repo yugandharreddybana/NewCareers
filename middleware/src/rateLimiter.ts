@@ -31,10 +31,14 @@ if (process.env.REDIS_URL) {
       sendCommand: (...args: string[]) => client.call(...args),
     });
     console.log('[rateLimiter] Using Redis store for rate limiting');
-  } catch (e: any) {
-    console.warn('[rateLimiter] Redis store failed to initialise, falling back to memory:', e.message);
+  } catch (e: unknown) {
+    const msg = e instanceof Error ? e.message : String(e);
+    console.warn('[rateLimiter] Redis store failed to initialise, falling back to memory:', msg);
   }
 } else {
+  if (process.env.NODE_ENV === 'production') {
+    throw new Error('[rateLimiter] REDIS_URL must be set in production to prevent out-of-sync per-instance limits.');
+  }
   console.warn(
     '[rateLimiter] REDIS_URL not set — using in-memory rate limit store. ' +
     'This resets on restart and is NOT safe for multi-instance deployments.',

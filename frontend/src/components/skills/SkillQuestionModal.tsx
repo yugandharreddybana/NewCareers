@@ -1,12 +1,18 @@
-import React, { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 
 interface Props {
-  isOpen: boolean;
-  skillName: string;
-  question: string;
-  onSubmit: (answer: string) => void;
-  onSkip: () => void;
-  isLoading: boolean;
+  isOpen?: boolean;
+  open?: boolean;
+  skillName?: string;
+  skillLabel?: string;
+  question?: string;
+  onSubmit?: (answer: string) => void;
+  onAnswer?: (answer: string) => void;
+  onSkip?: () => void;
+  isLoading?: boolean;
+  skillId?: string;
+  userJobId?: string;
+  onClose?: () => void;
 }
 
 /**
@@ -20,50 +26,57 @@ interface Props {
  *  - auto-focuses the textarea on open
  */
 export function SkillQuestionModal({
-  isOpen,
-  skillName,
-  question,
+  isOpen = false,
+  open,
+  skillName = '',
+  skillLabel,
+  question = '',
   onSubmit,
+  onAnswer,
   onSkip,
-  isLoading,
+  onClose,
+  isLoading = false,
 }: Props) {
   const [answer, setAnswer] = useState('');
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const modalRef = useRef<HTMLDivElement>(null);
+  const visible = open ?? isOpen;
+  const handleSkip = onSkip ?? onClose ?? (() => {});
+  const handleAnswer = onSubmit ?? onAnswer ?? (() => {});
 
   // Auto-focus textarea when modal opens
   useEffect(() => {
-    if (isOpen) {
+    if (visible) {
       setTimeout(() => textareaRef.current?.focus(), 50);
       setAnswer('');
     }
-  }, [isOpen]);
+  }, [visible]);
 
   // ESC key → skip
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
-      if (e.key === 'Escape' && isOpen && !isLoading) onSkip();
+      if (e.key === 'Escape' && visible && !isLoading) handleSkip();
     };
     window.addEventListener('keydown', handler);
     return () => window.removeEventListener('keydown', handler);
-  }, [isOpen, isLoading, onSkip]);
+  }, [visible, isLoading, handleSkip]);
 
-  if (!isOpen) return null;
+  if (!visible) return null;
 
-  const skillLabel = skillName
+  const resolvedSkillLabel = skillLabel ?? (skillName || '')
     .split('-')
     .map(w => w.charAt(0).toUpperCase() + w.slice(1))
     .join(' ');
 
   const handleSubmit = () => {
-    if (!isLoading) onSubmit(answer.trim());
+    if (!isLoading) handleAnswer(answer.trim());
   };
 
   return (
     // Backdrop
     <div
       className="fixed inset-0 z-50 flex items-center justify-center bg-black/50"
-      onClick={e => { if (e.target === e.currentTarget && !isLoading) onSkip(); }}
+      onClick={e => { if (e.target === e.currentTarget && !isLoading) handleSkip(); }}
     >
       {/* Modal */}
       <div
@@ -76,7 +89,7 @@ export function SkillQuestionModal({
         {/* Header */}
         <div className="flex items-center gap-2 mb-4">
           <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-indigo-100 text-indigo-800 dark:bg-indigo-900 dark:text-indigo-200">
-            {skillLabel}
+            {resolvedSkillLabel}
           </span>
           <h2
             id="skill-question-title"
@@ -108,7 +121,7 @@ export function SkillQuestionModal({
         {/* Actions */}
         <div className="flex justify-end gap-3 mt-4">
           <button
-            onClick={onSkip}
+            onClick={handleSkip}
             disabled={isLoading}
             className="px-4 py-2 text-sm font-medium text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white disabled:opacity-50 transition-colors"
           >
@@ -117,6 +130,7 @@ export function SkillQuestionModal({
           <button
             onClick={handleSubmit}
             disabled={isLoading || answer.trim().length === 0}
+            aria-label="Submit answer"
             className="px-5 py-2 text-sm font-semibold text-white bg-indigo-600 hover:bg-indigo-700 rounded-lg disabled:opacity-50 transition-colors flex items-center gap-2"
           >
             {isLoading ? (

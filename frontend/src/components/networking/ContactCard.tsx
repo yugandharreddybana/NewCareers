@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { type NetworkContact, type LogInteractionPayload, networkingApi } from '@/api/networkingApi';
+import { type NetworkContact, type LogInteractionPayload, networkingApi } from '@/services/networkingApi';
 import toast from 'react-hot-toast';
 
 const TEMP_COLOURS: Record<string, string> = {
@@ -116,7 +116,7 @@ export default function ContactCard({ contact, onUpdated }: Props) {
           <select
             className="input-sm"
             value={form.outcome}
-            onChange={e => setForm(f => ({ ...f, outcome: e.target.value as LogInteractionPayload['outcome'] }))}
+            onChange={e => setForm(f => ({ ...f, outcome: e.target.value as NonNullable<LogInteractionPayload['outcome']> }))}
           >
             {['no_response','positive','negative','meeting_booked'].map(o => (
               <option key={o} value={o}>{o.replace('_', ' ')}</option>

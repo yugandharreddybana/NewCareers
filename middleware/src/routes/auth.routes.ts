@@ -27,8 +27,8 @@ const COOKIE = process.env.COOKIE_NAME || 'co_session';
 
 const cookieOpts = () => ({
   httpOnly: true,
-  secure: String(process.env.COOKIE_SECURE).toLowerCase() === 'true',
-  sameSite: process.env.COOKIE_SAMESITE || 'lax',
+  secure: process.env.NODE_ENV === 'production',
+  sameSite: (process.env.COOKIE_SAMESITE || 'strict') as 'strict' | 'lax' | 'none',
   maxAge: 7 * 24 * 60 * 60 * 1000,
   path: '/'
 });
@@ -49,7 +49,7 @@ router.post('/signup',
       const r = await forward({ method: 'POST', path: '/auth/register', data: req.body });
       if (r.status >= 400) return res.status(r.status).json(r.data);
       res.cookie(COOKIE, r.data.token, cookieOpts());
-      res.json({ user: r.data.user, token: r.data.token, refreshToken: r.data.refreshToken });
+      res.json({ user: r.data.user, refreshToken: r.data.refreshToken });
     } catch (e) { next(e); }
   });
 
@@ -64,7 +64,7 @@ router.post('/login',
       const r = await forward({ method: 'POST', path: '/auth/login', data: req.body });
       if (r.status >= 400) return res.status(r.status).json(r.data);
       res.cookie(COOKIE, r.data.token, cookieOpts());
-      res.json({ user: r.data.user, token: r.data.token, refreshToken: r.data.refreshToken });
+      res.json({ user: r.data.user, refreshToken: r.data.refreshToken });
     } catch (e) { next(e); }
   });
 
@@ -82,7 +82,7 @@ router.post('/refresh',
       });
       if (r.status >= 400) return res.status(r.status).json(r.data);
       res.cookie(COOKIE, r.data.token, cookieOpts());
-      res.json({ token: r.data.token, refreshToken: r.data.refreshToken, user: r.data.user });
+      res.json({ refreshToken: r.data.refreshToken, user: r.data.user });
     } catch (e) { next(e); }
   });
 
@@ -91,14 +91,18 @@ router.post('/logout',
   authGuard,
   async (req, res, next) => {
     try {
-      await forward({
+      const r = await forward({
         method: 'POST',
         path: '/auth/logout',
         userId: req.userId,
-      }).catch(err => console.warn('Backend logout non-fatal:', err.message));
-    } finally {
+      });
+      if (r.status >= 400) {
+        throw new Error(`Backend logout failed with status: ${r.status}`);
+      }
       res.clearCookie(COOKIE, { path: '/' });
       res.json({ ok: true });
+    } catch (e) {
+      next(e);
     }
   });
 
@@ -110,8 +114,14 @@ router.post('/forgot-password',
   async (req, res, next) => {
     try {
       const r = await forward({ method: 'POST', path: '/auth/forgot-password', data: req.body });
-      res.status(r.status).json(r.data ?? {});
-    } catch (e) { next(e); }
+      if (r.status >= 400) {
+        console.warn(`Forgot-password backend returned non-success status: ${r.status}`);
+      }
+      res.status(202).json({ message: 'If that email exists in our system, we have sent a reset OTP.' });
+    } catch (e) {
+      console.error('Forgot-password backend error:', e.message);
+      res.status(202).json({ message: 'If that email exists in our system, we have sent a reset OTP.' });
+    }
   });
 
 // ── Reset Password ─────────────────────────────────────────────────────────

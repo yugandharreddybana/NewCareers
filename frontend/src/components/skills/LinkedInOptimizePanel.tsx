@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import { useState } from 'react';
 import { Copy, CheckCircle2 } from 'lucide-react';
 
 interface HeadlineSection { current?: string; rewritten: string; charCount?: number; }
@@ -32,9 +32,9 @@ function CopyBtn({ text }: { text: string }) {
 
 interface BeforeAfterProps {
   label: string;
-  before?: string;
+  before?: string | undefined;
   after: string;
-  note?: string;
+  note?: string | undefined;
 }
 
 function BeforeAfter({ label, before, after, note }: BeforeAfterProps) {

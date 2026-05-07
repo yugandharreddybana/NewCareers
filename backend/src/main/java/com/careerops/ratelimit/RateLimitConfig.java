@@ -25,9 +25,9 @@ public class RateLimitConfig {
     @Bean
     public Bandwidth apiBandwidth() {
         return Bandwidth.builder()
-            .capacity(60)
+            .capacity(70)
             .refillGreedy(60, Duration.ofMinutes(1))
-            .initialTokens(60)
+            .initialTokens(70)
             .build();
     }
 }

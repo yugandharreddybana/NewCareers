@@ -25,19 +25,20 @@ import org.springframework.data.jpa.repository.Modifying;
 @Repository
 public interface NotificationRepository extends JpaRepository<Notification, UUID> {
 
-    List<Notification> findByUserIdOrderByCreatedAtDesc(UUID userId);
+
 
     List<Notification> findByUserIdAndReadFalse(UUID userId);
+    boolean existsByUserIdAndTypeAndCreatedAtAfter(UUID userId, String type, java.time.Instant createdAt);
 
-    /**
-     * Returns the unread notification count as an {@code int} so it can be
-     * passed directly to {@code Map.of("unread", count)} without casting.
-     */
-    @Query("SELECT CAST(COUNT(n) AS int) FROM Notification n WHERE n.userId = :userId AND n.read = false")
-    int countUnreadByUserId(@Param("userId") UUID userId);
+    Page<Notification> findByUserIdAndCreatedAtBefore(UUID userId, java.time.Instant cursor, org.springframework.data.domain.Pageable pageable);
+
+
 
     @Query("SELECT n FROM Notification n WHERE n.userId = :userId ORDER BY n.createdAt DESC")
     Page<Notification> findByUserIdOrderByCreatedAtDesc(@Param("userId") UUID userId, Pageable pageable);
+
+    @Query("SELECT n FROM Notification n WHERE n.userId = :userId AND n.read = false ORDER BY n.createdAt DESC")
+    Page<Notification> findByUserIdAndReadFalseOrderByCreatedAtDesc(@Param("userId") UUID userId, Pageable pageable);
 
     @Query("SELECT n FROM Notification n WHERE n.id = :id AND n.userId = :userId")
     Optional<Notification> findByIdAndUserId(@Param("id") UUID id, @Param("userId") UUID userId);

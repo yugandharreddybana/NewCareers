@@ -19,8 +19,8 @@ const proxy = createProxyMiddleware({
   proxyTimeout: 30_000,
   timeout: 30_000,
   on: {
-    error: (_e, _r, res: any) => {
-      if (res && typeof res.status === 'function') {
+    error: (_e, _r, res) => {
+      if (res && 'status' in res && typeof res.status === 'function') {
         res.status(502).json({ error: 'Experiment service unavailable.' });
       }
     },

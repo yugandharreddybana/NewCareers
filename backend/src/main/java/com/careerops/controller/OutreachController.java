@@ -4,13 +4,20 @@ import com.careerops.dto.OutreachDtos.*;
 import com.careerops.service.OutreachCampaignService;
 import com.careerops.util.AuthUtil;
 import org.springframework.http.HttpStatus;
-import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.UUID;
 
+/**
+ * CORS Policy:
+ * - Allowed Origins: from ${cors.allowed.origins}
+ * - Methods: GET, POST, PUT, PATCH, DELETE, OPTIONS
+ * - Headers: Content-Type, Authorization, X-Requested-With, X-CSRF-Token, X-Internal-Secret, X-Internal-User-Id
+ * - Exposed: X-RateLimit-Remaining, X-RateLimit-Reset, Retry-After
+ */
 @RestController
 @RequestMapping("/outreach")
+@io.micrometer.core.annotation.Timed
 public class OutreachController {
 
     private final OutreachCampaignService service;
@@ -30,9 +37,9 @@ public class OutreachController {
     }
 
     @PostMapping("/campaigns")
-    public ResponseEntity<CampaignResponse> create(@RequestBody CreateCampaignRequest req) {
-        return ResponseEntity.status(HttpStatus.CREATED)
-            .body(service.create(AuthUtil.currentUserId(), req));
+    @ResponseStatus(HttpStatus.CREATED)
+    public CampaignResponse create(@RequestBody CreateCampaignRequest req) {
+        return service.create(AuthUtil.currentUserId(), req);
     }
 
     @PostMapping("/campaigns/{id}/launch")
@@ -40,10 +47,18 @@ public class OutreachController {
         return service.launch(AuthUtil.currentUserId(), id);
     }
 
+    /**
+     * DELETE /outreach/campaigns/{id}
+     * Deletes the named outreach campaign.
+     * Note: Requires `confirm=true` query parameter for safety.
+     */
     @DeleteMapping("/campaigns/{id}")
-    public ResponseEntity<Void> delete(@PathVariable UUID id) {
+    @ResponseStatus(HttpStatus.NO_CONTENT)
+    public void delete(@PathVariable UUID id, @RequestParam(required = false) Boolean confirm) {
+        if (!Boolean.TRUE.equals(confirm)) {
+            throw com.careerops.exception.ApiException.badRequest("Must confirm campaign deletion with ?confirm=true");
+        }
         service.delete(AuthUtil.currentUserId(), id);
-        return ResponseEntity.noContent().build();
     }
 
     @PostMapping("/campaigns/{id}/sequences")
@@ -53,10 +68,10 @@ public class OutreachController {
     }
 
     @PostMapping("/campaigns/{id}/messages")
-    public ResponseEntity<MessageResponse> addMessage(@PathVariable UUID id,
+    @ResponseStatus(HttpStatus.CREATED)
+    public MessageResponse addMessage(@PathVariable UUID id,
                                                       @RequestBody AddMessageRequest req) {
-        return ResponseEntity.status(HttpStatus.CREATED)
-            .body(service.addMessage(AuthUtil.currentUserId(), id, req));
+        return service.addMessage(AuthUtil.currentUserId(), id, req);
     }
 
     @PatchMapping("/messages/{messageId}")

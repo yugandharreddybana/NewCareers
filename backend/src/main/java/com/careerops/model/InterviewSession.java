@@ -8,8 +8,12 @@ import java.time.Instant;
 import java.util.UUID;
 
 @Entity
-@Table(name = "interview_sessions")
-@Data
+@Table(name = "interview_sessions", schema = "career_operations",
+       indexes = {
+           @Index(name = "idx_interview_sessions_user_created", columnList = "user_id, created_at DESC")
+       })
+@Getter
+@Setter
 @Builder
 @NoArgsConstructor
 @AllArgsConstructor

@@ -34,6 +34,7 @@ public class Organization {
     @Column
     private String domain;
 
+    @Builder.Default
     @Column(name = "seat_limit", nullable = false)
     private int seatLimit = 5;
 

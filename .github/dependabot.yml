@@ -1,0 +1,16 @@
+version: 2
+updates:
+  - package-ecosystem: "npm"
+    directory: "/frontend"
+    schedule:
+      interval: "daily"
+
+  - package-ecosystem: "npm"
+    directory: "/middleware"
+    schedule:
+      interval: "daily"
+
+  - package-ecosystem: "maven"
+    directory: "/backend"
+    schedule:
+      interval: "daily"

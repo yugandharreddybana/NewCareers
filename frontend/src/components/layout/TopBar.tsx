@@ -3,11 +3,12 @@
  * and user profile avatar + sign-out dropdown in top-right.
  */
 import { useLocation, Link, useNavigate } from 'react-router-dom';
-import { Search, LogOut, User, Settings, ChevronDown } from 'lucide-react';
+import { LogOut, Moon, Sun, User, Settings, ChevronDown } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui';
 import { Avatar } from '@/components/ui';
 import { useAuth } from '@/context/AuthContext';
+import { useTheme } from '@/context/ThemeContext';
 import NotificationBell from '@/components/notifications/NotificationBell';
 import { useState, useRef, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
@@ -39,6 +40,7 @@ const BREADCRUMBS: Record<string, { label: string; parent?: string; parentPath?:
 export default function TopBar() {
   const { pathname } = useLocation();
   const { user, signOut } = useAuth();
+  const { resolvedTheme, toggleTheme } = useTheme();
   const nav = useNavigate();
   const [dropOpen, setDropOpen] = useState(false);
   const dropRef = useRef<HTMLDivElement>(null);
@@ -63,10 +65,10 @@ export default function TopBar() {
     <header
       className={cn(
         'fixed top-0 right-0 z-20 flex items-center justify-between',
-        'h-[60px] px-5 bg-white/95 backdrop-blur-sm border-b border-border',
+        'topbar-shell-offset',
+        'h-[60px] px-5 bg-white/95 backdrop-blur-sm border-b border-border dark:bg-slate-950/95 dark:border-white/10',
         'transition-all duration-200',
       )}
-      style={{ left: 'var(--sidebar-width, 240px)' }}
     >
       {/* Breadcrumb */}
       <div className="flex items-center gap-1.5 text-sm">
@@ -74,15 +76,15 @@ export default function TopBar() {
           <>
             <Link
               to={crumb.parentPath!}
-              className="text-text-tertiary hover:text-text-secondary transition-colors"
+              className="text-text-tertiary transition-colors hover:text-text-secondary dark:text-slate-400 dark:hover:text-slate-200"
             >
               {crumb.parent}
             </Link>
-            <span className="text-text-tertiary">/</span>
+            <span className="text-text-tertiary dark:text-slate-500">/</span>
           </>
         )}
         {crumb.label && (
-          <span className="font-semibold text-text-primary">{crumb.label}</span>
+          <span className="font-semibold text-text-primary dark:text-white">{crumb.label}</span>
         )}
       </div>
 
@@ -91,36 +93,47 @@ export default function TopBar() {
         <NotificationBell />
 
         <Button
+          onClick={toggleTheme}
+          variant="ghost"
+          size="icon"
+          className="text-text-tertiary hover:text-text-primary dark:text-slate-400 dark:hover:bg-white/[0.06] dark:hover:text-white"
+          aria-label={resolvedTheme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'}
+          title={resolvedTheme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'}
+        >
+          {resolvedTheme === 'dark' ? <Sun size={16} /> : <Moon size={16} />}
+        </Button>
+
+        <Button
           onClick={handleSignOut}
           variant="ghost"
           size="icon"
-          className="text-text-tertiary hover:text-text-primary"
+          className="text-text-tertiary hover:text-text-primary dark:text-slate-400 dark:hover:bg-white/[0.06] dark:hover:text-white"
           aria-label="Sign out"
         >
           <LogOut size={16} />
         </Button>
 
         {/* Divider */}
-        <div className="w-px h-5 bg-border mx-1" />
+        <div className="w-px h-5 bg-border mx-1 dark:bg-white/10" />
 
         {/* Profile avatar + dropdown */}
         <div ref={dropRef} className="relative">
           <button
             onClick={() => setDropOpen(o => !o)}
             className="flex items-center gap-2 pl-1 pr-2.5 py-1.5 rounded-xl
-                       hover:bg-surface-raised transition-colors"
+                       hover:bg-surface-raised transition-colors dark:hover:bg-white/[0.06]"
             aria-label="User menu"
           >
-            <Avatar name={user?.name} size="sm" className="ring-1 ring-border" />
+            <Avatar name={user?.name || ''} size="sm" className="ring-1 ring-border" />
             <div className="hidden sm:block text-left leading-tight">
-              <p className="text-xs font-semibold text-text-primary max-w-[90px] truncate">
+              <p className="text-xs font-semibold text-text-primary dark:text-white max-w-[90px] truncate">
                 {user?.name ?? 'User'}
               </p>
             </div>
             <ChevronDown
               size={12}
               className={cn(
-                'text-text-tertiary transition-transform duration-150 ml-0.5',
+                'ml-0.5 text-text-tertiary transition-transform duration-150 dark:text-slate-400',
                 dropOpen && 'rotate-180',
               )}
             />
@@ -133,12 +146,12 @@ export default function TopBar() {
                 animate={{ opacity: 1, y: 0, scale: 1 }}
                 exit={{ opacity: 0, y: -4, scale: 0.97 }}
                 transition={{ duration: 0.14, ease: [0.16, 1, 0.3, 1] }}
-                className="absolute right-0 top-full mt-1.5 w-52 bg-white border border-border
-                           rounded-xl shadow-xl shadow-black/[0.08] overflow-hidden z-50"
+                className="absolute right-0 top-full mt-1.5 z-50 w-52 overflow-hidden rounded-xl border border-border bg-white shadow-xl shadow-black/[0.08]
+                           dark:border-white/[0.08] dark:bg-slate-900 dark:shadow-black/30"
               >
-                <div className="px-3.5 py-3 border-b border-border bg-surface-raised/50">
-                  <p className="text-xs font-semibold text-text-primary truncate">{user?.name}</p>
-                  <p className="text-[11px] text-text-tertiary truncate mt-0.5">{user?.email}</p>
+                <div className="border-b border-border bg-surface-raised/50 px-3.5 py-3 dark:border-white/[0.08] dark:bg-white/[0.03]">
+                  <p className="text-xs font-semibold text-text-primary dark:text-white truncate">{user?.name}</p>
+                  <p className="mt-0.5 truncate text-[11px] text-text-tertiary dark:text-slate-400">{user?.email}</p>
                 </div>
 
                 <div className="py-1.5 px-1.5">
@@ -152,19 +165,21 @@ export default function TopBar() {
                       onClick={() => setDropOpen(false)}
                       className="flex items-center gap-2.5 px-2.5 py-[7px] rounded-lg text-[13px]
                                  text-text-secondary hover:bg-surface-raised hover:text-text-primary
+                                 dark:text-slate-300 dark:hover:bg-white/[0.06] dark:hover:text-white
                                  transition-colors"
                     >
-                      <span className="text-text-tertiary">{item.icon}</span>
+                      <span className="text-text-tertiary dark:text-slate-500">{item.icon}</span>
                       {item.label}
                     </Link>
                   ))}
                 </div>
 
-                <div className="px-1.5 pb-1.5 border-t border-border pt-1.5">
+                <div className="border-t border-border px-1.5 pb-1.5 pt-1.5 dark:border-white/[0.08]">
                   <button
                     onClick={handleSignOut}
                     className="w-full flex items-center gap-2.5 px-2.5 py-[7px] rounded-lg text-[13px]
-                               text-danger-600 hover:bg-danger-50 transition-colors"
+                               text-danger-600 hover:bg-danger-50 transition-colors
+                               dark:text-rose-300 dark:hover:bg-rose-500/10"
                   >
                     <LogOut size={14} />
                     Sign out

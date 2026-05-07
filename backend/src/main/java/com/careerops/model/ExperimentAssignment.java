@@ -2,19 +2,18 @@ package com.careerops.model;
 
 import jakarta.persistence.*;
 import lombok.*;
-import org.hibernate.annotations.GenericGenerator;
 
 import java.time.Instant;
 import java.util.UUID;
 
 @Entity
-@Table(name = "experiment_assignments")
+@Table(name = "experiment_assignments", schema = "career_operations",
+       uniqueConstraints = @UniqueConstraint(columnNames = {"user_id", "experiment_id"}))
 @Getter @Setter @NoArgsConstructor @AllArgsConstructor @Builder
 public class ExperimentAssignment {
 
     @Id
-    @GeneratedValue(generator = "UUID")
-    @GenericGenerator(name = "UUID", strategy = "org.hibernate.id.UUIDGenerator")
+    @GeneratedValue(strategy = GenerationType.UUID)
     @Column(updatable = false, nullable = false)
     private UUID id;
 

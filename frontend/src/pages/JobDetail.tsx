@@ -1,12 +1,8 @@
 import React, { useEffect, useState } from 'react';
-import { useParams, useNavigate, Link } from 'react-router-dom';
+import { useParams, Link } from 'react-router-dom';
 import { PageMeta } from '@/components/PageMeta';
 import { AppShell } from '@/components/layout/AppShell';
-import { SkillButton } from '@/components/skills/SkillButton';
-import { SkillPanel } from '@/components/skills/SkillPanel';
-import { RunAllSkillsButton } from '@/components/skills/RunAllSkillsButton';
-import { ProfileCompletenessAlert } from '@/components/skills/ProfileCompletenessAlert';
-import { SkillQuestionModal } from '@/components/skills/SkillQuestionModal';
+import { SkillButton, SkillPanel, RunAllSkillsButton, ProfileCompletenessAlert, SkillQuestionModal } from '@/components/skills';
 import { kanbanApi, jobsApi } from '@/services/api';
 import type { JobDetail as JobDetailType, KanbanColumn } from '@/types';
 import { KANBAN_COLUMNS } from '@/types';
@@ -28,7 +24,7 @@ type Tab = 'overview' | 'ai-tools' | 'apply';
 
 const JobDetail: React.FC = () => {
   const { id } = useParams<{ id: string }>();
-  const navigate = useNavigate();
+  // const navigate = useNavigate();
 
   const [job, setJob] = useState<JobDetailType | null>(null);
   const [loading, setLoading] = useState(true);

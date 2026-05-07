@@ -1,17 +1,20 @@
 import { SkillState } from '@/types';
 import { Loader2, CheckCircle2, Lock, AlertCircle, Play } from 'lucide-react';
-import { motion, AnimatePresence } from 'framer-motion';
+import { motion } from 'framer-motion';
 
 interface Props {
+  skillId?: string;
   label: string;
   icon?: React.ReactNode;
-  state: SkillState;
+  state?: SkillState;
+  active?: boolean;
   onClick: () => void;
+  onQuickRun?: () => void;
   disabled?: boolean;
   className?: string;
 }
 
-export default function SkillButton({ label, icon, state, onClick, disabled, className }: Props) {
+export default function SkillButton({ label, icon, state = 'idle', onClick, disabled, className }: Props) {
   const isDisabled = disabled || state === 'loading' || state === 'locked';
 
   const styles: Record<SkillState, { bg: string, text: string, border: string, icon: React.ReactNode }> = {
@@ -47,7 +50,7 @@ export default function SkillButton({ label, icon, state, onClick, disabled, cla
     },
   };
 
-  const current = styles[state];
+  const current = styles[state] || styles.idle;
 
   return (
     <button

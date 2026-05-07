@@ -1,13 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import api from '../services/api';
-
-interface Notification {
-  id: string;
-  message: string;
-  type: string;
-  read: boolean;
-  createdAt: string;
-}
+import { notificationsApi, type AppNotification } from '../services/notificationsApi';
 
 interface Props {
   onClose: () => void;
@@ -16,18 +8,18 @@ interface Props {
 }
 
 const NotificationsPanel: React.FC<Props> = ({ onClose, onMarkAllRead }) => {
-  const [notifications, setNotifications] = useState<Notification[]>([]);
+  const [notifications, setNotifications] = useState<AppNotification[]>([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    api.get('/api/notifications')
-      .then(res => setNotifications(res.data))
+    notificationsApi.getNotifications(0, 20)
+      .then(res => setNotifications(res.items))
       .catch(() => setNotifications([]))
       .finally(() => setLoading(false));
   }, []);
 
   const markAllRead = () => {
-    api.patch('/api/notifications/mark-all-read')
+    notificationsApi.markAllRead()
       .then(() => {
         setNotifications(prev => prev.map(n => ({ ...n, read: true })));
         onMarkAllRead?.();
@@ -99,7 +91,8 @@ const NotificationsPanel: React.FC<Props> = ({ onClose, onMarkAllRead }) => {
               n.read ? 'bg-transparent' : 'bg-brand-500',
             )} />
             <div className="min-w-0">
-              <p className="text-sm text-text-primary leading-snug">{n.message}</p>
+              <p className="text-sm text-text-primary leading-snug">{n.title}</p>
+              {n.body && <p className="mt-1 text-xs text-text-muted">{n.body}</p>}
               <p className="mt-0.5 text-xs text-text-tertiary">
                 {new Date(n.createdAt).toLocaleString()}
               </p>

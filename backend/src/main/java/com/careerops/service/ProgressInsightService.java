@@ -1,5 +1,7 @@
 package com.careerops.service;
 
+import org.jspecify.annotations.Nullable;
+
 import com.careerops.dto.ProgressDTO;
 import com.careerops.model.UserStreak;
 import com.careerops.model.WeeklyProgressSnapshot;
@@ -26,6 +28,7 @@ public class ProgressInsightService {
 
     private final WeeklyProgressSnapshotRepository snapshotRepo;
     private final UserStreakRepository streakRepo;
+    private final com.careerops.repository.DailyActivityRepository activityRepo;
 
     // ------------------------------------------------------------------
     // Task 61 — GET /progress/weekly-summary (current week)
@@ -74,7 +77,7 @@ public class ProgressInsightService {
     // ------------------------------------------------------------------
     // Task 60 — Generate/refresh snapshot (called on-demand or by scheduler)
     // ------------------------------------------------------------------
-    @Transactional
+    @Transactional(timeout = 10)
     public WeeklyProgressSnapshot generateSnapshot(UUID userId, int jobsReviewed,
                                                     int appsSubmitted, int interviewsScheduled,
                                                     int responsesReceived, int offersReceived) {
@@ -108,26 +111,32 @@ public class ProgressInsightService {
     // ------------------------------------------------------------------
     // Task 64 — Record daily activity + update streak
     // ------------------------------------------------------------------
-    @Transactional
+    @Transactional(timeout = 10)
     public ProgressDTO.StreakResponse recordDailyActivity(UUID userId) {
         LocalDate today = LocalDate.now(ZoneOffset.UTC);
+
+        // 2.067 — Idempotency: try to record activity for today
+        int inserted = activityRepo.recordIdempotent(userId, today);
+        
         UserStreak streak = streakRepo.findByUserId(userId)
                 .orElseGet(() -> UserStreak.builder().userId(userId)
                         .currentDailyStreak(0).longestDailyStreak(0).build());
 
-        LocalDate last = streak.getLastActiveDate();
-        if (last == null || last.isBefore(today.minusDays(1))) {
-            streak.setCurrentDailyStreak(1);
-        } else if (last.isEqual(today.minusDays(1))) {
-            streak.setCurrentDailyStreak(streak.getCurrentDailyStreak() + 1);
+        if (inserted > 0) {
+            LocalDate last = streak.getLastActiveDate();
+            if (last == null || last.isBefore(today.minusDays(1))) {
+                streak.setCurrentDailyStreak(1);
+            } else if (last.isEqual(today.minusDays(1))) {
+                streak.setCurrentDailyStreak(streak.getCurrentDailyStreak() + 1);
+            }
+            
+            if (streak.getCurrentDailyStreak() > streak.getLongestDailyStreak()) {
+                streak.setLongestDailyStreak(streak.getCurrentDailyStreak());
+            }
+            streak.setLastActiveDate(today);
+            streakRepo.save(streak);
         }
-        // last == today: already recorded — no change
 
-        if (streak.getCurrentDailyStreak() > streak.getLongestDailyStreak()) {
-            streak.setLongestDailyStreak(streak.getCurrentDailyStreak());
-        }
-        streak.setLastActiveDate(today);
-        streakRepo.save(streak);
         return buildStreakResponse(streak);
     }
 
@@ -157,7 +166,7 @@ public class ProgressInsightService {
                 s.getApplicationsSubmitted(), s.getApplicationsSubmitted() == 1 ? "" : "s");
     }
 
-    private String generateBottlenecks(WeeklyProgressSnapshot s) {
+    private @Nullable String generateBottlenecks(WeeklyProgressSnapshot s) {
         if (s.getApplicationsSubmitted() > 5 && s.getResponsesReceived() == 0)
             return "You've applied to several roles but haven't received a response yet. Consider tailoring your CV more closely to each role.";
         if (s.getJobsReviewed() > 10 && s.getApplicationsSubmitted() == 0)
@@ -175,7 +184,7 @@ public class ProgressInsightService {
         return String.join(" ", tips);
     }
 
-    private String deriveBestCategory(WeeklyProgressSnapshot s) {
+    private @Nullable String deriveBestCategory(WeeklyProgressSnapshot s) {
         if (s.getResponseRate() != null && s.getResponseRate().compareTo(BigDecimal.valueOf(20)) > 0)
             return "Tech / Software Engineering";
         return null;

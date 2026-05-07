@@ -24,7 +24,7 @@ public class DeduplicationService {
         this.jobs = jobs; this.seen = seen;
     }
 
-    @Transactional
+    @Transactional(timeout = 10)
     public List<Job> dedupAndPersist(UUID userId, List<Job> raw) {
         List<Job> result = new ArrayList<>();
         Set<String> batch = new HashSet<>();
@@ -38,7 +38,7 @@ public class DeduplicationService {
         return result;
     }
 
-    @Transactional
+    @Transactional(timeout = 10)
     public void markSeen(UUID userId, List<Job> delivered) {
         for (Job j : delivered) {
             if (!seen.existsByUserIdAndFingerprint(userId, j.getFingerprint())) {
@@ -55,7 +55,7 @@ public class DeduplicationService {
      * @param keepDays how many days of seen history to retain (default: 60)
      * @return number of rows deleted
      */
-    @Transactional
+    @Transactional(timeout = 10)
     public int pruneOldSeenJobs(int keepDays) {
         Instant cutoff = Instant.now().minus(keepDays, ChronoUnit.DAYS);
         int deleted = seen.deleteBySeenAtBefore(cutoff);

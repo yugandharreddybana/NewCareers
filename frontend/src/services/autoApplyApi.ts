@@ -1,71 +1,52 @@
 /**
- * autoApplyApi.ts — typed service layer for /api/auto-apply
+ * autoApplyApi.ts — typed client for /auto-apply.
  *
- * Auto-apply orchestrates a Playwright-powered browser agent that fills
- * and submits job applications on behalf of the user with human-in-the-loop
- * approval before final submission.
+ * Pass 6 #6.011 — consolidated from src/api/autoApplyApi.ts. The shape
+ * preserved here is the one consumed by AutoApplyPage.tsx (AnswerBankEntry,
+ * ApplicationRun, RunStep). The earlier services/ duplicate (AutoApplyAnswer,
+ * AutoApplyRun) was a scaffolded stub; it is replaced by this canonical impl.
  */
 import { api } from './api';
 
-export interface AutoApplyAnswer {
+export interface AnswerBankEntry {
   id: string;
-  question: string;
-  answer: string;
-  category: 'experience' | 'education' | 'skills' | 'personal' | 'other';
+  questionKey: string;
+  answerText: string;
+  isDefault: boolean;
+  updatedAt: string;
 }
 
-export type AutoApplyRunStatus =
-  | 'pending'
-  | 'running'
-  | 'awaiting_approval'
-  | 'approved'
-  | 'submitted'
-  | 'failed'
-  | 'cancelled';
-
-export interface AutoApplyStep {
-  name: string;
-  status: 'pending' | 'done' | 'failed';
-  message: string | null;
-  screenshotUrl: string | null;
+export interface RunStep {
+  id: string;
+  stepNumber: number;
+  stepType: string;
+  description: string;
+  status: 'pending' | 'in_progress' | 'completed' | 'failed' | 'skipped';
+  errorMessage: string | null;
+  executedAt: string | null;
 }
 
-export interface AutoApplyRun {
+export interface ApplicationRun {
   id: string;
   userJobId: string;
-  jobTitle: string;
-  company: string;
-  status: AutoApplyRunStatus;
-  steps: AutoApplyStep[];
-  startedAt: string;
-  completedAt: string | null;
+  status: 'pending' | 'in_progress' | 'awaiting_approval' | 'completed' | 'failed' | 'cancelled';
+  totalSteps: number;
+  completedSteps: number;
   errorMessage: string | null;
+  resumeVersionId: string | null;
+  approvedAt: string | null;
+  submittedAt: string | null;
+  createdAt: string;
+  steps: RunStep[];
 }
 
 export const autoApplyApi = {
-  // ── Answer bank ───────────────────────────────────────────────────
-  getAnswers: () =>
-    api.get<AutoApplyAnswer[]>('/auto-apply/answers').then(r => r.data),
-
-  upsertAnswer: (body: Omit<AutoApplyAnswer, 'id'> & { id?: string }) =>
-    api.post<AutoApplyAnswer>('/auto-apply/answers', body).then(r => r.data),
-
-  deleteAnswer: (id: string) =>
-    api.delete(`/auto-apply/answers/${id}`).then(r => r.data),
-
-  // ── Runs ───────────────────────────────────────────────────────────
-  getHistory: () =>
-    api.get<AutoApplyRun[]>('/auto-apply/history').then(r => r.data),
-
-  getStatus: (runId: string) =>
-    api.get<AutoApplyRun>(`/auto-apply/status/${runId}`).then(r => r.data),
-
-  start: (userJobId: string) =>
-    api.post<AutoApplyRun>(`/auto-apply/start/${userJobId}`).then(r => r.data),
-
-  approve: (runId: string, approved: boolean) =>
-    api.post(`/auto-apply/approve/${runId}`, { approved }).then(r => r.data),
-
-  retry: (runId: string) =>
-    api.post<AutoApplyRun>(`/auto-apply/retry/${runId}`).then(r => r.data),
+  listAnswers:  ()                                                   => api.get<AnswerBankEntry[]>('/auto-apply/answers').then(r => r.data),
+  upsertAnswer: (body: { questionKey: string; answerText: string }) => api.post<AnswerBankEntry>('/auto-apply/answers', body).then(r => r.data),
+  deleteAnswer: (id: string)                                         => api.delete(`/auto-apply/answers/${id}`),
+  listRuns:     ()                                                   => api.get<{ runs: ApplicationRun[]; total: number }>('/auto-apply/history').then(r => r.data),
+  getStatus:    (runId: string)                                      => api.get<ApplicationRun>(`/auto-apply/status/${runId}`).then(r => r.data),
+  startRun:     (userJobId: string, resumeVersionId?: string)        => api.post<ApplicationRun>(`/auto-apply/start/${userJobId}`, { resumeVersionId }).then(r => r.data),
+  approveRun:   (runId: string, approved: boolean)                   => api.post<ApplicationRun>(`/auto-apply/approve/${runId}`, { approved }).then(r => r.data),
+  retryRun:     (runId: string)                                      => api.post<ApplicationRun>(`/auto-apply/retry/${runId}`).then(r => r.data),
 };

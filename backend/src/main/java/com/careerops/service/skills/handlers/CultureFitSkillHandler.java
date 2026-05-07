@@ -89,8 +89,8 @@ public class CultureFitSkillHandler implements SkillHandler {
     public JsonNode execute(UUID userId, UUID userJobId) {
         log.info("CultureFitSkillHandler.execute userId={} userJobId={}", userId, userJobId);
         UserProfile profile = profiles.findByUserId(userId).orElse(null);
-        Job job             = resolveJob(userJobId);
-        return claude.generateJson(SYSTEM_PROMPT, buildUserPrompt(profile, job));
+        Job job             = resolveJob(userId, userJobId);
+        return claude.generateJson(SYSTEM_PROMPT, buildUserPrompt(profile, job), userId, skillName());
     }
 
     private String buildUserPrompt(UserProfile p, Job job) {
@@ -119,9 +119,9 @@ public class CultureFitSkillHandler implements SkillHandler {
         return sb.toString();
     }
 
-    private Job resolveJob(UUID userJobId) {
+    private Job resolveJob(UUID userId, UUID userJobId) {
         if (userJobId == null) return null;
-        return userJobs.findById(userJobId)
+        return userJobs.findByIdAndUserId(userJobId, userId)
                 .flatMap(uj -> jobs.findById(uj.getJobId()))
                 .orElse(null);
     }

@@ -33,14 +33,16 @@ public class TwinAiSource implements JobSource {
     private final WebClient   client;
     private final String      apiKey;
     private final boolean     enabled;
-    private final ObjectMapper mapper = new ObjectMapper();
+    private final ObjectMapper mapper;
 
-    public TwinAiSource(WebClient.Builder builder,
+    public TwinAiSource(JobApiHttpClient httpClient,
                         @Value("${twin.api.key:}") String apiKey,
-                        @Value("${twin.enabled:false}") boolean enabled) {
+                        @Value("${twin.enabled:false}") boolean enabled,
+                        ObjectMapper mapper) {
         this.apiKey  = apiKey;
         this.enabled = enabled && apiKey != null && !apiKey.isBlank() && !apiKey.startsWith("YOUR_");
-        this.client  = builder.baseUrl("https://api.twin.so").build();
+        this.client  = httpClient.createClient("https://api.twin.so");
+        this.mapper  = mapper;
     }
 
     @Override public String  name()      { return "twin-linkedin"; }

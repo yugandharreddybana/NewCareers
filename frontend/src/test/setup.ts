@@ -1,16 +1,38 @@
 import '@testing-library/jest-dom';
-import { vi } from 'vitest';
+import 'vitest-axe/extend-expect';
+import { afterAll, afterEach, beforeAll, expect, vi } from 'vitest';
+import * as axeMatchers from 'vitest-axe/matchers.js';
+import { server } from './server';
+
+expect.extend(axeMatchers);
+
+beforeAll(() => {
+  server.listen({ onUnhandledRequest: 'error' });
+});
+
+afterEach(() => {
+  server.resetHandlers();
+  vi.clearAllMocks();
+});
+
+afterAll(() => {
+  server.close();
+});
+
+Object.defineProperty(HTMLCanvasElement.prototype, 'getContext', {
+  value: vi.fn(() => ({
+    measureText: () => ({ width: 0 }),
+  })),
+  writable: true,
+});
 
 // ── Global mocks ──────────────────────────────────────────────────────────────
 
 // Mock window.URL.createObjectURL (used in PDF download logic)
-Object.defineProperty(window, 'URL', {
-  value: {
-    createObjectURL: vi.fn(() => 'blob:mock-url'),
-    revokeObjectURL: vi.fn(),
-  },
-  writable: true,
-});
+if (typeof window !== 'undefined') {
+  window.URL.createObjectURL = vi.fn(() => 'blob:mock-url');
+  window.URL.revokeObjectURL = vi.fn();
+}
 
 // Mock navigator.clipboard
 Object.defineProperty(navigator, 'clipboard', {

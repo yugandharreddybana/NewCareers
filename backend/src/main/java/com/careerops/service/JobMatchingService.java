@@ -4,6 +4,9 @@ import com.careerops.model.Job;
 import com.careerops.model.UserProfile;
 import org.springframework.stereotype.Service;
 
+import java.time.Clock;
+import java.time.Instant;
+
 import java.util.*;
 import java.util.stream.Collectors;
 
@@ -25,12 +28,16 @@ public class JobMatchingService {
 
     public record ScoredJob(Job job, int score, List<String> matchedTerms, List<String> reasons) {}
 
-    // Location terms that earn full 15-pt location score
-    private static final List<String> LOCATION_MATCH_TERMS = List.of(
+    // 3.041 — Location terms that earn full 15-pt location score
+    private static final Set<String> LOCATION_MATCH_TOKENS = Set.of(
         "dublin", "ireland", "remote", "hybrid", "worldwide", "anywhere",
-        "global", " ie ", "/ie", "(ie)", "uk", "london", "belfast",
-        "work from home", "wfh", "fully remote"
+        "global", "ie", "uk", "london", "belfast", "wfh"
     );
+    private final Clock clock;
+
+    public JobMatchingService(Clock clock) {
+        this.clock = clock;
+    }
 
     /** Score all jobs and return sorted top-N. */
     public List<ScoredJob> topN(List<Job> jobs, UserProfile profile, int n) {
@@ -56,25 +63,35 @@ public class JobMatchingService {
                         + (job.getDescription()  == null ? "" : job.getDescription())).toLowerCase();
 
         // ── 1. Tech stack (40 pts) ────────────────────────────────────────────
-        if (profile.getTechStack() != null && profile.getTechStack().length > 0) {
+        // 3.040 — Filter blanks to avoid divide-by-zero or skewed scoring
+        String[] stack = profile.getTechStack() == null ? new String[0] : 
+                        Arrays.stream(profile.getTechStack())
+                              .filter(s -> s != null && !s.isBlank())
+                              .toArray(String[]::new);
+
+        if (stack.length > 0) {
             int stackHits = 0;
-            for (String skill : profile.getTechStack()) {
+            for (String skill : stack) {
                 if (haystack.contains(skill.toLowerCase())) {
                     matched.add(skill);
                     stackHits++;
                 }
             }
-            int stackScore = Math.min(40, (stackHits * 40) / profile.getTechStack().length);
+            int stackScore = Math.min(40, (stackHits * 40) / stack.length);
             points += stackScore;
             if (stackHits > 0)
-                reasons.add(stackHits + "/" + profile.getTechStack().length + " stack keywords matched");
+                reasons.add(stackHits + "/" + stack.length + " stack keywords matched");
         }
 
         // ── 2. Role title match (25 pts) ─────────────────────────────────────
         if (profile.getTargetRoles() != null) {
             String jobTitle = job.getTitle() == null ? "" : job.getTitle().toLowerCase();
             for (String role : profile.getTargetRoles()) {
-                String[] roleParts = role.toLowerCase().split("\\s+");
+                if (role == null || role.isBlank()) continue;
+                String[] roleParts = Arrays.stream(role.toLowerCase().split("\\s+"))
+                        .filter(p -> !p.isBlank()).toArray(String[]::new);
+                if (roleParts.length == 0) continue;
+
                 long roleHits = Arrays.stream(roleParts).filter(jobTitle::contains).count();
                 if (roleHits == roleParts.length) {
                     points += 25;
@@ -89,17 +106,26 @@ public class JobMatchingService {
         }
 
         // ── 3. Location (15 pts) ──────────────────────────────────────────────
-        String loc = " " + (job.getLocation() == null ? "" : job.getLocation()).toLowerCase() + " ";
-        boolean locationMatch = LOCATION_MATCH_TERMS.stream().anyMatch(loc::contains);
+        // 3.041 — Token-based location matching
+        String locStr = job.getLocation() == null ? "" : job.getLocation().toLowerCase();
+        Set<String> locTokens = Arrays.stream(locStr.split("[^a-zA-Z]+"))
+                                     .filter(t -> !t.isBlank())
+                                     .collect(Collectors.toSet());
+
+        boolean locationMatch = locTokens.stream().anyMatch(LOCATION_MATCH_TOKENS::contains)
+                                || locStr.contains("work from home") || locStr.contains("fully remote");
+
         if (locationMatch) {
             points += 15;
             reasons.add("Location compatible");
-        } else if (loc.isBlank() || loc.contains("unknown") || loc.contains("not specified")) {
+        } else if (locStr.isBlank() || locStr.contains("unknown") || locStr.contains("not specified")) {
             points += 5;  // neutral — don't penalise unlisted location
         }
+        
         // If the user's own location is set, boost exact match
         if (profile.getLocation() != null && !profile.getLocation().isBlank()) {
-            if (loc.contains(profile.getLocation().toLowerCase())) {
+            String userLoc = profile.getLocation().toLowerCase();
+            if (locStr.contains(userLoc)) {
                 points += 5;
                 reasons.add("Exact location match");
             }
@@ -117,7 +143,8 @@ public class JobMatchingService {
 
         // ── 5. Recency (10 pts) ───────────────────────────────────────────────
         if (job.getPostedAt() != null) {
-            long hoursOld = (System.currentTimeMillis() - job.getPostedAt().toEpochMilli()) / 3_600_000L;
+            long now = Instant.now(clock).toEpochMilli();
+            long hoursOld = (now - job.getPostedAt().toEpochMilli()) / 3_600_000L;
             if      (hoursOld <= 24)  { points += 10; reasons.add("Posted today"); }
             else if (hoursOld <= 72)  { points +=  7; reasons.add("Posted last 3 days"); }
             else if (hoursOld <= 168) { points +=  4; reasons.add("Posted this week"); }

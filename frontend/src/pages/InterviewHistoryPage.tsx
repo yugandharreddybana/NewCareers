@@ -4,9 +4,9 @@
  * Shows all mock interview sessions for the current user.
  * Displays session timeline, overall score, and weaknesses summary.
  */
-import React, { useState } from 'react';
+import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { interviewApi, InterviewSession, InterviewTrack } from '../services/interviewApi';
+import { interviewApi } from '../services/interviewApi';
 
 const STAGE_COLOURS: Record<string, string> = {
   applied:          'bg-gray-100 text-gray-600',
@@ -19,7 +19,7 @@ const STAGE_COLOURS: Record<string, string> = {
   rejected:         'bg-red-100 text-red-700',
 };
 
-function ScoreBadge({ score }: { score?: number }) {
+function ScoreBadge({ score }: { score: number | undefined }) {
   if (score == null) return null;
   const colour = score >= 7 ? 'bg-green-100 text-green-700'
     : score >= 4 ? 'bg-amber-100 text-amber-700'

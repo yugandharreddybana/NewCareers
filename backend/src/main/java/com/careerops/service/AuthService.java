@@ -1,5 +1,7 @@
 package com.careerops.service;
 
+import org.jspecify.annotations.Nullable;
+
 import com.careerops.dto.AuthDtos.*;
 import com.careerops.exception.ApiException;
 import com.careerops.model.PasswordReset;
@@ -8,6 +10,8 @@ import com.careerops.model.UserProfile;
 import com.careerops.repository.PasswordResetRepository;
 import com.careerops.repository.UserProfileRepository;
 import com.careerops.repository.UserRepository;
+import com.careerops.model.RefreshToken;
+import com.careerops.repository.RefreshTokenRepository;
 import com.careerops.security.JwtService;
 import jakarta.servlet.http.HttpServletRequest;
 import org.slf4j.Logger;
@@ -23,15 +27,18 @@ import java.time.Instant;
 import java.time.temporal.ChronoUnit;
 import java.util.Base64;
 import java.util.Map;
+import java.util.Optional;
 import java.util.UUID;
 
 /**
- * Task 117 — AuthService: issues refresh tokens on login (7-day expiry, stored hashed),
+ * Task 117 — AuthService: issues refresh tokens on login (7-day expiry, stored
+ * hashed),
  * rotates on every use, and blacklists on logout.
  * Access token expiry: 15 minutes (jwt.expiry.ms in application.properties).
  *
  * Batch 4 — added revokeAllTokensForUser(UUID) called by AccountController
- * before account deletion so tokens cannot be replayed after the user row is removed.
+ * before account deletion so tokens cannot be replayed after the user row is
+ * removed.
  */
 @Service
 public class AuthService {
@@ -41,217 +48,438 @@ public class AuthService {
     /** Refresh token validity: 7 days. */
     private static final long REFRESH_EXPIRY_DAYS = 7;
 
-    private final UserRepository          users;
-    private final UserProfileRepository   profiles;
+    private final UserRepository users;
+    private final UserProfileRepository profiles;
     private final PasswordResetRepository resets;
-    private final PasswordEncoder         encoder;
-    private final JwtService              jwt;
-    private final ResendEmailService      email;
-    private final ReferralService         referralService;
-    private final AuditLogService         audit;
+    private final PasswordEncoder encoder;
+    private final JwtService jwt;
+    private final ResendEmailService email;
+    private final AuditLogService audit;
+    private final RefreshTokenRepository refreshTokens;
+    private final CaptchaService captcha;
+    private final com.careerops.repository.ReferralOutboxRepository referralOutbox;
 
     public AuthService(UserRepository users,
-                       UserProfileRepository profiles,
-                       PasswordResetRepository resets,
-                       PasswordEncoder encoder,
-                       JwtService jwt,
-                       ResendEmailService email,
-                       ReferralService referralService,
-                       AuditLogService audit) {
-        this.users           = users;
-        this.profiles        = profiles;
-        this.resets          = resets;
-        this.encoder         = encoder;
-        this.jwt             = jwt;
-        this.email           = email;
-        this.referralService = referralService;
-        this.audit           = audit;
+            UserProfileRepository profiles,
+            PasswordResetRepository resets,
+            PasswordEncoder encoder,
+            JwtService jwt,
+            ResendEmailService email,
+            AuditLogService audit,
+            RefreshTokenRepository refreshTokens,
+            CaptchaService captcha,
+            com.careerops.repository.ReferralOutboxRepository referralOutbox) {
+        this.users = users;
+        this.profiles = profiles;
+        this.resets = resets;
+        this.encoder = encoder;
+        this.jwt = jwt;
+        this.email = email;
+        this.audit = audit;
+        this.refreshTokens = refreshTokens;
+        this.captcha = captcha;
+        this.referralOutbox = referralOutbox;
     }
 
     // ─── Signup ────────────────────────────────────────────────────────────────
 
-    @Transactional
+    @Transactional(timeout = 10)
     public AuthResponse signup(SignupRequest req) {
-        if (users.existsByEmail(req.email()))
-            throw new ApiException(HttpStatus.CONFLICT, "Email already in use");
-        if (users.existsByUsername(req.username()))
-            throw new ApiException(HttpStatus.CONFLICT, "Username taken");
-
-        User u = users.save(User.builder()
-            .name(req.name())
-            .username(req.username())
-            .email(req.email())
-            .passwordHash(encoder.encode(req.password()))
-            .build());
-
-        profiles.save(UserProfile.builder()
-            .userId(u.getId())
-            .location("Ireland")
-            .freshnessHours(96)
-            .minMatchPercent(60)
-            .sponsorshipRequired(false)
-            .onboarded(false)
-            .build());
-
+        checkPwnedPassword(req.password());
         try {
-            referralService.onRefereeSignup(u.getEmail(), u.getName());
-        } catch (Exception e) {
-            log.warn("onRefereeSignup non-fatal during signup for {}: {}", u.getEmail(), e.getMessage());
+            User u = users.save(User.builder()
+                    .name(req.name())
+                    .username(req.username())
+                    .email(req.email())
+                    .passwordHash(encoder.encode(req.password()))
+                    .build());
+
+            profiles.save(UserProfile.builder()
+                    .userId(u.getId())
+                    .location("Ireland")
+                    .freshnessHours(96)
+                    .minMatchPercent(UserProfile.DEFAULT_MIN_MATCH_PERCENT)
+                    .sponsorshipRequired(false)
+                    .onboarded(false)
+                    .build());
+
+            // 3.011 — Move referral handling onto an outbox table for reliable processing
+            referralOutbox.save(com.careerops.model.ReferralOutbox.builder()
+                    .refereeEmail(u.getEmail())
+                    .refereeName(u.getName())
+                    .build());
+
+            audit.log(u.getId(), "SIGNUP", Map.of("email", u.getEmail()));
+
+            String rawRefresh = issueRefreshToken(u, null);
+            return new AuthResponse(jwt.issue(u.getId().toString(), u.getEmail()), rawRefresh, toDto(u, false));
+        } catch (org.springframework.dao.DataIntegrityViolationException e) {
+            // 3.003 — Handle race condition where another request created the user between
+            // exists check and save
+            throw new ApiException(HttpStatus.CONFLICT, "Email or username already in use");
         }
-
-        audit.log(u.getId(), "SIGNUP", Map.of("email", u.getEmail()));
-
-        String rawRefresh = issueRefreshToken(u);
-        return new AuthResponse(jwt.issue(u.getId().toString(), u.getEmail()), rawRefresh, toDto(u, false));
     }
 
     // ─── Login ─────────────────────────────────────────────────────────────────
 
-    @Transactional
-    public AuthResponse login(LoginRequest req, HttpServletRequest httpRequest) {
-        User u = users.findByEmail(req.email())
-            .orElseThrow(() -> new ApiException(HttpStatus.UNAUTHORIZED, "Invalid credentials"));
-        if (!encoder.matches(req.password(), u.getPasswordHash()))
-            throw new ApiException(HttpStatus.UNAUTHORIZED, "Invalid credentials");
+    // 3.001 — Pre-computed dummy hash for timing protection
+    private static final String DUMMY_HASH = "$2a$10$EixZaYVK1fsbw1ZfbX3OXePaWxn96p36WQoeG6Lruj3vjPGGa31S.";
 
-        boolean onboarded = profiles.findByUserId(u.getId())
-            .map(UserProfile::getOnboarded).orElse(false);
+    @Transactional(timeout = 10)
+    public AuthResponse login(LoginRequest req, @Nullable HttpServletRequest httpRequest) {
+        String lookupEmail = req.email() != null ? req.email().toLowerCase() : "";
+        User u = users.findByEmail(lookupEmail).orElse(null);
+
+        // 3.002 — Brute-force protection: check lockout BEFORE password check
+        if (u != null && u.getLockedUntil() != null && Instant.now().isBefore(u.getLockedUntil())) {
+            encoder.matches(req.password(), DUMMY_HASH);
+            throw new ApiException(HttpStatus.UNAUTHORIZED,
+                    "Account is temporarily locked due to excessive failed attempts. Please try again in 15 minutes.");
+        }
+
+        // 3.002 — Expose Captcha challenge after 3 failures
+        if (u != null && u.getFailedLoginAttempts() >= 3) {
+            if (req.captchaToken() == null || req.captchaToken().isBlank()) {
+                throw new ApiException(HttpStatus.UNAUTHORIZED, "Captcha verification required", true);
+            }
+            if (!captcha.verify(req.captchaToken())) {
+                throw new ApiException(HttpStatus.UNAUTHORIZED, "Invalid captcha token", true);
+            }
+        }
+
+        // 3.001 — Security: Always run BCrypt verify
+        String hashToVerify = (u != null) ? u.getPasswordHash() : DUMMY_HASH;
+        boolean passwordMatches = encoder.matches(req.password(), hashToVerify);
+
+        if (u == null || !passwordMatches) {
+            boolean captchaRequired = false;
+            if (u != null) {
+                // 3.002 — Atomic increment ensures tracking even if login() rolls back
+                users.incrementFailedAttempts(u.getEmail());
+
+                // Fetch fresh copy to check thresholds
+                User fresh = users.findByEmail(u.getEmail()).orElse(u);
+                int attempts = fresh.getFailedLoginAttempts();
+
+                if (attempts >= 5) {
+                    users.lockAccount(u.getEmail(), Instant.now().plus(15, ChronoUnit.MINUTES));
+                    log.info("Account locked for email={} after {} failures", u.getEmail(), attempts);
+                    audit.log(u.getId(), "ACCOUNT_LOCKED", httpRequest,
+                            Map.of("reason", "Too many failed attempts", "count", attempts));
+                }
+                if (attempts >= 3) {
+                    captchaRequired = true;
+                }
+            }
+            throw new ApiException(HttpStatus.UNAUTHORIZED, "Invalid credentials", captchaRequired);
+        }
+
+        // Reset failed attempts on success
+        users.resetFailedAttempts(u.getEmail());
 
         audit.log(u.getId(), "LOGIN", httpRequest);
+        return createAuthResponse(u, httpRequest);
+    }
 
-        String rawRefresh = issueRefreshToken(u);
+    /**
+     * Issues a fresh access + refresh token pair for a user.
+     * Used by login, refresh, and rotation after password change.
+     */
+    @Transactional(timeout = 10)
+    public AuthResponse createAuthResponse(User u, @Nullable HttpServletRequest request) {
+        boolean onboarded = profiles.findByUserId(u.getId())
+                .map(UserProfile::getOnboarded).orElse(false);
+
+        String rawRefresh = issueRefreshToken(u, request);
         return new AuthResponse(jwt.issue(u.getId().toString(), u.getEmail()), rawRefresh, toDto(u, onboarded));
     }
 
-    /** Overload kept for backward-compat where HttpServletRequest is not available. */
-    @Transactional
+    /** Overload kept for backward-compat or non-request contexts. */
+    @Transactional(timeout = 10)
+    public AuthResponse createAuthResponse(User u) {
+        return createAuthResponse(u, null);
+    }
+
+    /**
+     * Overload kept for backward-compat where HttpServletRequest is not available.
+     */
+    @Transactional(timeout = 10)
     public AuthResponse login(LoginRequest req) {
         return login(req, null);
     }
 
     // ─── Refresh ───────────────────────────────────────────────────────────────
 
-    @Transactional
-    public AuthResponse refresh(String rawRefreshToken, HttpServletRequest httpRequest) {
+    @Transactional(timeout = 10)
+    public AuthResponse refresh(String rawRefreshToken, @Nullable HttpServletRequest httpRequest) {
         if (rawRefreshToken == null || rawRefreshToken.isBlank())
             throw new ApiException(HttpStatus.UNAUTHORIZED, "Refresh token required");
 
         String hashed = sha256(rawRefreshToken);
 
-        User u = users.findByRefreshToken(hashed)
-            .orElseThrow(() -> new ApiException(HttpStatus.UNAUTHORIZED, "Invalid or expired refresh token"));
+        RefreshToken rt = refreshTokens.findByTokenHash(hashed)
+                .orElseThrow(() -> new ApiException(HttpStatus.UNAUTHORIZED, "Invalid or expired refresh token"));
 
-        if (u.getRefreshTokenExpiresAt() == null || Instant.now().isAfter(u.getRefreshTokenExpiresAt())) {
-            u.setRefreshToken(null);
-            u.setRefreshTokenExpiresAt(null);
-            users.save(u);
+        if (Instant.now().isAfter(rt.getExpiresAt())) {
+            refreshTokens.delete(rt);
             throw new ApiException(HttpStatus.UNAUTHORIZED, "Refresh token expired");
         }
 
-        boolean onboarded = profiles.findByUserId(u.getId())
-            .map(UserProfile::getOnboarded).orElse(false);
+        User u = users.findById(rt.getUserId())
+                .orElseThrow(() -> new ApiException(HttpStatus.UNAUTHORIZED, "User not found"));
+
+        // Rotate token: delete old one, issue new one (Task 3.008)
+        refreshTokens.delete(rt);
 
         audit.log(u.getId(), "TOKEN_REFRESH", httpRequest);
 
-        String newRawRefresh  = issueRefreshToken(u);
+        String newRawRefresh = issueRefreshToken(u, httpRequest);
         String newAccessToken = jwt.issue(u.getId().toString(), u.getEmail());
+
+        boolean onboarded = profiles.findByUserId(u.getId())
+                .map(UserProfile::getOnboarded).orElse(false);
 
         return new AuthResponse(newAccessToken, newRawRefresh, toDto(u, onboarded));
     }
 
     // ─── Logout ────────────────────────────────────────────────────────────────
 
-    @Transactional
-    public void logout(UUID userId, HttpServletRequest httpRequest) {
-        users.findById(userId).ifPresent(u -> {
-            u.setRefreshToken(null);
-            u.setRefreshTokenExpiresAt(null);
-            users.save(u);
-            audit.log(userId, "LOGOUT", httpRequest);
-        });
+    @Transactional(timeout = 10)
+    public void logout(UUID userId, @Nullable String rawRefreshToken, @Nullable HttpServletRequest httpRequest) {
+        if (rawRefreshToken != null) {
+            refreshTokens.deleteByTokenHash(sha256(rawRefreshToken));
+        } else {
+            // Fallback: if no token provided, clear ALL for this user (3.008)
+            refreshTokens.deleteByUserId(userId);
+        }
+        audit.log(userId, "LOGOUT", httpRequest);
     }
 
-    // ─── Revoke all tokens (called before account deletion) ───────────────────
-
     /**
-     * Clears the stored refresh token for a user so it cannot be replayed
-     * after the account row is deleted. Tokens are stored on the User entity
-     * (not a separate table), so this is a single-row update.
-     *
-     * Non-fatal: swallows exceptions so account deletion is not blocked
-     * by a token-revocation failure.
+     * Clears ALL stored refresh tokens for a user (3.008).
      */
-    @Transactional
+    @Transactional(timeout = 10)
     public void revokeAllTokensForUser(UUID userId) {
-        try {
-            users.findById(userId).ifPresent(u -> {
-                u.setRefreshToken(null);
-                u.setRefreshTokenExpiresAt(null);
-                users.save(u);
-                log.info("revokeAllTokensForUser: refresh token cleared for user {}", userId);
-            });
-        } catch (Exception e) {
-            log.warn("revokeAllTokensForUser: could not clear token for {} — {}", userId, e.getMessage());
-        }
+        refreshTokens.deleteByUserId(userId);
+        log.info("revokeAllTokensForUser: refresh tokens cleared for user {}", userId);
     }
 
     // ─── Forgot / Reset ────────────────────────────────────────────────────────
 
-    @Transactional
+    @Transactional(timeout = 10)
     public void forgot(ForgotRequest req) {
-        if (users.findByEmail(req.email()).isEmpty()) return;
-        String otp = String.format("%06d", new SecureRandom().nextInt(1_000_000));
+        String lookupEmail = req.email() != null ? req.email().toLowerCase() : "";
+        User u = users.findByEmail(lookupEmail).orElse(null);
+        if (u == null)
+            return;
+
+        // 3.004 — Security: Invalidate any existing unused reset tokens for this user
+        resets.invalidateAllForUserId(u.getId());
+
+        // 3.004 — Security: Cap to 5 resets per user per 24h to prevent spam
+        long dailyCount = resets.countByUserIdAndCreatedAtAfter(u.getId(),
+                Instant.now().minus(24, java.time.temporal.ChronoUnit.HOURS));
+        if (dailyCount >= 5) {
+            throw new ApiException(HttpStatus.TOO_MANY_REQUESTS,
+                    "Daily limit of 5 password reset requests exceeded. Please try again tomorrow.");
+        }
+
+        // 2.044 — Security: Rate limit OTP requests to prevent spam (max 1 per 60s per user)
+        Optional<PasswordReset> last = resets.findFirstByUserIdOrderByCreatedAtDesc(u.getId());
+        if (last.isPresent() && last.get().getCreatedAt().isAfter(Instant.now().minus(1, ChronoUnit.MINUTES))) {
+            throw new ApiException(HttpStatus.TOO_MANY_REQUESTS,
+                    "Please wait 60 seconds before requesting another OTP");
+        }
+
+        String otp = generateAlphanumericOtp(); // 3.005 — Use 8-char alphanumeric OTP
         PasswordReset pr = PasswordReset.builder()
-            .email(req.email())
-            .otpHash(sha256(otp))
-            .expiresAt(Instant.now().plus(15, ChronoUnit.MINUTES))
-            .used(false)
-            .build();
+                .userId(u.getId())
+                .email(req.email())
+                .otpHash(sha256(otp))
+                .expiresAt(Instant.now().plus(15, ChronoUnit.MINUTES))
+                .used(false)
+                .build();
         resets.save(pr);
         email.sendOtp(req.email(), otp);
     }
 
-    @Transactional
+    private String generateAlphanumericOtp() {
+        String chars = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"; // 3.005 — 2.8 trillion combinations
+        java.security.SecureRandom rnd = new java.security.SecureRandom();
+        StringBuilder sb = new StringBuilder(8);
+        for (int i = 0; i < 8; i++) {
+            sb.append(chars.charAt(rnd.nextInt(chars.length())));
+        }
+        return sb.toString();
+    }
+
+    @Transactional(timeout = 10)
     public void verifyOtp(VerifyOtpRequest req) {
+        checkPwnedPassword(req.newPassword());
+        String lookupEmail = req.email() != null ? req.email().toLowerCase() : "";
+        User u = users.findByEmail(lookupEmail)
+                .orElseThrow(() -> new ApiException(HttpStatus.NOT_FOUND, "User not found"));
+
         PasswordReset pr = resets
-            .findFirstByEmailAndUsedFalseOrderByCreatedAtDesc(req.email())
-            .orElseThrow(() -> new ApiException(HttpStatus.BAD_REQUEST, "No reset request found"));
+                .findFirstByUserIdAndUsedFalseOrderByCreatedAtDesc(u.getId())
+                .orElseThrow(() -> new ApiException(HttpStatus.BAD_REQUEST, "No reset request found"));
+
         if (Instant.now().isAfter(pr.getExpiresAt()))
             throw new ApiException(HttpStatus.BAD_REQUEST, "OTP expired");
-        if (!pr.getOtpHash().equals(sha256(req.otp())))
+
+        // 3.005 — Brute-force protection: cap attempts per OTP
+        if (pr.getAttempts() >= 5) {
+            pr.setUsed(true); // Invalidate after too many failures
+            resets.saveAndFlush(pr);
+            throw new ApiException(HttpStatus.BAD_REQUEST, "Too many failed attempts. This OTP is now invalid.");
+        }
+
+        // 2.040 — Security: Use constant-time comparison to prevent timing attacks
+        String providedHash = sha256(req.otp());
+        if (!MessageDigest.isEqual(pr.getOtpHash().getBytes(), providedHash.getBytes())) {
+            resets.incrementAttempts(pr.getId());
             throw new ApiException(HttpStatus.BAD_REQUEST, "Invalid OTP");
-        User u = users.findByEmail(req.email())
-            .orElseThrow(() -> new ApiException(HttpStatus.NOT_FOUND, "User not found"));
+        }
+
+        if (encoder.matches(req.newPassword(), u.getPasswordHash())) {
+            throw new ApiException(HttpStatus.BAD_REQUEST, "New password cannot be the same as your current password");
+        }
+
         u.setPasswordHash(encoder.encode(req.newPassword()));
+
+        // 3.007 — Security: Invalidate all existing sessions after password reset
+        refreshTokens.deleteByUserId(u.getId());
         users.save(u);
+
         pr.setUsed(true);
-        resets.save(pr);
+
+        try {
+            resets.saveAndFlush(pr);
+        } catch (org.springframework.orm.ObjectOptimisticLockingFailureException e) {
+            // 3.005 — Handle concurrent OTP verification attempts
+            throw new ApiException(HttpStatus.CONFLICT,
+                    "This reset request was already processed or is being handled by another session.");
+        }
     }
 
     // ─── Internal helpers ──────────────────────────────────────────────────────
 
-    private String issueRefreshToken(User u) {
+    private String issueRefreshToken(User u, @Nullable HttpServletRequest request) {
         byte[] bytes = new byte[48];
         new SecureRandom().nextBytes(bytes);
-        String raw    = Base64.getUrlEncoder().withoutPadding().encodeToString(bytes);
+        String raw = Base64.getUrlEncoder().withoutPadding().encodeToString(bytes);
         String hashed = sha256(raw);
-        u.setRefreshToken(hashed);
-        u.setRefreshTokenExpiresAt(Instant.now().plus(REFRESH_EXPIRY_DAYS, ChronoUnit.DAYS));
-        users.save(u);
+
+        String deviceInfo = request != null ? request.getHeader("User-Agent") : "unknown";
+
+        RefreshToken rt = RefreshToken.builder()
+                .userId(u.getId())
+                .tokenHash(hashed)
+                .expiresAt(Instant.now().plus(REFRESH_EXPIRY_DAYS, ChronoUnit.DAYS))
+                .deviceInfo(deviceInfo)
+                .build();
+        refreshTokens.save(rt);
         return raw;
     }
 
     private UserDto toDto(User u, boolean onboarded) {
-        return new UserDto(u.getId().toString(), u.getName(), u.getUsername(), u.getEmail(), onboarded);
+        // Pass 6 #6.005: expose role so the frontend AdminRoute guard works.
+        // Defensive fallback: if a row pre-dates the role enum migration the
+        // entity defaults to USER; we mirror that here for the DTO.
+        String role = u.getRole() != null ? u.getRole().name() : User.Role.USER.name();
+        return new UserDto(
+                u.getId(),
+                u.getName(),
+                u.getUsername(),
+                u.getEmail(),
+                role,
+                onboarded,
+                u.getCreatedAt());
+    }
+
+    // ─── /auth/me ──────────────────────────────────────────────────────────────
+
+    /**
+     * Pass 6 #6.045 — the frontend AuthContext calls GET /auth/me on every
+     * mount to confirm the session is still valid AND pick up role / onboarded
+     * changes pushed from the server. Returns 401 if the user has been deleted
+     * or soft-deleted between sessions.
+     */
+    @Transactional(timeout = 10, readOnly = true)
+    public UserDto me(UUID userId) {
+        User u = users.findById(userId)
+                .orElseThrow(() -> new ApiException(HttpStatus.UNAUTHORIZED, "Session expired"));
+
+        if (u.getDeletedAt() != null) {
+            throw new ApiException(HttpStatus.UNAUTHORIZED, "Account is no longer active");
+        }
+
+        boolean onboarded = profiles.findByUserId(u.getId())
+                .map(UserProfile::getOnboarded)
+                .orElse(false);
+
+        return toDto(u, onboarded);
+    }
+
+    private void checkPwnedPassword(String password) {
+        if (password == null || password.isBlank()) {
+            return;
+        }
+        try {
+            java.security.MessageDigest sha1 = java.security.MessageDigest.getInstance("SHA-1");
+            byte[] bytes = sha1.digest(password.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+            StringBuilder sb = new StringBuilder();
+            for (byte b : bytes) {
+                sb.append(String.format("%02X", b));
+            }
+            String sha1Hex = sb.toString();
+            String prefix = sha1Hex.substring(0, 5);
+            String suffix = sha1Hex.substring(5);
+
+            java.net.URI uri = java.net.URI.create("https://api.pwnedpasswords.com/range/" + prefix);
+            java.net.http.HttpClient client = java.net.http.HttpClient.newHttpClient();
+            java.net.http.HttpRequest request = java.net.http.HttpRequest.newBuilder()
+                    .uri(uri)
+                    .header("User-Agent", "CareerOps-SecHardening")
+                    .timeout(java.time.Duration.ofSeconds(3))
+                    .GET()
+                    .build();
+
+            java.net.http.HttpResponse<String> response = client.send(request, java.net.http.HttpResponse.BodyHandlers.ofString());
+            if (response.statusCode() == 200) {
+                String body = response.body();
+                java.io.BufferedReader reader = new java.io.BufferedReader(new java.io.StringReader(body));
+                String line;
+                while ((line = reader.readLine()) != null) {
+                    String[] parts = line.split(":");
+                    if (parts.length > 0 && parts[0].equalsIgnoreCase(suffix)) {
+                        int count = Integer.parseInt(parts[1].trim());
+                        if (count > 0) {
+                            throw new ApiException(HttpStatus.BAD_REQUEST, "This password has been found in " + count + " known data breaches. Please choose a more secure password.");
+                        }
+                    }
+                }
+            }
+        } catch (ApiException ae) {
+            throw ae;
+        } catch (Exception e) {
+            log.warn("Pwned Password API check failed (failing-open): {}", e.getMessage());
+        }
     }
 
     private static String sha256(String s) {
         try {
             MessageDigest md = MessageDigest.getInstance("SHA-256");
-            byte[] b = md.digest(s.getBytes());
-            StringBuilder sb = new StringBuilder();
-            for (byte x : b) sb.append(String.format("%02x", x));
+            byte[] b = md.digest(s.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+            StringBuilder sb = new StringBuilder(b.length * 2);
+            for (byte x : b) {
+                int val = x & 0xff;
+                sb.append(Character.forDigit(val >> 4, 16));
+                sb.append(Character.forDigit(val & 0xf, 16));
+            }
             return sb.toString();
-        } catch (Exception e) { throw new RuntimeException(e); }
+        } catch (Exception e) {
+            throw new RuntimeException(e);
+        }
     }
 }

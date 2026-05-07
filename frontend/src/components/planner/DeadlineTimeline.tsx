@@ -1,6 +1,6 @@
 // Task 27 — DeadlineTimeline: visual vertical timeline of deadline events for a job or dashboard
 import React, { useEffect, useState } from 'react';
-import axios from '../../api/axiosInstance';
+import { api as axios } from '@/services/api';
 
 interface DeadlineEvent {
   id: string;

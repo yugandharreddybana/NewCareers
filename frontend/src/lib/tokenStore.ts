@@ -1,67 +1,120 @@
 /**
- * tokenStore.ts — single source of truth for JWT storage.
+ * tokenStore.ts — single source of truth for access/refresh tokens.
  *
- * Security model (A1 fix):
- *  - Access token  → sessionStorage  (cleared on tab close, not XSS-persistent)
- *  - Refresh token → localStorage    (intentional: must survive tab close for silent refresh)
+ * Pass 6 #6.021 — security model rewritten:
+ *   - Access token  → in-memory only (zero persistence ⇒ zero XSS surface).
+ *   - Refresh token → in-memory only by default; short fallback in
+ *                     sessionStorage so a browser-tab refresh does not log
+ *                     the user out before the silent /auth/refresh interceptor
+ *                     has a chance to run. SessionStorage is cleared on tab
+ *                     close, so the long-term threat surface is small.
  *
- * Rationale: storing the access token in localStorage means any injected script
- * can silently exfiltrate it. sessionStorage limits the blast radius to the
- * current tab session. The refresh token remains in localStorage so the silent-
- * refresh interceptor in api.ts can still obtain a new access token after a
- * page reload without forcing the user to log in again.
+ *   On a tab refresh:
+ *     1. Module re-evaluates → access token blank.
+ *     2. AuthContext mount calls /auth/me → 401 (cookie absent or expired).
+ *     3. Axios interceptor reads refresh from sessionStorage → /auth/refresh.
+ *     4. New access + refresh tokens are stored in memory + sessionStorage.
  *
- * Rules:
- *  - Never import localStorage/sessionStorage directly elsewhere; always go
- *    through this module.
- *  - Both tokens are cleared atomically on logout.
+ *   On a new tab / re-open:
+ *     1. SessionStorage is empty → user must sign in. Acceptable because
+ *        the alternative (localStorage) leaves long-lived tokens that survive
+ *        XSS-driven exfiltration.
+ *
+ * Subscribers are notified on token changes so the axios queue can re-run
+ * pending requests after a successful silent refresh.
+ *
+ * Replaces the previous localStorage(refresh) + sessionStorage(access) split.
+ *
+ * IMPORTANT: never re-introduce localStorage usage here without a security
+ * review. The audit (1.067 / 9.013 family) tracks this guarantee.
  */
 
-const ACCESS_KEY  = 'co_token';
-const REFRESH_KEY = 'co_refresh';
+const REFRESH_KEY = 'co_refresh_v2';
+const LEGACY_KEYS = ['co_token', 'co_refresh', 'co_user'] as const;
+
+let accessToken: string | null = null;
+let refreshToken: string | null = null;
+
+const listeners = new Set<(t: string | null) => void>();
+
+/** Best-effort safe sessionStorage get/set/remove (handles SSR, locked-down browsers). */
+const safeSession = {
+  get(key: string): string | null {
+    try { return typeof sessionStorage === 'undefined' ? null : sessionStorage.getItem(key); }
+    catch { return null; }
+  },
+  set(key: string, value: string): void {
+    try { if (typeof sessionStorage !== 'undefined') sessionStorage.setItem(key, value); }
+    catch { /* ignore quota / privacy errors */ }
+  },
+  remove(key: string): void {
+    try { if (typeof sessionStorage !== 'undefined') sessionStorage.removeItem(key); }
+    catch { /* ignore */ }
+  },
+};
+
+/** Wipe any tokens written by a previous version of this module. */
+function evictLegacyKeys(): void {
+  if (typeof window === 'undefined') return;
+  for (const k of LEGACY_KEYS) {
+    try { localStorage.removeItem(k); } catch { /* ignore */ }
+    try { sessionStorage.removeItem(k); } catch { /* ignore */ }
+  }
+}
+
+evictLegacyKeys();
+
+// Re-hydrate refresh token from sessionStorage on module load so a tab
+// refresh keeps the user signed in until /auth/refresh resolves.
+refreshToken = safeSession.get(REFRESH_KEY);
+
+function notify(): void {
+  for (const listener of listeners) listener(accessToken);
+}
 
 export const tokenStore = {
-  // ── Access token (sessionStorage — cleared on tab close) ────────────────
-  getAccess(): string | null {
-    return sessionStorage.getItem(ACCESS_KEY);
+  // ── Access token (memory only) ─────────────────────────────────────────
+  getAccess(): string | null { return accessToken; },
+
+  setAccess(token: string | null): void {
+    accessToken = token && token.length > 0 ? token : null;
+    notify();
   },
 
-  setAccess(token: string): void {
-    sessionStorage.setItem(ACCESS_KEY, token);
+  hasAccess(): boolean { return accessToken !== null; },
+
+  // ── Refresh token (memory + sessionStorage) ───────────────────────────
+  getRefresh(): string | null { return refreshToken; },
+
+  setRefresh(token: string | null): void {
+    refreshToken = token && token.length > 0 ? token : null;
+    if (refreshToken) safeSession.set(REFRESH_KEY, refreshToken);
+    else              safeSession.remove(REFRESH_KEY);
   },
 
-  hasAccess(): boolean {
-    return !!sessionStorage.getItem(ACCESS_KEY);
+  hasRefresh(): boolean { return refreshToken !== null; },
+
+  /** Atomic write of both tokens after login / signup / silent refresh. */
+  set(access: string, refresh: string): void {
+    this.setAccess(access);
+    this.setRefresh(refresh);
   },
 
-  // ── Refresh token (localStorage — survives page reload) ─────────────────
-  getRefresh(): string | null {
-    return localStorage.getItem(REFRESH_KEY);
-  },
-
-  setRefresh(token: string): void {
-    localStorage.setItem(REFRESH_KEY, token);
-  },
-
-  hasRefresh(): boolean {
-    return !!localStorage.getItem(REFRESH_KEY);
-  },
-
-  /** Store both tokens atomically after login / signup / silent refresh. */
-  set(accessToken: string, refreshToken: string): void {
-    sessionStorage.setItem(ACCESS_KEY, accessToken);
-    localStorage.setItem(REFRESH_KEY, refreshToken);
+  /** Atomic clear on logout / unrecoverable session error. */
+  clear(): void {
+    this.setAccess(null);
+    this.setRefresh(null);
+    evictLegacyKeys();
   },
 
   /**
-   * Wipe both tokens atomically on logout or unrecoverable session expiry.
-   * Also removes legacy localStorage access-token entry in case it exists
-   * from a previous version of this module.
+   * Subscribe to access-token changes. Invokes the listener once with the
+   * current value, then on every subsequent change. Returns an unsubscribe
+   * function.
    */
-  clear(): void {
-    sessionStorage.removeItem(ACCESS_KEY);
-    localStorage.removeItem(REFRESH_KEY);
-    // Remove legacy entry written by older tokenStore versions
-    localStorage.removeItem(ACCESS_KEY);
+  subscribe(listener: (t: string | null) => void): () => void {
+    listeners.add(listener);
+    listener(accessToken);
+    return () => { listeners.delete(listener); };
   },
 };

@@ -11,7 +11,6 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.util.List;
 import java.util.Optional;
-import java.util.Random;
 import java.util.UUID;
 
 /**
@@ -33,7 +32,7 @@ public class ExperimentAssignmentService {
      * Returns the assigned variant for this user and experiment key.
      * If the experiment is inactive or the user is outside traffic %, returns "control".
      */
-    @Transactional
+    @Transactional(timeout = 10)
     public String getVariant(UUID userId, String experimentKey) {
         Optional<Experiment> expOpt = experimentRepo.findByKey(experimentKey);
         if (expOpt.isEmpty() || !"active".equals(expOpt.get().getStatus())) {
@@ -77,7 +76,7 @@ public class ExperimentAssignmentService {
      * Returns all active experiments and the user's assigned variant for each.
      * Used by frontend to load all experiment assignments in one call.
      */
-    @Transactional(readOnly = true)
+    @Transactional(timeout = 10, readOnly = true)
     public java.util.Map<String, String> getAllVariants(UUID userId) {
         List<Experiment> active = experimentRepo.findByStatus("active");
         java.util.Map<String, String> result = new java.util.LinkedHashMap<>();

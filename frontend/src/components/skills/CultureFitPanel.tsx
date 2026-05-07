@@ -1,5 +1,3 @@
-import React from 'react';
-
 interface Dimension { name: string; score: number; insight?: string; }
 interface CultureFitOutput {
   overallScore: number;

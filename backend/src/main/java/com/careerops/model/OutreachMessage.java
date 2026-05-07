@@ -13,6 +13,12 @@ public class OutreachMessage {
     @Id @GeneratedValue(strategy = GenerationType.UUID)
     private UUID id;
 
+    public static final String STATUS_DRAFT = "draft";
+    public static final String STATUS_SCHEDULED = "scheduled";
+    public static final String STATUS_SENT = "sent";
+    public static final String STATUS_REPLIED = "replied";
+    public static final String STATUS_BOUNCED = "bounced";
+
     @Column(name = "campaign_id", nullable = false)
     private UUID campaignId;
 
@@ -36,7 +42,7 @@ public class OutreachMessage {
 
     @Builder.Default
     @Column(nullable = false, length = 20)
-    private String status = "draft";
+    private String status = STATUS_DRAFT;
 
     @Column(name = "sent_at")
     private Instant sentAt;

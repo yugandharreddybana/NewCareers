@@ -87,3 +87,5 @@ export default function EmptyState({
     </div>
   );
 }
+
+EmptyState.displayName = 'EmptyState';

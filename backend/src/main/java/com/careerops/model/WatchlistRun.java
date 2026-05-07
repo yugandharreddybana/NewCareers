@@ -9,7 +9,10 @@ import java.time.Instant;
 import java.util.UUID;
 
 @Entity
-@Table(name = "watchlist_runs", schema = "career_operations")
+@Table(name = "watchlist_runs", schema = "career_operations",
+       indexes = {
+           @Index(name = "idx_watchlist_runs_user", columnList = "user_id")
+       })
 @Getter @Setter @NoArgsConstructor @AllArgsConstructor @Builder
 public class WatchlistRun {
 

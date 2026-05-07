@@ -4,7 +4,7 @@ import com.careerops.model.DeadlineEvent;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.stereotype.Repository;
 
-import java.time.LocalDateTime;
+import java.time.Instant;
 import java.util.List;
 import java.util.UUID;
 
@@ -14,8 +14,8 @@ public interface DeadlineEventRepository extends JpaRepository<DeadlineEvent, UU
     List<DeadlineEvent> findByUserJobIdOrderByEventDateAsc(UUID userJobId);
 
     List<DeadlineEvent> findByUserIdAndEventDateBetweenOrderByEventDateAsc(
-            UUID userId, LocalDateTime from, LocalDateTime to);
+            UUID userId, Instant from, Instant to);
 
     List<DeadlineEvent> findByEventDateBetweenAndReminderSentFalse(
-            LocalDateTime from, LocalDateTime to);
+            Instant from, Instant to);
 }

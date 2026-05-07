@@ -31,6 +31,9 @@ jobs:
       - name: TypeScript type-check
         run: npx tsc --noEmit
 
+      - name: Run tests
+        run: npm run test --if-present
+
       - name: Build
         run: npm run build
         env:
@@ -62,8 +65,39 @@ jobs:
       - name: TypeScript type-check
         run: npx tsc --noEmit
 
+      - name: Run tests
+        run: npm run test --if-present
+
       - name: Build
         run: npm run build
+
+  # ── Backend: build + test + verify ───────────────────────────────────────
+  backend:
+    name: Backend (build + test)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@v4
+        with:
+          java-version: '21'
+          distribution: 'temurin'
+          cache: 'maven'
+
+      - name: Build and Verify with Maven
+        run: mvn -B verify -DskipITs=false
+
+      - name: Upload JaCoCo Coverage Report
+        uses: actions/upload-artifact@v4
+        with:
+          name: jacoco-coverage
+          path: backend/target/site/jacoco/
+        continue-on-error: true
 
   # ── Dependency security audit ───────────────────────────────────────────
   security:
@@ -81,9 +115,7 @@ jobs:
       - name: Audit frontend dependencies
         working-directory: frontend
         run: npm audit --audit-level=high
-        continue-on-error: true
 
       - name: Audit middleware dependencies
         working-directory: middleware
         run: npm audit --audit-level=high
-        continue-on-error: true

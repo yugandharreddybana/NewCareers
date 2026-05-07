@@ -4,14 +4,21 @@ import com.careerops.dto.AutoApplyDtos.*;
 import com.careerops.service.ApplicationAutomationService;
 import com.careerops.util.AuthUtil;
 import org.springframework.http.HttpStatus;
-import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
 import java.util.UUID;
 
+/**
+ * CORS Policy:
+ * - Allowed Origins: from ${cors.allowed.origins}
+ * - Methods: GET, POST, PUT, PATCH, DELETE, OPTIONS
+ * - Headers: Content-Type, Authorization, X-Requested-With, X-CSRF-Token, X-Internal-Secret, X-Internal-User-Id
+ * - Exposed: X-RateLimit-Remaining, X-RateLimit-Reset, Retry-After
+ */
 @RestController
 @RequestMapping("/applications/auto")
+@io.micrometer.core.annotation.Timed
 public class AutoApplyController {
 
     private final ApplicationAutomationService service;
@@ -33,9 +40,9 @@ public class AutoApplyController {
     }
 
     @DeleteMapping("/answers/{id}")
-    public ResponseEntity<Void> deleteAnswer(@PathVariable UUID id) {
+    @ResponseStatus(HttpStatus.NO_CONTENT)
+    public void deleteAnswer(@PathVariable UUID id) {
         service.deleteAnswer(AuthUtil.currentUserId(), id);
-        return ResponseEntity.noContent().build();
     }
 
     // ── Application runs ─────────────────────────────────────────────────────
@@ -51,11 +58,11 @@ public class AutoApplyController {
     }
 
     @PostMapping("/start/{userJobId}")
-    public ResponseEntity<ApplicationRunResponse> startRun(
+    @ResponseStatus(HttpStatus.CREATED)
+    public ApplicationRunResponse startRun(
             @PathVariable UUID userJobId,
             @RequestBody(required = false) StartRunRequest req) {
-        return ResponseEntity.status(HttpStatus.CREATED)
-            .body(service.startRun(AuthUtil.currentUserId(), userJobId, req));
+        return service.startRun(AuthUtil.currentUserId(), userJobId, req);
     }
 
     @PostMapping("/approve/{runId}")

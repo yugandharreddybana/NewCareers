@@ -1,6 +1,5 @@
 import { useState } from 'react';
 import { FileDown, Eye, GitCompare } from 'lucide-react';
-import toast from 'react-hot-toast';
 
 interface FlaggedPhrase {
   phrase: string;

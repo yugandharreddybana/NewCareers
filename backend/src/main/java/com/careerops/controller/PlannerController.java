@@ -3,108 +3,111 @@ package com.careerops.controller;
 import com.careerops.model.ApplicationTask;
 import com.careerops.model.DeadlineEvent;
 import com.careerops.service.ApplicationPlannerService;
-import com.careerops.security.JwtService;
-import jakarta.servlet.http.HttpServletRequest;
+import com.careerops.util.AuthUtil;
 import lombok.RequiredArgsConstructor;
-import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
 import java.time.OffsetDateTime;
 import java.util.*;
 
+/**
+ * CORS Policy:
+ * - Allowed Origins: from ${cors.allowed.origins}
+ * - Methods: GET, POST, PUT, PATCH, DELETE, OPTIONS
+ * - Headers: Content-Type, Authorization, X-Requested-With, X-CSRF-Token, X-Internal-Secret, X-Internal-User-Id
+ * - Exposed: X-RateLimit-Remaining, X-RateLimit-Reset, Retry-After
+ */
 @RestController
-@RequestMapping("/api/planner")
+@RequestMapping("/planner")
+@io.micrometer.core.annotation.Timed
 @RequiredArgsConstructor
 public class PlannerController {
 
     private final ApplicationPlannerService plannerService;
-    private final JwtService jwtService;
+    private final com.careerops.service.ProgressInsightService progressService;
 
     @GetMapping("/upcoming")
-    public ResponseEntity<Map<String, Object>> getUpcoming(HttpServletRequest request) {
-        UUID userId = extractUserId(request);
+    public com.careerops.dto.PlannerDTO.UpcomingResponse getUpcoming() {
+        UUID userId = AuthUtil.currentUserId();
         List<ApplicationTask> tasks = plannerService.getUpcoming(userId);
-        List<ApplicationTask> pending = new ArrayList<>();
-        List<ApplicationTask> overdue = new ArrayList<>();
+        List<com.careerops.dto.PlannerDTO.TaskResponse> pending = new ArrayList<>();
+        List<com.careerops.dto.PlannerDTO.TaskResponse> overdue = new ArrayList<>();
 
         for (ApplicationTask t : tasks) {
             if ("COMPLETED".equalsIgnoreCase(t.getStatus())) {
                 continue;
             }
-            if (t.getDueDate() != null && t.getDueDate().isBefore(java.time.LocalDateTime.now())) {
-                overdue.add(t);
+            if (t.getDueDate() != null && t.getDueDate().isBefore(java.time.Instant.now())) {
+                overdue.add(plannerService.toTaskResponse(t));
             } else {
-                pending.add(t);
+                pending.add(plannerService.toTaskResponse(t));
             }
         }
 
-        List<DeadlineEvent> upcomingEvents = plannerService.getUpcomingDeadlines(userId);
+        List<com.careerops.dto.PlannerDTO.DeadlineResponse> upcomingEvents = plannerService.getUpcomingDeadlines(userId)
+                .stream().map(plannerService::toDeadlineResponse).toList();
 
-        Map<String, Object> response = new HashMap<>();
-        response.put("pendingTasks", pending);
-        response.put("upcomingEvents", upcomingEvents);
-        response.put("overdueTasks", overdue);
-
-        return ResponseEntity.ok(response);
+        return com.careerops.dto.PlannerDTO.UpcomingResponse.builder()
+                .pendingTasks(pending)
+                .overdueTasks(overdue)
+                .upcomingEvents(upcomingEvents)
+                .build();
     }
 
     // ── GET /api/planner/jobs/{userJobId}/tasks ────────────────────────────────
     @GetMapping("/jobs/{userJobId}/tasks")
-    public ResponseEntity<List<ApplicationTask>> getTasksForJob(
+    public List<com.careerops.dto.PlannerDTO.TaskResponse> getTasksForJob(
             @PathVariable UUID userJobId) {
-        return ResponseEntity.ok(plannerService.getTasksForJob(userJobId));
+        UUID userId = AuthUtil.currentUserId();
+        return plannerService.getTasksForJob(userJobId, userId).stream()
+                .map(plannerService::toTaskResponse).toList();
     }
 
     // ── POST /api/planner/jobs/{userJobId}/tasks/generate ─────────────────────
-    // Auto-generate stage-aware tasks for a tracked job
     @PostMapping("/jobs/{userJobId}/tasks/generate")
-    public ResponseEntity<List<ApplicationTask>> generateTasks(
-            @PathVariable UUID userJobId,
-            HttpServletRequest request) {
-        UUID userId = extractUserId(request);
-        return ResponseEntity.ok(plannerService.generatePlan(userJobId, userId));
+    public List<com.careerops.dto.PlannerDTO.TaskResponse> generateTasks(
+            @PathVariable UUID userJobId) {
+        UUID userId = AuthUtil.currentUserId();
+        return plannerService.generatePlan(userJobId, userId).stream()
+                .map(plannerService::toTaskResponse).toList();
     }
 
     // ── PATCH /api/planner/tasks/{taskId}/complete ────────────────────────────
     @PatchMapping("/tasks/{taskId}/complete")
-    public ResponseEntity<ApplicationTask> completeTask(
-            @PathVariable UUID taskId,
-            HttpServletRequest request) {
-        UUID userId = extractUserId(request);
-        return ResponseEntity.ok(plannerService.markComplete(taskId, userId));
+    public com.careerops.dto.PlannerDTO.TaskCompletionResponse completeTask(
+            @PathVariable UUID taskId) {
+        UUID userId = AuthUtil.currentUserId();
+        var task = plannerService.toTaskResponse(plannerService.markComplete(taskId, userId));
+        var streak = progressService.recordDailyActivity(userId);
+        
+        return com.careerops.dto.PlannerDTO.TaskCompletionResponse.builder()
+                .task(task)
+                .streak(streak)
+                .build();
     }
 
     // ── GET /api/planner/jobs/{userJobId}/deadlines ───────────────────────────
     @GetMapping("/jobs/{userJobId}/deadlines")
-    public ResponseEntity<List<DeadlineEvent>> getDeadlines(
+    public List<com.careerops.dto.PlannerDTO.DeadlineResponse> getDeadlines(
             @PathVariable UUID userJobId) {
-        return ResponseEntity.ok(plannerService.getDeadlinesForJob(userJobId));
+        UUID userId = AuthUtil.currentUserId();
+        return plannerService.getDeadlinesForJob(userJobId, userId).stream()
+                .map(plannerService::toDeadlineResponse).toList();
     }
 
     // ── POST /api/planner/jobs/{userJobId}/deadlines ──────────────────────────
     @PostMapping("/jobs/{userJobId}/deadlines")
-    public ResponseEntity<DeadlineEvent> createDeadline(
+    public com.careerops.dto.PlannerDTO.DeadlineResponse createDeadline(
             @PathVariable UUID userJobId,
-            @RequestBody CreateDeadlineRequest body,
-            HttpServletRequest request) {
-        UUID userId = extractUserId(request);
+            @RequestBody CreateDeadlineRequest body) {
+        UUID userId = AuthUtil.currentUserId();
         DeadlineEvent event = plannerService.addDeadline(
             userJobId, userId,
             body.eventType(), body.title(),
-            body.eventDate() != null ? body.eventDate().toLocalDateTime() : null,
+            body.eventDate() != null ? body.eventDate().toInstant() : null,
             body.notes()
         );
-        return ResponseEntity.ok(event);
-    }
-
-    // ── Private helpers ───────────────────────────────────────────────────────
-    private UUID extractUserId(HttpServletRequest request) {
-        String authHeader = request.getHeader("Authorization");
-        if (authHeader == null || !authHeader.startsWith("Bearer "))
-            throw new SecurityException("Missing or invalid Authorization header");
-        String token = authHeader.substring(7);
-        String userIdStr = jwtService.extractUserId(token);
-        return UUID.fromString(userIdStr);
+        return plannerService.toDeadlineResponse(event);
     }
 
     // ── Inner record for request body ─────────────────────────────────────────

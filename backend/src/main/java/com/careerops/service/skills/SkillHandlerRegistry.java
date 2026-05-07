@@ -75,14 +75,14 @@ public class SkillHandlerRegistry {
      *   3. Persist result as SkillRun
      *   4. Return SkillRunResponse
      */
-    @Transactional
+    @Transactional(timeout = 10)
     public SkillRunResponse execute(String skillName, UUID userId, UUID userJobId) {
         log.info("SkillHandlerRegistry.execute: skill={}, userId={}, userJobId={}",
                 skillName, userId, userJobId);
 
         // Cache check
         if (userJobId != null) {
-            var cached = skillRuns.findValidCachedRun(userId, userJobId, skillName);
+            var cached = skillRuns.findValidCachedRun(userId, userJobId, skillName, Instant.now());
             if (cached.isPresent()) {
                 log.debug("Cache hit for Phase 2 skill={}, userId={}", skillName, userId);
                 return SkillRunResponse.result(skillName, cached.get().getOutput());

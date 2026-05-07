@@ -10,10 +10,15 @@ import java.time.Instant;
 import java.util.List;
 import java.util.UUID;
 
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
+
 @Repository
 public interface AuditLogRepository extends JpaRepository<AuditLog, UUID> {
 
     List<AuditLog> findByUserIdOrderByCreatedAtDesc(UUID userId);
+
+    Page<AuditLog> findByUserIdOrderByCreatedAtDesc(UUID userId, Pageable pageable);
 
     /**
      * Task 135 — AdminService.platformStats(): total audit events in last 24 h.

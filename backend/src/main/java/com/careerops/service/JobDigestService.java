@@ -1,5 +1,7 @@
 package com.careerops.service;
 
+import org.jspecify.annotations.Nullable;
+
 import com.careerops.model.Job;
 import com.careerops.repository.JobRepository;
 import com.careerops.repository.UserJobRepository;
@@ -67,7 +69,7 @@ public class JobDigestService {
                         a.getMatchPercent() == null ? 0 : a.getMatchPercent()))
                     .limit(DIGEST_MAX_JOBS)
                     .map(uj -> {
-                        Job j = jobs.findById(uj.getJobId()).orElse(null);
+                        @Nullable Job j = jobs.findById(uj.getJobId()).orElse(null);
                         if (j == null) return null;
                         return new ResendEmailService.DigestJob(
                             uj.getId().toString(),

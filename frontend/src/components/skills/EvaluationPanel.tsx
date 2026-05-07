@@ -1,6 +1,7 @@
 import SkillPanel from './SkillPanel';
+import type { EvaluationData } from '@/types/skills-data';
 
-interface Props { data: any; open: boolean; onClose: () => void; }
+interface Props { data: EvaluationData | null; open: boolean; onClose: () => void; }
 
 export default function EvaluationPanel({ data, open, onClose }: Props) {
   if (!data) return null;
@@ -30,10 +31,10 @@ export default function EvaluationPanel({ data, open, onClose }: Props) {
         {(data.matchedSkills?.length || data.unmatchedSkills?.length) && (
           <Section title="Skills">
             <div className="flex flex-wrap gap-2">
-              {(data.matchedSkills || []).map((s: string) => (
+              {(data.matchedSkills || []).map((s) => (
                 <span key={s} className="chip-green">✓ {s}</span>
               ))}
-              {(data.unmatchedSkills || []).map((s: string) => (
+              {(data.unmatchedSkills || []).map((s) => (
                 <span key={s} className="chip-red">✗ {s}</span>
               ))}
             </div>
@@ -55,10 +56,10 @@ export default function EvaluationPanel({ data, open, onClose }: Props) {
         ))}
 
         {/* CV tips */}
-        {data.cvImprovementTips?.length > 0 && (
+        {data.cvImprovementTips && data.cvImprovementTips.length > 0 && (
           <Section title="CV Improvement Tips">
             <ul className="space-y-2">
-              {data.cvImprovementTips.map((t: string, i: number) => (
+              {data.cvImprovementTips.map((t, i) => (
                 <li key={i} className="flex gap-2"><span className="text-warn-500 shrink-0">→</span>{t}</li>
               ))}
             </ul>

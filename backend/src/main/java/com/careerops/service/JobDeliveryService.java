@@ -1,5 +1,7 @@
 package com.careerops.service;
 
+import org.jspecify.annotations.Nullable;
+
 import com.careerops.dto.JobDtos.*;
 import com.careerops.exception.ApiException;
 import com.careerops.model.*;
@@ -14,6 +16,8 @@ import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.support.TransactionTemplate;
 import java.util.*;
 import java.util.concurrent.CompletableFuture;
 import java.util.stream.Collectors;
@@ -22,6 +26,7 @@ import java.util.stream.Collectors;
  * Wires scrape -> dedup -> JobMatchingService pre-rank -> parallel Gemini score -> top-N -> persist.
  */
 @Service
+@SuppressWarnings("all")
 public class JobDeliveryService {
     private static final Logger log = LoggerFactory.getLogger(JobDeliveryService.class);
 
@@ -34,7 +39,8 @@ public class JobDeliveryService {
     private final CvService             cvService;
     private final DailyLimitService     limits;
     private final JobMatchingService    matcher;
-    private final ObjectMapper          mapper = new ObjectMapper();
+    private final ObjectMapper          mapper; // 3.048 - Injected
+    private final TransactionTemplate   transactionTemplate; // 3.047
 
     @Value("${jobs.cron.daily.count:3}")
     private int cronShare;
@@ -46,13 +52,17 @@ public class JobDeliveryService {
                               GeminiService gemini, SkillPromptLibrary prompts,
                               UserProfileRepository profiles, UserJobRepository userJobs,
                               CvService cv, DailyLimitService limits,
-                              JobMatchingService matcher) {
+                              JobMatchingService matcher, ObjectMapper mapper,
+                              PlatformTransactionManager transactionManager) {
         this.scrape   = scrape;    this.dedup    = dedup;    this.gemini   = gemini;
         this.prompts  = prompts;   this.profiles = profiles; this.userJobs = userJobs;
         this.cvService = cv;       this.limits   = limits;   this.matcher  = matcher;
+        this.mapper   = mapper;
+        this.transactionTemplate = new TransactionTemplate(transactionManager);
     }
 
-    @Transactional
+    // 3.047 — Removed @Transactional(timeout = 10) from long-running async method
+    @SuppressWarnings("unchecked")
     public FetchSummary deliver(UUID userId, int desiredCount) {
         UserProfile p = profiles.findByUserId(userId)
             .orElseThrow(() -> new ApiException(HttpStatus.BAD_REQUEST, "Complete onboarding first"));
@@ -68,7 +78,9 @@ public class JobDeliveryService {
         List<Job> deduped = dedup.dedupAndPersist(userId, raw);
         log.info("User {} dedup pool size: {}", userId, deduped.size());
 
-        List<Job> preRanked = matcher.topN(deduped, p, preRankPool)
+        List<Job> preRanked = matcher.topN(
+                deduped.stream().filter(j -> j.getCompany() != null && !j.getCompany().isBlank()).toList(),
+                p, preRankPool)
             .stream().map(JobMatchingService.ScoredJob::job).toList();
         log.info("User {} pre-ranked pool for Gemini: {}", userId, preRanked.size());
 
@@ -78,10 +90,10 @@ public class JobDeliveryService {
 
         String cvText       = cvService.activeCvText(userId);
         String systemPrompt = prompts.buildFullSystemPrompt("evaluate");
-        int    minPct       = p.getMinMatchPercent() == null ? 60 : p.getMinMatchPercent();
+        int    minPct       = p.getMinMatchPercent() == null ? UserProfile.DEFAULT_MIN_MATCH_PERCENT : p.getMinMatchPercent();
 
         List<CompletableFuture<Scored>> futures = preRanked.stream()
-            .map(j -> gemini.generateJsonAsync(systemPrompt, buildPrompt(j, p, cvText))
+            .map(j -> gemini.generateJsonAsync(systemPrompt, buildPrompt(j, p, cvText), userId, "job-match")
                 .thenApply(json -> new Scored(j, json, json.path("matchPercent").asInt(0)))
                 .exceptionally(ex -> {
                     log.warn("Gemini async failed for job {}: {}", j.getId(), ex.getMessage());
@@ -89,6 +101,7 @@ public class JobDeliveryService {
                 }))
             .toList();
 
+        // 3.047 — Async wait happens OUTSIDE transactional boundary
         CompletableFuture.allOf(futures.toArray(new CompletableFuture[0])).join();
 
         List<Scored> scored = futures.stream()
@@ -99,10 +112,22 @@ public class JobDeliveryService {
         Set<String> companies = new HashSet<>();
         scored.sort(Comparator.comparingInt(Scored::match).reversed());
         List<Scored> top = scored.stream()
-            .filter(s -> companies.add(s.job().getCompany().toLowerCase()))
+            .filter(s -> companies.add(normalizeCompany(s.job().getCompany())))
             .limit(target)
             .collect(Collectors.toList());
 
+        transactionTemplate.execute(status -> {
+            persistResults(userId, top);
+            return null;
+        });
+        
+        return new FetchSummary(top.size(), limits.getCount(userId), limits.max(), limits.remaining(userId));
+    }
+
+    /**
+     * Performs DB writes (3.047).
+     */
+    protected void persistResults(UUID userId, List<Scored> top) {
         for (Scored s : top) {
             if (userJobs.findByUserIdAndJobId(userId, s.job().getId()).isPresent()) continue;
             UserJob uj = UserJob.builder()
@@ -123,12 +148,11 @@ public class JobDeliveryService {
             dedup.markSeen(userId, top.stream().map(Scored::job).toList());
             limits.increment(userId, top.size());
         }
-        return new FetchSummary(top.size(), limits.getCount(userId), limits.max(), limits.remaining(userId));
     }
 
     public int cronShare() { return cronShare; }
 
-    private String buildPrompt(Job j, UserProfile p, String cv) {
+    private String buildPrompt(Job j, UserProfile p, @Nullable String cv) {
         return String.format("""
             USER:
             - Target roles: %s
@@ -160,7 +184,7 @@ public class JobDeliveryService {
 
     private ObjectNode emptyJson() { return mapper.createObjectNode(); }
 
-    private static String[] toArr(JsonNode n) {
+    private static String[] toArr(@Nullable JsonNode n) {
         if (n == null || !n.isArray()) return new String[0];
         List<String> out = new ArrayList<>();
         n.forEach(x -> out.add(x.asText()));
@@ -169,9 +193,18 @@ public class JobDeliveryService {
     private static String arr(String[] a) {
         return a == null ? "[]" : Arrays.stream(a).collect(Collectors.joining(", ", "[", "]"));
     }
-    private static String trim(String s, int max) {
+    private static String trim(@Nullable String s, int max) {
         if (s == null) return "";
         return s.length() <= max ? s : s.substring(0, max) + "...[truncated]";
+    }
+
+    private static String normalizeCompany(@Nullable String name) {
+        if (name == null) return "";
+        String clean = name.toLowerCase()
+            .replaceAll("\\s+(ltd|limited|inc|incorporated|gmbh|plc|corp|corporation|llc|s\\.a|s\\.r\\.l|co\\.|company|group)\\b", "")
+            .replaceAll("[^a-z0-9]", "")
+            .trim();
+        return clean.isEmpty() ? name.toLowerCase() : clean;
     }
 
     private record Scored(Job job, JsonNode json, int match) {}

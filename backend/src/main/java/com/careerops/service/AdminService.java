@@ -9,7 +9,6 @@ import com.careerops.repository.UserJobRepository;
 import com.careerops.repository.UserRepository;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -38,15 +37,21 @@ public class AdminService {
     private final UserJobRepository     userJobs;
     private final AuditLogRepository    auditLogs;
     private final FeatureFlagRepository flags;
+    private final AuthService           authService;
+    private final SupabaseStorageService storage;
 
     public AdminService(UserRepository users,
                         UserJobRepository userJobs,
                         AuditLogRepository auditLogs,
-                        FeatureFlagRepository flags) {
-        this.users     = users;
-        this.userJobs  = userJobs;
-        this.auditLogs = auditLogs;
-        this.flags     = flags;
+                        FeatureFlagRepository flags,
+                        AuthService authService,
+                        SupabaseStorageService storage) {
+        this.users       = users;
+        this.userJobs    = userJobs;
+        this.auditLogs   = auditLogs;
+        this.flags       = flags;
+        this.authService = authService;
+        this.storage     = storage;
     }
 
     // ── Platform stats ──────────────────────────────────────────────────────────
@@ -57,7 +62,7 @@ public class AdminService {
      *   auditEventsToday, topAuditEventTypes (last 24 h, top 5),
      *   activeFeatureFlags count.
      */
-    public Map<String, Object> platformStats() {
+    public com.careerops.dto.AdminDtos.AdminStatsResponse platformStats() {
         Instant since = Instant.now().minus(24, ChronoUnit.HOURS);
 
         long totalUsers  = users.count();
@@ -75,14 +80,14 @@ public class AdminService {
             ))
             .collect(Collectors.toList());
 
-        return Map.of(
-            "totalUsers",         totalUsers,
-            "activeUsers",        activeUsers,
-            "jobsDeliveredToday", jobsToday,
-            "auditEventsToday",   auditToday,
-            "topAuditEvents",     topEvents,
-            "activeFlagCount",    activeFlagsCount,
-            "asOf",               Instant.now().toString()
+        return new com.careerops.dto.AdminDtos.AdminStatsResponse(
+            totalUsers,
+            activeUsers,
+            jobsToday,
+            auditToday,
+            topEvents,
+            activeFlagsCount,
+            Instant.now().toString()
         );
     }
 
@@ -92,12 +97,35 @@ public class AdminService {
         return flags.findAllByOrderByFlagKeyAsc();
     }
 
-    @Transactional
+    @Transactional(timeout = 10)
+    @org.springframework.cache.annotation.CacheEvict(value = "feature-flags", key = "#flagKey")
     public FeatureFlag toggleFlag(String flagKey, boolean enabled) {
         FeatureFlag flag = flags.findByFlagKey(flagKey)
             .orElseThrow(() -> ApiException.notFound("Feature flag not found: " + flagKey));
         flag.setEnabled(enabled);
         return flags.save(flag);
+    }
+
+    @Transactional(timeout = 10, readOnly = true)
+    public com.careerops.dto.AdminDtos.UserListResponse listUsers(int page, int size) {
+        org.springframework.data.domain.Pageable pageable = org.springframework.data.domain.PageRequest.of(page, size, org.springframework.data.domain.Sort.by("createdAt").descending());
+        org.springframework.data.domain.Page<User> userPage = users.findAll(pageable);
+        
+        List<com.careerops.dto.AdminDtos.UserSummaryResponse> summaries = userPage.getContent().stream()
+            .map(u -> new com.careerops.dto.AdminDtos.UserSummaryResponse(
+                u.getId(), u.getName(), u.getEmail(), u.getUsername(),
+                u.getRole() != null ? u.getRole().name() : "USER",
+                u.getCreatedAt(), u.getDeletedAt()
+            ))
+            .toList();
+
+        return new com.careerops.dto.AdminDtos.UserListResponse(
+            summaries,
+            userPage.getTotalElements(),
+            userPage.getTotalPages(),
+            page,
+            size
+        );
     }
 
     // ── User management ────────────────────────────────────────────────────────
@@ -106,13 +134,24 @@ public class AdminService {
      * Soft-deletes a user by setting deleted_at = now().
      * Does NOT delete any related data — data retention is handled separately.
      */
-    @Transactional
+    @Transactional(timeout = 10)
     public void softDeleteUser(UUID userId) {
         User user = users.findById(userId)
             .orElseThrow(() -> ApiException.notFound("User not found: " + userId));
         if (user.getDeletedAt() != null) {
             throw ApiException.conflict("User is already deleted");
         }
+
+        // 2.042 — Security: invalidate all tokens so they cannot keep calling APIs
+        authService.revokeAllTokensForUser(userId);
+
+        // 3.042 — GDPR: Purge files from all buckets when soft-deleting
+        try {
+            storage.purgeUserFiles(userId);
+        } catch (Exception e) {
+            log.error("Non-fatal: Failed to purge storage files for deleted user {}: {}", userId, e.getMessage());
+        }
+
         user.setDeletedAt(Instant.now());
         users.save(user);
         log.warn("Admin soft-deleted userId={}", userId);

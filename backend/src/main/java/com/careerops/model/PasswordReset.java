@@ -10,11 +10,19 @@ import java.util.UUID;
 @Getter @Setter @NoArgsConstructor @AllArgsConstructor @Builder
 public class PasswordReset {
     @Id @GeneratedValue(strategy = GenerationType.UUID) private UUID id;
+    @Column(name = "user_id", nullable = false) private UUID userId;
     @Column(nullable = false) private String email;
     @Column(name = "otp_hash", nullable = false) private String otpHash;
     @Column(name = "expires_at", nullable = false) private Instant expiresAt;
-    private Boolean used;
+    @Column(nullable = false)
+    @Builder.Default
+    private boolean used = false;
     @Column(name = "created_at") private Instant createdAt;
+    @Version private Long version;
 
-    @PrePersist void onCreate() { if (createdAt == null) createdAt = Instant.now(); if (used == null) used = false; }
+    @Column(name = "attempts", nullable = false)
+    @Builder.Default
+    private int attempts = 0;
+
+    @PrePersist void onCreate() { if (createdAt == null) createdAt = Instant.now(); }
 }

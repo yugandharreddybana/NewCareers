@@ -25,11 +25,11 @@ public class AdzunaSource implements JobSource {
     private final int dailyLimit;
     private final AtomicInteger todayCalls = new AtomicInteger(0);
 
-    public AdzunaSource(WebClient.Builder b,
+    public AdzunaSource(JobApiHttpClient httpClient,
                         @Value("${adzuna.app.id}") String appId,
                         @Value("${adzuna.app.key}") String appKey,
                         @Value("${adzuna.daily.limit:250}") int limit) {
-        this.client = b.baseUrl("https://api.adzuna.com").build();
+        this.client = httpClient.createClient("https://api.adzuna.com");
         this.appId = appId; this.appKey = appKey; this.dailyLimit = limit;
     }
 
@@ -67,7 +67,7 @@ public class AdzunaSource implements JobSource {
                     .currency("EUR")
                     .postedAt(parseDate(r.path("created").asText()))
                     .build();
-                j.setFingerprint(FingerprintUtil.of(j.getCompany(), j.getTitle(), j.getLocation()));
+                j.setFingerprint(FingerprintUtil.of(j.getCompany(), j.getTitle(), j.getLocation(), j.getSalaryMin(), j.getSalaryMax()));
                 out.add(j);
             }
         } catch (Exception e) { log.warn("Adzuna fetch failed: {}", e.getMessage()); }

@@ -2,13 +2,12 @@ package com.careerops.model;
 
 import jakarta.persistence.*;
 import lombok.*;
-import org.hibernate.annotations.GenericGenerator;
 
 import java.time.Instant;
 import java.util.UUID;
 
 @Entity
-@Table(name = "workspace_members")
+@Table(name = "workspace_members", schema = "career_operations")
 @Getter
 @Setter
 @NoArgsConstructor
@@ -20,8 +19,7 @@ public class WorkspaceMember {
     public enum InviteStatus { pending, accepted, declined }
 
     @Id
-    @GeneratedValue(generator = "UUID")
-    @GenericGenerator(name = "UUID", strategy = "org.hibernate.id.UUIDGenerator")
+    @GeneratedValue(strategy = GenerationType.UUID)
     @Column(updatable = false, nullable = false)
     private UUID id;
 

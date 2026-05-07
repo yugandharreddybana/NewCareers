@@ -2,7 +2,6 @@ package com.careerops.model;
 
 import jakarta.persistence.*;
 import lombok.*;
-import org.hibernate.annotations.GenericGenerator;
 
 import java.math.BigDecimal;
 import java.time.Instant;
@@ -10,13 +9,12 @@ import java.time.LocalDate;
 import java.util.UUID;
 
 @Entity
-@Table(name = "weekly_progress_snapshots")
+@Table(name = "weekly_progress_snapshots", schema = "career_operations")
 @Getter @Setter @NoArgsConstructor @AllArgsConstructor @Builder
 public class WeeklyProgressSnapshot {
 
     @Id
-    @GeneratedValue(generator = "UUID")
-    @GenericGenerator(name = "UUID", strategy = "org.hibernate.id.UUIDGenerator")
+    @GeneratedValue(strategy = GenerationType.UUID)
     @Column(updatable = false, nullable = false)
     private UUID id;
 
@@ -29,24 +27,31 @@ public class WeeklyProgressSnapshot {
     @Column(name = "week_end", nullable = false)
     private LocalDate weekEnd;
 
+    @Builder.Default
     @Column(name = "jobs_reviewed", nullable = false)
     private Integer jobsReviewed = 0;
 
+    @Builder.Default
     @Column(name = "applications_submitted", nullable = false)
     private Integer applicationsSubmitted = 0;
 
+    @Builder.Default
     @Column(name = "interviews_scheduled", nullable = false)
     private Integer interviewsScheduled = 0;
 
+    @Builder.Default
     @Column(name = "responses_received", nullable = false)
     private Integer responsesReceived = 0;
 
+    @Builder.Default
     @Column(name = "offers_received", nullable = false)
     private Integer offersReceived = 0;
 
+    @Builder.Default
     @Column(name = "daily_use_streak", nullable = false)
     private Integer dailyUseStreak = 0;
 
+    @Builder.Default
     @Column(name = "max_daily_use_streak", nullable = false)
     private Integer maxDailyUseStreak = 0;
 

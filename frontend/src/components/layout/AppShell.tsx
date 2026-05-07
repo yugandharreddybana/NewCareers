@@ -17,11 +17,11 @@
  *
  * Includes DevModeBanner in development when VITE_DEV_BYPASS_GUARDS=true.
  */
-import { Suspense } from 'react';
-import { Outlet } from 'react-router-dom';
+import React, { Suspense } from 'react';
+import { Outlet, useLocation } from 'react-router-dom';
 import { motion } from 'framer-motion';
-import Sidebar   from '@/components/layout/Sidebar';
-import TopBar    from '@/components/layout/TopBar';
+import Sidebar from '@/components/layout/Sidebar';
+import TopBar from '@/components/layout/TopBar';
 import BottomNav from '@/components/layout/BottomNav';
 import DevModeBanner from '@/components/ui/DevModeBanner';
 import { Sparkles } from 'lucide-react';
@@ -30,9 +30,13 @@ import { PageLoader } from '@/components/LoadingSpinner';
 
 interface AppShellProps {
   children?: React.ReactNode;
+  page?: string;
 }
 
 export default function AppShell({ children }: AppShellProps) {
+  const location = useLocation();
+  const isKanban = location.pathname.startsWith('/kanban');
+
   const content = children ?? (
     <ErrorBoundary>
       <Suspense fallback={<PageLoader />}>
@@ -42,7 +46,7 @@ export default function AppShell({ children }: AppShellProps) {
   );
 
   return (
-    <div className="min-h-screen bg-[#f5f6fa]">
+    <div className="min-h-screen bg-[#f5f6fa] text-slate-900 dark:bg-slate-950 dark:text-slate-100">
 
       {/* ── Desktop Sidebar ── */}
       <div className="hidden md:block">
@@ -55,12 +59,12 @@ export default function AppShell({ children }: AppShellProps) {
       </div>
 
       {/* ── Mobile top brand bar ── */}
-      <header className="md:hidden fixed top-0 inset-x-0 z-40 h-14 flex items-center px-4 bg-white border-b border-[#e2e8f0]">
+      <header className="md:hidden fixed top-0 inset-x-0 z-40 h-14 flex items-center px-4 bg-white border-b border-[#e2e8f0] dark:bg-slate-950 dark:border-white/10">
         <div className="flex items-center gap-2">
           <div className="w-7 h-7 bg-[#6366f1] rounded-lg flex items-center justify-center">
             <Sparkles size={14} className="text-white" />
           </div>
-          <span className="font-bold text-[15px] text-[#0f172a] font-display">
+          <span className="font-bold text-[15px] text-[#0f172a] dark:text-white font-display">
             Career<span className="text-[#6366f1]">Ops</span>
           </span>
         </div>
@@ -68,10 +72,9 @@ export default function AppShell({ children }: AppShellProps) {
 
       {/* ── Desktop content area ── */}
       <main
-        className="hidden md:block pt-[60px] min-h-screen"
-        style={{ marginLeft: 'var(--sidebar-width, 240px)' }}
+        className={`hidden md:block ${isKanban ? 'pt-[5px]' : 'pt-[60px] app-shell-content-offset'} min-h-screen`}
       >
-        <div className="max-w-[1200px] mx-auto px-6 py-6">
+        <div className="mx-auto px-6 py-6">
           <motion.div
             initial={{ opacity: 0, y: 8 }}
             animate={{ opacity: 1, y: 0 }}

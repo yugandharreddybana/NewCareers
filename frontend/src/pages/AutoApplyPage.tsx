@@ -1,66 +1,187 @@
-import React, { useEffect, useState } from 'react';
-import { PageMeta } from '@/components/PageMeta';
-import { autoApplyApi, type AutoApplyAnswer, type AutoApplyRun, type AutoApplyRunStatus } from '@/services/autoApplyApi';
-import * as mocks from '@/services/mockApi';
+import { useEffect, useState } from 'react';
 import toast from 'react-hot-toast';
 import {
-  Zap, CheckCircle, XCircle, Clock, AlertTriangle,
-  Plus, Trash2, Edit2, Save, X, RefreshCw,
-  PlayCircle, ChevronRight,
+  AlertTriangle,
+  CheckCircle,
+  ChevronRight,
+  Clock,
+  Edit2,
+  PlayCircle,
+  Plus,
+  RefreshCw,
+  Save,
+  Trash2,
+  X,
+  XCircle,
+  Zap,
+  type LucideIcon,
 } from 'lucide-react';
+import { PageMeta } from '@/components/PageMeta';
+import {
+  autoApplyApi,
+  type AnswerBankEntry,
+  type ApplicationRun,
+} from '@/services/autoApplyApi';
 
 const USE_MOCKS = import.meta.env.VITE_USE_MOCKS === 'true';
 
+type AnswerCategory = 'experience' | 'education' | 'skills' | 'personal' | 'other';
+type AutoApplyRunStatus = 'pending' | 'running' | 'awaiting_approval' | 'submitted' | 'failed' | 'cancelled';
+
+interface AutoApplyAnswer {
+  id: string;
+  question: string;
+  answer: string;
+  category: AnswerCategory;
+}
+
+interface AutoApplyRun {
+  id: string;
+  userJobId: string;
+  jobTitle: string;
+  company: string;
+  status: AutoApplyRunStatus;
+  steps: ApplicationRun['steps'];
+  startedAt: string;
+  completedAt: string | null;
+  errorMessage: string | null;
+}
+
 const MOCK_ANSWERS: AutoApplyAnswer[] = [
-  { id: 'a-1', question: 'Do you have the right to work in Ireland?',   answer: 'Yes',              category: 'personal' },
-  { id: 'a-2', question: 'Years of experience with React?',             answer: '4',                category: 'skills' },
-  { id: 'a-3', question: 'What is your notice period?',                 answer: '4 weeks',          category: 'personal' },
-  { id: 'a-4', question: 'Are you willing to relocate?',                answer: 'Within Ireland',   category: 'personal' },
-  { id: 'a-5', question: 'Highest level of education?',                 answer: 'MSc Data Analytics', category: 'education' },
+  { id: 'a-1', question: 'Do you have the right to work in Ireland?', answer: 'Yes', category: 'personal' },
+  { id: 'a-2', question: 'Years of experience with React?', answer: '4', category: 'skills' },
+  { id: 'a-3', question: 'What is your notice period?', answer: '4 weeks', category: 'personal' },
+  { id: 'a-4', question: 'Are you willing to relocate?', answer: 'Within Ireland', category: 'personal' },
+  { id: 'a-5', question: 'Highest level of education?', answer: 'MSc Data Analytics', category: 'education' },
 ];
 
 const MOCK_HISTORY: AutoApplyRun[] = [
-  { id: 'run-1', userJobId: 'uj-1', jobTitle: 'Senior Frontend Engineer', company: 'TechWave Ireland', status: 'submitted', steps: [], startedAt: new Date(Date.now() - 3600000).toISOString(), completedAt: new Date(Date.now() - 3000000).toISOString(), errorMessage: null },
-  { id: 'run-2', userJobId: 'uj-2', jobTitle: 'Lead Full Stack Developer', company: 'EcoGrowth',     status: 'awaiting_approval', steps: [], startedAt: new Date(Date.now() - 900000).toISOString(), completedAt: null, errorMessage: null },
-  { id: 'run-3', userJobId: 'uj-3', jobTitle: 'Product Designer',          company: 'DesignScale',  status: 'failed',   steps: [], startedAt: new Date(Date.now() - 7200000).toISOString(), completedAt: new Date(Date.now() - 7000000).toISOString(), errorMessage: 'Login wall detected' },
+  {
+    id: 'run-1',
+    userJobId: 'uj-1',
+    jobTitle: 'Senior Frontend Engineer',
+    company: 'TechWave Ireland',
+    status: 'submitted',
+    steps: [],
+    startedAt: new Date(Date.now() - 3_600_000).toISOString(),
+    completedAt: new Date(Date.now() - 3_000_000).toISOString(),
+    errorMessage: null,
+  },
+  {
+    id: 'run-2',
+    userJobId: 'uj-2',
+    jobTitle: 'Lead Full Stack Developer',
+    company: 'EcoGrowth',
+    status: 'awaiting_approval',
+    steps: [],
+    startedAt: new Date(Date.now() - 900_000).toISOString(),
+    completedAt: null,
+    errorMessage: null,
+  },
+  {
+    id: 'run-3',
+    userJobId: 'uj-3',
+    jobTitle: 'Product Designer',
+    company: 'DesignScale',
+    status: 'failed',
+    steps: [],
+    startedAt: new Date(Date.now() - 7_200_000).toISOString(),
+    completedAt: new Date(Date.now() - 7_000_000).toISOString(),
+    errorMessage: 'Login wall detected',
+  },
 ];
 
-const STATUS_META: Record<AutoApplyRunStatus, { label: string; color: string; icon: React.ReactNode }> = {
-  pending:           { label: 'Pending',           color: 'bg-gray-100 text-gray-600',   icon: <Clock size={11} /> },
-  running:           { label: 'Running',           color: 'bg-blue-100 text-blue-600',   icon: <RefreshCw size={11} className="animate-spin" /> },
-  awaiting_approval: { label: 'Needs Approval',    color: 'bg-amber-100 text-amber-700', icon: <AlertTriangle size={11} /> },
-  approved:          { label: 'Approved',          color: 'bg-indigo-100 text-indigo-700', icon: <CheckCircle size={11} /> },
-  submitted:         { label: 'Submitted',         color: 'bg-emerald-100 text-emerald-700', icon: <CheckCircle size={11} /> },
-  failed:            { label: 'Failed',            color: 'bg-red-100 text-red-600',     icon: <XCircle size={11} /> },
-  cancelled:         { label: 'Cancelled',         color: 'bg-gray-100 text-gray-500',   icon: <X size={11} /> },
+const STATUS_META: Record<AutoApplyRunStatus, { label: string; color: string; icon: LucideIcon; animate?: boolean }> = {
+  pending: { label: 'Pending', color: 'bg-gray-100 text-gray-600', icon: Clock },
+  running: { label: 'Running', color: 'bg-blue-100 text-blue-600', icon: RefreshCw, animate: true },
+  awaiting_approval: { label: 'Needs Approval', color: 'bg-amber-100 text-amber-700', icon: AlertTriangle },
+  submitted: { label: 'Submitted', color: 'bg-emerald-100 text-emerald-700', icon: CheckCircle },
+  failed: { label: 'Failed', color: 'bg-red-100 text-red-600', icon: XCircle },
+  cancelled: { label: 'Cancelled', color: 'bg-gray-100 text-gray-500', icon: X },
 };
 
-const CATEGORY_COLORS: Record<AutoApplyAnswer['category'], string> = {
+const CATEGORY_COLORS: Record<AnswerCategory, string> = {
   experience: 'bg-blue-100 text-blue-700',
-  education:  'bg-purple-100 text-purple-700',
-  skills:     'bg-emerald-100 text-emerald-700',
-  personal:   'bg-orange-100 text-orange-700',
-  other:      'bg-gray-100 text-gray-600',
+  education: 'bg-purple-100 text-purple-700',
+  skills: 'bg-emerald-100 text-emerald-700',
+  personal: 'bg-orange-100 text-orange-700',
+  other: 'bg-gray-100 text-gray-600',
 };
 
-// ── Answer editor row ─────────────────────────────────────────────────────────
-const AnswerRow: React.FC<{
-  answer: AutoApplyAnswer;
-  onSave: (a: AutoApplyAnswer) => void;
-  onDelete: (id: string) => void;
-}> = ({ answer, onSave, onDelete }) => {
-  const [editing, setEditing] = useState(false);
-  const [val, setVal] = useState(answer.answer);
+const humanizeQuestionKey = (questionKey: string) =>
+  questionKey
+    .replace(/[_-]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
 
-  const handleSave = () => { onSave({ ...answer, answer: val }); setEditing(false); };
+const inferAnswerCategory = (questionKey: string): AnswerCategory => {
+  const normalized = questionKey.toLowerCase();
+  if (/(react|node|java|python|skill|experience|years)/.test(normalized)) return 'skills';
+  if (/(degree|education|university|college|msc|bsc|phd)/.test(normalized)) return 'education';
+  if (/(notice|relocate|work|visa|sponsorship|salary|personal)/.test(normalized)) return 'personal';
+  if (/(employment|history|career)/.test(normalized)) return 'experience';
+  return 'other';
+};
+
+const normalizeRunStatus = (status: ApplicationRun['status']): AutoApplyRunStatus => {
+  switch (status) {
+    case 'in_progress':
+      return 'running';
+    case 'completed':
+      return 'submitted';
+    default:
+      return status;
+  }
+};
+
+const toAnswerRecord = (entry: AnswerBankEntry): AutoApplyAnswer => ({
+  id: entry.id,
+  question: humanizeQuestionKey(entry.questionKey),
+  answer: entry.answerText,
+  category: inferAnswerCategory(entry.questionKey),
+});
+
+const toRunRecord = (run: ApplicationRun): AutoApplyRun => ({
+  id: run.id,
+  userJobId: run.userJobId,
+  jobTitle: `Job ${run.userJobId.slice(0, 8)}`,
+  company: 'CareerOps tracked application',
+  status: normalizeRunStatus(run.status),
+  steps: run.steps,
+  startedAt: run.createdAt,
+  completedAt: run.submittedAt,
+  errorMessage: run.errorMessage,
+});
+
+const AnswerRow = ({
+  answer,
+  onSave,
+  onDelete,
+}: {
+  answer: AutoApplyAnswer;
+  onSave: (answer: AutoApplyAnswer) => void;
+  onDelete: (id: string) => void;
+}) => {
+  const [editing, setEditing] = useState(false);
+  const [value, setValue] = useState(answer.answer);
+
+  const handleSave = () => {
+    onSave({ ...answer, answer: value });
+    setEditing(false);
+  };
 
   return (
     <div className="flex items-start gap-3 py-3 border-b border-gray-100 last:border-0">
       <div className="flex-1 min-w-0">
         <p className="text-xs text-gray-500 mb-1">{answer.question}</p>
         {editing ? (
-          <input autoFocus value={val} onChange={e => setVal(e.target.value)}
-            className="w-full px-2.5 py-1.5 border border-indigo-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400" />
+          <input
+            autoFocus
+            value={value}
+            onChange={event => setValue(event.target.value)}
+            aria-label="Edit auto-apply answer"
+            className="w-full px-2.5 py-1.5 border border-indigo-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400"
+          />
         ) : (
           <p className="text-sm font-semibold text-gray-900">{answer.answer}</p>
         )}
@@ -69,13 +190,13 @@ const AnswerRow: React.FC<{
         <span className={`px-1.5 py-0.5 text-[10px] font-bold rounded-full ${CATEGORY_COLORS[answer.category]}`}>{answer.category}</span>
         {editing ? (
           <>
-            <button onClick={handleSave} className="p-1.5 rounded text-emerald-600 hover:bg-emerald-50"><Save size={13} /></button>
-            <button onClick={() => { setVal(answer.answer); setEditing(false); }} className="p-1.5 rounded text-gray-400 hover:bg-gray-50"><X size={13} /></button>
+            <button aria-label="Save answer" title="Save answer" onClick={handleSave} className="p-1.5 rounded text-emerald-600 hover:bg-emerald-50"><Save size={13} /></button>
+            <button aria-label="Cancel editing" title="Cancel editing" onClick={() => { setValue(answer.answer); setEditing(false); }} className="p-1.5 rounded text-gray-400 hover:bg-gray-50"><X size={13} /></button>
           </>
         ) : (
           <>
-            <button onClick={() => setEditing(true)} className="p-1.5 rounded text-gray-400 hover:text-indigo-500 hover:bg-indigo-50"><Edit2 size={13} /></button>
-            <button onClick={() => onDelete(answer.id)} className="p-1.5 rounded text-gray-400 hover:text-red-500 hover:bg-red-50"><Trash2 size={13} /></button>
+            <button aria-label="Edit answer" title="Edit answer" onClick={() => setEditing(true)} className="p-1.5 rounded text-gray-400 hover:text-indigo-500 hover:bg-indigo-50"><Edit2 size={13} /></button>
+            <button aria-label="Delete answer" title="Delete answer" onClick={() => onDelete(answer.id)} className="p-1.5 rounded text-gray-400 hover:text-red-500 hover:bg-red-50"><Trash2 size={13} /></button>
           </>
         )}
       </div>
@@ -83,51 +204,91 @@ const AnswerRow: React.FC<{
   );
 };
 
-// ── Add answer form ───────────────────────────────────────────────────────────
-const AddAnswerForm: React.FC<{ onAdd: (a: AutoApplyAnswer) => void }> = ({ onAdd }) => {
+const AddAnswerForm = ({ onAdd }: { onAdd: (answer: AutoApplyAnswer) => void }) => {
   const [question, setQuestion] = useState('');
-  const [answer, setAnswer]     = useState('');
-  const [category, setCategory] = useState<AutoApplyAnswer['category']>('personal');
-  const [saving, setSaving]     = useState(false);
+  const [answer, setAnswer] = useState('');
+  const [category, setCategory] = useState<AnswerCategory>('personal');
+  const [saving, setSaving] = useState(false);
 
   const handleAdd = async () => {
-    if (!question.trim() || !answer.trim()) { toast.error('Question and answer are required.'); return; }
+    if (!question.trim() || !answer.trim()) {
+      toast.error('Question and answer are required.');
+      return;
+    }
+
     setSaving(true);
     try {
-      const res = USE_MOCKS
+      const result = USE_MOCKS
         ? { id: `a-${Date.now()}`, question, answer, category }
-        : await autoApplyApi.upsertAnswer({ question, answer, category });
-      onAdd(res);
-      setQuestion(''); setAnswer(''); setCategory('personal');
+        : toAnswerRecord(await autoApplyApi.upsertAnswer({
+            questionKey: question,
+            answerText: answer,
+          }));
+      onAdd(result);
+      setQuestion('');
+      setAnswer('');
+      setCategory('personal');
       toast.success('Answer added to bank.');
-    } catch { toast.error('Failed to save answer.'); }
-    finally { setSaving(false); }
+    } catch {
+      toast.error('Failed to save answer.');
+    } finally {
+      setSaving(false);
+    }
   };
 
   return (
     <div className="bg-gray-50 border border-gray-200 rounded-xl p-4 space-y-3">
       <p className="text-xs font-semibold text-gray-700">Add New Answer</p>
-      <input value={question} onChange={e => setQuestion(e.target.value)} placeholder="Question text…"
-        className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400" />
+      <input
+        value={question}
+        onChange={event => setQuestion(event.target.value)}
+        placeholder="Question text..."
+        className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400"
+      />
       <div className="flex gap-2">
-        <input value={answer} onChange={e => setAnswer(e.target.value)} placeholder="Your answer…"
-          className="flex-1 px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400" />
-        <select value={category} onChange={e => setCategory(e.target.value as AutoApplyAnswer['category'])}
-          className="px-2 py-2 border border-gray-300 rounded-lg text-xs focus:outline-none focus:ring-2 focus:ring-indigo-400">
-          {(['experience','education','skills','personal','other'] as const).map(c => <option key={c} value={c}>{c}</option>)}
+        <input
+          value={answer}
+          onChange={event => setAnswer(event.target.value)}
+          placeholder="Your answer..."
+          className="flex-1 px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400"
+        />
+        <select
+          value={category}
+          onChange={event => setCategory(event.target.value as AnswerCategory)}
+          aria-label="Answer category"
+          className="px-2 py-2 border border-gray-300 rounded-lg text-xs focus:outline-none focus:ring-2 focus:ring-indigo-400"
+        >
+          {(['experience', 'education', 'skills', 'personal', 'other'] as const).map(item => (
+            <option key={item} value={item}>{item}</option>
+          ))}
         </select>
-        <button onClick={handleAdd} disabled={saving}
-          className="px-4 py-2 bg-indigo-500 hover:bg-indigo-600 disabled:opacity-60 text-white text-xs font-bold rounded-lg transition-colors">
-          {saving ? '…' : <Plus size={14} />}
+        <button
+          type="button"
+          aria-label="Add answer"
+          title="Add answer"
+          onClick={handleAdd}
+          disabled={saving}
+          className="px-4 py-2 bg-indigo-500 hover:bg-indigo-600 disabled:opacity-60 text-white text-xs font-bold rounded-lg transition-colors"
+        >
+          {saving ? '...' : <Plus size={14} />}
         </button>
       </div>
     </div>
   );
 };
 
-// ── Run history card ──────────────────────────────────────────────────────────
-const RunCard: React.FC<{ run: AutoApplyRun; onApprove: (id: string) => void; onRetry: (id: string) => void }> = ({ run, onApprove, onRetry }) => {
+const RunCard = ({
+  run,
+  onApprove,
+  onRetry,
+}: {
+  run: AutoApplyRun;
+  onApprove: (id: string) => void;
+  onRetry: (id: string) => void;
+}) => {
   const meta = STATUS_META[run.status];
+  const StatusIcon = meta.icon;
+
   return (
     <div className="bg-white border border-gray-200 rounded-xl p-4 flex items-start gap-3">
       <div className="w-9 h-9 bg-gray-100 rounded-xl flex items-center justify-center shrink-0">
@@ -140,7 +301,7 @@ const RunCard: React.FC<{ run: AutoApplyRun; onApprove: (id: string) => void; on
         </div>
         <div className="flex items-center gap-2 mt-1 flex-wrap">
           <span className={`inline-flex items-center gap-1 px-2 py-0.5 text-[10px] font-bold rounded-full ${meta.color}`}>
-            {meta.icon} {meta.label}
+            <StatusIcon size={11} className={meta.animate ? 'animate-spin' : undefined} /> {meta.label}
           </span>
           {run.errorMessage && <span className="text-[11px] text-red-500">{run.errorMessage}</span>}
           <span className="text-[10px] text-gray-400">{new Date(run.startedAt).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })}</span>
@@ -148,14 +309,12 @@ const RunCard: React.FC<{ run: AutoApplyRun; onApprove: (id: string) => void; on
       </div>
       <div className="flex flex-col gap-1 shrink-0">
         {run.status === 'awaiting_approval' && (
-          <button onClick={() => onApprove(run.id)}
-            className="px-3 py-1.5 bg-emerald-500 hover:bg-emerald-600 text-white text-xs font-bold rounded-lg transition-colors">
+          <button onClick={() => onApprove(run.id)} className="px-3 py-1.5 bg-emerald-500 hover:bg-emerald-600 text-white text-xs font-bold rounded-lg transition-colors">
             Approve
           </button>
         )}
         {run.status === 'failed' && (
-          <button onClick={() => onRetry(run.id)}
-            className="px-3 py-1.5 border border-gray-300 text-gray-600 text-xs font-bold rounded-lg hover:bg-gray-50 transition-colors">
+          <button onClick={() => onRetry(run.id)} className="px-3 py-1.5 border border-gray-300 text-gray-600 text-xs font-bold rounded-lg hover:bg-gray-50 transition-colors">
             Retry
           </button>
         )}
@@ -164,74 +323,99 @@ const RunCard: React.FC<{ run: AutoApplyRun; onApprove: (id: string) => void; on
   );
 };
 
-// ── Main page ─────────────────────────────────────────────────────────────────
-const AutoApplyPage: React.FC = () => {
-  const [answers, setAnswers]   = useState<AutoApplyAnswer[]>([]);
-  const [history, setHistory]   = useState<AutoApplyRun[]>([]);
-  const [loading, setLoading]   = useState(true);
-  const [tab, setTab]           = useState<'answers' | 'history'>('answers');
+const AutoApplyPage = () => {
+  const [answers, setAnswers] = useState<AutoApplyAnswer[]>([]);
+  const [history, setHistory] = useState<AutoApplyRun[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [tab, setTab] = useState<'answers' | 'history'>('answers');
 
   useEffect(() => {
     const load = async () => {
       try {
         if (USE_MOCKS) {
-          await new Promise(r => setTimeout(r, 500));
+          await new Promise(resolve => setTimeout(resolve, 500));
           setAnswers(MOCK_ANSWERS);
           setHistory(MOCK_HISTORY);
-        } else {
-          const [ans, hist] = await Promise.all([
-            autoApplyApi.getAnswers().catch(() => MOCK_ANSWERS),
-            autoApplyApi.getHistory().catch(() => MOCK_HISTORY),
-          ]);
-          setAnswers(ans);
-          setHistory(hist);
+          return;
         }
-      } finally { setLoading(false); }
+
+        const [answerEntries, runResponse] = await Promise.all([
+          autoApplyApi.listAnswers().catch(() => [] as AnswerBankEntry[]),
+          autoApplyApi.listRuns().catch(() => ({ runs: [] as ApplicationRun[], total: 0 })),
+        ]);
+        setAnswers(answerEntries.map(toAnswerRecord));
+        setHistory(runResponse.runs.map(toRunRecord));
+      } finally {
+        setLoading(false);
+      }
     };
-    load();
+
+    void load();
   }, []);
 
   const handleSaveAnswer = async (updated: AutoApplyAnswer) => {
     try {
-      if (!USE_MOCKS) await autoApplyApi.upsertAnswer(updated);
-      setAnswers(prev => prev.map(a => a.id === updated.id ? updated : a));
+      const saved = USE_MOCKS
+        ? updated
+        : toAnswerRecord(await autoApplyApi.upsertAnswer({
+            questionKey: updated.question,
+            answerText: updated.answer,
+          }));
+      setAnswers(prev => prev.map(answer => answer.id === updated.id ? saved : answer));
       toast.success('Answer updated.');
-    } catch { toast.error('Failed to update answer.'); }
+    } catch {
+      toast.error('Failed to update answer.');
+    }
   };
 
   const handleDeleteAnswer = async (id: string) => {
     try {
       if (!USE_MOCKS) await autoApplyApi.deleteAnswer(id);
-      setAnswers(prev => prev.filter(a => a.id !== id));
+      setAnswers(prev => prev.filter(answer => answer.id !== id));
       toast.success('Answer removed.');
-    } catch { toast.error('Failed to delete answer.'); }
+    } catch {
+      toast.error('Failed to delete answer.');
+    }
   };
 
   const handleApprove = async (runId: string) => {
     try {
-      if (!USE_MOCKS) await autoApplyApi.approve(runId, true);
-      setHistory(prev => prev.map(r => r.id === runId ? { ...r, status: 'approved' as AutoApplyRunStatus } : r));
+      const updated = USE_MOCKS
+        ? history.find(run => run.id === runId)
+        : toRunRecord(await autoApplyApi.approveRun(runId, true));
+      if (!updated) return;
+
+      setHistory(prev => prev.map(run => run.id === runId ? { ...updated, status: 'submitted' } : run));
       toast.success('Application approved for submission!');
-    } catch { toast.error('Failed to approve.'); }
+    } catch {
+      toast.error('Failed to approve.');
+    }
   };
 
   const handleRetry = async (runId: string) => {
     try {
-      if (!USE_MOCKS) await autoApplyApi.retry(runId);
-      setHistory(prev => prev.map(r => r.id === runId ? { ...r, status: 'running' as AutoApplyRunStatus } : r));
+      const updated = USE_MOCKS
+        ? history.find(run => run.id === runId)
+        : toRunRecord(await autoApplyApi.retryRun(runId));
+      if (!updated) return;
+
+      setHistory(prev => prev.map(run => run.id === runId ? { ...updated, status: 'running' } : run));
       toast.success('Retry started.');
-    } catch { toast.error('Failed to retry.'); }
+    } catch {
+      toast.error('Failed to retry.');
+    }
   };
 
-  if (loading) return <div className="flex items-center justify-center min-h-[50vh] text-gray-400 text-sm">Loading Auto-Apply…</div>;
+  if (loading) {
+    return <div className="flex items-center justify-center min-h-[50vh] text-gray-400 text-sm">Loading Auto-Apply...</div>;
+  }
 
-  const pendingApprovals = history.filter(r => r.status === 'awaiting_approval').length;
+  const pendingApprovals = history.filter(run => run.status === 'awaiting_approval').length;
 
   return (
     <>
-      <PageMeta title="Auto-Apply — CareerOps" />
+      <PageMeta title="Auto-Apply - CareerOps" />
       <div className="max-w-3xl mx-auto px-4 sm:px-6 py-8 space-y-6">
-
         <div className="flex items-start justify-between">
           <div>
             <h1 className="text-2xl font-semibold text-gray-900">Auto-Apply</h1>
@@ -244,27 +428,28 @@ const AutoApplyPage: React.FC = () => {
           )}
         </div>
 
-        {/* How it works banner */}
         <div className="bg-indigo-50 border border-indigo-100 rounded-xl p-4">
-          <p className="text-xs font-semibold text-indigo-800 mb-2">⚡ How Auto-Apply works</p>
+          <p className="text-xs font-semibold text-indigo-800 mb-2">How Auto-Apply works</p>
           <div className="flex items-center gap-2 flex-wrap">
-            {['1. AI fills the form', '2. You review & approve', '3. Agent submits'].map((s, i) => (
-              <span key={i} className="flex items-center gap-1 text-xs text-indigo-700">
-                {s} {i < 2 && <ChevronRight size={12} className="text-indigo-400" />}
+            {['1. AI fills the form', '2. You review & approve', '3. Agent submits'].map((step, index) => (
+              <span key={index} className="flex items-center gap-1 text-xs text-indigo-700">
+                {step} {index < 2 && <ChevronRight size={12} className="text-indigo-400" />}
               </span>
             ))}
           </div>
         </div>
 
-        {/* Tabs */}
         <div className="flex border-b border-gray-200">
-          {(['answers', 'history'] as const).map(t => (
-            <button key={t} onClick={() => setTab(t)}
+          {(['answers', 'history'] as const).map(currentTab => (
+            <button
+              key={currentTab}
+              onClick={() => setTab(currentTab)}
               className={`px-4 py-2.5 text-sm font-medium border-b-2 -mb-px transition-colors capitalize ${
-                tab === t ? 'border-indigo-500 text-indigo-600' : 'border-transparent text-gray-500 hover:text-gray-700'
-              }`}>
-              {t === 'answers' ? 'Answer Bank' : 'Run History'}
-              {t === 'history' && pendingApprovals > 0 && (
+                tab === currentTab ? 'border-indigo-500 text-indigo-600' : 'border-transparent text-gray-500 hover:text-gray-700'
+              }`}
+            >
+              {currentTab === 'answers' ? 'Answer Bank' : 'Run History'}
+              {currentTab === 'history' && pendingApprovals > 0 && (
                 <span className="ml-2 px-1.5 py-0.5 bg-amber-400 text-white text-[10px] font-bold rounded-full">{pendingApprovals}</span>
               )}
             </button>
@@ -276,27 +461,27 @@ const AutoApplyPage: React.FC = () => {
             <div className="bg-white border border-gray-200 rounded-xl p-4">
               <p className="text-xs font-semibold text-gray-700 mb-1">Answer Bank ({answers.length} answers)</p>
               <p className="text-xs text-gray-400 mb-4">Pre-filled answers used by the agent when it encounters common application questions.</p>
-              {answers.map(a => (
-                <AnswerRow key={a.id} answer={a} onSave={handleSaveAnswer} onDelete={handleDeleteAnswer} />
+              {answers.map(answer => (
+                <AnswerRow key={answer.id} answer={answer} onSave={handleSaveAnswer} onDelete={handleDeleteAnswer} />
               ))}
               {answers.length === 0 && <p className="text-sm text-gray-400 text-center py-4">No answers yet.</p>}
             </div>
-            <AddAnswerForm onAdd={a => setAnswers(prev => [...prev, a])} />
+            <AddAnswerForm onAdd={answer => setAnswers(prev => [...prev, answer])} />
           </div>
         )}
 
         {tab === 'history' && (
           <div className="space-y-3">
-            {history.length > 0
-              ? history.map(r => <RunCard key={r.id} run={r} onApprove={handleApprove} onRetry={handleRetry} />)
-              : <div className="bg-gray-50 border border-gray-200 rounded-xl p-10 text-center">
-                  <Zap size={24} className="mx-auto text-gray-300 mb-2" />
-                  <p className="text-sm text-gray-500">No auto-apply runs yet. Start one from the Job Detail page.</p>
-                </div>
-            }
+            {history.length > 0 ? (
+              history.map(run => <RunCard key={run.id} run={run} onApprove={handleApprove} onRetry={handleRetry} />)
+            ) : (
+              <div className="bg-gray-50 border border-gray-200 rounded-xl p-10 text-center">
+                <Zap size={24} className="mx-auto text-gray-300 mb-2" />
+                <p className="text-sm text-gray-500">No auto-apply runs yet. Start one from the Job Detail page.</p>
+              </div>
+            )}
           </div>
         )}
-
       </div>
     </>
   );

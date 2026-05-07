@@ -13,7 +13,6 @@ import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 
 import java.time.Instant;
-import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -35,57 +34,71 @@ public class PlannerReminderScheduler {
     private final EmailService emailService;
 
     /** Task 30 — Notify overdue tasks every 6 hours */
-    @Scheduled(cron = "0 0 */6 * * *")
+    @Scheduled(cron = "0 0 */6 * * *", zone = "Europe/Dublin")
+    @org.springframework.transaction.annotation.Transactional
     public void notifyOverdueTasks() {
+        // 3.090 — Add jitter
+        try { Thread.sleep(new java.util.Random().nextInt(30000)); } 
+        catch (InterruptedException e) { Thread.currentThread().interrupt(); }
+ 
         List<ApplicationTask> overdue = taskRepo
-                .findByStatusAndDueDateBeforeAndReminderSentFalse("PENDING", LocalDateTime.now());
-
-        for (ApplicationTask task : overdue) {
-            try {
-                Notification n = new Notification();
-                n.setId(UUID.randomUUID());
-                n.setUserId(task.getUserId());
-                n.setType("OVERDUE_TASK");
-                n.setTitle("Overdue task!");
-                n.setBody("\"" + task.getTitle() + "\" was due and hasn't been completed yet.");
-                n.setRead(false);
-                n.setCreatedAt(Instant.now());
-                n.setMetadata(Map.of("entityType", "application_task", "entityId", task.getId().toString()));
-                notificationRepo.save(n);
-
-                task.setReminderSent(true);
-                taskRepo.save(task);
-                log.info("Overdue notification created for taskId={}", task.getId());
-            } catch (Exception e) {
-                log.error("Failed to notify overdue task {}: {}", task.getId(), e.getMessage());
-            }
+                .findByStatusAndDueDateBeforeAndReminderSentFalse("PENDING", Instant.now());
+ 
+        if (overdue.isEmpty()) {
+            return;
         }
+
+        java.util.ArrayList<Notification> notificationsToSave = new java.util.ArrayList<>();
+        for (ApplicationTask task : overdue) {
+            Notification n = Notification.builder()
+                    .id(UUID.randomUUID())
+                    .userId(task.getUserId())
+                    .type("OVERDUE_TASK")
+                    .title("Overdue task!")
+                    .body("\"" + task.getTitle() + "\" was due and hasn't been completed yet.")
+                    .read(false)
+                    .createdAt(Instant.now())
+                    .metadata(Map.of("entityType", "application_task", "entityId", task.getId().toString()))
+                    .build();
+            notificationsToSave.add(n);
+ 
+            task.setReminderSent(true);
+            log.info("Overdue notification staged for taskId={}", task.getId());
+        }
+
+        notificationRepo.saveAll(notificationsToSave);
+        taskRepo.saveAll(overdue);
+        log.info("Successfully batched and saved {} overdue task reminders.", overdue.size());
     }
 
-    /** Tasks 28, 29 — Email reminders for deadlines within 24 hours */
-    @Scheduled(cron = "0 0 8 * * *") // Every day at 08:00
+    /** 
+     * Tasks 28, 29 — Email reminders for deadlines within 24 hours.
+     * This is the CANONICAL and sole source-of-truth scheduler for DeadlineEvent reminders (08:00 Europe/Dublin).
+     */
+    @Scheduled(cron = "0 0 8 * * *", zone = "Europe/Dublin") // Every day at 08:00
+    @org.springframework.transaction.annotation.Transactional
     public void sendDeadlineEmailReminders() {
-        LocalDateTime now = LocalDateTime.now();
-        LocalDateTime in24 = now.plusHours(24);
-
+        // 3.090 — Add jitter
+        try { Thread.sleep(new java.util.Random().nextInt(30000)); } 
+        catch (InterruptedException e) { Thread.currentThread().interrupt(); }
+ 
+        Instant now = Instant.now();
+        Instant in24 = now.plus(java.time.Duration.ofHours(24));
+ 
         List<DeadlineEvent> upcoming = deadlineRepo
                 .findByEventDateBetweenAndReminderSentFalse(now, in24);
-
+ 
         for (DeadlineEvent event : upcoming) {
-            try {
-                emailService.sendDeadlineReminder(
-                        event.getUserId(),
-                        event.getTitle(),
-                        event.getEventType(),
-                        event.getEventDate()
-                );
-
-                event.setReminderSent(true);
-                deadlineRepo.save(event);
-                log.info("Deadline reminder email sent for eventId={}", event.getId());
-            } catch (Exception e) {
-                log.error("Failed to send deadline reminder for eventId={}: {}", event.getId(), e.getMessage());
-            }
+            emailService.sendDeadlineReminder(
+                    event.getUserId(),
+                    event.getTitle(),
+                    event.getEventType(),
+                    event.getEventDate()
+            );
+ 
+            event.setReminderSent(true);
+            deadlineRepo.save(event);
+            log.info("Deadline reminder email sent for eventId={}", event.getId());
         }
     }
 }

@@ -16,7 +16,7 @@ import java.util.List;
 public class JobicySource implements JobSource {
     private static final Logger log = LoggerFactory.getLogger(JobicySource.class);
     private final WebClient client;
-    public JobicySource(WebClient.Builder b) { this.client = b.baseUrl("https://jobicy.com").build(); }
+    public JobicySource(JobApiHttpClient httpClient) { this.client = httpClient.createClient("https://jobicy.com"); }
 
     @Override public String name() { return "jobicy"; }
 

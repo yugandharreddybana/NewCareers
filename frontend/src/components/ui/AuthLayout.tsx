@@ -16,9 +16,15 @@ const TESTIMONIALS = [
   { text: 'The AI cover letter tool alone is worth it. Saved me hours every application.', name: 'Priya S.', role: 'Data Analyst, Cork' },
 ];
 
+const FALLBACK_TESTIMONIAL = {
+  text: 'CareerOps keeps my job search organised and focused.',
+  name: 'CareerOps Member',
+  role: 'Active job seeker',
+};
+
 export function AuthLayout({ children, title, subtitle, footer }: AuthLayoutProps) {
   const tIndex = Math.floor(Date.now() / 1000 / 60 / 5) % TESTIMONIALS.length;
-  const t = TESTIMONIALS[tIndex];
+  const t = TESTIMONIALS[tIndex] ?? FALLBACK_TESTIMONIAL;
 
   return (
     <div className="min-h-screen flex">
@@ -102,5 +108,7 @@ export function AuthLayout({ children, title, subtitle, footer }: AuthLayoutProp
     </div>
   );
 }
+
+AuthLayout.displayName = 'AuthLayout';
 
 export default AuthLayout;

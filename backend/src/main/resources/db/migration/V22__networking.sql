@@ -28,6 +28,10 @@ CREATE INDEX IF NOT EXISTS idx_network_contacts_user_id
 CREATE INDEX IF NOT EXISTS idx_network_contacts_pipeline_stage
     ON network_contacts(user_id, pipeline_stage);
 
+CREATE UNIQUE INDEX IF NOT EXISTS idx_network_contacts_user_email
+    ON network_contacts(user_id, lower(email))
+    WHERE email IS NOT NULL;
+
 -- ─────────────────────────────────────────────────────────────
 
 CREATE TABLE IF NOT EXISTS contact_interactions (
@@ -36,7 +40,7 @@ CREATE TABLE IF NOT EXISTS contact_interactions (
     user_id            UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
     interaction_type   VARCHAR(50) NOT NULL
                            CHECK (interaction_type IN ('linkedin_message','email','call','meeting','follow_up')),
-    outcome            VARCHAR(30)
+    outcome            VARCHAR(30) NOT NULL DEFAULT 'no_response'
                            CHECK (outcome IN ('no_response','positive','negative','meeting_booked')),
     notes              TEXT,
     next_step          TEXT,
@@ -50,3 +54,6 @@ CREATE INDEX IF NOT EXISTS idx_contact_interactions_contact_id
 CREATE INDEX IF NOT EXISTS idx_contact_interactions_overdue
     ON contact_interactions(user_id, next_step_due_date)
     WHERE next_step_due_date IS NOT NULL;
+
+CREATE INDEX IF NOT EXISTS idx_contact_interactions_user
+    ON contact_interactions(user_id, created_at DESC);

@@ -1,221 +1,136 @@
-// App.tsx — single BrowserRouter owns all routing
-// AuthProvider lives inside BrowserRouter so it can use useNavigate
-//
-// G12 fix (Batch 7d): each route group is now wrapped in its own
-// <ErrorBoundary> + <Suspense> pair so a single lazy-chunk failure
-// (network error, parse error) only breaks that section of the app,
-// not the entire page. The top-level <Suspense> is retained as a
-// catch-all for the very first paint.
-import React, { Suspense, lazy } from 'react';
+/**
+ * App.tsx — single BrowserRouter; AuthProvider lives inside so it can use
+ * useNavigate.
+ *
+ * Pass 6 fixes folded in:
+ *   #6.002 / #6.010 — `/signup` is canonical; `/register` retained as a
+ *                     redirect so old emails / search results still work.
+ *   #6.034          — RouteFallback is now context-aware (extracted to
+ *                     ErrorBoundary.tsx).
+ *   #6.036          — `withPreload(...)` helper exposes `.preload()` on each
+ *                     lazy chunk so the AppShell sidebar can pre-warm chunks
+ *                     on hover. Routes still lazy-load by default.
+ *   #6.038 / #6.044 — `/forgot-password` and `/reset-password` route to
+ *                     dedicated pages.
+ *   #6.043          — replaced the 25× ErrorBoundary+Suspense duplication with
+ *                     a single `<RouteWithBoundary>` wrapper.
+ *   #6.045 (server) — backend `/auth/me` now exists; frontend session check
+ *                     resolves cleanly on cold load.
+ */
+import { Suspense, lazy, type ComponentType, type LazyExoticComponent } from 'react';
 import { BrowserRouter, Route, Routes, Navigate } from 'react-router-dom';
 import { HelmetProvider } from 'react-helmet-async';
 import { AuthProvider } from './context/AuthContext';
 import { ProtectedRoute, AdminRoute } from './components/ProtectedRoute';
 import { PageLoader } from './components/LoadingSpinner';
 import { ExperimentProvider } from './context/ExperimentContext';
-import { ErrorBoundary } from './components/ErrorBoundary';
+import { ErrorBoundary, RouteFallback } from './components/ErrorBoundary';
 
-// ── Public pages (lazy-loaded) ──────────────────────────────────────────────
-const Login            = lazy(() => import('./pages/Login'));
-const NotFound         = lazy(() => import('./pages/NotFound'));
-const Signup           = lazy(() => import('./pages/Signup'));
-const PasswordRecovery = lazy(() => import('./pages/PasswordRecovery'));
-const Onboarding       = lazy(() => import('./pages/Onboarding'));
+// ── lazy() with a `.preload()` method for hover-warming chunks ─────────────
+type Importable<T extends ComponentType<any>> = () => Promise<{ default: T }>;
+type Preloadable<T extends ComponentType<any>> =
+  LazyExoticComponent<T> & { preload: () => Promise<{ default: T }> };
 
-// ── Protected pages ───────────────────────────────────────────────────────────
-const Dashboard          = lazy(() => import('./pages/Dashboard'));
-const JobDetail          = lazy(() => import('./pages/JobDetail'));
-const Profile            = lazy(() => import('./pages/Profile'));
-const AccountSettings    = lazy(() => import('./pages/AccountSettings'));
-const InterviewHistoryPage = lazy(() => import('./pages/InterviewHistoryPage'));
-const InterviewPage      = lazy(() => import('./pages/InterviewPage'));
-const NetworkingPage     = lazy(() => import('./pages/NetworkingPage'));
-const WorkspacePage      = lazy(() => import('./pages/WorkspacePage'));
-const ProgressPage       = lazy(() => import('./pages/ProgressPage'));
-const ExperimentDashboard = lazy(() => import('./pages/ExperimentDashboardPage'));
-const Kanban             = lazy(() => import('./pages/Kanban'));
-const CvManager          = lazy(() => import('./pages/CvManager'));
-const Skills             = lazy(() => import('./pages/Skills'));
-const Analytics          = lazy(() => import('./pages/Analytics'));
-const BillingPage        = lazy(() => import('./pages/BillingPage'));
-const Refer              = lazy(() => import('./pages/Refer'));
-const PlannerPage        = lazy(() => import('./pages/PlannerPage'));
-const WatchlistsPage     = lazy(() => import('./pages/WatchlistsPage'));
-const AutoApplyPage      = lazy(() => import('./pages/AutoApplyPage'));
-const OutreachPage       = lazy(() => import('./pages/OutreachPage'));
-const AgentMemoryPage    = lazy(() => import('./pages/AgentMemoryPage'));
-const ResumeVersionsPage = lazy(() => import('./pages/ResumeVersionsPage'));
+function withPreload<T extends ComponentType<any>>(loader: Importable<T>): Preloadable<T> {
+  const Lazy = lazy(loader) as Preloadable<T>;
+  Lazy.preload = loader;
+  return Lazy;
+}
 
-/** Inline fallback used by per-route error boundaries — compact, non-intrusive. */
-const RouteFallback = ({ label }: { label: string }) => (
-  <div className="flex flex-col items-center justify-center min-h-[40vh] gap-3 text-gray-500">
-    <span className="text-3xl">⚠️</span>
-    <p className="text-sm">{label} failed to load. <a href="/dashboard" className="underline text-indigo-500">Go to Dashboard</a></p>
-  </div>
-);
+// ── Public pages ───────────────────────────────────────────────────────────
+const Login              = withPreload(() => import('./pages/Login'));
+const NotFound           = withPreload(() => import('./pages/NotFound'));
+const Signup             = withPreload(() => import('./pages/Signup'));
+const ForgotPasswordPage = withPreload(() => import('./pages/ForgotPasswordPage'));
+const ResetPasswordPage  = withPreload(() => import('./pages/ResetPasswordPage'));
+const Onboarding         = withPreload(() => import('./pages/Onboarding'));
+
+// ── Protected pages ────────────────────────────────────────────────────────
+const Dashboard            = withPreload(() => import('./pages/Dashboard'));
+const JobDetail            = withPreload(() => import('./pages/JobDetail'));
+const Profile              = withPreload(() => import('./pages/Profile'));
+const AccountSettings      = withPreload(() => import('./pages/AccountSettings'));
+const InterviewHistoryPage = withPreload(() => import('./pages/InterviewHistoryPage'));
+const InterviewPage        = withPreload(() => import('./pages/InterviewPage'));
+const NetworkingPage       = withPreload(() => import('./pages/NetworkingPage'));
+const WorkspacePage        = withPreload(() => import('./pages/WorkspacePage'));
+const ProgressPage         = withPreload(() => import('./pages/ProgressPage'));
+const ExperimentDashboard  = withPreload(() => import('./pages/ExperimentDashboardPage'));
+const Kanban               = withPreload(() => import('./pages/Kanban'));
+const CvManager            = withPreload(() => import('./pages/CvManager'));
+const Skills               = withPreload(() => import('./pages/Skills'));
+const Analytics            = withPreload(() => import('./pages/Analytics'));
+const BillingPage          = withPreload(() => import('./pages/BillingPage'));
+const Refer                = withPreload(() => import('./pages/Refer'));
+const PlannerPage          = withPreload(() => import('./pages/PlannerPage'));
+const WatchlistsPage       = withPreload(() => import('./pages/WatchlistsPage'));
+const AutoApplyPage        = withPreload(() => import('./pages/AutoApplyPage'));
+const OutreachPage         = withPreload(() => import('./pages/OutreachPage'));
+const AgentMemoryPage      = withPreload(() => import('./pages/AgentMemoryPage'));
+const ResumeVersionsPage   = withPreload(() => import('./pages/ResumeVersionsPage'));
+
+// ── Pass 6 #6.043 — route boundary helper to remove ~250 lines of duplication.
+function RouteWithBoundary(props: { label: string; children: React.ReactNode }) {
+  return (
+    <ErrorBoundary fallback={<RouteFallback label={props.label} />} label={props.label}>
+      <Suspense fallback={<PageLoader />}>{props.children}</Suspense>
+    </ErrorBoundary>
+  );
+}
 
 export const App: React.FC = () => (
-  // B4 fix: top-level ErrorBoundary catches any unhandled render crash.
   <ErrorBoundary>
     <HelmetProvider>
       <BrowserRouter>
         <AuthProvider>
           <ExperimentProvider>
-            {/* Top-level Suspense: catch-all for very first paint */}
+            {/* Top-level Suspense catches the very first paint. */}
             <Suspense fallback={<PageLoader />}>
               <Routes>
 
-                {/* ── Public routes ─────────────────────────────────────────────── */}
+                {/* ── Public routes ───────────────────────────────────────── */}
                 <Route path="/" element={<Navigate to="/dashboard" replace />} />
 
-                <Route path="/login" element={
-                  <ErrorBoundary fallback={<RouteFallback label="Login" />}>
-                    <Suspense fallback={<PageLoader />}><Login /></Suspense>
-                  </ErrorBoundary>
-                } />
+                <Route path="/login"            element={<RouteWithBoundary label="Login"><Login /></RouteWithBoundary>} />
+                <Route path="/signup"           element={<RouteWithBoundary label="Sign up"><Signup /></RouteWithBoundary>} />
+                {/* Legacy /register → /signup so old emails still work. */}
+                <Route path="/register"         element={<Navigate to="/signup" replace />} />
 
-                <Route path="/register" element={
-                  <ErrorBoundary fallback={<RouteFallback label="Signup" />}>
-                    <Suspense fallback={<PageLoader />}><Signup /></Suspense>
-                  </ErrorBoundary>
-                } />
+                <Route path="/forgot-password"  element={<RouteWithBoundary label="Forgot password"><ForgotPasswordPage /></RouteWithBoundary>} />
+                <Route path="/reset-password"   element={<RouteWithBoundary label="Reset password"><ResetPasswordPage /></RouteWithBoundary>} />
 
-                <Route path="/forgot-password" element={
-                  <ErrorBoundary fallback={<RouteFallback label="Password Recovery" />}>
-                    <Suspense fallback={<PageLoader />}><PasswordRecovery /></Suspense>
-                  </ErrorBoundary>
-                } />
-
-                <Route path="/reset-password" element={
-                  <ErrorBoundary fallback={<RouteFallback label="Password Reset" />}>
-                    <Suspense fallback={<PageLoader />}><PasswordRecovery /></Suspense>
-                  </ErrorBoundary>
-                } />
-
-                {/* ── Protected routes ──────────────────────────────────────────── */}
+                {/* ── Protected routes ────────────────────────────────────── */}
                 <Route element={<ProtectedRoute />}>
-                  <Route path="/onboarding" element={
-                    <ErrorBoundary fallback={<RouteFallback label="Onboarding" />}>
-                      <Suspense fallback={<PageLoader />}><Onboarding /></Suspense>
-                    </ErrorBoundary>
-                  } />
-                  <Route path="/dashboard" element={
-                    <ErrorBoundary fallback={<RouteFallback label="Dashboard" />}>
-                      <Suspense fallback={<PageLoader />}><Dashboard /></Suspense>
-                    </ErrorBoundary>
-                  } />
-                  <Route path="/jobs/:id" element={
-                    <ErrorBoundary fallback={<RouteFallback label="Job Detail" />}>
-                      <Suspense fallback={<PageLoader />}><JobDetail /></Suspense>
-                    </ErrorBoundary>
-                  } />
-                  <Route path="/profile" element={
-                    <ErrorBoundary fallback={<RouteFallback label="Profile" />}>
-                      <Suspense fallback={<PageLoader />}><Profile /></Suspense>
-                    </ErrorBoundary>
-                  } />
-                  <Route path="/account" element={
-                    <ErrorBoundary fallback={<RouteFallback label="Account Settings" />}>
-                      <Suspense fallback={<PageLoader />}><AccountSettings /></Suspense>
-                    </ErrorBoundary>
-                  } />
-                  <Route path="/interviews" element={
-                    <ErrorBoundary fallback={<RouteFallback label="Interview History" />}>
-                      <Suspense fallback={<PageLoader />}><InterviewHistoryPage /></Suspense>
-                    </ErrorBoundary>
-                  } />
-                  <Route path="/interview" element={
-                    <ErrorBoundary fallback={<RouteFallback label="Interview" />}>
-                      <Suspense fallback={<PageLoader />}><InterviewPage /></Suspense>
-                    </ErrorBoundary>
-                  } />
-                  <Route path="/networking" element={
-                    <ErrorBoundary fallback={<RouteFallback label="Networking" />}>
-                      <Suspense fallback={<PageLoader />}><NetworkingPage /></Suspense>
-                    </ErrorBoundary>
-                  } />
-                  <Route path="/workspaces" element={
-                    <ErrorBoundary fallback={<RouteFallback label="Workspaces" />}>
-                      <Suspense fallback={<PageLoader />}><WorkspacePage /></Suspense>
-                    </ErrorBoundary>
-                  } />
-                  <Route path="/progress" element={
-                    <ErrorBoundary fallback={<RouteFallback label="Progress" />}>
-                      <Suspense fallback={<PageLoader />}><ProgressPage /></Suspense>
-                    </ErrorBoundary>
-                  } />
-                  <Route path="/kanban" element={
-                    <ErrorBoundary fallback={<RouteFallback label="Kanban" />}>
-                      <Suspense fallback={<PageLoader />}><Kanban /></Suspense>
-                    </ErrorBoundary>
-                  } />
-                  <Route path="/cv" element={
-                    <ErrorBoundary fallback={<RouteFallback label="CV Manager" />}>
-                      <Suspense fallback={<PageLoader />}><CvManager /></Suspense>
-                    </ErrorBoundary>
-                  } />
-                  <Route path="/skills" element={
-                    <ErrorBoundary fallback={<RouteFallback label="Skills" />}>
-                      <Suspense fallback={<PageLoader />}><Skills /></Suspense>
-                    </ErrorBoundary>
-                  } />
-                  <Route path="/analytics" element={
-                    <ErrorBoundary fallback={<RouteFallback label="Analytics" />}>
-                      <Suspense fallback={<PageLoader />}><Analytics /></Suspense>
-                    </ErrorBoundary>
-                  } />
-                  <Route path="/billing" element={
-                    <ErrorBoundary fallback={<RouteFallback label="Billing" />}>
-                      <Suspense fallback={<PageLoader />}><BillingPage /></Suspense>
-                    </ErrorBoundary>
-                  } />
-                  <Route path="/refer" element={
-                    <ErrorBoundary fallback={<RouteFallback label="Refer" />}>
-                      <Suspense fallback={<PageLoader />}><Refer /></Suspense>
-                    </ErrorBoundary>
-                  } />
-                  <Route path="/planner" element={
-                    <ErrorBoundary fallback={<RouteFallback label="Planner" />}>
-                      <Suspense fallback={<PageLoader />}><PlannerPage /></Suspense>
-                    </ErrorBoundary>
-                  } />
-                  <Route path="/auto-apply" element={
-                    <ErrorBoundary fallback={<RouteFallback label="Auto Apply" />}>
-                      <Suspense fallback={<PageLoader />}><AutoApplyPage /></Suspense>
-                    </ErrorBoundary>
-                  } />
-                  <Route path="/watchlists" element={
-                    <ErrorBoundary fallback={<RouteFallback label="Watchlists" />}>
-                      <Suspense fallback={<PageLoader />}><WatchlistsPage /></Suspense>
-                    </ErrorBoundary>
-                  } />
-                  <Route path="/outreach" element={
-                    <ErrorBoundary fallback={<RouteFallback label="Outreach" />}>
-                      <Suspense fallback={<PageLoader />}><OutreachPage /></Suspense>
-                    </ErrorBoundary>
-                  } />
-                  <Route path="/agent-memory" element={
-                    <ErrorBoundary fallback={<RouteFallback label="Agent Memory" />}>
-                      <Suspense fallback={<PageLoader />}><AgentMemoryPage /></Suspense>
-                    </ErrorBoundary>
-                  } />
-                  <Route path="/resume-versions" element={
-                    <ErrorBoundary fallback={<RouteFallback label="Resume Versions" />}>
-                      <Suspense fallback={<PageLoader />}><ResumeVersionsPage /></Suspense>
-                    </ErrorBoundary>
-                  } />
+                  <Route path="/onboarding"       element={<RouteWithBoundary label="Onboarding"><Onboarding /></RouteWithBoundary>} />
+                  <Route path="/dashboard"        element={<RouteWithBoundary label="Dashboard"><Dashboard /></RouteWithBoundary>} />
+                  <Route path="/jobs/:id"         element={<RouteWithBoundary label="Job detail"><JobDetail /></RouteWithBoundary>} />
+                  <Route path="/profile"          element={<RouteWithBoundary label="Profile"><Profile /></RouteWithBoundary>} />
+                  <Route path="/account"          element={<RouteWithBoundary label="Account settings"><AccountSettings /></RouteWithBoundary>} />
+                  <Route path="/interviews"       element={<RouteWithBoundary label="Interview history"><InterviewHistoryPage /></RouteWithBoundary>} />
+                  <Route path="/interview"        element={<RouteWithBoundary label="Interview"><InterviewPage /></RouteWithBoundary>} />
+                  <Route path="/networking"       element={<RouteWithBoundary label="Networking"><NetworkingPage /></RouteWithBoundary>} />
+                  <Route path="/workspaces"       element={<RouteWithBoundary label="Workspaces"><WorkspacePage /></RouteWithBoundary>} />
+                  <Route path="/progress"         element={<RouteWithBoundary label="Progress"><ProgressPage /></RouteWithBoundary>} />
+                  <Route path="/kanban"           element={<RouteWithBoundary label="Kanban"><Kanban /></RouteWithBoundary>} />
+                  <Route path="/cv"               element={<RouteWithBoundary label="CV manager"><CvManager /></RouteWithBoundary>} />
+                  <Route path="/skills"           element={<RouteWithBoundary label="Skills"><Skills /></RouteWithBoundary>} />
+                  <Route path="/analytics"        element={<RouteWithBoundary label="Analytics"><Analytics /></RouteWithBoundary>} />
+                  <Route path="/billing"          element={<RouteWithBoundary label="Billing"><BillingPage /></RouteWithBoundary>} />
+                  <Route path="/refer"            element={<RouteWithBoundary label="Refer"><Refer /></RouteWithBoundary>} />
+                  <Route path="/planner"          element={<RouteWithBoundary label="Planner"><PlannerPage /></RouteWithBoundary>} />
+                  <Route path="/auto-apply"       element={<RouteWithBoundary label="Auto apply"><AutoApplyPage /></RouteWithBoundary>} />
+                  <Route path="/watchlists"       element={<RouteWithBoundary label="Watchlists"><WatchlistsPage /></RouteWithBoundary>} />
+                  <Route path="/outreach"         element={<RouteWithBoundary label="Outreach"><OutreachPage /></RouteWithBoundary>} />
+                  <Route path="/agent-memory"     element={<RouteWithBoundary label="Agent memory"><AgentMemoryPage /></RouteWithBoundary>} />
+                  <Route path="/resume-versions"  element={<RouteWithBoundary label="Resume versions"><ResumeVersionsPage /></RouteWithBoundary>} />
                 </Route>
 
-                {/* ── Admin-only routes ─────────────────────────────────────────── */}
+                {/* ── Admin-only routes ───────────────────────────────────── */}
                 <Route element={<AdminRoute />}>
-                  <Route path="/admin/experiments" element={
-                    <ErrorBoundary fallback={<RouteFallback label="Experiments" />}>
-                      <Suspense fallback={<PageLoader />}><ExperimentDashboard /></Suspense>
-                    </ErrorBoundary>
-                  } />
+                  <Route path="/admin/experiments" element={<RouteWithBoundary label="Experiments"><ExperimentDashboard /></RouteWithBoundary>} />
                 </Route>
 
-                {/* ── Catch-all 404 ────────────────────────────────────────────── */}
+                {/* ── Catch-all 404 ───────────────────────────────────────── */}
                 <Route path="*" element={<NotFound />} />
 
               </Routes>
@@ -226,5 +141,15 @@ export const App: React.FC = () => (
     </HelmetProvider>
   </ErrorBoundary>
 );
+
+// Pass 6 #6.036 — exposed for sidebars / nav links to call `.preload()` on hover.
+export const lazyPages = {
+  Login, Signup, ForgotPasswordPage, ResetPasswordPage, Onboarding,
+  Dashboard, JobDetail, Profile, AccountSettings,
+  InterviewHistoryPage, InterviewPage, NetworkingPage, WorkspacePage,
+  ProgressPage, ExperimentDashboard, Kanban, CvManager, Skills, Analytics,
+  BillingPage, Refer, PlannerPage, WatchlistsPage, AutoApplyPage, OutreachPage,
+  AgentMemoryPage, ResumeVersionsPage,
+};
 
 export default App;

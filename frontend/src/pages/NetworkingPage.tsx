@@ -1,9 +1,8 @@
 import React, { useEffect, useState } from 'react';
 import { PageMeta } from '@/components/PageMeta';
 import { api } from '@/services/api';
-import * as mocks from '@/services/mockApi';
 import toast from 'react-hot-toast';
-import { Users, Plus, Search, Mail, Linkedin, Phone, Trash2, Edit2, X, ThermometerSun } from 'lucide-react';
+import { Users, Plus, Search, Mail, ExternalLink, Trash2, X } from 'lucide-react';
 
 interface Contact {
   id: string;
@@ -40,17 +39,21 @@ const STAGE_STYLES: Record<Contact['pipelineStage'], string> = {
   closed:     'bg-purple-100 text-purple-700',
 };
 
-const TYPE_ICONS: Record<Contact['contactType'], React.ReactNode> = {
-  recruiter:      <Users size={13} />,
-  hiring_manager: <Users size={13} />,
-  peer:           <Users size={13} />,
-  mentor:         <Users size={13} />,
-  other:          <Users size={13} />,
-};
-
 const AddContactModal: React.FC<{ onClose: () => void; onAdd: (c: Contact) => void }> = ({ onClose, onAdd }) => {
   const [form, setForm] = useState({ name: '', company: '', roleTitle: '', email: '', linkedinUrl: '', contactType: 'recruiter' as Contact['contactType'], relationshipTemperature: 'cold' as Contact['relationshipTemperature'], pipelineStage: 'identified' as Contact['pipelineStage'], notes: '' });
   const [saving, setSaving] = useState(false);
+  const textFields = [
+    ['name', 'Name *'],
+    ['company', 'Company'],
+    ['roleTitle', 'Role / Title'],
+    ['email', 'Email'],
+    ['linkedinUrl', 'LinkedIn URL'],
+  ] as const;
+  const selectFields = [
+    ['contactType', 'Type', ['recruiter', 'hiring_manager', 'peer', 'mentor', 'other'] as const],
+    ['relationshipTemperature', 'Temperature', ['cold', 'warm', 'hot'] as const],
+    ['pipelineStage', 'Stage', ['identified', 'outreached', 'replied', 'meeting', 'closed'] as const],
+  ] as const;
 
   const set = (k: string, v: string) => setForm(f => ({ ...f, [k]: v }));
 
@@ -71,18 +74,18 @@ const AddContactModal: React.FC<{ onClose: () => void; onAdd: (c: Contact) => vo
     <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
       <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md p-6 space-y-4 max-h-[90vh] overflow-y-auto">
         <div className="flex items-center justify-between"><h2 className="text-base font-bold text-gray-900">Add Contact</h2><button onClick={onClose} className="text-gray-400 hover:text-gray-600"><X size={18} /></button></div>
-        {[['name','Name *'],['company','Company'],['roleTitle','Role / Title'],['email','Email'],['linkedinUrl','LinkedIn URL']].map(([k, label]) => (
-          <div key={k}>
+        {textFields.map(([key, label]) => (
+          <div key={key}>
             <label className="block text-xs font-medium text-gray-600 mb-1">{label}</label>
-            <input value={(form as Record<string,string>)[k]} onChange={e => set(k, e.target.value)} className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400" />
+            <input value={form[key]} onChange={e => set(key, e.target.value)} className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400" />
           </div>
         ))}
         <div className="grid grid-cols-2 gap-3">
-          {[['contactType','Type',['recruiter','hiring_manager','peer','mentor','other']],['relationshipTemperature','Temperature',['cold','warm','hot']],['pipelineStage','Stage',['identified','outreached','replied','meeting','closed']]].map(([k, label, opts]) => (
-            <div key={k as string}>
-              <label className="block text-xs font-medium text-gray-600 mb-1">{label as string}</label>
-              <select value={(form as Record<string,string>)[k as string]} onChange={e => set(k as string, e.target.value)} className="w-full px-2 py-2 border border-gray-300 rounded-lg text-xs focus:outline-none">
-                {(opts as string[]).map(o => <option key={o} value={o}>{o.replace('_',' ')}</option>)}
+          {selectFields.map(([key, label, options]) => (
+            <div key={key}>
+              <label className="block text-xs font-medium text-gray-600 mb-1">{label}</label>
+              <select value={form[key]} onChange={e => set(key, e.target.value)} className="w-full px-2 py-2 border border-gray-300 rounded-lg text-xs focus:outline-none">
+                {options.map(option => <option key={option} value={option}>{option.replace('_',' ')}</option>)}
               </select>
             </div>
           ))}
@@ -180,7 +183,7 @@ const NetworkingPage: React.FC = () => {
                   {c.notes && <p className="text-xs text-gray-400 mt-1 italic">{c.notes}</p>}
                   <div className="flex items-center gap-3 mt-2">
                     {c.email && <a href={`mailto:${c.email}`} className="text-gray-400 hover:text-indigo-500 transition-colors"><Mail size={14} /></a>}
-                    {c.linkedinUrl && <a href={c.linkedinUrl} target="_blank" rel="noopener noreferrer" className="text-gray-400 hover:text-blue-600 transition-colors"><Linkedin size={14} /></a>}
+                    {c.linkedinUrl && <a href={c.linkedinUrl} target="_blank" rel="noopener noreferrer" className="text-gray-400 hover:text-blue-600 transition-colors"><ExternalLink size={14} /></a>}
                   </div>
                 </div>
                 <button onClick={() => handleDelete(c.id)} disabled={deleting === c.id} className="text-gray-300 hover:text-red-500 transition-colors p-1 shrink-0">

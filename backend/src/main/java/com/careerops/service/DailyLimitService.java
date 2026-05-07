@@ -9,6 +9,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDate;
+import java.time.ZoneId;
 import java.util.UUID;
 
 @Service
@@ -21,7 +22,8 @@ public class DailyLimitService {
     public DailyLimitService(DailyFetchLogRepository repo) { this.repo = repo; }
 
     public int getCount(UUID userId) {
-        return repo.findByUserIdAndFetchDate(userId, LocalDate.now())
+        LocalDate today = LocalDate.now(ZoneId.of("Europe/Dublin"));
+        return repo.findByUserIdAndFetchDate(userId, today)
             .map(DailyFetchLog::getCount).orElse(0);
     }
 
@@ -29,10 +31,11 @@ public class DailyLimitService {
 
     public int remaining(UUID userId) { return Math.max(0, maxPerDay - getCount(userId)); }
 
-    @Transactional
+    @Transactional(timeout = 10)
     public int increment(UUID userId, int delta) {
-        DailyFetchLog log = repo.findByUserIdAndFetchDate(userId, LocalDate.now())
-            .orElseGet(() -> DailyFetchLog.builder().userId(userId).fetchDate(LocalDate.now()).count(0).build());
+        LocalDate today = LocalDate.now(ZoneId.of("Europe/Dublin"));
+        DailyFetchLog log = repo.findByUserIdAndFetchDate(userId, today)
+            .orElseGet(() -> DailyFetchLog.builder().userId(userId).fetchDate(today).count(0).build());
         log.setCount((log.getCount() == null ? 0 : log.getCount()) + delta);
         repo.save(log);
         return log.getCount();

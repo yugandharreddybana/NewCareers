@@ -66,7 +66,7 @@ public class WatchlistService {
         return toResponse(find(userId, id));
     }
 
-    @Transactional
+    @Transactional(timeout = 10)
     public WatchlistResponse update(UUID userId, UUID id, UpdateWatchlistRequest req) {
         JobWatchlist w = find(userId, id);
         if (req.name()                != null) w.setName(req.name());
@@ -101,7 +101,7 @@ public class WatchlistService {
     }
 
     // Called by WatchlistScheduler — runs one active watchlist
-    @Transactional
+    @Transactional(timeout = 10)
     public WatchlistRun runWatchlist(JobWatchlist w) {
         int matched = (int) (Math.random() * 5);
         int newJobs = Math.min(matched, (int) (Math.random() * 3));

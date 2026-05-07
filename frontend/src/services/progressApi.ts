@@ -1,54 +1,66 @@
 /**
- * progressApi.ts — typed service layer for /api/progress
+ * progressApi.ts — typed client for /progress.
  *
- * Covers weekly stats, activity streaks, multi-week chart history,
- * and activity recording for the gamification engine.
+ * Pass 6 #6.011 — consolidated from src/api/progressApi.ts. The shape
+ * preserved here is what ProgressCharts/StreakBadges use (BadgeDTO,
+ * StreakResponse, WeeklySummaryResponse, HistoryResponse). Earlier
+ * services/ duplicate (WeeklySummary etc.) was a scaffolded stub.
  */
 import { api } from './api';
 
-export interface WeeklySummary {
+export interface BadgeDTO {
+  key: string;
+  label: string;
+  icon: string;
+  earned: boolean;
+}
+
+export interface StreakResponse {
+  currentDailyStreak: number;
+  longestDailyStreak: number;
+  lastActiveDate: string | null;
+  totalJobsReviewed: number;
+  totalAppsSubmitted: number;
+  badges: BadgeDTO[];
+}
+
+export interface WeeklySummaryResponse {
+  id: string;
   weekStart: string;
   weekEnd: string;
+  jobsReviewed: number;
   applicationsSubmitted: number;
-  skillsRun: number;
   interviewsScheduled: number;
+  responsesReceived: number;
   offersReceived: number;
-  avgMatchPercent: number;
+  dailyUseStreak: number;
+  winsSummary: string | null;
+  bottlenecksSummary: string | null;
+  recommendations: string | null;
+  bestPerformingCategory: string | null;
+  responseRate: number | null;
+  interviewRate: number | null;
+  createdAt: string;
 }
 
-export interface StreakData {
-  currentStreak: number;
-  longestStreak: number;
-  lastActiveDate: string | null;
-  isActiveToday: boolean;
-}
-
-export interface ProgressHistory {
-  weeks: WeeklySummary[];
-  streak: StreakData;
+export interface HistoryResponse {
+  weeks: WeeklySummaryResponse[];
+  streak: StreakResponse;
 }
 
 export const progressApi = {
-  /** Weekly summary for the current week */
   getWeeklySummary: () =>
-    api.get<WeeklySummary>('/progress/weekly-summary').then(r => r.data),
+    api.get<WeeklySummaryResponse>('/progress/weekly-summary').then(r => r.data),
 
-  /** Current and longest activity streaks */
   getStreaks: () =>
-    api.get<StreakData>('/progress/streaks').then(r => r.data),
+    api.get<StreakResponse>('/progress/streaks').then(r => r.data),
 
-  /**
-   * Multi-week chart data
-   * @param weeks Number of weeks of history to fetch (default: 8)
-   */
+  recordActivity: () =>
+    api.post<StreakResponse>('/progress/activity').then(r => r.data),
+
   getHistory: (weeks = 8) =>
-    api.get<WeeklySummary[]>('/progress/history', { params: { weeks } }).then(r => r.data),
+    api.get<WeeklySummaryResponse[]>(`/progress/history?weeks=${weeks}`).then(r => r.data),
 
-  /** Combined history + streak in a single round-trip */
   getFull: () =>
-    api.get<ProgressHistory>('/progress/full').then(r => r.data),
-
-  /** Record a daily activity event (triggers streak update on backend) */
-  recordActivity: (type: string, metadata?: Record<string, unknown>) =>
-    api.post('/progress/activity', { type, metadata }).then(r => r.data),
+    api.get<HistoryResponse>('/progress/full').then(r => r.data),
 };

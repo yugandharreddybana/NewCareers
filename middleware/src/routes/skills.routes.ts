@@ -1,44 +1,48 @@
-/**
- * skills.routes.ts — AI skill execution endpoints
- *
- * C6b fix (Batch 3 carry-over from Batch 6 audit): skillLimiter was defined
- * in rateLimiter.ts (30 calls/min) but was never applied to any skill route.
- * All write/run endpoints now enforce it to prevent runaway AI cost.
- */
 import express from 'express';
 import { authGuard } from '../authGuard.js';
 import { skillLimiter } from '../rateLimiter.js';
-import { createProxyMiddleware } from 'http-proxy-middleware';
+import { proxyMiddleware } from '../services/backendProxy.js';
+import { body } from 'express-validator';
+import { checkValidation } from '../sanitize.js';
 
 const router = express.Router();
 
-const JAVA = process.env.JAVA_BACKEND_URL || 'http://localhost:8080';
-
-const javaProxy = createProxyMiddleware({
-  target: JAVA,
-  changeOrigin: true,
-  proxyTimeout: 60_000,
-  timeout: 60_000,
-  on: {
-    error: (err, _req, res) => {
-      res.status(502).json({ error: 'Backend unavailable', details: err.message });
-    },
-  },
-});
+const javaProxy = proxyMiddleware();
 
 // ── Core skill endpoints ──────────────────────────────────────────────────────────
 
 // POST /api/skills/start — start or continue a skill run
-router.post('/start',   authGuard, skillLimiter, javaProxy);
+router.post('/start',
+  authGuard, skillLimiter,
+  body('userJobId').exists().withMessage('userJobId is required'),
+  checkValidation,
+  javaProxy
+);
 
 // POST /api/skills/reply — reply to a pending conversation
-router.post('/reply',   authGuard, skillLimiter, javaProxy);
+router.post('/reply',
+  authGuard, skillLimiter,
+  body('userJobId').exists().withMessage('userJobId is required'),
+  body('message').isString().trim().notEmpty().withMessage('message must be a non-empty string'),
+  checkValidation,
+  javaProxy
+);
 
 // POST /api/skills/run-all — run all skills at once
-router.post('/run-all', authGuard, skillLimiter, javaProxy);
+router.post('/run-all',
+  authGuard, skillLimiter,
+  body('userJobId').exists().withMessage('userJobId is required'),
+  checkValidation,
+  javaProxy
+);
 
 // POST /api/skills/cv-human-score
-router.post('/cv-human-score', authGuard, skillLimiter, javaProxy);
+router.post('/cv-human-score',
+  authGuard, skillLimiter,
+  body('userJobId').exists().withMessage('userJobId is required'),
+  checkValidation,
+  javaProxy
+);
 
 // GET endpoints are read-only — no rate limit needed beyond the global 200/min
 router.get('/pdf/:userJobId/:type',     authGuard, javaProxy);

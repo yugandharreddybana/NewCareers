@@ -13,16 +13,9 @@
  */
 import { Request, Response, NextFunction } from 'express';
 import jwt from 'jsonwebtoken';
+import { verifySessionToken } from './jwtVerification.js';
 
 const COOKIE = process.env.COOKIE_NAME || 'co_session';
-
-interface JwtPayload {
-  sub: string;
-  email?: string;
-  role?: string;
-  iat?: number;
-  exp?: number;
-}
 
 // F5 fix: augment Express Request so downstream route handlers are typed
 declare global {
@@ -47,17 +40,26 @@ export function authGuard(req: Request, res: Response, next: NextFunction): void
     return;
   }
 
-  if (!process.env.JWT_SECRET) {
-    console.error('CRITICAL: JWT_SECRET environment variable is not set');
+  if (!process.env.JWT_PUBLIC_KEY) {
+    console.error('CRITICAL: JWT_PUBLIC_KEY environment variable is not set');
     res.status(500).json({ error: 'Internal server error: Auth configuration missing' });
     return;
   }
 
   try {
-    const payload = jwt.verify(token, process.env.JWT_SECRET) as JwtPayload;
+    const payload = verifySessionToken(token);
     req.userId = payload.sub;
     req.email  = payload.email;
     req.role   = payload.role ?? 'USER';
+
+    const trustHeader = process.env.INTERNAL_TRUST_HEADER || 'X-Internal-User-Id';
+    req.headers[trustHeader] = req.userId;
+    req.headers[trustHeader.toLowerCase()] = req.userId;
+    if (process.env.INTERNAL_TRUST_SECRET) {
+      req.headers['X-Internal-Secret'] = process.env.INTERNAL_TRUST_SECRET;
+      req.headers['x-internal-secret'] = process.env.INTERNAL_TRUST_SECRET;
+    }
+
     next();
   } catch (err) {
     const message = err instanceof jwt.TokenExpiredError

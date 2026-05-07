@@ -5,9 +5,9 @@
  * Placed on JobDetail page.
  * Lets user generate kit, browse questions by skill area, and start a mock.
  */
-import React, { useState } from 'react';
+import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { interviewApi, InterviewQuestion } from '../../services/interviewApi';
+import { interviewApi } from '../../services/interviewApi';
 
 const SKILL_COLOURS: Record<string, string> = {
   behavioural:  'bg-blue-100 text-blue-800',

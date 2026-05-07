@@ -8,7 +8,8 @@ import java.util.UUID;
 
 public interface ApplicationRunRepository extends JpaRepository<ApplicationRun, UUID> {
     List<ApplicationRun> findByUserIdOrderByCreatedAtDesc(UUID userId);
-    List<ApplicationRun> findByUserIdAndStatusOrderByCreatedAtDesc(UUID userId, String status);
+    List<ApplicationRun> findByUserIdAndStatusOrderByCreatedAtDesc(UUID userId, com.careerops.model.ApplicationRunStatus status);
     Optional<ApplicationRun> findByIdAndUserId(UUID id, UUID userId);
     List<ApplicationRun> findByUserJobId(UUID userJobId);
+    boolean existsByUserIdAndUserJobIdAndStatusIn(UUID userId, UUID userJobId, java.util.Collection<com.careerops.model.ApplicationRunStatus> statuses);
 }

@@ -1,4 +1,4 @@
-import { type ReactNode, useRef, useState } from 'react';
+import { type ReactNode, useEffect, useRef, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { cn } from '@/lib/utils';
 
@@ -27,6 +27,12 @@ const placementOrigin: Record<Placement, string> = {
 export function Tooltip({ content, placement = 'top', delay = 600, children, className, disabled }: TooltipProps) {
   const [visible, setVisible] = useState(false);
   const timer = useRef<ReturnType<typeof setTimeout>>();
+
+  useEffect(() => () => {
+    if (timer.current) {
+      clearTimeout(timer.current);
+    }
+  }, []);
 
   const show = () => { if (!disabled) { timer.current = setTimeout(() => setVisible(true), delay); } };
   const hide = () => { clearTimeout(timer.current); setVisible(false); };
@@ -58,4 +64,6 @@ export function Tooltip({ content, placement = 'top', delay = 600, children, cla
     </div>
   );
 }
+
+Tooltip.displayName = 'Tooltip';
 export default Tooltip;

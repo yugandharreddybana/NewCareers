@@ -57,4 +57,6 @@ export function Badge({ variant = 'default', size = 'md', dot, icon, children, c
   );
 }
 
+Badge.displayName = 'Badge';
+
 export default Badge;

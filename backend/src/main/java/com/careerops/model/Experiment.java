@@ -2,7 +2,6 @@ package com.careerops.model;
 
 import jakarta.persistence.*;
 import lombok.*;
-import org.hibernate.annotations.GenericGenerator;
 import org.hibernate.annotations.JdbcTypeCode;
 import org.hibernate.type.SqlTypes;
 
@@ -11,17 +10,20 @@ import java.util.List;
 import java.util.UUID;
 
 @Entity
-@Table(name = "experiments")
+@EntityListeners(AuditEntityListener.class)
+@Table(name = "experiments", schema = "career_operations")
 @Getter @Setter @NoArgsConstructor @AllArgsConstructor @Builder
 public class Experiment {
 
     @Id
-    @GeneratedValue(generator = "UUID")
-    @GenericGenerator(name = "UUID", strategy = "org.hibernate.id.UUIDGenerator")
+    @GeneratedValue(strategy = GenerationType.UUID)
     @Column(updatable = false, nullable = false)
     private UUID id;
 
-    @Column(nullable = false, unique = true, length = 100)
+    @Version
+    private Long version;
+
+    @Column(name = "experiment_key", nullable = false, unique = true, length = 100)
     private String key;
 
     @Column(nullable = false)
@@ -37,6 +39,7 @@ public class Experiment {
     @Column(columnDefinition = "jsonb")
     private List<String> variants;
 
+    @Builder.Default
     @Column(name = "traffic_pct", nullable = false)
     private Short trafficPct = 100;
 

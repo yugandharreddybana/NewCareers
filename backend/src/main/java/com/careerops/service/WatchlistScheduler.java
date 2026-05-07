@@ -24,15 +24,17 @@ public class WatchlistScheduler {
     }
 
     // Run all active watchlists every 6 hours
-    @Scheduled(cron = "0 0 */6 * * *")
+    @Scheduled(cron = "0 0 */6 * * *", zone = "Europe/Dublin")
+    @net.javacrumbs.shedlock.spring.annotation.SchedulerLock(name = "runActiveWatchlists", lockAtMostFor = "2h", lockAtLeastFor = "10m")
     public void runActiveWatchlists() {
-        List<JobWatchlist> active = watchlistRepo.findByStatus("active");
+        List<JobWatchlist> active = watchlistRepo.findByStatus(JobWatchlist.STATUS_ACTIVE);
         log.info("WatchlistScheduler: running {} active watchlists", active.size());
         for (JobWatchlist w : active) {
             try {
                 watchlistService.runWatchlist(w);
             } catch (Exception e) {
                 log.warn("Failed to run watchlist {}: {}", w.getId(), e.getMessage());
+                // Non-fatal per-item failure
             }
         }
     }

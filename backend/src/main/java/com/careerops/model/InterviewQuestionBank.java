@@ -8,8 +8,9 @@ import java.time.Instant;
 import java.util.UUID;
 
 @Entity
-@Table(name = "interview_question_bank")
-@Data
+@Table(name = "interview_question_bank", schema = "career_operations")
+@Getter
+@Setter
 @Builder
 @NoArgsConstructor
 @AllArgsConstructor

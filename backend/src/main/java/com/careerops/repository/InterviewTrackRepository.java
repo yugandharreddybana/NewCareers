@@ -12,4 +12,5 @@ import java.util.UUID;
 public interface InterviewTrackRepository extends JpaRepository<InterviewTrack, UUID> {
     List<InterviewTrack> findByUserIdOrderByCreatedAtDesc(UUID userId);
     Optional<InterviewTrack> findByUserJobIdAndUserId(UUID userJobId, UUID userId);
+    List<InterviewTrack> findByReminderSentFalseAndInterviewDateBefore(java.time.Instant cutoff);
 }

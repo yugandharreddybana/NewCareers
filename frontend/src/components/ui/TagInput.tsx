@@ -33,3 +33,5 @@ export default function TagInput({ value, onChange, placeholder }: {
     </div>
   );
 }
+
+TagInput.displayName = 'TagInput';

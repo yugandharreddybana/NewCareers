@@ -13,11 +13,19 @@ import java.util.UUID;
 @Getter @Setter @NoArgsConstructor @AllArgsConstructor @Builder
 public class DailyFetchLog {
     @Id @Column(name = "user_id") private UUID userId;
-    @Id @Column(name = "fetch_date") private LocalDate fetchDate;
+    @Id @Column(name = "fetch_date", nullable = false) private LocalDate fetchDate;
     private Integer count;
+
+    @PrePersist
+    protected void onCreate() {
+        if (fetchDate == null) {
+            fetchDate = LocalDate.now();
+        }
+    }
 
     @Getter @Setter @NoArgsConstructor @AllArgsConstructor
     public static class PK implements Serializable {
+        private static final long serialVersionUID = 1L;
         private UUID userId;
         private LocalDate fetchDate;
         @Override public boolean equals(Object o){

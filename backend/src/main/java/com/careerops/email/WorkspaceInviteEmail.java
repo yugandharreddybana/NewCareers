@@ -43,12 +43,20 @@ public class WorkspaceInviteEmail {
                   </div>
                 </body>
                 </html>
-                """.formatted(workspaceName, role, acceptUrl);
+                """.formatted(escape(workspaceName), escape(role), acceptUrl);
     }
 
     public static String buildPlainText(String workspaceName, String role, String token) {
         return "You've been invited to join \"" + workspaceName + "\" as a " + role + " on NewCareers.\n\n"
                 + "Accept your invite here: https://app.newcareers.io/workspaces/invite/accept?token=" + token + "\n\n"
                 + "This invite expires in 72 hours.";
+    }
+
+    private static String escape(String s) {
+        if (s == null) return "";
+        return s.replace("&", "&amp;")
+                .replace("<", "&lt;")
+                .replace(">", "&gt;")
+                .replace("\"", "&quot;");
     }
 }

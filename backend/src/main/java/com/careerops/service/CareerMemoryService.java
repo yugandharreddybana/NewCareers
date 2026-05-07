@@ -3,7 +3,6 @@ package com.careerops.service;
 import com.careerops.dto.CareerMemoryDtos.*;
 import com.careerops.model.CareerMemory;
 import com.careerops.exception.ApiException;
-import com.careerops.model.CareerMemory;
 import com.careerops.repository.CareerMemoryRepository;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
@@ -35,7 +34,7 @@ public class CareerMemoryService {
         return new MemoryListResponse(items, items.size());
     }
 
-    @Transactional
+    @Transactional(timeout = 10)
     public MemoryResponse upsert(UUID userId, UpsertMemoryRequest req) {
         CareerMemory m = memoryRepo.findByUserIdAndCategoryAndKey(userId, req.category(), req.key())
             .orElseGet(() -> CareerMemory.builder()
@@ -50,20 +49,20 @@ public class CareerMemoryService {
         return toResponse(memoryRepo.save(m));
     }
 
-    @Transactional
+    @Transactional(timeout = 10)
     public MemoryResponse toggle(UUID userId, UUID id, ToggleMemoryRequest req) {
         CareerMemory m = find(userId, id);
         m.setMemoryEnabled(req.memoryEnabled());
         return toResponse(memoryRepo.save(m));
     }
 
-    @Transactional
+    @Transactional(timeout = 10)
     public void delete(UUID userId, UUID id) {
         find(userId, id);
         memoryRepo.deleteByIdAndUserId(id, userId);
     }
 
-    @Transactional
+    @Transactional(timeout = 10)
     public void resetAll(UUID userId) {
         memoryRepo.deleteByUserId(userId);
     }
@@ -78,7 +77,7 @@ public class CareerMemoryService {
      * Upserts a memory entry on behalf of the AI (e.g. after a skill run).
      * Lower confidence than user-set entries; will not overwrite if already exists with higher confidence.
      */
-    @Transactional
+    @Transactional(timeout = 10)
     public void extractFromSkillRun(UUID userId, String category, String key, String value,
                                     String source, short confidence) {
         memoryRepo.findByUserIdAndCategoryAndKey(userId, category, key)

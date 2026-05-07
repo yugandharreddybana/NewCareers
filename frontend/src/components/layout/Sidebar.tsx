@@ -7,7 +7,7 @@ import {
   BarChart2, Users, Share2,
   Zap, MessageSquare, Bell, MemoryStick, Layers,
   ChevronLeft, ChevronRight, Sparkles,
-  User, Settings, Gift, CreditCard, HelpCircle, LogOut,
+  User, Settings, Gift, HelpCircle, LogOut,
   ChevronUp,
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
@@ -62,7 +62,6 @@ const NAV_GROUPS: { label: string; items: NavItem[] }[] = [
 const PROFILE_MENU = [
   { to: '/profile', icon: <User size={15} />, label: 'My Profile' },
   { to: '/account', icon: <Settings size={15} />, label: 'Account Settings' },
-  { to: '/billing', icon: <CreditCard size={15} />, label: 'Billing' },
   { to: '/refer', icon: <Gift size={15} />, label: 'Refer & Earn' },
   { to: '/profile', icon: <HelpCircle size={15} />, label: 'Help & Support' },
 ];
@@ -140,8 +139,7 @@ export default function Sidebar() {
 
       {/* ── Navigation ── */}
       <nav
-        className="flex-1 py-4 px-2 overflow-y-auto overflow-x-hidden space-y-5"
-        style={{ scrollbarWidth: 'none' }}
+        className="sidebar-scrollbarless flex-1 py-4 px-2 overflow-y-auto overflow-x-hidden space-y-5"
       >
         {NAV_GROUPS.map(group => (
           <div key={group.label}>
@@ -158,9 +156,11 @@ export default function Sidebar() {
                 </motion.p>
               )}
             </AnimatePresence>
-            <div className="space-y-0.5">
+            <div className="flex flex-col gap-1 w-full">
               {group.items.map(item => (
-                <SidebarLink key={item.to} item={item} collapsed={collapsed} />
+                <div key={item.to} className="w-full block">
+                  <SidebarLink item={item} collapsed={collapsed} />
+                </div>
               ))}
             </div>
           </div>
@@ -218,7 +218,7 @@ export default function Sidebar() {
         </AnimatePresence>
 
         {/* Profile trigger */}
-        <Tooltip content={user?.name ?? 'Profile'} placement="right" disabled={!collapsed}>
+        <Tooltip content={user?.name ?? 'Profile'} placement="right" disabled={true}>
           <button
             onClick={() => setProfileOpen(o => !o)}
             className={cn(
@@ -229,7 +229,7 @@ export default function Sidebar() {
               collapsed && 'justify-center px-2',
             )}
           >
-            <Avatar name={user?.name} size="sm" className="shrink-0 ring-1 ring-white/10" />
+            <Avatar name={user?.name || ''} size="sm" className="shrink-0 ring-1 ring-white/10" />
             <AnimatePresence>
               {!collapsed && (
                 <motion.div
@@ -266,13 +266,13 @@ export default function Sidebar() {
 
 function SidebarLink({ item, collapsed }: { item: NavItem; collapsed: boolean }) {
   return (
-    <Tooltip content={item.label} placement="right" disabled={!collapsed}>
+    <Tooltip content={item.label} placement="right" disabled={true}>
       <NavLink
         id={item.id}
         to={item.to}
         end={item.to === '/'}
         className={({ isActive }) => cn(
-          'flex items-center gap-2.5 px-2.5 py-[7px] rounded-lg text-[13px] font-medium',
+          'flex items-center w-full gap-2.5 px-2.5 py-[7px] rounded-lg text-[13px] font-medium',
           'transition-all duration-150 group relative',
           isActive
             ? 'bg-indigo-500/[0.14] text-indigo-300'

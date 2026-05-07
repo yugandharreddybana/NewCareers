@@ -37,7 +37,8 @@ import java.util.UUID;
                columnList = "user_id, user_job_id, skill, created_at DESC")
     }
 )
-@Data
+@Getter
+@Setter
 @Builder
 @NoArgsConstructor
 @AllArgsConstructor
@@ -81,6 +82,7 @@ public class SkillRun {
      * Served ONLY via the PDF download endpoint — never exposed directly in API responses.
      * Stored here AND in Supabase for redundancy.
      */
+    @Basic(fetch = FetchType.LAZY)
     @Column(name = "resume_html", columnDefinition = "TEXT")
     @JsonIgnore
     private String resumeHtml;

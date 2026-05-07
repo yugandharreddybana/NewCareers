@@ -1,8 +1,11 @@
 package com.careerops.service;
 
+import org.jspecify.annotations.Nullable;
+
 import com.careerops.exception.ApiException;
 import com.careerops.model.Referral;
 import com.careerops.repository.ReferralRepository;
+import com.careerops.repository.UserRepository;
 import jakarta.persistence.EntityManager;
 import jakarta.persistence.NoResultException;
 import jakarta.persistence.PersistenceContext;
@@ -20,43 +23,49 @@ import java.util.*;
  * Section 9 — Task 96.
  *
  * Handles all Refer-a-Friend business logic:
- *   - createReferral   → creates DB row + fires invite email
- *   - validateToken    → returns referrer name for the signup page
- *   - onRefereeSignup  → called by AuthService on new user creation;
- *                        marks signed_up → rewarded + fires success email + notification
- *   - getMyReferrals   → paginated list for the dashboard table
- *   - getMyStats       → aggregate counts for the dashboard header
+ * - createReferral → creates DB row + fires invite email
+ * - validateToken → returns referrer name for the signup page
+ * - onRefereeSignup → called by AuthService on new user creation;
+ * marks signed_up → rewarded + fires success email + notification
+ * - getMyReferrals → paginated list for the dashboard table
+ * - getMyStats → aggregate counts for the dashboard header
  */
 @Service
 public class ReferralService {
 
     private static final Logger log = LoggerFactory.getLogger(ReferralService.class);
 
-    /** In-app notification type — mirrors Notification.TYPE_REFERRAL (added in Section 9). */
+    /**
+     * In-app notification type — mirrors Notification.TYPE_REFERRAL (added in
+     * Section 9).
+     */
     private static final String NOTIF_TYPE_REFERRAL = "REFERRAL";
 
     @PersistenceContext
     private EntityManager em;
 
-    private final ReferralRepository   referrals;
-    private final ResendEmailService   emailService;
-    private final NotificationService  notificationService;
+    private final ReferralRepository referrals;
+    private final UserRepository userRepository;
+    private final ResendEmailService emailService;
+    private final NotificationService notificationService;
 
     @Value("${app.base.url:https://careersops.app}")
     private String appBaseUrl;
 
     public ReferralService(
             ReferralRepository referrals,
+            UserRepository userRepository,
             ResendEmailService emailService,
             NotificationService notificationService) {
-        this.referrals           = referrals;
-        this.emailService        = emailService;
+        this.referrals = referrals;
+        this.userRepository = userRepository;
+        this.emailService = emailService;
         this.notificationService = notificationService;
     }
 
     // ── Create a referral + send invite email ─────────────────────────────────
 
-    @Transactional
+    @Transactional(timeout = 10)
     public ReferralDto createReferral(UUID referrerId, String refereeEmail) {
         String normalised = refereeEmail.trim().toLowerCase();
 
@@ -99,32 +108,30 @@ public class ReferralService {
      * "You were invited by &lt;name&gt;".
      *
      * The token in the URL may be:
-     *   (a) A referral row token  → from a specific email invite
-     *   (b) A user UUID           → from the generic shareable link
+     * (a) A referral row token → from a specific email invite
+     * (b) A user UUID → from the generic shareable link
      */
-    public Map<String, Object> validateToken(UUID token) {
+    public Map<String, Object> validateToken(@Nullable UUID token) {
         // (a) look up by referral token first
         Optional<Referral> byToken = referrals.findByToken(token);
         if (byToken.isPresent()) {
-            Referral r    = byToken.get();
-            String   name = resolveDisplayName(r.getReferrerId());
+            Referral r = byToken.get();
+            String name = resolveDisplayName(r.getReferrerId());
             return Map.of(
-                "valid",        true,
-                "referrerName", name,
-                "status",       r.getStatus(),
-                "tokenType",    "invite"
-            );
+                    "valid", true,
+                    "referrerName", name,
+                    "status", r.getStatus(),
+                    "tokenType", "invite");
         }
 
         // (b) treat token as a user UUID (generic shareable link)
         String name = resolveDisplayName(token);
         if (name != null) {
             return Map.of(
-                "valid",        true,
-                "referrerName", name,
-                "status",       "pending",
-                "tokenType",    "link"
-            );
+                    "valid", true,
+                    "referrerName", name,
+                    "status", "pending",
+                    "tokenType", "link");
         }
 
         return Map.of("valid", false);
@@ -133,13 +140,15 @@ public class ReferralService {
     // ── Called by AuthService on new user creation ──────────────────────────────
 
     /**
-     * Marks a pending referral as signed_up + rewarded when the referee creates an account.
+     * Marks a pending referral as signed_up + rewarded when the referee creates an
+     * account.
      * If no pending referral exists for this email, this is a no-op.
      *
      * @param refereeEmail the email of the newly registered user
-     * @param refereeName  display name of the new user (shown in success email to referrer)
+     * @param refereeName  display name of the new user (shown in success email to
+     *                     referrer)
      */
-    @Transactional
+    @Transactional(timeout = 10)
     public void onRefereeSignup(String refereeEmail, String refereeName) {
         String normalised = refereeEmail.trim().toLowerCase();
 
@@ -150,7 +159,7 @@ public class ReferralService {
         }
 
         Referral r = opt.get();
-        r.setStatus(Referral.STATUS_REWARDED);   // signed_up → rewarded in one step (immediate reward)
+        r.setStatus(Referral.STATUS_REWARDED); // signed_up → rewarded in one step (immediate reward)
         r.setRewardedAt(Instant.now());
         referrals.save(r);
 
@@ -169,10 +178,32 @@ public class ReferralService {
                     NOTIF_TYPE_REFERRAL,
                     "\uD83C\uDF89 " + refereeName + " joined CareerOps!",
                     refereeName + " signed up using your referral link. You\'ve earned a reward!",
-                    Map.of("referralId", r.getId().toString(), "refereeName", refereeName)
-            );
+                    Map.of("referralId", r.getId().toString(), "refereeName", refereeName));
         } catch (Exception e) {
             log.warn("Referral notification non-fatal: {}", e.getMessage());
+        }
+    }
+
+    /** 3.011 — Background processor for the referral outbox. */
+    @Transactional(timeout = 10)
+    public void processOutbox(com.careerops.repository.ReferralOutboxRepository outboxRepo) {
+        List<com.careerops.model.ReferralOutbox> pending = outboxRepo.findByProcessedFalseOrderByCreatedAtAsc();
+        if (pending.isEmpty())
+            return;
+
+        log.info("Processing {} pending referral outbox entries", pending.size());
+
+        for (com.careerops.model.ReferralOutbox entry : pending) {
+            try {
+                onRefereeSignup(entry.getRefereeEmail(), entry.getRefereeName());
+                entry.setProcessed(true);
+                entry.setProcessedAt(Instant.now());
+            } catch (Exception e) {
+                entry.setAttempts(entry.getAttempts() + 1);
+                entry.setLastError(e.getMessage());
+                log.error("Failed to process referral outbox entry {}: {}", entry.getId(), e.getMessage());
+            }
+            outboxRepo.save(entry);
         }
     }
 
@@ -184,58 +215,49 @@ public class ReferralService {
     }
 
     public Map<String, Object> getMyStats(UUID userId) {
-        long sent      = referrals.countByReferrerIdAndStatus(userId, Referral.STATUS_PENDING)
-                       + referrals.countByReferrerIdAndStatus(userId, Referral.STATUS_SIGNED_UP)
-                       + referrals.countByReferrerIdAndStatus(userId, Referral.STATUS_REWARDED);
-        long signedUp  = referrals.countByReferrerIdAndStatus(userId, Referral.STATUS_SIGNED_UP)
-                       + referrals.countByReferrerIdAndStatus(userId, Referral.STATUS_REWARDED);
-        long rewarded  = referrals.countByReferrerIdAndStatus(userId, Referral.STATUS_REWARDED);
+        long sent = referrals.countByReferrerIdAndStatus(userId, Referral.STATUS_PENDING)
+                + referrals.countByReferrerIdAndStatus(userId, Referral.STATUS_SIGNED_UP)
+                + referrals.countByReferrerIdAndStatus(userId, Referral.STATUS_REWARDED);
+        long signedUp = referrals.countByReferrerIdAndStatus(userId, Referral.STATUS_SIGNED_UP)
+                + referrals.countByReferrerIdAndStatus(userId, Referral.STATUS_REWARDED);
+        long rewarded = referrals.countByReferrerIdAndStatus(userId, Referral.STATUS_REWARDED);
         return Map.of("sent", sent, "signedUp", signedUp, "rewarded", rewarded);
     }
 
     // ── DTO + Helpers ───────────────────────────────────────────────────────────
 
     public record ReferralDto(
-        UUID    id,
-        String  refereeEmail,
-        String  status,
-        Instant createdAt,
-        Instant rewardedAt
-    ) {}
+            UUID id,
+            String refereeEmail,
+            String status,
+            Instant createdAt,
+            Instant rewardedAt) {
+    }
 
     private ReferralDto toDto(Referral r) {
         return new ReferralDto(
-            r.getId(), r.getRefereeEmail(), r.getStatus(),
-            r.getCreatedAt(), r.getRewardedAt()
-        );
+                r.getId(), r.getRefereeEmail(), r.getStatus(),
+                r.getCreatedAt(), r.getRewardedAt());
     }
 
     /** Resolves display name (first_name + last_name) for a given userId. */
-    private String resolveDisplayName(UUID userId) {
-        if (userId == null) return null;
-        try {
-            Object[] row = (Object[]) em.createNativeQuery(
-                "SELECT first_name, last_name FROM career_operations.users WHERE id = :id")
-                .setParameter("id", userId)
-                .getSingleResult();
-            String first = row[0] instanceof String s ? s : "";
-            String last  = row[1] instanceof String s ? s : "";
-            String name  = (first + " " + last).trim();
-            return name.isEmpty() ? "A CareerOps user" : name;
-        } catch (Exception e) {
+    private @Nullable String resolveDisplayName(@Nullable UUID userId) {
+        if (userId == null)
             return null;
-        }
+        return userRepository.findById(userId)
+                .map(u -> {
+                    String name = u.getName();
+                    return (name != null && !name.isBlank()) ? name : "A CareerOps user";
+                })
+                .orElse(null);
     }
 
     /** Resolves email for a given userId (used for self-referral check). */
-    private String resolveEmail(UUID userId) {
-        try {
-            return (String) em.createNativeQuery(
-                "SELECT email FROM career_operations.users WHERE id = :id")
-                .setParameter("id", userId)
-                .getSingleResult();
-        } catch (Exception e) {
+    private @Nullable String resolveEmail(@Nullable UUID userId) {
+        if (userId == null)
             return null;
-        }
+        return userRepository.findById(userId)
+                .map(com.careerops.model.User::getEmail)
+                .orElse(null);
     }
 }

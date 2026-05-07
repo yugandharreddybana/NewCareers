@@ -6,9 +6,17 @@ import java.time.Instant;
 import java.util.UUID;
 
 @Entity
-@Table(name = "job_watchlists", schema = "career_operations")
+@Table(name = "job_watchlists", schema = "career_operations",
+       indexes = {
+           @Index(name = "idx_job_watchlists_user", columnList = "user_id")
+       })
+@org.hibernate.annotations.SQLRestriction("deleted_at IS NULL")
+@org.hibernate.annotations.SQLDelete(sql = "UPDATE career_operations.job_watchlists SET deleted_at = CURRENT_TIMESTAMP WHERE id = ?")
 @Getter @Setter @NoArgsConstructor @AllArgsConstructor @Builder
 public class JobWatchlist {
+
+    public static final String STATUS_ACTIVE = "active";
+    public static final String STATUS_INACTIVE = "inactive";
 
     @Id @GeneratedValue(strategy = GenerationType.UUID)
     private UUID id;
@@ -69,6 +77,9 @@ public class JobWatchlist {
     @Builder.Default
     @Column(name = "applied_total", nullable = false)
     private int appliedTotal = 0;
+
+    @Column(name = "deleted_at")
+    private Instant deletedAt;
 
     @Column(name = "created_at", nullable = false, updatable = false)
     private Instant createdAt;

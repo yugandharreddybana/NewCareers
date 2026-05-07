@@ -1,5 +1,6 @@
 package com.careerops.service;
 
+import com.careerops.exception.ApiException;
 import com.careerops.model.ApplicationTask;
 import com.careerops.model.DeadlineEvent;
 import com.careerops.model.Job;
@@ -15,7 +16,6 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 
 import java.time.Instant;
-import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
@@ -43,15 +43,15 @@ public class ApplicationPlannerService {
      */
     public List<ApplicationTask> generatePlan(UUID userJobId, UUID userId) {
         UserJob userJob = userJobRepo.findById(userJobId)
-                .orElseThrow(() -> new IllegalArgumentException("UserJob not found: " + userJobId));
+                .orElseThrow(() -> ApiException.notFound("UserJob not found: " + userJobId));
 
         if (!userJob.getUserId().equals(userId)) {
-            throw new SecurityException("Access denied to userJob: " + userJobId);
+            throw ApiException.forbidden("Access denied to userJob: " + userJobId);
         }
 
         // Resolve the underlying Job to get title and company
         Job job = jobRepo.findById(userJob.getJobId())
-                .orElseThrow(() -> new IllegalArgumentException("Job not found: " + userJob.getJobId()));
+                .orElseThrow(() -> ApiException.notFound("Job not found: " + userJob.getJobId()));
 
         // Delete existing auto-generated tasks for this job
         List<ApplicationTask> existing = taskRepo.findByUserJobIdOrderByDueDateAsc(userJobId);
@@ -75,7 +75,7 @@ public class ApplicationPlannerService {
             jobTitle, company, stage
         );
 
-        String aiResponse = geminiService.generateContent(prompt);
+        String aiResponse = geminiService.generateContent(prompt, userId, "application-plan");
         List<ApplicationTask> created = new ArrayList<>();
 
         try {
@@ -94,7 +94,7 @@ public class ApplicationPlannerService {
                 task.setPriority(extractField(block, "priority", "MEDIUM"));
 
                 int days = extractInt(block, "daysFromNow", 3);
-                task.setDueDate(LocalDateTime.now().plusDays(days));
+                task.setDueDate(Instant.now().plus(java.time.Duration.ofDays(days)));
                 created.add(taskRepo.save(task));
             }
         } catch (Exception e) {
@@ -109,12 +109,12 @@ public class ApplicationPlannerService {
     /** Task 23 — Mark a task complete */
     public ApplicationTask markComplete(UUID taskId, UUID userId) {
         ApplicationTask task = taskRepo.findById(taskId)
-                .orElseThrow(() -> new IllegalArgumentException("Task not found: " + taskId));
+                .orElseThrow(() -> ApiException.notFound("Task not found: " + taskId));
         if (!task.getUserId().equals(userId)) {
-            throw new SecurityException("Access denied to task: " + taskId);
+            throw ApiException.forbidden("Access denied to task: " + taskId);
         }
         task.setStatus("COMPLETED");
-        task.setCompletedAt(LocalDateTime.now());
+        task.setCompletedAt(Instant.now());
         return taskRepo.save(task);
     }
 
@@ -122,26 +122,41 @@ public class ApplicationPlannerService {
     public List<ApplicationTask> getUpcoming(UUID userId) {
         return taskRepo.findUpcomingByUser(
                 userId,
-                LocalDateTime.now().minusDays(30),
-                LocalDateTime.now().plusDays(14)
+                Instant.now().minus(java.time.Duration.ofDays(30)),
+                Instant.now().plus(java.time.Duration.ofDays(14))
         );
     }
 
-    public List<ApplicationTask> getTasksForJob(UUID userJobId) {
+    public List<ApplicationTask> getTasksForJob(UUID userJobId, UUID userId) {
+        UserJob userJob = userJobRepo.findById(userJobId)
+                .orElseThrow(() -> ApiException.notFound("UserJob not found"));
+        if (!userJob.getUserId().equals(userId)) {
+            throw ApiException.notFound("UserJob not found");
+        }
         return taskRepo.findByUserJobIdOrderByDueDateAsc(userJobId);
     }
 
-    public List<DeadlineEvent> getDeadlinesForJob(UUID userJobId) {
+    public List<DeadlineEvent> getDeadlinesForJob(UUID userJobId, UUID userId) {
+        UserJob userJob = userJobRepo.findById(userJobId)
+                .orElseThrow(() -> ApiException.notFound("UserJob not found"));
+        if (!userJob.getUserId().equals(userId)) {
+            throw ApiException.notFound("UserJob not found");
+        }
         return deadlineRepo.findByUserJobIdOrderByEventDateAsc(userJobId);
     }
 
     public List<DeadlineEvent> getUpcomingDeadlines(UUID userId) {
         return deadlineRepo.findByUserIdAndEventDateBetweenOrderByEventDateAsc(
-                userId, LocalDateTime.now(), LocalDateTime.now().plusDays(30));
+                userId, Instant.now(), Instant.now().plus(java.time.Duration.ofDays(30)));
     }
 
     public DeadlineEvent addDeadline(UUID userJobId, UUID userId, String type, String title,
-                                     LocalDateTime eventDate, String notes) {
+                                     Instant eventDate, String notes) {
+        UserJob userJob = userJobRepo.findById(userJobId)
+                .orElseThrow(() -> ApiException.notFound("UserJob not found"));
+        if (!userJob.getUserId().equals(userId)) {
+            throw ApiException.forbidden("Access denied to user job");
+        }
         DeadlineEvent event = new DeadlineEvent();
         event.setId(UUID.randomUUID());
         event.setUserJobId(userJobId);
@@ -164,11 +179,41 @@ public class ApplicationPlannerService {
         n.setRead(false);
         n.setCreatedAt(Instant.now());
         n.setEntityType("application_task");
-        n.setEntityId(task.getId().toString());
+        n.setEntityId(task.getId());
         notificationRepo.save(n);
 
         task.setReminderSent(true);
         taskRepo.save(task);
+    }
+
+    // ---- Mappers for 2.056 ----
+
+    public com.careerops.dto.PlannerDTO.TaskResponse toTaskResponse(ApplicationTask t) {
+        return com.careerops.dto.PlannerDTO.TaskResponse.builder()
+                .id(t.getId())
+                .userJobId(t.getUserJobId())
+                .title(t.getTitle())
+                .description(t.getDescription())
+                .taskType(t.getTaskType())
+                .priority(t.getPriority())
+                .status(t.getStatus())
+                .dueDate(t.getDueDate())
+                .completedAt(t.getCompletedAt())
+                .autoGenerated(t.isAutoGenerated())
+                .createdAt(t.getCreatedAt())
+                .build();
+    }
+
+    public com.careerops.dto.PlannerDTO.DeadlineResponse toDeadlineResponse(DeadlineEvent e) {
+        return com.careerops.dto.PlannerDTO.DeadlineResponse.builder()
+                .id(e.getId())
+                .userJobId(e.getUserJobId())
+                .eventType(e.getEventType())
+                .title(e.getTitle())
+                .eventDate(e.getEventDate())
+                .notes(e.getNotes())
+                .createdAt(e.getCreatedAt())
+                .build();
     }
 
     // ---- helpers ----
@@ -194,7 +239,7 @@ public class ApplicationPlannerService {
             t.setPriority(d[3]);
             t.setStatus("PENDING");
             t.setAutoGenerated(true);
-            t.setDueDate(LocalDateTime.now().plusDays(Long.parseLong(d[4])));
+            t.setDueDate(Instant.now().plus(java.time.Duration.ofDays(Long.parseLong(d[4]))));
             created.add(taskRepo.save(t));
         }
         return created;

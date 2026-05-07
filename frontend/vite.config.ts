@@ -79,10 +79,20 @@ export default defineConfig({
   ],
 
   resolve: { alias: { '@': path.resolve(__dirname, 'src') } },
-  server: { port: 5173, host: true },
+  server: {
+    port: 5173,
+    host: true,
+    proxy: {
+      '/api': {
+        target: 'http://localhost:4000',
+        changeOrigin: true,
+      },
+    },
+  },
 
   // E1 fix: manual chunk splitting
   build: {
+    sourcemap: 'hidden',
     rollupOptions: {
       output: {
         manualChunks(id) {

@@ -1,5 +1,7 @@
 package com.careerops.service;
 
+import org.jspecify.annotations.Nullable;
+
 import com.careerops.dto.ProfileDtos.*;
 import com.careerops.exception.ApiException;
 import com.careerops.model.UserCv;
@@ -10,6 +12,7 @@ import com.careerops.repository.UserProfileRepository;
 import com.careerops.repository.UserJobRepository;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.cache.annotation.CacheEvict;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -67,10 +70,24 @@ public class ProfileService {
 
     // ─── Upsert profile ────────────────────────────────────────────────────────
 
-    @Transactional
-    public ProfileResponse upsert(UUID userId, ProfileRequest req) {
-        var profile = profiles.findByUserId(userId)
-            .orElseThrow(() -> new ApiException(HttpStatus.NOT_FOUND, "Profile not found"));
+    @Transactional(timeout = 10)
+    @CacheEvict(value = "user-profile", key = "#userId")
+    public ProfileResponse upsert(UUID userId, ProfileRequest req, @Nullable Long ifMatch) {
+        var profile = requireProfile(userId);
+        validateVersion(profile, ifMatch);
+
+        // 3.037 — Validate salary ranges (min <= max)
+        Integer min = req.salaryMin() != null ? req.salaryMin() : profile.getSalaryMin();
+        Integer max = req.salaryMax() != null ? req.salaryMax() : profile.getSalaryMax();
+        if (min != null && max != null && min > max) {
+            throw new ApiException(HttpStatus.BAD_REQUEST, "Salary minimum (" + min + ") cannot be greater than maximum (" + max + ")");
+        }
+
+        Integer gMin = req.goalSalaryMin() != null ? req.goalSalaryMin() : profile.getGoalSalaryMin();
+        Integer gMax = req.goalSalaryMax() != null ? req.goalSalaryMax() : profile.getGoalSalaryMax();
+        if (gMin != null && gMax != null && gMin > gMax) {
+            throw new ApiException(HttpStatus.BAD_REQUEST, "Goal salary minimum (" + gMin + ") cannot be greater than maximum (" + gMax + ")");
+        }
 
         if (req.targetRoles()        != null) profile.setTargetRoles(req.targetRoles());
         if (req.techStack()          != null) profile.setTechStack(req.techStack());
@@ -115,15 +132,45 @@ public class ProfileService {
         long interviews = userJobs.countByUserIdAndKanbanColumn(userId, "Interview");
         long offers     = userJobs.countByUserIdAndKanbanColumn(userId, "Offer");
         double avgMatch = userJobs.avgMatchPercentForUser(userId);
-        return new StatsResponse(total, applied, interviews, offers, avgMatch);
+        return new StatsResponse(total, applied, interviews, offers, 
+                Math.round(avgMatch * 10.0) / 10.0);
     }
 
     // ─── Portfolio CRUD ────────────────────────────────────────────────────────
 
-    @Transactional
-    public ProfileResponse addPortfolioItem(UUID userId, PortfolioItemRequest req) {
+    @Transactional(timeout = 10)
+    @CacheEvict(value = "user-profile", key = "#userId")
+    public ProfileResponse addPortfolioItem(UUID userId, PortfolioItemRequest req, @Nullable Long ifMatch) {
         var profile = requireProfile(userId);
+        validateVersion(profile, ifMatch);
+
         List<PortfolioItem> items = ensureList(profile);
+
+        if (items.size() >= 20) {
+            throw new ApiException(HttpStatus.BAD_REQUEST, "Portfolio is limited to a maximum of 20 items");
+        }
+
+        if (req.title() != null && req.title().length() > 100) {
+            throw new ApiException(HttpStatus.BAD_REQUEST, "Title cannot exceed 100 characters");
+        }
+
+        if (req.description() != null && req.description().length() > 1000) {
+            throw new ApiException(HttpStatus.BAD_REQUEST, "Description cannot exceed 1000 characters");
+        }
+
+        if (req.url() != null && !req.url().isBlank()) {
+            if (!req.url().startsWith("http://") && !req.url().startsWith("https://")) {
+                throw new ApiException(HttpStatus.BAD_REQUEST, "URL must start with http:// or https://");
+            }
+        }
+        
+        // 3.038 — Prevent duplicate URLs in portfolio
+        if (req.url() != null && !req.url().isBlank()) {
+            if (items.stream().anyMatch(i -> req.url().equalsIgnoreCase(i.getUrl()))) {
+                throw new ApiException(HttpStatus.CONFLICT, "This project URL is already in your portfolio");
+            }
+        }
+
         items.add(PortfolioItem.builder()
             .id(UUID.randomUUID().toString())
             .title(req.title())
@@ -138,16 +185,42 @@ public class ProfileService {
         return get(userId);
     }
 
-    @Transactional
+    @Transactional(timeout = 10)
+    @CacheEvict(value = "user-profile", key = "#userId")
     public ProfileResponse updatePortfolioItem(UUID userId, String itemId,
-                                               PortfolioItemRequest req) {
+                                               PortfolioItemRequest req, @Nullable Long ifMatch) {
         var profile = requireProfile(userId);
+        validateVersion(profile, ifMatch);
+
         List<PortfolioItem> items = ensureList(profile);
+
+        if (req.title() != null && req.title().length() > 100) {
+            throw new ApiException(HttpStatus.BAD_REQUEST, "Title cannot exceed 100 characters");
+        }
+
+        if (req.description() != null && req.description().length() > 1000) {
+            throw new ApiException(HttpStatus.BAD_REQUEST, "Description cannot exceed 1000 characters");
+        }
+
+        if (req.url() != null && !req.url().isBlank()) {
+            if (!req.url().startsWith("http://") && !req.url().startsWith("https://")) {
+                throw new ApiException(HttpStatus.BAD_REQUEST, "URL must start with http:// or https://");
+            }
+        }
+
+        // 3.038 — Ensure URL uniqueness on update
+        if (req.url() != null && !req.url().isBlank()) {
+            if (items.stream().anyMatch(i -> !itemId.equals(i.getId()) && req.url().equalsIgnoreCase(i.getUrl()))) {
+                throw new ApiException(HttpStatus.CONFLICT, "This project URL is already in your portfolio");
+            }
+        }
+
         boolean found = false;
         for (PortfolioItem item : items) {
             if (itemId.equals(item.getId())) {
-                if (req.title()       != null) item.setTitle(req.title());
-                if (req.url()         != null) item.setUrl(req.url());
+                // 3.039 — Protect integrity: don't allow nulling out required fields
+                if (req.title()       != null && !req.title().isBlank()) item.setTitle(req.title());
+                if (req.url()         != null && !req.url().isBlank())   item.setUrl(req.url());
                 if (req.description() != null) item.setDescription(req.description());
                 if (req.techTags()    != null) item.setTechTags(req.techTags());
                 found = true;
@@ -161,9 +234,12 @@ public class ProfileService {
         return get(userId);
     }
 
-    @Transactional
-    public ProfileResponse deletePortfolioItem(UUID userId, String itemId) {
+    @Transactional(timeout = 10)
+    @CacheEvict(value = "user-profile", key = "#userId")
+    public ProfileResponse deletePortfolioItem(UUID userId, String itemId, @Nullable Long ifMatch) {
         var profile = requireProfile(userId);
+        validateVersion(profile, ifMatch);
+
         List<PortfolioItem> items = ensureList(profile);
         boolean removed = items.removeIf(i -> itemId.equals(i.getId()));
         if (!removed) throw new ApiException(HttpStatus.NOT_FOUND, "Portfolio item not found");
@@ -180,13 +256,20 @@ public class ProfileService {
             .orElseThrow(() -> new ApiException(HttpStatus.NOT_FOUND, "Profile not found"));
     }
 
+    private void validateVersion(UserProfile profile, @Nullable Long ifMatch) {
+        if (ifMatch != null && !ifMatch.equals(profile.getVersion())) {
+            throw new ApiException(HttpStatus.PRECONDITION_FAILED,
+                "Profile was modified by another session. Please refresh and try again.");
+        }
+    }
+
     private List<PortfolioItem> ensureList(UserProfile profile) {
         return profile.getPortfolioItems() != null
             ? new ArrayList<>(profile.getPortfolioItems())
             : new ArrayList<>();
     }
 
-    private ProfileResponse toResponse(UserProfile p, String activeCvFileName) {
+    private ProfileResponse toResponse(UserProfile p, @Nullable String activeCvFileName) {
         int score = computeCompleteness(p);
         return new ProfileResponse(
             p.getTargetRoles(), p.getTechStack(), p.getLocation(),
@@ -197,7 +280,8 @@ public class ProfileService {
             p.getPortfolioItems(),
             p.getGoalTitle(), p.getGoalSalaryMin(), p.getGoalSalaryMax(),
             p.getGoalLocation(), p.getOpenToRemote(),
-            score
+            score,
+            p.getVersion()
         );
     }
 

@@ -1,11 +1,11 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useId, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '@/context/AuthContext';
 import { profileApi } from '@/services/api';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   CloudUpload, Briefcase, MapPin,
-  ArrowLeft, ChevronRight, FileText, Check,
+  ArrowLeft, ChevronDown, ChevronRight, FileText, Check,
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 
@@ -64,17 +64,27 @@ function Label({ children }: { children: React.ReactNode }) {
 
 // Native select styled
 function StyledSelect({
-  value, onChange, options,
-}: { value: string; onChange: (v: string) => void; options: string[] }) {
+  value, onChange, options, label,
+}: { value: string; onChange: (v: string) => void; options: string[]; label: string }) {
+  const selectId = useId();
+
   return (
-    <select
-      value={value}
-      onChange={e => onChange(e.target.value)}
-      className="w-full px-4 h-12 rounded-xl border border-slate-200 bg-white text-slate-700 text-sm font-medium focus:outline-none focus:ring-2 focus:ring-emerald-500/30 focus:border-emerald-400 transition-all appearance-none cursor-pointer"
-      style={{ backgroundImage: `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 24 24' stroke='%2394a3b8' stroke-width='2'%3E%3Cpath stroke-linecap='round' stroke-linejoin='round' d='M19 9l-7 7-7-7'/%3E%3C/svg%3E")`, backgroundRepeat: 'no-repeat', backgroundPosition: 'right 12px center', backgroundSize: '18px', paddingRight: '40px' }}
-    >
-      {options.map(o => <option key={o}>{o}</option>)}
-    </select>
+    <div className="relative">
+      <label htmlFor={selectId} className="sr-only">{label}</label>
+      <select
+        id={selectId}
+        aria-label={label}
+        value={value}
+        onChange={e => onChange(e.target.value)}
+        className="w-full px-4 pr-10 h-12 rounded-xl border border-slate-200 bg-white text-slate-700 text-sm font-medium focus:outline-none focus:ring-2 focus:ring-emerald-500/30 focus:border-emerald-400 transition-all appearance-none cursor-pointer"
+      >
+        {options.map(o => <option key={o}>{o}</option>)}
+      </select>
+      <ChevronDown
+        aria-hidden="true"
+        className="pointer-events-none absolute right-4 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400"
+      />
+    </div>
   );
 }
 
@@ -135,7 +145,7 @@ export default function Onboarding() {
         sponsorshipRequired: sponsorship,
         location:            'Dublin',
         onboardingCompleted: true,
-      } as any);
+      });
       nav('/dashboard');
     } catch {
       toast.error('Could not save your profile — please try again.');
@@ -192,22 +202,25 @@ export default function Onboarding() {
                   </div>
 
                   {/* Upload zone */}
-                  <div
+                  <input
+                    id="onboarding-cv-upload"
+                    ref={cvRef}
+                    type="file"
+                    accept=".pdf,.docx,.txt"
+                    aria-label="Upload your primary CV"
+                    className="hidden"
+                    onChange={e => setCvFile(e.target.files?.[0] ?? null)}
+                  />
+                  <button
+                    type="button"
                     className={[
-                      'border-2 border-dashed rounded-2xl p-8 flex flex-col items-center gap-3 cursor-pointer transition-all',
+                      'w-full border-2 border-dashed rounded-2xl p-8 flex flex-col items-center gap-3 transition-all',
                       cvFile
                         ? 'border-emerald-400 bg-emerald-50'
                         : 'border-slate-200 bg-slate-50 hover:border-emerald-300 hover:bg-emerald-50/40',
                     ].join(' ')}
                     onClick={() => cvRef.current?.click()}
                   >
-                    <input
-                      ref={cvRef}
-                      type="file"
-                      accept=".pdf,.docx,.txt"
-                      className="hidden"
-                      onChange={e => setCvFile(e.target.files?.[0] ?? null)}
-                    />
                     <div className="w-12 h-12 rounded-full bg-white border border-slate-200 flex items-center justify-center shadow-sm">
                       <CloudUpload size={22} className={cvFile ? 'text-emerald-500' : 'text-slate-400'} />
                     </div>
@@ -230,7 +243,7 @@ export default function Onboarding() {
                         <p className="text-[11px] text-slate-300 uppercase tracking-wider font-semibold">PDF, WORD, OR TXT (MAX 5MB)</p>
                       </>
                     )}
-                  </div>
+                  </button>
 
                   {/* Next */}
                   <div className="flex justify-end">
@@ -323,13 +336,13 @@ export default function Onboarding() {
                   {/* Seniority */}
                   <div>
                     <Label>Seniority</Label>
-                    <StyledSelect value={seniority} onChange={setSeniority} options={SENIORITY_OPTIONS} />
+                    <StyledSelect value={seniority} onChange={setSeniority} options={SENIORITY_OPTIONS} label="Seniority" />
                   </div>
 
                   {/* Remote policy */}
                   <div>
                     <Label>Remote Policy</Label>
-                    <StyledSelect value={remotePolicy} onChange={setRemotePolicy} options={REMOTE_OPTIONS} />
+                    <StyledSelect value={remotePolicy} onChange={setRemotePolicy} options={REMOTE_OPTIONS} label="Remote policy" />
                   </div>
 
                   {/* Max on-site days — only when Hybrid */}
@@ -343,7 +356,7 @@ export default function Onboarding() {
                         className="overflow-hidden"
                       >
                         <Label>Max On-Site Days</Label>
-                        <StyledSelect value={onsiteDays} onChange={setOnsiteDays} options={ONSITE_DAY_OPTIONS} />
+                        <StyledSelect value={onsiteDays} onChange={setOnsiteDays} options={ONSITE_DAY_OPTIONS} label="On-site days" />
                       </motion.div>
                     )}
                   </AnimatePresence>

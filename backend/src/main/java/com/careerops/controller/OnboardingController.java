@@ -1,63 +1,70 @@
 package com.careerops.controller;
 
 import com.careerops.service.OnboardingAnalyticsService;
+import com.careerops.util.AuthUtil;
 import lombok.RequiredArgsConstructor;
-import org.springframework.http.ResponseEntity;
-import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.*;
-import org.springframework.jdbc.core.JdbcTemplate;
 
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 
+/**
+ * CORS Policy:
+ * - Allowed Origins: from ${cors.allowed.origins}
+ * - Methods: GET, POST, PUT, PATCH, DELETE, OPTIONS
+ * - Headers: Content-Type, Authorization, X-Requested-With, X-CSRF-Token, X-Internal-Secret, X-Internal-User-Id
+ * - Exposed: X-RateLimit-Remaining, X-RateLimit-Reset, Retry-After
+ */
 @RestController
-@RequestMapping("/api/onboarding")
+@RequestMapping("/onboarding")
+@io.micrometer.core.annotation.Timed
 @RequiredArgsConstructor
 public class OnboardingController {
 
     private final OnboardingAnalyticsService analyticsService;
-    private final JdbcTemplate jdbc;
+
+    public record TrackEventRequest(
+        String type,
+        String step,
+        String eventType,
+        String feature,
+        String action,
+        Map<String, Object> metadata
+    ) {}
 
     // Task 74 — GET /onboarding/checklist
     // Returns the list of onboarding step keys the user has completed
     @GetMapping("/checklist")
-    public ResponseEntity<Map<String, Object>> getChecklist(
-            @AuthenticationPrincipal UUID userId) {
-
-        List<String> completedSteps = jdbc.queryForList(
-            "SELECT step FROM onboarding_events WHERE user_id = ? AND event_type = 'completed'",
-            String.class, userId
-        );
-
-        return ResponseEntity.ok(Map.of(
+    public Map<String, Object> getChecklist() {
+        UUID userId = AuthUtil.currentUserId();
+        List<String> completedSteps = analyticsService.getCompletedSteps(userId);
+        return Map.of(
             "completedSteps", completedSteps
-        ));
+        );
     }
 
     // Tasks 69+70 — POST /onboarding/event
     @PostMapping("/event")
-    public ResponseEntity<Void> trackEvent(
-            @AuthenticationPrincipal UUID userId,
-            @RequestBody Map<String, Object> body) {
+    @ResponseStatus(org.springframework.http.HttpStatus.NO_CONTENT)
+    public void trackEvent(
+            @RequestBody TrackEventRequest body) {
+        UUID userId = AuthUtil.currentUserId();
 
-        String type = (String) body.getOrDefault("type", "onboarding"); // 'onboarding' | 'feature'
-        String step = (String) body.get("step");
-        String event = (String) body.getOrDefault("eventType", "completed");
-
-        if (step == null) return ResponseEntity.badRequest().build();
-
-        @SuppressWarnings("unchecked")
-        Map<String, Object> metadata = (Map<String, Object>) body.getOrDefault("metadata", Map.of());
-
-        if ("feature".equals(type)) {
-            String feature = (String) body.getOrDefault("feature", step);
-            String action  = (String) body.getOrDefault("action",  event);
-            analyticsService.trackFeatureAdoption(userId, feature, action, metadata);
-        } else {
-            analyticsService.trackOnboardingStep(userId, step, event, metadata);
+        if (body == null || body.step() == null) {
+            throw com.careerops.exception.ApiException.badRequest("Missing step field");
         }
 
-        return ResponseEntity.noContent().build();
+        String type = body.type() != null ? body.type() : "onboarding"; // 'onboarding' | 'feature'
+        String step = body.step();
+        String event = body.eventType() != null ? body.eventType() : "completed";
+        Map<String, Object> metadata = body.metadata() != null ? body.metadata() : Map.of();
+
+        if ("feature".equals(type)) {
+            String feature = body.feature() != null ? body.feature() : step;
+            String action  = body.action() != null ? body.action() : event;
+            analyticsService.trackFeatureAdoption(userId, feature, action, metadata);
+            analyticsService.trackOnboardingStep(userId, step, event, metadata);
+        }
     }
 }

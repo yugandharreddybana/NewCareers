@@ -1,5 +1,11 @@
 package com.careerops.controller;
 
+import com.careerops.model.AgentResult;
+import com.careerops.service.ClaudeAgentService;
+import com.careerops.service.ClaudeDirectService;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ArrayNode;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -8,11 +14,17 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.context.SpringBootTest.WebEnvironment;
+import org.springframework.boot.test.mock.mockito.MockBean;
 import org.springframework.http.MediaType;
-import org.springframework.security.test.context.support.WithMockUser;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.web.servlet.MockMvc;
 
+import java.util.UUID;
+
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.Mockito.lenient;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.*;
 
@@ -26,8 +38,110 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 class SkillsControllerIntegrationTest {
 
     @Autowired MockMvc mockMvc;
+    @Autowired JdbcTemplate jdbc;
+    @Autowired ObjectMapper mapper;
 
-    private static final String USER_JOB_ID = "test-job-001";
+    @MockBean ClaudeAgentService claudeAgentService;
+    @MockBean ClaudeDirectService claudeDirectService;
+
+    private static final String USER_JOB_ID = "00000000-0000-0000-0000-000000000111";
+    private static final String INTERNAL_SECRET = "test-internal-trust-secret-minimum-32-characters-long";
+    private static final String INTERNAL_USER_ID = "00000000-0000-0000-0000-000000000001";
+    private static final String INTERNAL_USERNAME = "skills-" + INTERNAL_USER_ID;
+    private static final String INTERNAL_EMAIL = "skills-" + INTERNAL_USER_ID + "@example.com";
+
+    @BeforeEach
+    void ensureAuthenticatedUserExists() {
+        UUID userId = UUID.fromString(INTERNAL_USER_ID);
+        jdbc.update(
+            """
+            DELETE FROM career_operations.users
+            WHERE (email = ? OR username = ?) AND id <> ?
+            """,
+            INTERNAL_EMAIL,
+            INTERNAL_USERNAME,
+            userId
+        );
+
+        Integer existingUsers = jdbc.queryForObject(
+            """
+            SELECT COUNT(*)
+            FROM career_operations.users
+            WHERE id = ?
+            """,
+            Integer.class,
+            userId
+        );
+
+        if (existingUsers != null && existingUsers > 0) {
+            jdbc.update(
+                """
+                UPDATE career_operations.users
+                SET name = ?,
+                    username = ?,
+                    email = ?,
+                    password_hash = ?,
+                    role = ?,
+                    locale = ?,
+                    failed_login_attempts = ?,
+                    locked_until = NULL,
+                    email_verified_at = NULL,
+                    last_login_at = NULL,
+                    ai_processing_consent = ?,
+                    deleted_at = NULL
+                WHERE id = ?
+                """,
+                "Skills Test User",
+                INTERNAL_USERNAME,
+                INTERNAL_EMAIL,
+                "test-password-hash",
+                "USER",
+                "en",
+                0,
+                true,
+                userId
+            );
+            return;
+        }
+
+        jdbc.update(
+            """
+            INSERT INTO career_operations.users (
+                id,
+                name,
+                username,
+                email,
+                password_hash,
+                role,
+                locale,
+                failed_login_attempts,
+                ai_processing_consent,
+                created_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP())
+            """,
+            userId,
+            "Skills Test User",
+            INTERNAL_USERNAME,
+            INTERNAL_EMAIL,
+            "test-password-hash",
+            "USER",
+            "en",
+            0,
+            true
+        );
+    }
+
+    @BeforeEach
+    void stubAiClients() {
+        lenient().when(claudeAgentService.run(anyString(), any(ArrayNode.class), any(UUID.class), any(UUID.class)))
+            .thenReturn(AgentResult.done("{\"source\":\"mock-agent\"}"));
+
+        lenient().when(claudeDirectService.generateJson(anyString(), anyString(), any(UUID.class), anyString()))
+            .thenAnswer(invocation -> mapper.createObjectNode()
+                .put("source", "mock-direct")
+                .put("feature", invocation.getArgument(3, String.class))
+            );
+    }
 
     @ParameterizedTest(name = "POST /skills/start — skill: {0}")
     @ValueSource(strings = {
@@ -36,7 +150,6 @@ class SkillsControllerIntegrationTest {
         "salary-negotiation", "culture-fit", "linkedin-optimize",
         "cover-letter", "skills-gap-plan"
     })
-    @WithMockUser(username = "testuser", roles = "USER")
     void postSkillStart_returnsExpectedShape(String skillName) throws Exception {
         String body = """
             {
@@ -46,13 +159,15 @@ class SkillsControllerIntegrationTest {
             """.formatted(USER_JOB_ID, skillName);
 
         mockMvc.perform(
-            post("/api/skills/start")
+            post("/skills/start")
+                .header("X-Internal-Secret", INTERNAL_SECRET)
+                .header("X-Internal-User-Id", INTERNAL_USER_ID)
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(body)
         )
         .andExpect(status().isOk())
         .andExpect(content().contentTypeCompatibleWith(MediaType.APPLICATION_JSON))
-        .andExpect(jsonPath("$.status").exists())
+        .andExpect(jsonPath("$.type").exists())
         .andExpect(jsonPath("$.skillName").value(skillName));
     }
 
@@ -60,7 +175,7 @@ class SkillsControllerIntegrationTest {
     @DisplayName("POST /skills/start — unauthenticated returns 401")
     void postSkillStart_unauthenticated_returns401() throws Exception {
         mockMvc.perform(
-            post("/api/skills/start")
+            post("/skills/start")
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("{\"userJobId\":\"x\",\"skillName\":\"evaluate\"}")
         )

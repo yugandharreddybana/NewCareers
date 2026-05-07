@@ -6,7 +6,14 @@ import java.time.Instant;
 import java.util.UUID;
 
 @Entity
-@Table(name = "jobs", schema = "career_operations")
+@Table(name = "jobs", schema = "career_operations",
+       indexes = {
+            @Index(name = "idx_jobs_posted", columnList = "posted_at DESC"),
+            @Index(name = "idx_jobs_sector", columnList = "sector"),
+            @Index(name = "idx_jobs_company_posted", columnList = "company, posted_at DESC"),
+            @Index(name = "idx_jobs_source_posted", columnList = "source_name, posted_at DESC"),
+            @Index(name = "idx_jobs_scraped", columnList = "scraped_at")
+       })
 @Getter @Setter @NoArgsConstructor @AllArgsConstructor @Builder
 public class Job {
     @Id @GeneratedValue(strategy = GenerationType.UUID) private UUID id;
@@ -21,7 +28,7 @@ public class Job {
     private String currency;
     private Boolean sponsorship;
 
-    @Lob private String description;
+    @Column(columnDefinition = "TEXT") private String description;
 
     @Column(name = "source_url")  private String sourceUrl;
     @Column(name = "source_name") private String sourceName;

@@ -41,4 +41,7 @@ public interface AiTokenUsageRepository extends JpaRepository<AiTokenUsage, UUID
 
     @Query("SELECT COALESCE(SUM(t.costUsd), 0) FROM AiTokenUsage t WHERE t.userId = :userId")
     double sumCostByUser(@Param("userId") UUID userId);
+
+    @Query("SELECT COALESCE(SUM(t.totalTokens), 0) FROM AiTokenUsage t WHERE t.userId = :userId AND t.createdAt >= :since")
+    long sumTokensByUserSince(@Param("userId") UUID userId, @Param("since") java.time.Instant since);
 }

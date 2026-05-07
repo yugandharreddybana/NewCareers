@@ -14,21 +14,47 @@ public class ProfileDtos {
     // ── Core profile request ─────────────────────────────────────────────
 
     public record ProfileRequest(
+        @jakarta.validation.constraints.Size(max = 10, message = "Maximum 10 target roles allowed")
         String[]  targetRoles,
+
+        @jakarta.validation.constraints.Size(max = 20, message = "Maximum 20 technologies allowed")
         String[]  techStack,
+
+        @jakarta.validation.constraints.Size(max = 100, message = "Location string too long")
         String    location,
+
+        @jakarta.validation.constraints.Min(value = 0, message = "Salary cannot be negative")
         Integer   salaryMin,
+
+        @jakarta.validation.constraints.Min(value = 0, message = "Salary cannot be negative")
         Integer   salaryMax,
+
         String[]  sectors,
+
+        @jakarta.validation.constraints.Min(value = 1, message = "Freshness must be at least 1 hour")
+        @jakarta.validation.constraints.Max(value = 720, message = "Freshness cannot exceed 30 days")
         Integer   freshnessHours,
+
+        @jakarta.validation.constraints.Min(value = 0, message = "Percent must be 0-100")
+        @jakarta.validation.constraints.Max(value = 100, message = "Percent must be 0-100")
         Integer   minMatchPercent,
+
         Boolean   sponsorshipRequired,
         Boolean   onboarded,
+
         // Section 10 — goal fields
+        @jakarta.validation.constraints.Size(max = 100, message = "Goal title too long")
         String    goalTitle,
+
+        @jakarta.validation.constraints.Min(value = 0, message = "Salary cannot be negative")
         Integer   goalSalaryMin,
+
+        @jakarta.validation.constraints.Min(value = 0, message = "Salary cannot be negative")
         Integer   goalSalaryMax,
+
+        @jakarta.validation.constraints.Size(max = 100, message = "Goal location too long")
         String    goalLocation,
+
         Boolean   openToRemote
     ) {}
 
@@ -53,7 +79,8 @@ public class ProfileDtos {
         Integer             goalSalaryMax,
         String              goalLocation,
         Boolean             openToRemote,
-        Integer             completenessScore
+        Integer             completenessScore,
+        Long                version
     ) {}
 
     // ── Stats ────────────────────────────────────────────────────────────
@@ -69,8 +96,12 @@ public class ProfileDtos {
     // ── Portfolio item request ────────────────────────────────────────────
 
     public record PortfolioItemRequest(
+        @jakarta.validation.constraints.NotBlank(message = "Title is required")
+        @jakarta.validation.constraints.Size(max = 200, message = "Title too long")
         String       title,
+        @jakarta.validation.constraints.Size(max = 500, message = "URL too long")
         String       url,
+        @jakarta.validation.constraints.Size(max = 1000, message = "Description too long")
         String       description,
         List<String> techTags
     ) {}

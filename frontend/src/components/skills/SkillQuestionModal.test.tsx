@@ -6,17 +6,21 @@
  *  ✓ Fires onAnswer with correct value on submit
  *  ✓ Escape key closes the modal (calls onClose)
  */
+import type { HTMLAttributes, ReactNode } from 'react';
 import { render, screen, fireEvent } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, it, expect, vi } from 'vitest';
+import { axe } from '@/test/axe';
 import SkillQuestionModal from './SkillQuestionModal';
+
+type MotionDivProps = HTMLAttributes<HTMLDivElement> & { children?: ReactNode };
 
 // Mock framer-motion
 vi.mock('framer-motion', () => ({
   motion: {
-    div: ({ children, ...p }: any) => <div {...p}>{children}</div>,
+    div: ({ children, ...p }: MotionDivProps) => <div {...p}>{children}</div>,
   },
-  AnimatePresence: ({ children }: any) => <>{children}</>,
+  AnimatePresence: ({ children }: { children?: ReactNode }) => <>{children}</>,
 }));
 
 describe('SkillQuestionModal', () => {
@@ -31,6 +35,11 @@ describe('SkillQuestionModal', () => {
   it('renders the question text when open', () => {
     render(<SkillQuestionModal {...defaultProps} />);
     expect(screen.getByText(/What is your main goal/i)).toBeInTheDocument();
+  });
+
+  it('has no obvious accessibility violations when open', async () => {
+    const { container } = render(<SkillQuestionModal {...defaultProps} />);
+    expect(await axe(container)).toHaveNoViolations();
   });
 
   it('does not render when open=false', () => {

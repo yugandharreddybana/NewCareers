@@ -1,13 +1,22 @@
 package com.careerops.service;
 
+import org.jspecify.annotations.Nullable;
+import io.micrometer.core.instrument.MeterRegistry;
+import io.micrometer.core.instrument.Timer;
+
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpMethod;
 import org.springframework.http.MediaType;
 import org.springframework.stereotype.Service;
-import org.springframework.web.reactive.function.BodyInserters;
-import org.springframework.web.reactive.function.client.WebClient;
-import org.springframework.web.reactive.function.client.WebClientResponseException;
+import org.springframework.web.client.RestClient;
+import org.springframework.web.client.RestClientResponseException;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import io.jsonwebtoken.Jwts;
+import io.jsonwebtoken.security.Keys;
+import java.util.Date;
+import java.util.UUID;
 
 import java.time.Duration;
 import java.util.Collections;
@@ -22,53 +31,179 @@ import java.util.Map;
  */
 @Service
 public class SupabaseStorageService {
+    private static final Logger log = LoggerFactory.getLogger(SupabaseStorageService.class);
 
-    private final WebClient client;
+
+    private final RestClient client;
     private final String url;
     private final String key;
+    private final String anonKey; // 3.033
+    private final String jwtSecret; // 3.033
+    private final MeterRegistry meterRegistry;
 
-    public SupabaseStorageService(WebClient.Builder builder,
+    @Value("${supabase.bucket.cv:resumes}")
+    private String bucketCv;
+
+    @Value("${supabase.bucket.application-cv:application-cvs}")
+    private String bucketApp;
+
+    @Value("${supabase.bucket.resume:resume-versions}")
+    private String bucketVersion;
+
+    public SupabaseStorageService(RestClient.Builder builder,
                                   @Value("${supabase.url}") String url,
-                                  @Value("${supabase.service.key}") String key) {
+                                  @Value("${supabase.service.key}") String key,
+                                  @Value("${supabase.anon.key:}") String anonKey,
+                                  @Value("${supabase.jwt.secret:}") String jwtSecret,
+                                  MeterRegistry meterRegistry) {
         this.url = url;
         this.key = key;
+        this.anonKey = anonKey;
+        this.jwtSecret = jwtSecret;
+        this.meterRegistry = meterRegistry;
         this.client = builder.baseUrl(url).build();
+    }
+ 
+    /** 
+     * 3.086 — Connectivity check for health monitoring. 
+     * Attempts to list buckets to verify API key and network.
+     */
+    public void ping() {
+        executeWithTimer("ping", () -> {
+            try {
+                client.get().uri("/storage/v1/bucket")
+                    .header(HttpHeaders.AUTHORIZATION, "Bearer " + key)
+                    .retrieve()
+                    .toBodilessEntity();
+            } catch (Exception e) {
+                log.error("Supabase health check failed: {}", e.getMessage());
+                throw new RuntimeException("Supabase Storage unreachable", e);
+            }
+        });
+    }
+
+    /**
+     * 3.033 — Create a signed JWT for a specific user to satisfy Supabase RLS.
+     */
+    private String createScopedToken(@Nullable UUID userId) {
+        if (jwtSecret == null || jwtSecret.isBlank() || userId == null) {
+            return key; // Fallback to service key if secret missing or no user context
+        }
+        long exp = System.currentTimeMillis() + (10 * 60 * 1000); // 10 mins
+        return Jwts.builder()
+                .header().add("typ", "JWT").and()
+                .claim("role", "authenticated")
+                .claim("aud",  "authenticated")
+                .subject(userId.toString())
+                .expiration(new Date(exp))
+                .signWith(Keys.hmacShaKeyFor(jwtSecret.getBytes(java.nio.charset.StandardCharsets.UTF_8)))
+                .compact();
+    }
+
+    private String getAuthHeader(@Nullable UUID userId) {
+        if (userId != null && !anonKey.isEmpty() && !jwtSecret.isEmpty()) {
+            return "Bearer " + createScopedToken(userId);
+        }
+        return "Bearer " + key;
+    }
+
+    private String getApiKey(@Nullable UUID userId) {
+        if (userId != null && !anonKey.isEmpty()) {
+            return anonKey;
+        }
+        return key;
     }
 
     // Upload (new object — 409 if already exists)
-    public void upload(String bucket, String path, byte[] bytes, String contentType) {
-        client.post()
-            .uri("/storage/v1/object/{b}/{p}", bucket, path)
-            .header(HttpHeaders.AUTHORIZATION, "Bearer " + key)
-            .contentType(MediaType.parseMediaType(safeContentType(contentType)))
-            .body(BodyInserters.fromValue(bytes))
-            .retrieve().bodyToMono(String.class)
-            .block(Duration.ofSeconds(30));
+    public void upload(String bucket, String path, byte[] bytes, @Nullable String contentType, @Nullable UUID userId) {
+        executeWithTimer("upload", () -> {
+            try {
+                client.post()
+                    .uri("/storage/v1/object/{b}/{p}", bucket, path)
+                    .header(HttpHeaders.AUTHORIZATION, getAuthHeader(userId))
+                    .header("apikey", getApiKey(userId))
+                    .contentType(MediaType.parseMediaType(safeContentType(path, contentType)))
+                    .body(bytes)
+                    .retrieve().body(String.class);
+            } catch (Exception e) {
+                log.error("[SupabaseStorage] Upload failed for bucket={}, path={}: {}", bucket, path, e.getMessage());
+                throw e;
+            }
+        });
+    }
+
+    public void uploadStream(String bucket, String path, org.springframework.core.io.Resource resource, @Nullable String contentType, @Nullable UUID userId) {
+        executeWithTimer("uploadStream", () -> {
+            try {
+                client.post()
+                    .uri("/storage/v1/object/{b}/{p}", bucket, path)
+                    .header(HttpHeaders.AUTHORIZATION, getAuthHeader(userId))
+                    .header("apikey", getApiKey(userId))
+                    .contentType(MediaType.parseMediaType(safeContentType(path, contentType)))
+                    .body(resource)
+                    .retrieve().body(String.class);
+            } catch (Exception e) {
+                log.error("[SupabaseStorage] UploadStream failed for bucket={}, path={}: {}", bucket, path, e.getMessage());
+                throw e;
+            }
+        });
     }
 
     // Upsert (creates or overwrites)
-    public void upsert(String bucket, String path, byte[] bytes, String contentType) {
-        client.put()
-            .uri("/storage/v1/object/{b}/{p}", bucket, path)
-            .header(HttpHeaders.AUTHORIZATION, "Bearer " + key)
-            .header("x-upsert", "true")
-            .contentType(MediaType.parseMediaType(safeContentType(contentType)))
-            .body(BodyInserters.fromValue(bytes))
-            .retrieve().bodyToMono(String.class)
-            .block(Duration.ofSeconds(30));
+    public void upsert(String bucket, String path, byte[] bytes, @Nullable String contentType, @Nullable UUID userId) {
+        executeWithTimer("upsert", () -> {
+            try {
+                client.put()
+                    .uri("/storage/v1/object/{b}/{p}", bucket, path)
+                    .header(HttpHeaders.AUTHORIZATION, getAuthHeader(userId))
+                    .header("apikey", getApiKey(userId))
+                    .header("x-upsert", "true")
+                    .contentType(MediaType.parseMediaType(safeContentType(path, contentType)))
+                    .body(bytes)
+                    .retrieve().body(String.class);
+            } catch (Exception e) {
+                log.error("[SupabaseStorage] Upsert failed for bucket={}, path={}: {}", bucket, path, e.getMessage());
+                throw e;
+            }
+        });
+    }
+
+    public void upsertStream(String bucket, String path, org.springframework.core.io.Resource resource, @Nullable String contentType, @Nullable UUID userId) {
+        executeWithTimer("upsertStream", () -> {
+            try {
+                client.put()
+                    .uri("/storage/v1/object/{b}/{p}", bucket, path)
+                    .header(HttpHeaders.AUTHORIZATION, getAuthHeader(userId))
+                    .header("apikey", getApiKey(userId))
+                    .header("x-upsert", "true")
+                    .contentType(MediaType.parseMediaType(safeContentType(path, contentType)))
+                    .body(resource)
+                    .retrieve().body(String.class);
+            } catch (Exception e) {
+                log.error("[SupabaseStorage] UpsertStream failed for bucket={}, path={}: {}", bucket, path, e.getMessage());
+                throw e;
+            }
+        });
     }
 
     // Signed URL (time-limited private access)
-    public String signedUrl(String bucket, String path, int expiresInSeconds) {
-        Map<?, ?> resp = client.post()
-            .uri("/storage/v1/object/sign/{b}/{p}", bucket, path)
-            .header(HttpHeaders.AUTHORIZATION, "Bearer " + key)
-            .contentType(MediaType.APPLICATION_JSON)
-            .bodyValue(Map.of("expiresIn", expiresInSeconds))
-            .retrieve().bodyToMono(Map.class)
-            .block(Duration.ofSeconds(15));
-        Object signed = resp == null ? null : resp.get("signedURL");
-        return signed == null ? null : url + "/storage/v1" + signed;
+    public @Nullable String signedUrl(String bucket, String path, int expiresInSeconds, @Nullable UUID userId) {
+        return executeWithTimer("signedUrl", () -> {
+            try {
+                Map<?, ?> resp = client.post()
+                    .uri("/storage/v1/object/sign/{b}/{p}", bucket, path)
+                    .header(HttpHeaders.AUTHORIZATION, getAuthHeader(userId))
+                    .header("apikey", getApiKey(userId))
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .body(Map.of("expiresIn", expiresInSeconds))
+                    .retrieve().body(Map.class);
+                Object signed = resp == null ? null : resp.get("signedURL");
+                return signed == null ? null : url + "/storage/v1" + signed;
+            } catch (Exception e) {
+                log.warn("[SupabaseStorage] Failed to generate signed URL for bucket={}, path={}: {}", bucket, path, e.getMessage());
+                return null; // Return null so caller can handle missing file gracefully
+            }
+        });
     }
 
     // Public URL (for public buckets only)
@@ -77,61 +212,135 @@ public class SupabaseStorageService {
     }
 
     // Delete a single object
-    public void delete(String bucket, String path) {
-        try {
-            client.method(HttpMethod.DELETE)
-                .uri("/storage/v1/object/{b}", bucket)
-                .header(HttpHeaders.AUTHORIZATION, "Bearer " + key)
-                .contentType(MediaType.APPLICATION_JSON)
-                .bodyValue(Map.of("prefixes", List.of(path)))
-                .retrieve().bodyToMono(String.class)
-                .block(Duration.ofSeconds(15));
-        } catch (WebClientResponseException e) {
-            System.err.println("[SupabaseStorage] delete warning: " + e.getMessage());
-        }
+    public void delete(String bucket, String path, @Nullable UUID userId) {
+        executeWithTimer("delete", () -> {
+            try {
+                client.method(HttpMethod.DELETE)
+                    .uri("/storage/v1/object/{b}", bucket)
+                    .header(HttpHeaders.AUTHORIZATION, getAuthHeader(userId))
+                    .header("apikey", getApiKey(userId))
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .body(Map.of("prefixes", List.of(path)))
+                    .retrieve().body(String.class);
+            } catch (Exception e) {
+                // 3.032 — Log the error but rethrow so transactional Saga can handle it or fail-fast
+                log.error("[SupabaseStorage] Delete failed for bucket={}, path={}: {}", bucket, path, e.getMessage());
+                throw e;
+            }
+        });
     }
 
     // Delete multiple objects
-    public void deleteMany(String bucket, List<String> paths) {
+    public void deleteMany(String bucket, @Nullable List<String> paths, @Nullable UUID userId) {
         if (paths == null || paths.isEmpty()) return;
-        try {
-            client.method(HttpMethod.DELETE)
-                .uri("/storage/v1/object/{b}", bucket)
-                .header(HttpHeaders.AUTHORIZATION, "Bearer " + key)
-                .contentType(MediaType.APPLICATION_JSON)
-                .bodyValue(Map.of("prefixes", paths))
-                .retrieve().bodyToMono(String.class)
-                .block(Duration.ofSeconds(20));
-        } catch (WebClientResponseException e) {
-            System.err.println("[SupabaseStorage] deleteMany warning: " + e.getMessage());
-        }
+        executeWithTimer("deleteMany", () -> {
+            try {
+                client.method(HttpMethod.DELETE)
+                    .uri("/storage/v1/object/{b}", bucket)
+                    .header(HttpHeaders.AUTHORIZATION, getAuthHeader(userId))
+                    .header("apikey", getApiKey(userId))
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .body(Map.of("prefixes", paths))
+                    .retrieve().body(String.class);
+            } catch (Exception e) {
+                log.error("[SupabaseStorage] DeleteMany failed for bucket={}, count={}: {}", bucket, paths.size(), e.getMessage());
+                throw e;
+            }
+        });
     }
 
     // List files in a folder prefix
     @SuppressWarnings("unchecked")
-    public List<Map<String, Object>> listFiles(String bucket, String prefix) {
-        try {
-            List<?> resp = client.post()
-                .uri("/storage/v1/object/list/{b}", bucket)
-                .header(HttpHeaders.AUTHORIZATION, "Bearer " + key)
-                .contentType(MediaType.APPLICATION_JSON)
-                .bodyValue(Map.of(
-                    "prefix", prefix == null ? "" : prefix,
-                    "limit", 100,
-                    "offset", 0,
-                    "sortBy", Map.of("column", "created_at", "order", "desc")
-                ))
-                .retrieve().bodyToMono(List.class)
-                .block(Duration.ofSeconds(15));
-            if (resp == null) return Collections.emptyList();
-            return (List<Map<String, Object>>) resp;
-        } catch (WebClientResponseException e) {
-            System.err.println("[SupabaseStorage] listFiles warning: " + e.getMessage());
-            return Collections.emptyList();
+    public List<Map<String, Object>> listFiles(String bucket, @Nullable String prefix, @Nullable UUID userId) {
+        return executeWithTimer("listFiles", () -> {
+            try {
+                List<?> resp = client.post()
+                    .uri("/storage/v1/object/list/{b}", bucket)
+                    .header(HttpHeaders.AUTHORIZATION, getAuthHeader(userId))
+                    .header("apikey", getApiKey(userId))
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .body(Map.of(
+                        "prefix", prefix == null ? "" : prefix,
+                        "limit", 100,
+                        "offset", 0,
+                        "sortBy", Map.of("column", "created_at", "order", "desc")
+                    ))
+                    .retrieve().body(List.class);
+                if (resp == null) return Collections.emptyList();
+                return (List<Map<String, Object>>) resp;
+            } catch (RestClientResponseException e) {
+                log.warn("[SupabaseStorage] listFiles failed: {}", e.getMessage());
+                return Collections.emptyList();
+            }
+        });
+    }
+
+    /**
+     * 3.042 — GDPR Cleanup: Delete all files in a folder prefix.
+     */
+    public void deleteFolder(String bucket, @Nullable String prefix, @Nullable UUID userId) {
+        String cleanPrefix = (prefix != null && !prefix.endsWith("/")) ? prefix + "/" : prefix;
+        List<Map<String, Object>> files = listFiles(bucket, prefix, userId);
+        if (files == null || files.isEmpty()) return;
+
+        List<String> paths = files.stream()
+            .map(f -> (String) f.get("name"))
+            .filter(n -> n != null && !n.isBlank())
+            .map(n -> cleanPrefix + n)
+            .toList();
+
+        if (!paths.isEmpty()) {
+            deleteMany(bucket, paths, userId);
+            log.info("[SupabaseStorage] Purged {} files from bucket={} prefix={} (userId={})", paths.size(), bucket, prefix, userId);
         }
     }
 
-    private String safeContentType(String ct) {
-        return (ct == null || ct.isBlank()) ? "application/octet-stream" : ct;
+    /**
+     * 3.042 — GDPR Cleanup: Purge all user-related files across all known buckets.
+     */
+    public void purgeUserFiles(@Nullable UUID userId) {
+        if (userId == null) return;
+        String prefix = userId.toString();
+        log.info("[SupabaseStorage] Starting full file purge for userId={}", userId);
+        deleteFolder(bucketCv, prefix, userId);
+        deleteFolder(bucketApp, prefix, userId);
+        deleteFolder(bucketVersion, prefix, userId);
+    }
+
+    private String safeContentType(@Nullable String path, @Nullable String ct) {
+        if (ct != null && !ct.isBlank() && !ct.equals("application/octet-stream")) {
+            return ct;
+        }
+        if (path == null) return "application/octet-stream";
+        String lc = path.toLowerCase();
+        if (lc.endsWith(".pdf")) return "application/pdf";
+        if (lc.endsWith(".docx")) return "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
+        if (lc.endsWith(".html")) return "text/html; charset=utf-8";
+        if (lc.endsWith(".png")) return "image/png";
+        if (lc.endsWith(".jpg") || lc.endsWith(".jpeg")) return "image/jpeg";
+        return "application/octet-stream";
+    }
+
+    private <T> T executeWithTimer(String operation, java.util.function.Supplier<T> action) {
+        Timer.Sample sample = Timer.start(meterRegistry);
+        try {
+            T res = action.get();
+            sample.stop(meterRegistry.timer("outbound.call.latency", "service", "supabase", "operation", operation, "status", "success"));
+            return res;
+        } catch (Exception e) {
+            sample.stop(meterRegistry.timer("outbound.call.latency", "service", "supabase", "operation", operation, "status", "failure"));
+            throw e;
+        }
+    }
+
+    private void executeWithTimer(String operation, Runnable action) {
+        Timer.Sample sample = Timer.start(meterRegistry);
+        try {
+            action.run();
+            sample.stop(meterRegistry.timer("outbound.call.latency", "service", "supabase", "operation", operation, "status", "success"));
+        } catch (Exception e) {
+            sample.stop(meterRegistry.timer("outbound.call.latency", "service", "supabase", "operation", operation, "status", "failure"));
+            throw e;
+        }
     }
 }

@@ -9,10 +9,12 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.stereotype.Service;
-import org.springframework.web.reactive.function.client.WebClient;
-import org.springframework.web.reactive.function.client.WebClientResponseException;
+import org.springframework.web.client.RestClient;
+import org.springframework.web.client.RestClientResponseException;
+import io.micrometer.core.instrument.MeterRegistry;
+import io.micrometer.core.instrument.Timer;
 
-import java.time.Duration;
+import java.util.UUID;
 
 /**
  * Single-turn Claude call that enforces JSON output.
@@ -43,15 +45,20 @@ public class ClaudeDirectService {
     @Value("${anthropic.call.timeout.seconds:120}")
     private int timeoutSeconds;
 
-    private final WebClient webClient;
+    private final RestClient restClient;
     private final ObjectMapper mapper;
+    private final TokenUsageService tokenUsageService;
+    private final UserConsentService consentService;
+    private final MeterRegistry meterRegistry;
 
-    public ClaudeDirectService(ObjectMapper mapper) {
+    public ClaudeDirectService(RestClient.Builder builder, ObjectMapper mapper, TokenUsageService tokenUsageService, UserConsentService consentService, MeterRegistry meterRegistry) {
         this.mapper = mapper;
-        this.webClient = WebClient.builder()
+        this.tokenUsageService = tokenUsageService;
+        this.consentService = consentService;
+        this.meterRegistry = meterRegistry;
+        this.restClient = builder
                 .baseUrl(ANTHROPIC_API_URL)
                 .defaultHeader(HttpHeaders.CONTENT_TYPE, MediaType.APPLICATION_JSON_VALUE)
-                .codecs(cfg -> cfg.defaultCodecs().maxInMemorySize(10 * 1024 * 1024))
                 .build();
     }
 
@@ -60,28 +67,21 @@ public class ClaudeDirectService {
      * System prompt MUST instruct Claude to return only valid JSON.
      * Falls back to a text-wrapped node on parse failure.
      */
-    public JsonNode generateJson(String systemPrompt, String userPrompt) {
-        String raw = generate(systemPrompt, userPrompt);
-        String cleaned = stripCodeFences(raw);
-        try {
-            return mapper.readTree(cleaned);
-        } catch (Exception e) {
-            log.warn("ClaudeDirectService: JSON parse failed — wrapping as text. raw={}",
-                    raw.length() > 200 ? raw.substring(0, 200) + "..." : raw);
-            ObjectNode fallback = mapper.createObjectNode();
-            fallback.put("raw", raw);
-            fallback.put("parseError", e.getMessage());
-            return fallback;
-        }
+    public JsonNode generateJson(String systemPrompt, String userPrompt, UUID userId, String featureName) {
+        consentService.validateAiConsent(userId);
+        String raw = generate(systemPrompt, userPrompt, userId, featureName);
+        // 3.072 — Use shared utility for robust extraction
+        return com.careerops.util.JsonExtractor.extract(raw, mapper);
     }
 
     /**
      * Raw text call — returns Claude's response as a plain string.
      */
-    public String generate(String systemPrompt, String userPrompt) {
+    public String generate(String systemPrompt, String userPrompt, UUID userId, String featureName) {
         if (apiKey == null || apiKey.isBlank() || apiKey.startsWith("YOUR_")) {
-            log.warn("ClaudeDirectService: API key not configured — returning stub");
-            return "{\"stub\":true,\"note\":\"Anthropic API key not configured\"}";
+            log.error("ClaudeDirectService: Anthropic API key not configured");
+            // 3.074 — Throw exception instead of returning silent stub data
+            throw com.careerops.exception.ApiException.internalError("AI engine not configured (Anthropic)");
         }
 
         ObjectNode body = mapper.createObjectNode();
@@ -101,28 +101,33 @@ public class ClaudeDirectService {
         messages.add(userMsg);
         body.set("messages", messages);
 
-        return callWithRetry(body);
+        return callWithRetry(body, userId, featureName);
     }
 
-    private String callWithRetry(ObjectNode body) {
-        int attempts = 0;
+    private String callWithRetry(ObjectNode body, UUID userId, String featureName) {
+        Timer.Sample sample = Timer.start(meterRegistry);
         int maxAttempts = 3;
-        long delayMs = 2000;
-
-        while (attempts < maxAttempts) {
-            attempts++;
+        long backoffMs = 2000;
+        for (int attempt = 1; attempt <= maxAttempts; attempt++) {
             try {
-                String responseStr = webClient.post()
-                        .header("x-api-key",        apiKey)
-                        .header("anthropic-version", ANTHROPIC_VERSION)
-                        .bodyValue(body.toString())
-                        .retrieve()
-                        .bodyToMono(String.class)
-                        .timeout(Duration.ofSeconds(timeoutSeconds))
-                        .block();
+                String responseStr = restClient.post()
+                    .header("x-api-key", apiKey)
+                    .header("anthropic-version", ANTHROPIC_VERSION)
+                    .body(body.toString())
+                    .retrieve()
+                    .body(String.class);
 
-                if (responseStr == null) return "{}";
                 JsonNode resp = mapper.readTree(responseStr);
+                
+                // 3.075 — Record token usage
+                JsonNode usage = resp.path("usage");
+                if (!usage.isMissingNode()) {
+                    int input  = usage.path("input_tokens").asInt(0);
+                    int output = usage.path("output_tokens").asInt(0);
+                    // Approximate cost for Opus: $15/M input, $75/M output (simplified for proxy)
+                    double cost = (input * 0.000015) + (output * 0.000075);
+                    tokenUsageService.record(userId, featureName, model, input, output, cost);
+                }
 
                 StringBuilder sb = new StringBuilder();
                 for (JsonNode block : resp.path("content")) {
@@ -130,40 +135,46 @@ public class ClaudeDirectService {
                         sb.append(block.path("text").asText());
                     }
                 }
-                return sb.toString().trim();
-
-            } catch (WebClientResponseException e) {
+                String result = sb.toString().trim();
+                sample.stop(meterRegistry.timer("outbound.call.latency", "service", "anthropic_direct", "status", "success"));
+                return result;
+            } catch (RestClientResponseException e) {
                 int status = e.getStatusCode().value();
                 if (status == 401) {
-                    log.error("ClaudeDirectService: invalid API key (401)");
-                    return "{\"error\":\"Invalid Anthropic API key\"}";
+                    sample.stop(meterRegistry.timer("outbound.call.latency", "service", "anthropic_direct", "status", "failure"));
+                    return mapper.createObjectNode().put("error", "Invalid Anthropic API key").toString();
                 }
-                if ((status == 429 || status == 529) && attempts < maxAttempts) {
-                    log.warn("ClaudeDirectService: rate limited ({}), retrying in {}ms ({}/{})",
-                            status, delayMs, attempts, maxAttempts);
-                    try { Thread.sleep(delayMs); } catch (InterruptedException ie) {
-                        Thread.currentThread().interrupt();
-                        return "{\"error\":\"Interrupted\"}";
+                if (status == 429 || status == 529) {
+                    if (attempt == maxAttempts) {
+                        sample.stop(meterRegistry.timer("outbound.call.latency", "service", "anthropic_direct", "status", "failure"));
+                        String retryAfter = e.getResponseHeaders() != null ? e.getResponseHeaders().getFirst(org.springframework.http.HttpHeaders.RETRY_AFTER) : null;
+                        Integer seconds = null;
+                        if (retryAfter != null) {
+                            try { seconds = Integer.parseInt(retryAfter); } catch (Exception ignored) {}
+                        }
+                        throw com.careerops.exception.ApiException.tooManyRequests(
+                            "AI engine is currently overloaded. Please try again later.", seconds);
                     }
-                    delayMs *= 2;
-                    continue;
+                    log.warn("ClaudeDirectService: rate limited, retrying... (attempt {})", attempt);
+                    try { Thread.sleep(backoffMs); } catch (InterruptedException ie) { Thread.currentThread().interrupt(); }
+                    backoffMs *= 2;
+                } else {
+                    sample.stop(meterRegistry.timer("outbound.call.latency", "service", "anthropic_direct", "status", "failure"));
+                    throw new com.careerops.exception.ApiException(
+                        org.springframework.http.HttpStatus.valueOf(status), "Claude API error: " + status);
                 }
-                log.error("ClaudeDirectService: API error {}: {}", status, e.getResponseBodyAsString());
-                return "{\"error\":\"Claude API error " + status + "\"}";
             } catch (Exception e) {
-                log.error("ClaudeDirectService: call failed: {}", e.getMessage(), e);
-                return "{\"error\":\"" + e.getMessage().replace("\"", "'") + "\"}";
+                if (attempt == maxAttempts) {
+                    sample.stop(meterRegistry.timer("outbound.call.latency", "service", "anthropic_direct", "status", "failure"));
+                    throw com.careerops.exception.ApiException.internalError("Max retries exceeded: " + e.getMessage());
+                }
+                log.warn("ClaudeDirectService: call failed, retrying... (attempt {})", attempt);
+                try { Thread.sleep(backoffMs); } catch (InterruptedException ie) { Thread.currentThread().interrupt(); }
+                backoffMs *= 2;
             }
         }
-        return "{\"error\":\"Max retries exceeded\"}";
+        throw com.careerops.exception.ApiException.internalError("Max retries exceeded");
     }
 
-    private String stripCodeFences(String raw) {
-        if (raw == null) return "{}";
-        String s = raw.trim();
-        if (s.startsWith("```json")) s = s.substring(7);
-        else if (s.startsWith("```"))  s = s.substring(3);
-        if (s.endsWith("```")) s = s.substring(0, s.length() - 3);
-        return s.trim();
-    }
+    // 3.072 — stripCodeFences logic removed in favour of JsonExtractor.extract()
 }

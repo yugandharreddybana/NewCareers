@@ -35,17 +35,17 @@ export interface ValidateTokenResponse {
 
 export const referralsApi = {
   createReferral: async (email: string): Promise<ReferralDto> => {
-    const res = await api.post<ReferralDto>('/api/referrals', { email });
+    const res = await api.post<ReferralDto>('/referrals', { email });
     return res.data;
   },
 
   getMyReferrals: async (): Promise<MyReferralsResponse> => {
-    const res = await api.get<MyReferralsResponse>('/api/referrals/my');
+    const res = await api.get<MyReferralsResponse>('/referrals/my');
     return res.data;
   },
 
   validateToken: async (token: string): Promise<ValidateTokenResponse> => {
-    const res = await api.get<ValidateTokenResponse>(`/api/referrals/validate/${token}`);
+    const res = await api.get<ValidateTokenResponse>(`/referrals/validate/${token}`);
     return res.data;
   },
 };

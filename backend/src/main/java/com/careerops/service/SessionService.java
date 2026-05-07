@@ -54,7 +54,7 @@ public class SessionService {
     }
 
     public int revokeAllSessions(UUID userId) {
-        return repo.revokeAllByUserId(userId);
+        return repo.revokeAllByUserId(userId, Instant.now());
     }
 
     private SessionResponse toResponse(UserSession s, boolean current) {

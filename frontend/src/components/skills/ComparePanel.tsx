@@ -1,13 +1,17 @@
 import SkillPanel from './SkillPanel';
 import { useNavigate } from 'react-router-dom';
+import type { CompareData, CompareRow } from '@/types/skills-data';
 
-interface Props { data: any; open: boolean; onClose: () => void; jobIds: string[]; }
+interface Props { data: CompareData | null; open: boolean; onClose: () => void; jobIds: string[]; }
 
 export default function ComparePanel({ data, open, onClose, jobIds }: Props) {
   const nav = useNavigate();
   if (!data) return null;
-  const rows: any[] = data.rows || [];
+  const rows: CompareRow[] = data.rows || [];
   const colCount = rows[0]?.values?.length || jobIds.length;
+  const winnerJobId = typeof data.winnerIndex === 'number'
+    ? jobIds[data.winnerIndex]
+    : null;
 
   return (
     <SkillPanel title="Job Comparison" open={open} onClose={onClose}>
@@ -29,10 +33,10 @@ export default function ComparePanel({ data, open, onClose, jobIds }: Props) {
               </tr>
             </thead>
             <tbody>
-              {rows.map((row: any, ri: number) => (
+              {rows.map((row, ri) => (
                 <tr key={ri} className="border-t border-slate-100">
                   <td className="py-2.5 pr-4 font-medium text-ink-900">{row.label}</td>
-                  {(row.values || []).map((val: string, ci: number) => (
+                  {(row.values || []).map((val, ci) => (
                     <td key={ci} className={`py-2.5 px-3 text-center align-top text-slate-700
                       ${ci === data.winnerIndex ? 'bg-emerald-50 font-medium text-emerald-800' : ''}`}>
                       {val}
@@ -44,10 +48,10 @@ export default function ComparePanel({ data, open, onClose, jobIds }: Props) {
           </table>
         </div>
 
-        {typeof data.winnerIndex === 'number' && jobIds[data.winnerIndex] && (
+        {winnerJobId && (
           <button
             className="btn btn-accent w-full"
-            onClick={() => { nav(`/jobs/${jobIds[data.winnerIndex]}`); onClose(); }}>
+            onClick={() => { nav(`/jobs/${winnerJobId}`); onClose(); }}>
             Pick this one →
           </button>
         )}

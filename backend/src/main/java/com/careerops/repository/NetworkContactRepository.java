@@ -21,4 +21,5 @@ public interface NetworkContactRepository extends JpaRepository<NetworkContact, 
             UUID userId, ContactType contactType);
 
     Optional<NetworkContact> findByIdAndUserId(UUID id, UUID userId);
+    boolean existsByUserIdAndName(UUID userId, String name);
 }

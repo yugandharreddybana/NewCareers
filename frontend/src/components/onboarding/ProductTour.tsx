@@ -5,7 +5,7 @@
  * - Animated entry/exit, progress dots, back/next/skip
  */
 import React, { useEffect, useState, useCallback } from 'react';
-import { motion, AnimatePresence } from 'framer-motion';
+import { motion, AnimatePresence, type MotionStyle } from 'framer-motion';
 import { X, ArrowRight, ArrowLeft } from 'lucide-react';
 
 export interface TourStep {
@@ -31,9 +31,9 @@ const TIP = 280; // tooltip width
 function getTooltipStyle(
   rect: Rect,
   placement: TourStep['placement'] = 'bottom',
-): React.CSSProperties {
+): MotionStyle {
   const gap = 20;
-  const style: React.CSSProperties = { position: 'fixed', width: TIP, zIndex: 10000 };
+  const style: MotionStyle = { position: 'fixed', width: TIP, zIndex: 10000 };
 
   if (placement === 'bottom') {
     style.top  = rect.top + rect.height + PAD + gap;
@@ -134,7 +134,7 @@ export const ProductTour: React.FC<ProductTourProps> = ({ steps, onComplete, onS
       }
     : { display: 'none' };
 
-  const tooltipStyle: React.CSSProperties = rect
+  const tooltipStyle: MotionStyle = rect
     ? getTooltipStyle(rect, step.placement)
     : {
         position: 'fixed',

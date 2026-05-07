@@ -18,20 +18,24 @@ public interface UserRepository extends JpaRepository<User, UUID> {
     boolean existsByUsername(String username);
     Optional<User> findByEmail(String email);
 
-    /** Task 118 — look up a user by their hashed refresh token. */
-    @Query("SELECT u FROM User u WHERE u.refreshToken = :hash")
-    Optional<User> findByRefreshToken(String hash);
-
-    /**
-     * Task 124 — Bulk-wipe all expired refresh tokens in a single UPDATE.
-     * Called nightly by CronJobService at 02:00 Dublin time.
-     * Returns the number of rows purged.
-     */
+    /** 3.002 — Atomic increment of failed attempts. Returns new count. */
     @Modifying
-    @Transactional
-    @Query("UPDATE User u SET u.refreshToken = NULL, u.refreshTokenExpiresAt = NULL "
-         + "WHERE u.refreshTokenExpiresAt IS NOT NULL AND u.refreshTokenExpiresAt < :now")
-    int purgeExpiredRefreshTokens(Instant now);
+    @Transactional(propagation = org.springframework.transaction.annotation.Propagation.REQUIRES_NEW)
+    @Query("UPDATE User u SET u.failedLoginAttempts = u.failedLoginAttempts + 1 WHERE u.email = :email")
+    int incrementFailedAttempts(String email);
+
+    /** 3.002 — Set lockout time. */
+    @Modifying
+    @Transactional(propagation = org.springframework.transaction.annotation.Propagation.REQUIRES_NEW)
+    @Query("UPDATE User u SET u.lockedUntil = :until WHERE u.email = :email")
+    void lockAccount(String email, Instant until);
+
+    /** 3.002 — Reset failed attempts on success. */
+    @Modifying
+    @Transactional(propagation = org.springframework.transaction.annotation.Propagation.REQUIRES_NEW)
+    @Query("UPDATE User u SET u.failedLoginAttempts = 0, u.lockedUntil = NULL WHERE u.email = :email")
+    void resetFailedAttempts(String email);
+
 
     /**
      * Task 135 — AdminService.platformStats(): count only non-deleted users.

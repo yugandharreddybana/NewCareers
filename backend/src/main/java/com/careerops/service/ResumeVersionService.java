@@ -30,15 +30,18 @@ public class ResumeVersionService {
 
     private final ResumeVersionRepository versionRepo;
     private final SupabaseStorageService storage;
+    private final com.careerops.util.FileUtil fileUtil;
     private final String bucket;
 
     private static final long MAX_FILE_SIZE = 10L * 1024 * 1024;
 
     public ResumeVersionService(ResumeVersionRepository versionRepo,
                                 SupabaseStorageService storage,
+                                com.careerops.util.FileUtil fileUtil,
                                 @Value("${supabase.bucket.resume}") String bucket) {
         this.versionRepo = versionRepo;
         this.storage = storage;
+        this.fileUtil = fileUtil;
         this.bucket = bucket;
     }
 
@@ -53,7 +56,7 @@ public class ResumeVersionService {
         return toResponse(find(userId, id));
     }
 
-    @Transactional
+    @Transactional(timeout = 10)
     public ResumeVersionResponse create(UUID userId, CreateResumeVersionRequest req) {
         int nextVersion = versionRepo.countByUserId(userId) + 1;
         if (req.isActive()) {
@@ -75,7 +78,7 @@ public class ResumeVersionService {
         return toResponse(versionRepo.save(v));
     }
 
-    @Transactional
+    @Transactional(timeout = 10)
     public ResumeVersionResponse uploadFile(UUID userId, UUID versionId, MultipartFile file)
             throws IOException {
         ResumeVersion v = find(userId, versionId);
@@ -85,18 +88,18 @@ public class ResumeVersionService {
         if (file.getSize() > MAX_FILE_SIZE)
             throw new ApiException(HttpStatus.PAYLOAD_TOO_LARGE, "Max 10 MB");
 
-        String name = file.getOriginalFilename() == null ? "resume" : file.getOriginalFilename();
+        String name = fileUtil.sanitizeFilename(file.getOriginalFilename());
         String lc = name.toLowerCase();
         if (!(lc.endsWith(".pdf") || lc.endsWith(".docx")))
             throw new ApiException(HttpStatus.UNSUPPORTED_MEDIA_TYPE, "Only PDF or DOCX");
 
         if (v.getStoragePath() != null && !v.getStoragePath().isBlank()) {
-            storage.delete(bucket, v.getStoragePath());
+            storage.delete(bucket, v.getStoragePath(), userId);
         }
 
         String path = userId + "/v" + v.getVersionNumber() + "-" +
-                      System.currentTimeMillis() + "-" + name.replaceAll("\\s+", "_");
-        storage.upsert(bucket, path, file.getBytes(), file.getContentType());
+                      System.currentTimeMillis() + "-" + name;
+        storage.upsertStream(bucket, path, file.getResource(), file.getContentType(), userId);
 
         v.setStoragePath(path);
         v.setFileName(name);
@@ -107,15 +110,15 @@ public class ResumeVersionService {
         ResumeVersion v = find(userId, versionId);
         if (v.getStoragePath() == null || v.getStoragePath().isBlank())
             throw new ApiException(HttpStatus.NOT_FOUND, "No file attached to this version");
-        String signed = storage.signedUrl(bucket, v.getStoragePath(), 600);
+        String signed = storage.signedUrl(bucket, v.getStoragePath(), 600, userId);
         return Map.of("url", signed, "fileName", v.getFileName() != null ? v.getFileName() : "resume");
     }
 
-    @Transactional
+    @Transactional(timeout = 10)
     public ResumeVersionResponse deleteFile(UUID userId, UUID versionId) {
         ResumeVersion v = find(userId, versionId);
         if (v.getStoragePath() != null && !v.getStoragePath().isBlank()) {
-            storage.delete(bucket, v.getStoragePath());
+            storage.delete(bucket, v.getStoragePath(), userId);
             v.setStoragePath(null);
             v.setFileName(null);
             versionRepo.save(v);
@@ -123,7 +126,7 @@ public class ResumeVersionService {
         return toResponse(v);
     }
 
-    @Transactional
+    @Transactional(timeout = 10)
     public ResumeVersionResponse update(UUID userId, UUID id, UpdateResumeVersionRequest req) {
         ResumeVersion v = find(userId, id);
         if (req.name()               != null) v.setName(req.name());
@@ -143,7 +146,7 @@ public class ResumeVersionService {
         return toResponse(versionRepo.save(v));
     }
 
-    @Transactional
+    @Transactional(timeout = 10)
     public ResumeVersionResponse recordOutcome(UUID userId, UUID id, RecordOutcomeRequest req) {
         ResumeVersion v = find(userId, id);
         v.setOutcomeAssociation(req.outcome());
@@ -186,11 +189,11 @@ public class ResumeVersionService {
         return new RecommendResponse(toResponse(best), reason);
     }
 
-    @Transactional
+    @Transactional(timeout = 10)
     public void delete(UUID userId, UUID id) {
         ResumeVersion v = find(userId, id);
         if (v.getStoragePath() != null && !v.getStoragePath().isBlank()) {
-            storage.delete(bucket, v.getStoragePath());
+            storage.delete(bucket, v.getStoragePath(), userId);
         }
         versionRepo.delete(v);
     }

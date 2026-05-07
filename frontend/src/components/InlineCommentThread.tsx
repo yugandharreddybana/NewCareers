@@ -1,7 +1,9 @@
 // Section 3.4 — Task 56
 // Inline commenting panel for cover letter drafts and tailored CV content
 import React, { useEffect, useRef, useState } from 'react';
-import { workspaceApi, WorkspaceNote } from '../api/workspaceApi';
+import { workspaceApi, type WorkspaceNote } from '@/services/workspaceApi';
+
+const NOTES_POLL_INTERVAL_MS = 30_000;
 
 interface Props {
   workspaceId: string;
@@ -23,15 +25,48 @@ export const InlineCommentThread: React.FC<Props> = ({
   const bottomRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    setLoading(true);
-    workspaceApi
-      .getNotes(workspaceId)
-      .then(all =>
+    let active = true;
+
+    const refreshNotes = async (showSpinner = false) => {
+      if (showSpinner) setLoading(true);
+
+      try {
+        const all = await workspaceApi.getNotes(workspaceId);
+        if (!active) return;
+
         setNotes(
-          all.filter(n => n.targetType === targetType && n.targetId === targetId)
-        )
-      )
-      .finally(() => setLoading(false));
+          all.filter(note => note.targetType === targetType && note.targetId === targetId)
+        );
+      } finally {
+        if (active && showSpinner) {
+          setLoading(false);
+        }
+      }
+    };
+
+    void refreshNotes(true);
+
+    const refreshWhenVisible = () => {
+      if (document.visibilityState === 'visible') {
+        void refreshNotes();
+      }
+    };
+
+    const pollId = window.setInterval(() => {
+      if (document.visibilityState === 'visible') {
+        void refreshNotes();
+      }
+    }, NOTES_POLL_INTERVAL_MS);
+
+    document.addEventListener('visibilitychange', refreshWhenVisible);
+    window.addEventListener('focus', refreshWhenVisible);
+
+    return () => {
+      active = false;
+      window.clearInterval(pollId);
+      document.removeEventListener('visibilitychange', refreshWhenVisible);
+      window.removeEventListener('focus', refreshWhenVisible);
+    };
   }, [workspaceId, targetType, targetId]);
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -59,7 +94,10 @@ export const InlineCommentThread: React.FC<Props> = ({
       {loading ? (
         <div className="thread-skeleton">
           {[1, 2].map(i => (
-            <div key={i} className="skeleton skeleton-text" style={{ width: i === 1 ? '80%' : '60%' }} />
+            <div
+              key={i}
+              className={`skeleton skeleton-text ${i === 1 ? 'thread-skeleton-line--wide' : 'thread-skeleton-line--narrow'}`}
+            />
           ))}
         </div>
       ) : notes.length === 0 ? (

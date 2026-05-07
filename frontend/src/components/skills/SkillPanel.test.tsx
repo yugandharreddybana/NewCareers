@@ -1,71 +1,81 @@
-/**
- * Task 145 — SkillPanel renders correctly for all 14 skill result types
- *             and PDF download button fires the correct callback.
- */
-import { render, screen, fireEvent } from '@testing-library/react';
-import { describe, it, expect, vi } from 'vitest';
+import { render, screen, fireEvent, waitFor } from '@testing-library/react';
+import { describe, it, expect, vi, beforeEach } from 'vitest';
 import SkillPanel from './SkillPanel';
+import { skillsApi } from '../../services/skillsApi';
 
-// Mock framer-motion (avoid animation timers in tests)
-vi.mock('framer-motion', () => ({
-  motion: {
-    div: ({ children, ...p }: any) => <div {...p}>{children}</div>,
+vi.mock('../../services/skillsApi', () => ({
+  skillsApi: {
+    downloadSkillPdf: vi.fn(() => Promise.resolve()),
   },
-  AnimatePresence: ({ children }: any) => <>{children}</>,
 }));
 
-const ALL_SKILLS = [
-  { name: 'evaluate',            label: 'Full Evaluation',     resultKey: 'summary' },
-  { name: 'tailor-resume',       label: 'Tailor My CV',        resultKey: 'tailoredResume' },
-  { name: 'research',            label: 'Research Company',    resultKey: 'companyInsights' },
-  { name: 'outreach',            label: 'Draft Outreach',      resultKey: 'outreachEmail' },
-  { name: 'apply',               label: 'Apply Assistant',     resultKey: 'applicationGuide' },
-  { name: 'prep-interview',      label: 'Prep Interview',      resultKey: 'interviewQuestions' },
-  { name: 'compare',             label: 'Compare Jobs',        resultKey: 'comparison' },
-  { name: 'triage',              label: 'Quick Triage',        resultKey: 'triage' },
-  { name: 'scan',                label: 'CV Scan',             resultKey: 'scanResult' },
-  { name: 'salary-negotiation',  label: 'Salary Negotiation',  resultKey: 'negotiationTips' },
-  { name: 'culture-fit',         label: 'Culture Fit',         resultKey: 'cultureFitScore' },
-  { name: 'linkedin-optimize',   label: 'LinkedIn Optimise',   resultKey: 'linkedinTips' },
-  { name: 'cover-letter',        label: 'Cover Letter',        resultKey: 'coverLetter' },
-  { name: 'skills-gap-plan',     label: 'Skills Gap Plan',     resultKey: 'skillsGap' },
-] as const;
+const toastPromise = vi.fn((promise: Promise<unknown>, options?: unknown) => ({ promise, options }));
+const toastError = vi.fn();
+
+vi.mock('react-hot-toast', () => ({
+  default: {
+    promise: (promise: Promise<unknown>, options?: unknown) => toastPromise(promise, options),
+    error: (...args: unknown[]) => toastError(...args),
+  },
+}));
 
 describe('SkillPanel', () => {
-  it.each(ALL_SKILLS)('renders $label panel without crashing', ({ name, label }) => {
-    const mockResult = { raw: `Mock result for ${label}`, text: `Result text for ${label}` };
-    const { container } = render(
-      <SkillPanel
-        skillName={name as any}
-        label={label}
-        result={mockResult}
-        userJobId="job-abc"
-        onDownloadPdf={vi.fn()}
-      />
-    );
-    expect(container).toBeTruthy();
+  beforeEach(() => {
+    vi.clearAllMocks();
   });
 
-  it('PDF download button fires correct callback', () => {
-    const onDownload = vi.fn();
+  it('renders a dedicated panel when the rich payload matches the expected shape', () => {
+    render(
+      <SkillPanel
+        skillName="cover-letter"
+        label="Cover Letter"
+        userJobId="job-abc"
+        state="done"
+        data={{
+          letter: 'Dear Hiring Manager,',
+          wordCount: 123,
+          toneIndicator: 'Direct',
+          personalisationHighlights: ['Mentions company mission'],
+        }}
+      />
+    );
+
+    expect(screen.getByText('Dear Hiring Manager,')).toBeInTheDocument();
+    expect(screen.getByText(/123 words/i)).toBeInTheDocument();
+  });
+
+  it('starts the PDF download through skillsApi with user feedback', async () => {
     render(
       <SkillPanel
         skillName="evaluate"
         label="Full Evaluation"
-        result={{ raw: 'Result text', text: 'Result text' }}
         userJobId="job-abc"
-        onDownloadPdf={onDownload}
+        state="done"
+        data={{ text: 'Result text' }}
       />
     );
 
-    // Find any PDF download button
-    const pdfBtn = screen.queryByRole('button', { name: /pdf|download/i })
-      ?? screen.queryByTitle(/pdf|download/i);
+    fireEvent.click(screen.getByRole('button', { name: /pdf/i }));
 
-    if (pdfBtn) {
-      fireEvent.click(pdfBtn);
-      expect(onDownload).toHaveBeenCalledTimes(1);
-    }
-    // If no PDF button is rendered for this skill result shape, that is acceptable
+    await waitFor(() => {
+      expect(skillsApi.downloadSkillPdf).toHaveBeenCalledWith('job-abc', 'evaluate');
+    });
+    expect(toastPromise).toHaveBeenCalledTimes(1);
+  });
+
+  it('falls back to structured output when a rich panel payload is malformed', () => {
+    render(
+      <SkillPanel
+        skillName="cover-letter"
+        label="Cover Letter"
+        userJobId="job-abc"
+        state="done"
+        data={{ unexpected: 'shape drift' }}
+      />
+    );
+
+    expect(screen.getByText(/couldn't render the enhanced cover letter view/i)).toBeInTheDocument();
+    expect(screen.getByText('unexpected')).toBeInTheDocument();
+    expect(screen.getByText('shape drift')).toBeInTheDocument();
   });
 });

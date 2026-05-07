@@ -37,3 +37,35 @@ export interface PlannerStats {
   overdueTasks: number;
   streak: number;
 }
+
+export type PlannerDashboardTaskStatus = 'PENDING' | 'IN_PROGRESS' | 'DONE' | 'SKIPPED';
+export type PlannerDashboardTaskPriority = 'HIGH' | 'MEDIUM' | 'LOW';
+export type PlannerDeadlineEventType =
+  | 'APPLICATION_CLOSE'
+  | 'INTERVIEW_DATE'
+  | 'FOLLOW_UP'
+  | 'OFFER_DEADLINE'
+  | 'CUSTOM';
+
+export interface PlannerDashboardTask {
+  id: string;
+  title: string;
+  status: PlannerDashboardTaskStatus;
+  priority: PlannerDashboardTaskPriority;
+  dueDate?: string | null;
+  userJobId?: string | null;
+}
+
+export interface PlannerDeadline {
+  id: string;
+  title: string;
+  eventType: PlannerDeadlineEventType;
+  eventDate: string;
+  userJobId?: string | null;
+}
+
+export interface PlannerUpcomingSummary {
+  pendingTasks: PlannerDashboardTask[];
+  upcomingEvents: PlannerDeadline[];
+  overdueTasks: PlannerDashboardTask[];
+}

@@ -36,6 +36,7 @@ public class KanbanService {
     private final ApplicationCvRepository appCvs;
     private final SupabaseStorageService  storage;
     private final AuditLogService         audit; // Task 126
+    private final com.careerops.util.FileUtil fileUtil;
 
     @Value("${supabase.bucket.application-cv:application-cvs}")
     private String bucket;
@@ -43,16 +44,18 @@ public class KanbanService {
     public KanbanService(UserJobRepository userJobs,
                          ApplicationCvRepository appCvs,
                          SupabaseStorageService storage,
-                         AuditLogService audit) {
+                         AuditLogService audit,
+                         com.careerops.util.FileUtil fileUtil) {
         this.userJobs = userJobs;
         this.appCvs   = appCvs;
         this.storage  = storage;
         this.audit    = audit;
+        this.fileUtil = fileUtil;
     }
 
     // ─── Move card / update status ─────────────────────────────────────────────
 
-    @Transactional
+    @Transactional(timeout = 10)
     public UserJob update(UUID userId, UUID userJobId, KanbanUpdateRequest req) {
         UserJob uj = userJobs.findByIdAndUserId(userJobId, userId)
             .orElseThrow(() -> new ApiException(HttpStatus.NOT_FOUND, "Job not found on board"));
@@ -77,7 +80,7 @@ public class KanbanService {
 
     // ─── Attach application CV to a job card ──────────────────────────────────
 
-    @Transactional
+    @Transactional(timeout = 10)
     public ApplicationCv attachCv(UUID userId, UUID userJobId, MultipartFile file) {
         if (file == null || file.isEmpty())
             throw new ApiException(HttpStatus.BAD_REQUEST, "File is empty");
@@ -85,12 +88,12 @@ public class KanbanService {
         UserJob uj = userJobs.findByIdAndUserId(userJobId, userId)
             .orElseThrow(() -> new ApiException(HttpStatus.NOT_FOUND, "Job not found on board"));
 
-        String name = file.getOriginalFilename() == null ? "cv" : file.getOriginalFilename();
+        String name = fileUtil.sanitizeFilename(file.getOriginalFilename());
         String path = userId + "/" + userJobId + "/" + System.currentTimeMillis()
-                      + "-" + name.replaceAll("\\s+", "_");
+                      + "-" + name;
 
         try {
-            storage.upload(bucket, path, file.getBytes(), file.getContentType());
+            storage.uploadStream(bucket, path, file.getResource(), file.getContentType(), userId);
         } catch (Exception e) {
             throw new ApiException(HttpStatus.INTERNAL_SERVER_ERROR,
                 "CV upload failed: " + e.getMessage());
@@ -110,5 +113,35 @@ public class KanbanService {
         ));
 
         return cv;
+    }
+
+    @Transactional(timeout = 10, readOnly = true)
+    public com.careerops.dto.JobDtos.KanbanStatsResponse getStats(UUID userId) {
+        Map<String, Long> byColumn = new java.util.HashMap<>();
+        for (Object[] row : userJobs.countByColumnForUser(userId)) {
+            byColumn.put((String) row[0], (Long) row[1]);
+        }
+        long total      = byColumn.values().stream().mapToLong(Long::longValue).sum();
+        long applied    = byColumn.getOrDefault("Applied",   0L);
+        long interviews = byColumn.getOrDefault("Interview", 0L);
+        long offers     = byColumn.getOrDefault("Offer",     0L);
+        double avgMatch = userJobs.avgMatchPercentForUser(userId);
+
+        return new com.careerops.dto.JobDtos.KanbanStatsResponse(
+            total,
+            applied,
+            interviews,
+            offers,
+            Math.round(avgMatch * 10.0) / 10.0
+        );
+    }
+
+    @Transactional(timeout = 10, readOnly = true)
+    public Map<String, Long> getColumnCounts(UUID userId) {
+        Map<String, Long> counts = new java.util.HashMap<>();
+        for (Object[] row : userJobs.countByColumnForUser(userId)) {
+            counts.put((String) row[0], (Long) row[1]);
+        }
+        return counts;
     }
 }

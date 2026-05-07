@@ -104,12 +104,12 @@ public class CvHumanScoreService {
      * @param jobText  Full job description (may be null)
      * @return CvScoreResult with atsScore, humanScore, flaggedPhrases
      */
-    public CvScoreResult score(String cvText, String jobText) {
+    public CvScoreResult score(String cvText, String jobText, java.util.UUID userId) {
         if (cvText == null || cvText.isBlank()) {
             return new CvScoreResult(0, 0, List.of());
         }
         try {
-            return scoreWithClaude(cvText, jobText);
+            return scoreWithClaude(cvText, jobText, userId);
         } catch (Exception e) {
             log.warn("CvHumanScoreService: Claude scoring failed, using regex fallback. reason={}",
                     e.getMessage());
@@ -119,7 +119,7 @@ public class CvHumanScoreService {
 
     // ── Claude primary scorer ─────────────────────────────────────────────────
 
-    private CvScoreResult scoreWithClaude(String cvText, String jobText) {
+    private CvScoreResult scoreWithClaude(String cvText, String jobText, java.util.UUID userId) {
         // Truncate to stay within Claude's context limit
         String cvSnippet  = cvText.length() > 6000  ? cvText.substring(0, 6000)  : cvText;
         String jdSnippet  = (jobText == null || jobText.isBlank())
@@ -140,7 +140,7 @@ public class CvHumanScoreService {
                 Evaluate the CV against the job description and return the JSON scores.
                 """.formatted(cvSnippet, jdSnippet);
 
-        JsonNode root      = claude.generateJson(SYSTEM_PROMPT, userPrompt);
+        JsonNode root      = claude.generateJson(SYSTEM_PROMPT, userPrompt, userId, "tailor-resume");
         int      atsScore  = clamp(root.path("atsScore").asInt(0));
         int      humanScore = clamp(root.path("humanScore").asInt(0));
 

@@ -122,6 +122,7 @@ public class IndeedRssSource implements JobSource {
                     combined.contains("work permit")
                 );
 
+                job.setFingerprint(FingerprintUtil.of(job.getCompany(), job.getTitle(), job.getLocation(), job.getSalaryMin(), job.getSalaryMax()));
                 results.add(job);
             }
             log.info("IndeedRSS returned {} jobs for query '{}'", results.size(), params.getQuery());

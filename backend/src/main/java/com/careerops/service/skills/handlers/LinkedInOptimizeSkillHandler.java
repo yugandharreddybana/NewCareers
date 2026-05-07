@@ -116,8 +116,8 @@ public class LinkedInOptimizeSkillHandler implements SkillHandler {
         log.info("LinkedInOptimizeSkillHandler.execute userId={} userJobId={}", userId, userJobId);
         UserProfile profile = profiles.findByUserId(userId).orElse(null);
         String cvText       = getCvText(userId);
-        Job job             = resolveJob(userJobId);
-        return claude.generateJson(SYSTEM_PROMPT, buildUserPrompt(profile, job, cvText));
+        Job job             = resolveJob(userId, userJobId);
+        return claude.generateJson(SYSTEM_PROMPT, buildUserPrompt(profile, job, cvText), userId, skillName());
     }
 
     private String buildUserPrompt(UserProfile p, Job job, String cv) {
@@ -154,9 +154,9 @@ public class LinkedInOptimizeSkillHandler implements SkillHandler {
         try { return cvService.activeCvText(userId); } catch (Exception e) { return ""; }
     }
 
-    private Job resolveJob(UUID userJobId) {
+    private Job resolveJob(UUID userId, UUID userJobId) {
         if (userJobId == null) return null;
-        return userJobs.findById(userJobId)
+        return userJobs.findByIdAndUserId(userJobId, userId)
                 .flatMap(uj -> jobs.findById(uj.getJobId()))
                 .orElse(null);
     }

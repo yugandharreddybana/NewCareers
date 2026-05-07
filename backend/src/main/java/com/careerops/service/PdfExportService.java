@@ -42,8 +42,8 @@ public class PdfExportService {
             html.append("<p>No questions generated yet. Run the kit generator first.</p>");
         } else {
             for (InterviewQuestionBank bank : questions) {
-                html.append("<h2>").append(esc(bank.getCompany())).append(" — ").append(esc(bank.getRoleTitle())).append("</h2>");
-                html.append("<pre style='white-space:pre-wrap;font-size:13px;'>").append(esc(bank.getQuestionsJson())).append("</pre>");
+                html.append("<h2>").append(esc(bank.getCompanyName())).append(" — ").append(esc(bank.getRoleTitle())).append("</h2>");
+                html.append("<pre style='white-space:pre-wrap;font-size:13px;'>").append(esc(bank.getQuestion())).append("</pre>");
             }
         }
         html.append("</body></html>");
@@ -64,11 +64,12 @@ public class PdfExportService {
         html.append("<h1>Mock Interview Report</h1>");
         html.append("<p class='label'>Session ID</p><p>").append(esc(sessionId)).append("</p>");
         html.append("<p class='label'>Status</p><p>").append(esc(session.getStatus())).append("</p>");
-        html.append("<p class='label'>Overall Score</p><p class='score'>").append(session.getScore()).append("<span style='font-size:24px'>/10</span></p>");
-        html.append("<p class='label'>Turns Completed</p><p>").append(session.getTurnCount()).append("</p>");
-        html.append("<h2>Full Transcript</h2>");
-        html.append("<pre style='white-space:pre-wrap;font-size:13px;background:#f7f6f2;padding:16px;border-radius:8px;'>");
-        html.append(esc(session.getTranscriptJson())).append("</pre>");
+        html.append("<p class='label'>Overall Score</p><p class='score'>").append(session.getOverallScore()).append("<span style='font-size:24px'>/10</span></p>");
+        html.append("<p class='label'>Mode</p><p>").append(esc(session.getMode())).append("</p>");
+        html.append("<h2>Strengths</h2>");
+        html.append("<p>").append(esc(session.getStrengths())).append("</p>");
+        html.append("<h2>Weaknesses</h2>");
+        html.append("<p>").append(esc(session.getWeaknesses())).append("</p>");
         html.append("</body></html>");
         return html.toString().getBytes(StandardCharsets.UTF_8);
     }

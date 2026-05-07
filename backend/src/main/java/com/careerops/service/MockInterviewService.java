@@ -1,10 +1,14 @@
 package com.careerops.service;
 
+import org.jspecify.annotations.Nullable;
+
 import com.careerops.exception.ApiException;
 import com.careerops.model.InterviewQuestionBank;
 import com.careerops.model.InterviewSession;
+import com.careerops.model.UserJob;
 import com.careerops.repository.InterviewQuestionBankRepository;
 import com.careerops.repository.InterviewSessionRepository;
+import com.careerops.repository.UserJobRepository;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -27,19 +31,28 @@ public class MockInterviewService {
 
     private final InterviewSessionRepository sessionRepo;
     private final InterviewQuestionBankRepository questionRepo;
+    private final UserJobRepository userJobRepo;
     private final GeminiService gemini;
 
     public MockInterviewService(InterviewSessionRepository sessionRepo,
                                  InterviewQuestionBankRepository questionRepo,
+                                 UserJobRepository userJobRepo,
                                  GeminiService gemini) {
         this.sessionRepo = sessionRepo;
         this.questionRepo = questionRepo;
+        this.userJobRepo = userJobRepo;
         this.gemini = gemini;
     }
 
     // ── Start a new mock interview session ────────────────────────────────────
-    @Transactional
+    @Transactional(timeout = 10)
     public Map<String, Object> start(UUID userId, UUID userJobId, UUID trackId) {
+        UserJob userJob = userJobRepo.findById(userJobId)
+            .orElseThrow(() -> new ApiException(HttpStatus.NOT_FOUND, "UserJob not found"));
+        if (!userJob.getUserId().equals(userId)) {
+            throw new ApiException(HttpStatus.NOT_FOUND, "UserJob not found");
+        }
+
         // Load kit questions for this job
         List<InterviewQuestionBank> kit = questionRepo.findByUserJobIdOrderByCreatedAtDesc(userJobId);
         if (kit.isEmpty())
@@ -69,7 +82,7 @@ public class MockInterviewService {
     }
 
     // ── Submit a reply for scoring ─────────────────────────────────────────────
-    @Transactional
+    @Transactional(timeout = 10)
     public Map<String, Object> reply(UUID userId, UUID sessionId, UUID questionId, String userAnswer) {
         InterviewSession session = sessionRepo.findById(sessionId)
             .filter(s -> s.getUserId().equals(userId))
@@ -79,7 +92,9 @@ public class MockInterviewService {
             throw new ApiException(HttpStatus.BAD_REQUEST, "Session already completed");
 
         InterviewQuestionBank question = questionRepo.findById(questionId)
-            .orElseThrow(() -> new ApiException(HttpStatus.NOT_FOUND, "Question not found"));
+            .filter(q -> q.getUserId().equals(userId))
+            .filter(q -> q.getUserJobId().equals(session.getUserJobId()))
+            .orElseThrow(() -> new ApiException(HttpStatus.NOT_FOUND, "Question not found or access denied"));
 
         // Score the answer via Gemini
         String scorePrompt = String.format("""
@@ -93,7 +108,7 @@ public class MockInterviewService {
             FEEDBACK: [one sentence of constructive feedback]
             """, question.getQuestion(), question.getModelAnswer(), userAnswer);
 
-        String aiResp = gemini.generate(scorePrompt);
+        String aiResp = gemini.generate(scorePrompt, userId, "mock-interview");
         BigDecimal score = parseScore(aiResp);
         String feedback = parseFeedback(aiResp);
 
@@ -120,7 +135,7 @@ public class MockInterviewService {
         }
 
         // Determine next question
-        InterviewQuestionBank next = allQs.stream()
+        @Nullable InterviewQuestionBank next = allQs.stream()
             .filter(q -> q.getUserAnswer() == null || q.getUserAnswer().isBlank())
             .findFirst().orElse(null);
 
@@ -136,7 +151,12 @@ public class MockInterviewService {
     }
 
     // ── Get session history for a job ─────────────────────────────────────────
-    public List<InterviewSession> historyForJob(UUID userJobId) {
+    public List<InterviewSession> historyForJob(UUID userJobId, UUID userId) {
+        UserJob userJob = userJobRepo.findById(userJobId)
+            .orElseThrow(() -> new ApiException(HttpStatus.NOT_FOUND, "UserJob not found"));
+        if (!userJob.getUserId().equals(userId)) {
+            throw new ApiException(HttpStatus.NOT_FOUND, "UserJob not found");
+        }
         return sessionRepo.findByUserJobIdOrderByStartedAtDesc(userJobId);
     }
 
@@ -145,7 +165,7 @@ public class MockInterviewService {
     }
 
     // ── Parse Gemini score response ───────────────────────────────────────────
-    private BigDecimal parseScore(String resp) {
+    private BigDecimal parseScore(@Nullable String resp) {
         if (resp == null) return BigDecimal.ZERO;
         for (String line : resp.split("\n")) {
             if (line.trim().startsWith("SCORE:")) {
@@ -157,7 +177,7 @@ public class MockInterviewService {
         return BigDecimal.ZERO;
     }
 
-    private String parseFeedback(String resp) {
+    private String parseFeedback(@Nullable String resp) {
         if (resp == null) return "";
         for (String line : resp.split("\n")) {
             if (line.trim().startsWith("FEEDBACK:")) {
@@ -165,5 +185,23 @@ public class MockInterviewService {
             }
         }
         return "";
+    }
+
+    // ---- Mappers for 2.056 ----
+
+    public com.careerops.dto.InterviewDTO.SessionResponse toSessionResponse(InterviewSession s) {
+        return com.careerops.dto.InterviewDTO.SessionResponse.builder()
+                .id(s.getId())
+                .trackId(s.getTrackId())
+                .userJobId(s.getUserJobId())
+                .mode(s.getMode())
+                .status(s.getStatus())
+                .overallScore(s.getOverallScore())
+                .strengths(s.getStrengths())
+                .weaknesses(s.getWeaknesses())
+                .startedAt(s.getStartedAt())
+                .completedAt(s.getCompletedAt())
+                .createdAt(s.getCreatedAt())
+                .build();
     }
 }

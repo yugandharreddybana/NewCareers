@@ -1,4 +1,3 @@
-import React from 'react';
 import { ExternalLink, Clock, Target } from 'lucide-react';
 
 interface Course { title: string; platform: string; url?: string; durationHours?: number; }

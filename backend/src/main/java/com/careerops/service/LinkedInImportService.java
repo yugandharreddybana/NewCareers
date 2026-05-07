@@ -1,11 +1,14 @@
 package com.careerops.service;
 
+import org.jspecify.annotations.Nullable;
+
 import com.careerops.dto.ProfileDtos.ImportSummary;
 import com.careerops.exception.ApiException;
 import com.careerops.model.UserProfile;
 import com.careerops.repository.UserProfileRepository;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.cache.annotation.CacheEvict;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -45,7 +48,8 @@ public class LinkedInImportService {
 
     // ── Public API ───────────────────────────────────────────────────────
 
-    @Transactional
+    @Transactional(timeout = 10)
+    @CacheEvict(value = "user-profile", key = "#userId")
     public ImportSummary importZip(UUID userId, MultipartFile file) throws IOException {
         if (file == null || file.isEmpty())
             throw new ApiException(HttpStatus.BAD_REQUEST, "ZIP file is empty");
@@ -150,7 +154,7 @@ public class LinkedInImportService {
     }
 
     /** Returns the logical key for known CSVs, or null to skip. */
-    private String csvKey(String filename) {
+    private @Nullable String csvKey(String filename) {
         String lower = filename.toLowerCase(Locale.ROOT);
         if (lower.equals("profile.csv"))   return "Profile";
         if (lower.equals("positions.csv")) return "Positions";

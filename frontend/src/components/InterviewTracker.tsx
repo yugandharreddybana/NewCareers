@@ -63,12 +63,14 @@ export const InterviewTracker: React.FC<Props> = ({
   const [generatingKit, setGeneratingKit] = useState(false);
 
   useEffect(() => {
-    loadTrack();
+    void loadTrack();
   }, [loadTrack]);
 
   useEffect(() => {
-    if (track?.id) loadKit(track.id);
-  }, [track?.id, loadKit]);
+    if (track) {
+      void loadKit();
+    }
+  }, [track, loadKit]);
 
   useEffect(() => {
     if (kit.length > 0) setKitGenerated(true);
@@ -76,13 +78,17 @@ export const InterviewTracker: React.FC<Props> = ({
 
   const handleGenerateKit = async () => {
     setGeneratingKit(true);
-    await generateKit();
+    await generateKit(
+      companyName ?? track?.companyName ?? '',
+      roleTitle ?? track?.roleTitle ?? '',
+      '',
+    );
     setGeneratingKit(false);
     setKitGenerated(true);
   };
 
   const handleStageChange = (stage: InterviewStage) => {
-    if (track?.id) updateStage(track.id, stage);
+    void updateStage(stage);
   };
 
   if (loading && !track) {
@@ -183,13 +189,22 @@ export const InterviewTracker: React.FC<Props> = ({
                 <span className="text-xs font-bold text-gray-400 mt-0.5 w-4 flex-shrink-0">{i + 1}</span>
                 <div className="flex-1 min-w-0">
                   <p className="text-xs text-gray-700 leading-relaxed">{q.question}</p>
+                  {(() => {
+                    const skillArea = q.skillArea?.toLowerCase() ?? 'general';
+                    const badgeClass = skillArea === 'technical'
+                      ? 'bg-blue-50 text-blue-600'
+                      : skillArea === 'situational'
+                        ? 'bg-yellow-50 text-yellow-600'
+                        : 'bg-purple-50 text-purple-600';
+
+                    return (
                   <span className={`inline-block mt-1 px-2 py-0.5 rounded text-xs font-medium ${
-                    q.questionType === 'TECHNICAL' ? 'bg-blue-50 text-blue-600'
-                    : q.questionType === 'SITUATIONAL' ? 'bg-yellow-50 text-yellow-600'
-                    : 'bg-purple-50 text-purple-600'
+                    badgeClass
                   }`}>
-                    {q.questionType}
+                    {skillArea}
                   </span>
+                    );
+                  })()}
                 </div>
               </div>
             ))}

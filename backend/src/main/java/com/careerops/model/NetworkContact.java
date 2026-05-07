@@ -13,7 +13,10 @@ import java.util.UUID;
  * Maps to career_operations.network_contacts
  */
 @Entity
-@Table(name = "network_contacts", schema = "career_operations")
+@Table(name = "network_contacts", schema = "career_operations",
+       indexes = {
+           @Index(name = "idx_net_contacts_user_company", columnList = "user_id, company")
+       })
 @Getter @Setter @NoArgsConstructor @AllArgsConstructor @Builder
 public class NetworkContact {
 

@@ -27,7 +27,7 @@ public class OrgInvitation {
     private String role;
 
     @Column(nullable = false, unique = true)
-    private String token;
+    private String tokenHash;
 
     @Builder.Default
     @Column(nullable = false)

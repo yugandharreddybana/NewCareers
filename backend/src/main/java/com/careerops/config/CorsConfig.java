@@ -20,9 +20,13 @@ public class CorsConfig {
     public CorsFilter corsFilter() {
         CorsConfiguration cfg = new CorsConfiguration();
         cfg.setAllowCredentials(true);
-        cfg.setAllowedOrigins(Arrays.asList(origins.split(",")));
+        cfg.setAllowedOrigins(Arrays.stream(origins.split(",")).map(String::trim).filter(s -> !s.isBlank()).toList());
         cfg.setAllowedMethods(List.of("GET","POST","PUT","PATCH","DELETE","OPTIONS"));
-        cfg.setAllowedHeaders(List.of("*"));
+        cfg.setAllowedHeaders(List.of("Content-Type", "Authorization", "X-Requested-With", "X-CSRF-Token", "X-Internal-Secret", "X-Internal-User-Id"));
+        cfg.setExposedHeaders(List.of("X-RateLimit-Remaining", "X-RateLimit-Reset", "Retry-After"));
+        cfg.setMaxAge(3600L);
+
+
         UrlBasedCorsConfigurationSource src = new UrlBasedCorsConfigurationSource();
         src.registerCorsConfiguration("/**", cfg);
         return new CorsFilter(src);

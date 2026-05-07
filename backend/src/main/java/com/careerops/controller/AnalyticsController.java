@@ -1,7 +1,7 @@
 package com.careerops.controller;
 
 import com.careerops.service.AnalyticsService;
-import org.springframework.http.ResponseEntity;
+import com.careerops.util.AuthUtil;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
@@ -14,9 +14,16 @@ import java.util.UUID;
  * GET /analytics/summary          — weekly stats + skill usage
  * GET /analytics/funnel           — application pipeline counts per kanban stage
  * GET /analytics/time-series      — weekly trend data for charts (new)
+ *
+ * CORS Policy:
+ * - Allowed Origins: from ${cors.allowed.origins}
+ * - Methods: GET, POST, PUT, PATCH, DELETE, OPTIONS
+ * - Headers: Content-Type, Authorization, X-Requested-With, X-CSRF-Token, X-Internal-Secret, X-Internal-User-Id
+ * - Exposed: X-RateLimit-Remaining, X-RateLimit-Reset, Retry-After
  */
 @RestController
 @RequestMapping("/analytics")
+@io.micrometer.core.annotation.Timed
 public class AnalyticsController {
 
     private final AnalyticsService analyticsService;
@@ -26,23 +33,19 @@ public class AnalyticsController {
     }
 
     @GetMapping("/summary")
-    public ResponseEntity<Map<String, Object>> getSummary(
-            @RequestHeader("X-User-Id") String userId) {
-        try {
-            return ResponseEntity.ok(analyticsService.getWeeklyStats(UUID.fromString(userId)));
-        } catch (IllegalArgumentException e) {
-            return ResponseEntity.badRequest().build();
-        }
+    public Map<String, Object> getSummary() {
+        UUID userId = AuthUtil.currentUserId();
+        return analyticsService.getWeeklyStats(userId);
     }
 
     @GetMapping("/funnel")
-    public ResponseEntity<List<Map<String, Object>>> getFunnel(
-            @RequestHeader("X-User-Id") String userId) {
-        try {
-            return ResponseEntity.ok(analyticsService.getApplicationFunnel(UUID.fromString(userId)));
-        } catch (IllegalArgumentException e) {
-            return ResponseEntity.badRequest().build();
+    public List<Map<String, Object>> getFunnel(@RequestParam(required = false) Integer days) {
+        UUID userId = AuthUtil.currentUserId();
+        java.time.Instant since = null;
+        if (days != null) {
+            since = java.time.Instant.now().minus(days, java.time.temporal.ChronoUnit.DAYS);
         }
+        return analyticsService.getApplicationFunnel(userId, since);
     }
 
     /**
@@ -54,15 +57,9 @@ public class AnalyticsController {
      * @param weeks number of rolling weeks (1-52, default 8)
      */
     @GetMapping("/time-series")
-    public ResponseEntity<List<Map<String, Object>>> getTimeSeries(
-            @RequestHeader("X-User-Id") String userId,
+    public List<Map<String, Object>> getTimeSeries(
             @RequestParam(defaultValue = "8") int weeks) {
-        try {
-            return ResponseEntity.ok(
-                analyticsService.getWeeklyTimeSeries(UUID.fromString(userId), weeks)
-            );
-        } catch (IllegalArgumentException e) {
-            return ResponseEntity.badRequest().build();
-        }
+        UUID userId = AuthUtil.currentUserId();
+        return analyticsService.getWeeklyTimeSeries(userId, weeks);
     }
 }

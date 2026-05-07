@@ -1,6 +1,6 @@
 // Section 3.5 Task 65 — StreakBadges component
 import React from 'react';
-import type { BadgeDTO } from '../../api/progressApi';
+import type { BadgeDTO } from '@/services/progressApi';
 
 interface StreakBadgesProps {
   badges: BadgeDTO[];

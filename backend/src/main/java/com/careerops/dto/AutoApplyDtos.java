@@ -27,6 +27,7 @@ public class AutoApplyDtos {
         Instant approvedAt,
         Instant submittedAt,
         Instant createdAt,
+        String runHash,
         List<RunStepResponse> steps
     ) {}
 
@@ -42,7 +43,7 @@ public class AutoApplyDtos {
 
     public record StartRunRequest(UUID resumeVersionId) {}
 
-    public record ApproveRunRequest(boolean approved) {}
+    public record ApproveRunRequest(boolean approved, String runHash) {}
 
     public record RunListResponse(List<ApplicationRunResponse> runs, int total) {}
 }

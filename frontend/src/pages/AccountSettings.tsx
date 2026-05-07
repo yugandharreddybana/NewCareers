@@ -1,11 +1,12 @@
 import React, { useState } from 'react';
 import { PageMeta } from '@/components/PageMeta';
 import { useAuth } from '@/context/AuthContext';
+import { useTheme, type ThemePreference } from '@/context/ThemeContext';
 import { api } from '@/services/api';
 import toast from 'react-hot-toast';
 import {
   User, Lock, Bell, Trash2, CheckCircle,
-  Eye, EyeOff, AlertTriangle, Shield,
+  Eye, EyeOff, AlertTriangle, Shield, Monitor, Moon, Sun,
 } from 'lucide-react';
 
 // ── Types ──────────────────────────────────────────────────────────────────────
@@ -16,6 +17,12 @@ interface NotifPrefs {
   inAppJobAlerts: boolean;
   inAppSkillReminders: boolean;
 }
+
+const THEME_OPTIONS: Array<{ value: ThemePreference; label: string; icon: React.ReactNode }> = [
+  { value: 'light', label: 'Light', icon: <Sun size={14} /> },
+  { value: 'dark', label: 'Dark', icon: <Moon size={14} /> },
+  { value: 'system', label: 'System', icon: <Monitor size={14} /> },
+];
 
 // ── Section wrapper ────────────────────────────────────────────────────────────────
 const Section: React.FC<{ title: string; icon: React.ReactNode; description?: string; children: React.ReactNode; danger?: boolean }> = ({
@@ -70,6 +77,7 @@ function passwordStrength(pw: string): { score: number; label: string; color: st
 // ── Main page ──────────────────────────────────────────────────────────────────
 const AccountSettingsPage: React.FC = () => {
   const { user, signOut } = useAuth();
+  const { theme, setTheme } = useTheme();
 
   // ── Account info ─────────────────────────────────────────────────────────────
   const [name, setName]   = useState(user?.name ?? '');
@@ -264,6 +272,35 @@ const AccountSettingsPage: React.FC = () => {
               {savingPw ? 'Updating…' : 'Update Password'}
             </button>
           </div>
+        </Section>
+
+        <Section
+          title="Appearance"
+          icon={<Monitor size={16} />}
+          description="Pick the theme for this browser. System follows your OS preference."
+        >
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+            {THEME_OPTIONS.map(option => {
+              const active = theme === option.value;
+              return (
+                <button
+                  key={option.value}
+                  type="button"
+                  onClick={() => setTheme(option.value)}
+                  className={`flex items-center justify-center gap-2 rounded-xl border px-3 py-2.5 text-sm font-medium transition-colors ${
+                    active
+                      ? 'border-indigo-500 bg-indigo-50 text-indigo-700'
+                      : 'border-gray-200 bg-white text-gray-600 hover:border-gray-300 hover:text-gray-900'
+                  }`}
+                  aria-pressed={active}
+                >
+                  {option.icon}
+                  {option.label}
+                </button>
+              );
+            })}
+          </div>
+          <p className="text-[11px] text-gray-400">Theme preference is saved on this device.</p>
         </Section>
 
         {/* Notifications */}

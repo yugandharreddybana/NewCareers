@@ -1,19 +1,18 @@
-import React, { useState } from 'react';
-
 interface Props {
-  missingFields: string[];
-  skillName: string;
-  onDismiss: () => void;
+  missingFields?: string[];
+  skillName?: string;
+  onDismiss?: () => void;
+  userJobId?: string;
 }
 
 /**
  * Shown when the user tries to run a skill but their profile is incomplete.
  * Lists exactly what is missing and links directly to the relevant settings section.
  */
-export function ProfileCompletenessAlert({ missingFields, skillName, onDismiss }: Props) {
+export function ProfileCompletenessAlert({ missingFields = [], skillName = '', onDismiss }: Props) {
   if (!missingFields || missingFields.length === 0) return null;
 
-  const skillLabel = skillName
+  const skillLabel = (skillName || '')
     .split('-')
     .map(w => w.charAt(0).toUpperCase() + w.slice(1))
     .join(' ');

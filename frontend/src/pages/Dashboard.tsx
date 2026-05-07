@@ -14,27 +14,27 @@
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import toast from 'react-hot-toast';
-import { useAuth } from '@/context/AuthContext';
 import { PageMeta } from '@/components/PageMeta';
-import { jobsApi, skillsApi } from '@/services/api';
+import { jobsApi } from '@/services/api';
 import { analyticsApi, AnalyticsSummary } from '@/services/analyticsApi';
 import { discoveryApi, SearchParams, SearchResult } from '@/services/discoveryApi';
-import { JobCard, JobsListResponse } from '@/types';
+import { skillsApi } from '@/services/skillsApi';
+import { isApiError, JobCard, JobsListResponse } from '@/types';
+import { isCompareData, isTriageData, type CompareData, type TriageData } from '@/types/skills-data';
 import JobCardUI from '@/components/ui/JobCard';
 import SkillButton from '@/components/skills/SkillButton';
-import { useSkill } from '@/components/skills/useSkill';
+import { useQuickSkill as useSkill } from '@/components/skills/useQuickSkill';
 import ComparePanel from '@/components/skills/ComparePanel';
 import TriagePanel from '@/components/skills/TriagePanel';
 import JobSearchBar from '@/components/discovery/JobSearchBar';
 import RecommendedJobsWidget from '@/components/discovery/RecommendedJobsWidget';
 import { PlannerWidget, JobPlannerPanel } from '@/components/planner';
-import SalaryRangeFilter from '@/components/jobs/SalaryRangeFilter';
 import { ProductTour, DASHBOARD_TOUR_STEPS } from '@/components/onboarding/ProductTour';
 import { FirstApplicationChecklist } from '@/components/onboarding/FirstApplicationChecklist';
 import { ContextualHelpTip, HELP_TIPS } from '@/components/onboarding/ContextualHelpTip';
 import {
-  RotateCw, SlidersHorizontal, X,
-  Target, Zap, AlertTriangle, Building2, Send, TrendingUp, Search,
+  RotateCw, X,
+  Target, Zap, AlertTriangle, Building2, Send, TrendingUp,
   ChevronLeft, ChevronRight,
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
@@ -42,13 +42,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 
 const TOUR_KEY = 'careerops_dashboard_tour_done';
 
-const SOURCE_OPTIONS = [
-  'All Sources', 'LinkedIn (Twin AI)', 'IrishJobs',
-  'Jobs.ie', 'Reed', 'Adzuna', 'Remotive', 'TheMuse', 'Jobicy',
-];
-
 export default function Dashboard() {
-  const { user } = useAuth();
   const [data,     setData]     = useState<JobsListResponse>({
     items: [],
     remaining: 0,
@@ -63,14 +57,13 @@ export default function Dashboard() {
   const [statsLoading,   setStatsLoading]   = useState(true);
 
   // Pipeline filters (existing)
-  const [search,       setSearch]      = useState('');
-  const [sourceFilter, setSource]      = useState('All Sources');
-  const [minMatch,     setMinMatch]    = useState(0);
-  const [showFilters,  setShowFilters] = useState(false);
+  const [search] = useState('');
+  const [sourceFilter] = useState('All Sources');
+  const [minMatch] = useState(0);
 
   // Salary range filter for pipeline
-  const [pipelineMinSalary, setPipelineMinSalary] = useState<number | undefined>(undefined);
-  const [pipelineMaxSalary, setPipelineMaxSalary] = useState<number | undefined>(undefined);
+  const [pipelineMinSalary] = useState<number | undefined>(undefined);
+  const [pipelineMaxSalary] = useState<number | undefined>(undefined);
 
   // ── Section 7: Search mode state ────────────────────────────────────
   const [searchResult,     setSearchResult]     = useState<SearchResult | null>(null);
@@ -101,19 +94,37 @@ export default function Dashboard() {
     setPlannerJobId(userJobId);
   }
 
+  const unwrapCompareData = (value: unknown): CompareData | null => {
+    if (!isCompareData(value)) {
+      throw new Error('Compare skill returned unexpected data.');
+    }
+    return value;
+  };
+
+  const unwrapTriageData = (value: unknown): TriageData | null => {
+    if (!isTriageData(value)) {
+      throw new Error('Triage skill returned unexpected data.');
+    }
+    return value;
+  };
+
   // AI skill hooks
-  const compareSkill = useSkill(useCallback(async () => {
+  const compareSkill = useSkill<CompareData | null>(useCallback(async () => {
     const ids = (data?.items || []).slice(0, 5).map(j => j.userJobId);
-    return skillsApi.compare(ids);
+    const result = await skillsApi.compare(ids);
+    return unwrapCompareData(result.data);
   }, [data]));
-  const triageSkill = useSkill(useCallback(() => skillsApi.triage(), []));
+  const triageSkill = useSkill<TriageData | null>(useCallback(async () => {
+    const result = await skillsApi.triage();
+    return unwrapTriageData(result.data);
+  }, []));
 
   async function load() {
     try {
       const res = await jobsApi.list();
       setData(res);
-    } catch (e: any) {
-      toast.error(e.normalizedMessage || 'Failed to load jobs');
+    } catch (e) {
+      toast.error(isApiError(e) ? e.normalizedMessage : 'Failed to load jobs');
     } finally {
       setLoading(false);
     }
@@ -135,8 +146,8 @@ export default function Dashboard() {
       const summary = await jobsApi.fetch(Math.min(5, data.remaining));
       toast.success(`${summary.delivered} new job${summary.delivered !== 1 ? 's' : ''} added`);
       await load();
-    } catch (e: any) {
-      toast.error(e.normalizedMessage || 'Fetch failed');
+    } catch (e) {
+      toast.error(isApiError(e) ? e.normalizedMessage : 'Fetch failed');
     } finally {
       setFetching(false);
     }
@@ -154,8 +165,8 @@ export default function Dashboard() {
     try {
       const result = await discoveryApi.search({ ...params, page: 0 });
       setSearchResult(result);
-    } catch (e: any) {
-      toast.error(e.normalizedMessage || 'Search failed');
+    } catch (e) {
+      toast.error(isApiError(e) ? e.normalizedMessage : 'Search failed');
     } finally {
       setSearching(false);
     }
@@ -169,8 +180,8 @@ export default function Dashboard() {
       const result = await discoveryApi.search({ ...lastSearchParams, page });
       setSearchResult(result);
       window.scrollTo({ top: 0, behavior: 'smooth' });
-    } catch (e: any) {
-      toast.error(e.normalizedMessage || 'Failed to load page');
+    } catch (e) {
+      toast.error(isApiError(e) ? e.normalizedMessage : 'Failed to load page');
     } finally {
       setSearching(false);
     }
@@ -205,6 +216,7 @@ export default function Dashboard() {
     }
     return Object.entries(map).sort((a, b) => b[1] - a[1]).slice(0, 5).filter(([, c]) => c >= 2);
   }, [allJobs]);
+  const topMissingSkillCount = missingSkillsMap[0]?.[1] ?? 0;
 
   const activeFilters = search || sourceFilter !== 'All Sources' || minMatch > 0
     || pipelineMinSalary != null || pipelineMaxSalary != null;
@@ -274,7 +286,7 @@ export default function Dashboard() {
             <AlertTriangle size={18} className="text-amber-500 mt-0.5 shrink-0" />
             <div className="flex-1 min-w-0">
               <p className="text-sm font-semibold text-amber-900 mb-2">
-                Your CV is missing skills that appear in {missingSkillsMap[0][1]}+ of your top matches
+                Your CV is missing skills that appear in {topMissingSkillCount}+ of your top matches
               </p>
               <div className="flex flex-wrap gap-2">
                 {missingSkillsMap.map(([skill, count]) => (

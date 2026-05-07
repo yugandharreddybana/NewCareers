@@ -4,9 +4,10 @@
  * Completely absent from production builds.
  */
 const DEV_BYPASS = import.meta.env.VITE_DEV_BYPASS_GUARDS === 'true';
+const IS_DEVELOPMENT = import.meta.env.MODE === 'development';
 
 export default function DevModeBanner() {
-  if (!DEV_BYPASS) return null;
+  if (!IS_DEVELOPMENT || !DEV_BYPASS) return null;
 
   return (
     <div
@@ -24,3 +25,5 @@ export default function DevModeBanner() {
     </div>
   );
 }
+
+DevModeBanner.displayName = 'DevModeBanner';

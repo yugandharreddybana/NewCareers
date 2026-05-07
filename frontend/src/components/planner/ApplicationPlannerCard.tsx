@@ -1,6 +1,6 @@
 // Task 26 — ApplicationPlannerCard: Dashboard widget showing upcoming tasks and quick actions
 import React, { useEffect, useState, useCallback } from 'react';
-import axios from '../../api/axiosInstance';
+import { api as axios } from '@/services/api';
 
 interface Task {
   id: string;

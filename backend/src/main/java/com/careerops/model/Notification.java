@@ -23,12 +23,20 @@ import java.util.UUID;
  *   OVERDUE_TASK        — an application planner task has passed its due date
  */
 @Entity
-@Table(name = "notifications", schema = "career_operations")
+@Table(name = "notifications", schema = "career_operations",
+       indexes = {
+           @Index(name = "idx_notifications_user_created", columnList = "user_id, created_at DESC")
+       })
+@org.hibernate.annotations.SQLRestriction("deleted_at IS NULL")
+@org.hibernate.annotations.SQLDelete(sql = "UPDATE career_operations.notifications SET deleted_at = CURRENT_TIMESTAMP WHERE id = ?")
 @Getter @Setter @NoArgsConstructor @AllArgsConstructor @Builder
 public class Notification {
 
     @Id @GeneratedValue(strategy = GenerationType.UUID)
     private UUID id;
+
+    @Version
+    private Long version;
 
     @Column(name = "user_id", nullable = false)
     private UUID userId;
@@ -43,23 +51,13 @@ public class Notification {
     @Column(columnDefinition = "TEXT")
     private String body;
 
-    /**
-     * Convenience alias — maps to the same {@code body} column.
-     * Services may call setMessage()/getMessage() interchangeably with setBody()/getBody().
-     * Stored in the single {@code body} TEXT column.
-     */
-    @Transient
-    public String getMessage() { return body; }
-    @Transient
-    public void setMessage(String message) { this.body = message; }
-
     /** The domain entity type that triggered this notification, e.g. "application_task". */
     @Column(name = "entity_type", length = 100)
     private String entityType;
 
-    /** The UUID (as string) of the entity that triggered this notification. */
-    @Column(name = "entity_id", length = 100)
-    private String entityId;
+    /** The UUID of the entity that triggered this notification. */
+    @Column(name = "entity_id")
+    private UUID entityId;
 
     /** false = unread (default), true = read */
     @Builder.Default
@@ -74,9 +72,36 @@ public class Notification {
     @Column(name = "created_at", nullable = false, updatable = false)
     private Instant createdAt;
 
+    @Column(name = "deleted_at")
+    private Instant deletedAt;
+
     @PrePersist
     void prePersist() {
         if (createdAt == null) createdAt = Instant.now();
+        validateType();
+    }
+
+    @PreUpdate
+    void preUpdate() {
+        validateType();
+    }
+
+    private void validateType() {
+        if (type == null) {
+            throw new IllegalStateException("Notification type cannot be null");
+        }
+        switch (type) {
+            case TYPE_SKILL_COMPLETE:
+            case TYPE_INTERVIEW_REMINDER:
+            case TYPE_JOB_MATCH:
+            case TYPE_WEEKLY_DIGEST:
+            case TYPE_SYSTEM:
+            case TYPE_REFERRAL:
+            case TYPE_OVERDUE_TASK:
+                break;
+            default:
+                throw new IllegalStateException("Invalid notification type: " + type);
+        }
     }
 
     public static final String TYPE_SKILL_COMPLETE     = "SKILL_COMPLETE";

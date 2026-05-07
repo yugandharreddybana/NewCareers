@@ -55,4 +55,6 @@ export function Avatar({ name, src, size = 'md', online, className, ...props }: 
     </div>
   );
 }
+
+Avatar.displayName = 'Avatar';
 export default Avatar;

@@ -113,10 +113,10 @@ public class CoverLetterSkillHandler implements SkillHandler {
 
         UserProfile profile = profiles.findByUserId(userId).orElse(null);
         String cvText       = getCvText(userId);
-        Job job             = resolveJob(userJobId);
+        Job job             = resolveJob(userId, userJobId);
 
         String userPrompt = buildUserPrompt(profile, job, cvText);
-        return claude.generateJson(SYSTEM_PROMPT, userPrompt);
+        return claude.generateJson(SYSTEM_PROMPT, userPrompt, userId, skillName());
     }
 
     private String buildUserPrompt(UserProfile p, Job job, String cv) {
@@ -161,9 +161,9 @@ public class CoverLetterSkillHandler implements SkillHandler {
         try { return cvService.activeCvText(userId); } catch (Exception e) { return ""; }
     }
 
-    private Job resolveJob(UUID userJobId) {
+    private Job resolveJob(UUID userId, UUID userJobId) {
         if (userJobId == null) return null;
-        return userJobs.findById(userJobId)
+        return userJobs.findByIdAndUserId(userJobId, userId)
                 .flatMap(uj -> jobs.findById(uj.getJobId()))
                 .orElse(null);
     }

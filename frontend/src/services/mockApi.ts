@@ -21,6 +21,7 @@ export const MOCK_USER: User = {
   username: 'devtester',
   email: 'dev@careerops.ie',
   onboarded: true,
+  role: 'ADMIN',
 };
 
 export const MOCK_JOBS: JobCard[] = [
@@ -96,7 +97,7 @@ export const MOCK_JOBS: JobCard[] = [
 ];
 
 export const MOCK_JOB_DETAIL: JobDetail = {
-  ...MOCK_JOBS[0],
+  ...MOCK_JOBS[0]!,
   description: `
     ## About the Role
     TechWave is looking for a Senior Frontend Engineer to lead our customer portal redesign. 

@@ -54,7 +54,8 @@ Edit `application.properties` — replace every `YOUR_*` and `CHANGE_ME_*`:
 spring.datasource.url=jdbc:postgresql://db.YOUR-PROJECT.supabase.co:5432/postgres
 spring.datasource.password=YOUR_DB_PASSWORD
 internal.trust.secret=some-long-random-string-keep-same-as-middleware
-jwt.secret=same-32-char-string-as-middleware
+jwt.private-key=base64-pkcs8-private-key
+jwt.public-key=base64-spki-public-key
 gemini.api.key=AIza...
 adzuna.app.id=abc123
 adzuna.app.key=xyz789
@@ -80,7 +81,8 @@ Test: `curl http://localhost:8080/health` → `{"ok":true}`
 cd career-ops/middleware
 
 cp .env.example .env
-# Edit .env — fill JWT_SECRET (same as Java), INTERNAL_TRUST_SECRET (same as Java)
+# Edit .env — fill JWT_PUBLIC_KEY (matches the Java public key),
+# INTERNAL_TRUST_SECRET (same as Java), and Stripe keys
 
 npm install
 npm run dev

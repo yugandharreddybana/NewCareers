@@ -23,5 +23,7 @@ export { default as PrepInterviewPanel }    from './PrepInterviewPanel';
 export { default as ComparePanel }          from './ComparePanel';
 export { default as TriagePanel }           from './TriagePanel';
 
-// ── Hook (co-located legacy version — prefer @/hooks/useSkill for new code) ──
-export { useSkill }                         from './useSkill';
+// ── Hooks ────────────────────────────────────────────────────────────────────
+// Pass 6 #6.014 — the simple fire-once panel hook lives at `useQuickSkill`.
+// The richer state-machine hook lives at `@/hooks/useSkill` (used by SkillPanel).
+export { useQuickSkill, useSkill } from './useQuickSkill';

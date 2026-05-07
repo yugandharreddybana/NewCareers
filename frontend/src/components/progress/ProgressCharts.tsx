@@ -1,7 +1,7 @@
 // Section 3.5 Task 67 — ProgressCharts: multi-week bar + line charts using native SVG
 // No external chart library dependency — keeps bundle lean.
 import React from 'react';
-import type { WeeklySummaryResponse } from '../../api/progressApi';
+import type { WeeklySummaryResponse } from '@/services/progressApi';
 
 interface ProgressChartsProps {
   weeks: WeeklySummaryResponse[];
@@ -42,6 +42,9 @@ function BarChart({
         style={{ overflow: 'visible' }}
       >
         {values.map((v, i) => {
+          const week = weeks[i];
+          if (!week) return null;
+
           const barH = Math.max(4, (v / maxVal) * BAR_HEIGHT);
           const x = i * (BAR_WIDTH + GAP);
           const y = BAR_HEIGHT - barH;
@@ -53,7 +56,7 @@ function BarChart({
                 rx={4} fill={color}
                 opacity={0.85}
               >
-                <title>{`${formatWeekLabel(weeks[i].weekStart)}: ${v}`}</title>
+                <title>{`${formatWeekLabel(week.weekStart)}: ${v}`}</title>
               </rect>
               <text
                 x={x + BAR_WIDTH / 2} y={y - 4}
@@ -71,7 +74,7 @@ function BarChart({
                 fill="currentColor"
                 opacity={0.5}
               >
-                {formatWeekLabel(weeks[i].weekStart)}
+                {formatWeekLabel(week.weekStart)}
               </text>
             </g>
           );

@@ -2,7 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { PageMeta } from '@/components/PageMeta';
 import { referralsApi, type ReferralDto, type ReferralStats } from '@/services/referralsApi';
 import toast from 'react-hot-toast';
-import { Gift, Copy, Check, Mail, Users, Award, CheckCircle, Clock, Star } from 'lucide-react';
+import { Gift, Copy, Check, Mail, Users, Award, CheckCircle, Clock } from 'lucide-react';
 
 const USE_MOCKS = import.meta.env.VITE_USE_MOCKS === 'true';
 

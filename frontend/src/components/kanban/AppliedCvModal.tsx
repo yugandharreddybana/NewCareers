@@ -1,4 +1,5 @@
 import { useRef, useState } from 'react';
+import { isApiError } from '@/types';
 import { kanbanApi } from '@/services/api';
 import toast from 'react-hot-toast';
 
@@ -20,8 +21,9 @@ export default function AppliedCvModal({ userJobId, jobTitle, onClose }: Props) 
       await kanbanApi.uploadCv(userJobId, file);
       toast.success('CV attached to application');
       onClose();
-    } catch (e: any) {
-      toast.error(e.normalizedMessage || 'Upload failed');
+    } catch (e) {
+      const msg = isApiError(e) ? e.normalizedMessage : 'Upload failed';
+      toast.error(msg);
     } finally { setUploading(false); }
   }
 

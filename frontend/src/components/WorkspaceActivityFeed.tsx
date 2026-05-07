@@ -1,7 +1,7 @@
 // Section 3.4 — Task 57
 // Activity feed: recent notes, members joining, document edits
 import React, { useEffect, useState } from 'react';
-import { workspaceApi, WorkspaceNote } from '../api/workspaceApi';
+import { workspaceApi, type WorkspaceNote } from '@/services/workspaceApi';
 
 interface Props {
   workspaceId: string;

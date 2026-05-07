@@ -2,6 +2,7 @@ package com.careerops.repository;
 
 import com.careerops.model.UserJob;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.JpaSpecificationExecutor;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
@@ -10,9 +11,13 @@ import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 
-public interface UserJobRepository extends JpaRepository<UserJob, UUID> {
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
+
+public interface UserJobRepository extends JpaRepository<UserJob, UUID>, JpaSpecificationExecutor<UserJob> {
 
     List<UserJob> findByUserIdOrderByDeliveredAtDesc(UUID userId);
+    Page<UserJob> findByUserIdOrderByDeliveredAtDesc(UUID userId, Pageable pageable);
     Optional<UserJob> findByUserIdAndJobId(UUID userId, UUID jobId);
     Optional<UserJob> findByIdAndUserId(UUID id, UUID userId);
 
@@ -42,4 +47,10 @@ public interface UserJobRepository extends JpaRepository<UserJob, UUID> {
      */
     @Query("SELECT COUNT(uj) FROM UserJob uj WHERE uj.deliveredAt >= :since")
     long countDeliveredSince(@Param("since") Instant since);
+
+    long countByUserIdAndDeliveredAtAfter(UUID userId, Instant since);
+
+    long countByUserIdAndKanbanColumnAndDeliveredAtAfter(UUID userId, String column, Instant since);
+
+    List<UserJob> findTop3ByUserIdAndDeliveredAtAfterAndMatchPercentIsNotNullOrderByMatchPercentDesc(UUID userId, Instant since);
 }

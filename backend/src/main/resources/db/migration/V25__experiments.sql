@@ -2,7 +2,7 @@
 
 CREATE TABLE IF NOT EXISTS experiments (
   id           UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  key          VARCHAR(100) NOT NULL UNIQUE,  -- e.g. 'onboarding_cta_v2'
+  experiment_key VARCHAR(100) NOT NULL UNIQUE,  -- e.g. 'onboarding_cta_v2'
   name         VARCHAR(255) NOT NULL,
   description  TEXT,
   status       VARCHAR(50) NOT NULL DEFAULT 'draft' CHECK (status IN ('draft','active','paused','completed')),
@@ -28,8 +28,8 @@ CREATE INDEX IF NOT EXISTS idx_exp_assignments_exp  ON experiment_assignments(ex
 CREATE TABLE IF NOT EXISTS onboarding_events (
   id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   user_id     UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-  step        VARCHAR(100) NOT NULL,   -- e.g. 'profile_complete', 'first_skill_run', 'first_application'
-  event_type  VARCHAR(50)  NOT NULL,   -- 'started' | 'completed' | 'dropped'
+  step        VARCHAR(100) NOT NULL CHECK (step IN ('profile_complete', 'first_job_saved', 'first_skill_run', 'planner_viewed', 'first_application')),
+  event_type  VARCHAR(50)  NOT NULL CHECK (event_type IN ('started', 'completed', 'dropped')),
   metadata    JSONB,
   occurred_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );

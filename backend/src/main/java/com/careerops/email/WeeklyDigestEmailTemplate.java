@@ -54,7 +54,7 @@ public final class WeeklyDigestEmailTemplate {
         sb.append("<meta charset='UTF-8'>");
         sb.append("<meta name='viewport' content='width=device-width,initial-scale=1'>");
         sb.append("<title>Your Weekly CareerOps Digest</title>");
-        sb.append("</head><body style='margin:0;padding:16px;background:#f1f5f9;font-family:Inter,Helvetica,Arial,sans-serif'>");
+        sb.append("</head><body style='margin:0;padding:16px;background:#f1f5f9;font-family:-apple-system,BlinkMacSystemFont,\"Segoe UI\",Roboto,Helvetica,Arial,sans-serif'>");
         sb.append("<div style='max-width:600px;margin:0 auto'>");
 
         // ─ Hero header
@@ -123,9 +123,10 @@ public final class WeeklyDigestEmailTemplate {
         sb.append("style='display:inline-block;background:linear-gradient(135deg,#6366f1,#8b5cf6);");
         sb.append("color:#fff;font-size:14px;font-weight:700;padding:12px 28px;border-radius:10px;text-decoration:none'>");
         sb.append("Open Dashboard \uD83D\uDE80</a>");
-        sb.append("<p style='margin:16px 0 0;font-size:12px;color:#94a3b8'>");
-        sb.append("CareerOps &mdash; AI-powered job search &bull; ");
-        sb.append("<a href='").append(appBaseUrl).append("/profile' style='color:#6366f1'>Update preferences</a>");
+        sb.append("<p style='margin:16px 0 0;font-size:12px;color:#94a3b8;line-height:1.5'>");
+        sb.append("CareerOps &mdash; AI-powered job search<br/>");
+        sb.append("123 Digital Hub, Dublin 8, Ireland<br/>");
+        sb.append("To unsubscribe, please update your <a href='").append(appBaseUrl).append("/profile' style='color:#6366f1;text-decoration:underline'>preferences</a>");
         sb.append("</p></div>");
 
         sb.append("</div></body></html>");

@@ -15,6 +15,9 @@ public class UserCv {
     @Column(name = "storage_path", nullable = false) private String storagePath;
     @Column(name = "file_type") private String fileType;
     @Lob @Column(name = "parsed_text") private String parsedText;
+    @org.hibernate.annotations.Type(io.hypersistence.utils.hibernate.type.json.JsonType.class)
+    @Column(name = "vector_json", columnDefinition = "jsonb")
+    private com.fasterxml.jackson.databind.JsonNode vectorJson;
     @Column(name = "uploaded_at") private Instant uploadedAt;
     @Column(name = "is_active") private Boolean isActive;
 

@@ -5,7 +5,7 @@ import { verifyToken } from '../auth.js';
 
 const router = express.Router();
 const proxy = createProxyMiddleware({
-  target: process.env.BACKEND_URL || 'http://localhost:8080',
+  target: process.env.JAVA_BACKEND_URL || process.env.BACKEND_URL || 'http://localhost:8080',
   changeOrigin: true,
   on: { error: (_e, _r, res) => res.status(502).json({ error: 'Workspace service unavailable.' }) },
 });

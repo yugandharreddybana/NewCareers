@@ -1,7 +1,8 @@
 import SkillPanel from './SkillPanel';
 import { useNavigate } from 'react-router-dom';
+import type { TriageData, TriageItem } from '@/types/skills-data';
 
-interface Props { data: any; open: boolean; onClose: () => void; }
+interface Props { data: TriageData | null; open: boolean; onClose: () => void; }
 
 const VERDICT_COLORS: Record<string, string> = {
   'Apply immediately':                     'text-emerald-700 bg-emerald-50 border-emerald-200',
@@ -20,14 +21,14 @@ function verdictColor(v: string): string {
 export default function TriagePanel({ data, open, onClose }: Props) {
   const nav = useNavigate();
   if (!data) return null;
-  const ranked: any[] = data.ranked || [];
+  const ranked: TriageItem[] = data.ranked || [];
 
   return (
     <SkillPanel title="Pipeline Triage" open={open} onClose={onClose}>
       <div className="space-y-3">
         <p className="text-sm text-slate-500">Gemini re-ranked your full pipeline. Click any row to view the job.</p>
         {ranked.length === 0 && <p className="text-slate-400 text-sm">No jobs in pipeline yet.</p>}
-        {ranked.map((item: any, i: number) => (
+        {ranked.map((item, i) => (
           <div
             key={item.userJobId || i}
             className={`flex items-center gap-3 p-3 rounded-xl border cursor-pointer hover:shadow-sm transition-shadow ${verdictColor(item.verdict || '')}`}

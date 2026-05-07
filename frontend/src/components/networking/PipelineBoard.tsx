@@ -1,4 +1,4 @@
-import { type NetworkContact } from '@/api/networkingApi';
+import { type NetworkContact } from '@/services/networkingApi';
 import ContactCard from './ContactCard';
 
 const STAGES = [

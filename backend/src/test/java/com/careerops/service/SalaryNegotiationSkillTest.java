@@ -12,13 +12,13 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
-import org.mockito.Spy;
 import org.mockito.junit.jupiter.MockitoExtension;
 
 import java.util.Optional;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.when;
 
@@ -30,7 +30,7 @@ class SalaryNegotiationSkillTest {
     @Mock private UserJobRepository userJobs;
     @Mock private JobRepository jobs;
     @Mock private CvService cvService;
-    @Spy private ObjectMapper mapper = new ObjectMapper();
+    private final ObjectMapper mapper = new ObjectMapper();
 
     @InjectMocks
     private SalaryNegotiationSkillHandler skill;
@@ -45,7 +45,8 @@ class SalaryNegotiationSkillTest {
         p.setTargetRoles(new String[]{"Data Engineer"});
         when(profiles.findByUserId(userId)).thenReturn(Optional.of(p));
 
-        when(claude.generateJson(anyString(), anyString())).thenReturn(mapper.readTree("{\"salaryBand\": {\"min\": 60000}}"));
+        JsonNode response = mapper.readTree("{\"salaryBand\": {\"min\": 60000}}");
+        when(claude.generateJson(anyString(), anyString(), any(UUID.class), anyString())).thenReturn(response);
 
         JsonNode result = skill.execute(userId, userJobId);
 

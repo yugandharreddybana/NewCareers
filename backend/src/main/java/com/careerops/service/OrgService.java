@@ -1,5 +1,7 @@
 package com.careerops.service;
 
+import org.jspecify.annotations.Nullable;
+
 import com.careerops.dto.OrganizationDtos.*;
 import com.careerops.model.*;
 import com.careerops.repository.*;
@@ -10,6 +12,7 @@ import org.springframework.web.server.ResponseStatusException;
 import java.security.SecureRandom;
 import java.time.Instant;
 import java.util.*;
+import java.security.MessageDigest;
 
 @Service
 public class OrgService {
@@ -102,7 +105,7 @@ public class OrgService {
                 String name = "";
                 String email = "";
                 try {
-                    User u = userRepo.findById(m.getUserId()).orElse(null);
+                    @Nullable User u = userRepo.findById(m.getUserId()).orElse(null);
                     if (u != null) { name = u.getName(); email = u.getEmail(); }
                 } catch (Exception ignored) {}
                 return new OrgMemberResponse(m.getId(), m.getUserId(), m.getRole(),
@@ -145,7 +148,7 @@ public class OrgService {
             .invitedBy(requesterId)
             .email(req.email())
             .role(req.role() != null ? req.role() : "member")
-            .token(token)
+            .tokenHash(hashToken(token))
             .expiresAt(Instant.now().plusSeconds(7 * 24 * 3600))
             .build();
         inv = inviteRepo.save(inv);
@@ -159,7 +162,7 @@ public class OrgService {
     }
 
     public OrgResponse acceptInvitation(UUID userId, String token) {
-        OrgInvitation inv = inviteRepo.findByToken(token)
+        OrgInvitation inv = inviteRepo.findByTokenHash(hashToken(token))
             .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Invalid invitation token"));
         if (!"pending".equals(inv.getStatus())) {
             throw new ResponseStatusException(HttpStatus.GONE, "Invitation already used or expired");
@@ -282,5 +285,21 @@ public class OrgService {
         byte[] bytes = new byte[32];
         new SecureRandom().nextBytes(bytes);
         return HexFormat.of().formatHex(bytes);
+    }
+
+    private String hashToken(String token) {
+        try {
+            MessageDigest digest = MessageDigest.getInstance("SHA-256");
+            byte[] bytes = digest.digest(token.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+            StringBuilder builder = new StringBuilder(bytes.length * 2);
+            for (byte value : bytes) {
+                int unsigned = value & 0xff;
+                builder.append(Character.forDigit(unsigned >> 4, 16));
+                builder.append(Character.forDigit(unsigned & 0xf, 16));
+            }
+            return builder.toString();
+        } catch (Exception exception) {
+            throw new RuntimeException(exception);
+        }
     }
 }

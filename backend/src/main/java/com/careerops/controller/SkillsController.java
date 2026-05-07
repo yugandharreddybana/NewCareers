@@ -1,19 +1,19 @@
 package com.careerops.controller;
 
 import com.careerops.dto.ConversationReplyRequest;
+import com.careerops.dto.BatchRunStatusResponse;
 import com.careerops.dto.RunAllSkillsResponse;
 import com.careerops.dto.SkillRunResponse;
 import com.careerops.dto.SkillStartRequest;
-import com.careerops.security.JwtService;
+import com.careerops.ratelimit.RateLimited;
 import com.careerops.service.PdfExportService;
 import com.careerops.service.SkillService;
+import com.careerops.util.AuthUtil;
 import jakarta.validation.Valid;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
-import org.springframework.http.ResponseEntity;
-import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.UUID;
@@ -21,29 +21,27 @@ import java.util.UUID;
 /**
  * Unified skills controller.
  *
- * All 9 skills share a single /api/skills/start endpoint.
- * Replaces the old per-skill endpoints (/evaluate, /tailor-resume, etc.)
- *
- * Security: userId is ALWAYS extracted from the JWT token.
- * It is never accepted from the request body or path variables.
+ * CORS Policy:
+ * - Allowed Origins: from ${cors.allowed.origins}
+ * - Methods: GET, POST, PUT, PATCH, DELETE, OPTIONS
+ * - Headers: Content-Type, Authorization, X-Requested-With, X-CSRF-Token, X-Internal-Secret, X-Internal-User-Id
+ * - Exposed: X-RateLimit-Remaining, X-RateLimit-Reset, Retry-After
  */
 @RestController
-@RequestMapping("/api/skills")
+@RequestMapping("/skills")
+@io.micrometer.core.annotation.Timed
 public class SkillsController {
 
     private static final Logger log = LoggerFactory.getLogger(SkillsController.class);
 
     private final SkillService    skillService;
     private final PdfExportService pdfService;
-    private final JwtService       jwtService;
 
     public SkillsController(
             SkillService skillService,
-            PdfExportService pdfService,
-            JwtService jwtService) {
+            PdfExportService pdfService) {
         this.skillService = skillService;
         this.pdfService   = pdfService;
-        this.jwtService   = jwtService;
     }
 
     // ================================================================
@@ -63,16 +61,14 @@ public class SkillsController {
      *   ERROR             → show error in skill panel
      */
     @PostMapping("/start")
-    @PreAuthorize("isAuthenticated()")
-    public ResponseEntity<SkillRunResponse> startSkill(
-            @Valid @RequestBody SkillStartRequest req,
-            @RequestHeader("Authorization") String authHeader) {
+    @RateLimited(capacity = 5, requestsPerMinute = 5)
+    public SkillRunResponse startSkill(
+            @Valid @RequestBody SkillStartRequest req) {
 
-        UUID userId = extractUserId(authHeader);
+        UUID userId = AuthUtil.currentUserId();
         log.info("POST /api/skills/start skill={} userId={}", req.skillName(), userId);
 
-        SkillRunResponse response = skillService.startSkill(req, userId);
-        return ResponseEntity.ok(response);
+        return skillService.startSkill(req, userId);
     }
 
     // ================================================================
@@ -88,18 +84,16 @@ public class SkillsController {
      * Returns a new SkillRunResponse — may be another QUESTION if Claude asks again.
      */
     @PostMapping("/conversation/reply")
-    @PreAuthorize("isAuthenticated()")
-    public ResponseEntity<SkillRunResponse> replyToConversation(
-            @Valid @RequestBody ConversationReplyRequest req,
-            @RequestHeader("Authorization") String authHeader) {
+    @RateLimited(capacity = 5, requestsPerMinute = 5)
+    public SkillRunResponse replyToConversation(
+            @Valid @RequestBody ConversationReplyRequest req) {
 
-        UUID userId = extractUserId(authHeader);
+        UUID userId = AuthUtil.currentUserId();
         log.info("POST /api/skills/conversation/reply convId={} userId={}",
                 req.conversationId(), userId);
 
-        SkillRunResponse response = skillService.resumeConversation(
+        return skillService.resumeConversation(
                 req.conversationId(), req.answer(), userId);
-        return ResponseEntity.ok(response);
     }
 
     // ================================================================
@@ -111,16 +105,42 @@ public class SkillsController {
      * POST /api/skills/run-all/{userJobId}
      */
     @PostMapping("/run-all/{userJobId}")
-    @PreAuthorize("isAuthenticated()")
-    public ResponseEntity<RunAllSkillsResponse> runAll(
-            @PathVariable UUID userJobId,
-            @RequestHeader("Authorization") String authHeader) {
+    @RateLimited(capacity = 2, requestsPerMinute = 2)
+    public RunAllSkillsResponse runAll(
+            @PathVariable UUID userJobId) {
 
-        UUID userId = extractUserId(authHeader);
+        UUID userId = AuthUtil.currentUserId();
         log.info("POST /api/skills/run-all userJobId={} userId={}", userJobId, userId);
 
-        RunAllSkillsResponse response = skillService.runAllSkills(userId, userJobId);
-        return ResponseEntity.ok(response);
+        return skillService.runAllSkills(userId, userJobId);
+    }
+
+    /**
+     * Start an asynchronous run-all batch and return immediately with a batch id.
+     * POST /api/skills/run-all-async/{userJobId}
+     */
+    @PostMapping("/run-all-async/{userJobId}")
+    @RateLimited(capacity = 2, requestsPerMinute = 2)
+    public BatchRunStatusResponse runAllAsync(
+            @PathVariable UUID userJobId) {
+
+        UUID userId = AuthUtil.currentUserId();
+        log.info("POST /api/skills/run-all-async userJobId={} userId={}", userJobId, userId);
+
+        return skillService.runAllSkillsAsync(userId, userJobId);
+    }
+
+    /**
+     * Poll the status of an asynchronous run-all batch.
+     * GET /api/skills/run-all/{batchId}/status
+     */
+    @GetMapping("/run-all/{batchId}/status")
+    @RateLimited(capacity = 30, requestsPerMinute = 30)
+    public BatchRunStatusResponse getRunAllStatus(
+            @PathVariable UUID batchId) {
+
+        UUID userId = AuthUtil.currentUserId();
+        return skillService.getBatchStatus(userId, batchId);
     }
 
     // ================================================================
@@ -132,14 +152,12 @@ public class SkillsController {
      * GET /api/skills/last-run/{userJobId}/{skillName}
      */
     @GetMapping("/last-run/{userJobId}/{skillName}")
-    @PreAuthorize("isAuthenticated()")
-    public ResponseEntity<SkillRunResponse> getLastRun(
+    public SkillRunResponse getLastRun(
             @PathVariable UUID userJobId,
-            @PathVariable String skillName,
-            @RequestHeader("Authorization") String authHeader) {
+            @PathVariable String skillName) {
 
-        UUID userId = extractUserId(authHeader);
-        return ResponseEntity.ok(skillService.getLastRun(userId, userJobId, skillName));
+        UUID userId = AuthUtil.currentUserId();
+        return skillService.getLastRun(userId, userJobId, skillName);
     }
 
     // ================================================================
@@ -151,20 +169,15 @@ public class SkillsController {
      * GET /api/skills/pdf/{userJobId}/{skillName}
      */
     @GetMapping("/pdf/{userJobId}/{skillName}")
-    @PreAuthorize("isAuthenticated()")
-    public ResponseEntity<byte[]> downloadSkillPdf(
+    public byte[] downloadSkillPdf(
             @PathVariable UUID userJobId,
             @PathVariable String skillName,
-            @RequestHeader("Authorization") String authHeader) {
+            jakarta.servlet.http.HttpServletResponse response) {
 
-        UUID userId = extractUserId(authHeader);
-        try {
-            byte[] pdf = pdfService.generateSkillPdf(userId, userJobId, skillName);
-            return pdfResponse(pdf, skillName + "-report.pdf");
-        } catch (Exception e) {
-            log.error("PDF generation failed for skill={}: {}", skillName, e.getMessage(), e);
-            return ResponseEntity.internalServerError().build();
-        }
+        UUID userId = AuthUtil.currentUserId();
+        byte[] pdf = pdfService.generateSkillPdf(userId, userJobId, skillName);
+        pdfResponse(pdf, skillName + "-report.pdf", response);
+        return pdf;
     }
 
     /**
@@ -172,19 +185,14 @@ public class SkillsController {
      * GET /api/skills/pdf/{userJobId}/all
      */
     @GetMapping("/pdf/{userJobId}/all")
-    @PreAuthorize("isAuthenticated()")
-    public ResponseEntity<byte[]> downloadAllSkillsPdf(
+    public byte[] downloadAllSkillsPdf(
             @PathVariable UUID userJobId,
-            @RequestHeader("Authorization") String authHeader) {
+            jakarta.servlet.http.HttpServletResponse response) {
 
-        UUID userId = extractUserId(authHeader);
-        try {
-            byte[] pdf = pdfService.generateAllSkillsPdf(userId, userJobId);
-            return pdfResponse(pdf, "careerops-complete-pack.pdf");
-        } catch (Exception e) {
-            log.error("All-skills PDF failed: {}", e.getMessage(), e);
-            return ResponseEntity.internalServerError().build();
-        }
+        UUID userId = AuthUtil.currentUserId();
+        byte[] pdf = pdfService.generateAllSkillsPdf(userId, userJobId);
+        pdfResponse(pdf, "careerops-complete-pack.pdf", response);
+        return pdf;
     }
 
     /**
@@ -192,41 +200,23 @@ public class SkillsController {
      * GET /api/skills/pdf/{userJobId}/resume
      */
     @GetMapping("/pdf/{userJobId}/resume")
-    @PreAuthorize("isAuthenticated()")
-    public ResponseEntity<byte[]> downloadResumePdf(
+    public byte[] downloadResumePdf(
             @PathVariable UUID userJobId,
-            @RequestHeader("Authorization") String authHeader) {
+            jakarta.servlet.http.HttpServletResponse response) {
 
-        UUID userId = extractUserId(authHeader);
-        try {
-            byte[] pdf = pdfService.generateResumePdf(userId, userJobId);
-            return pdfResponse(pdf, "tailored-resume.pdf");
-        } catch (Exception e) {
-            log.error("Resume PDF failed: {}", e.getMessage(), e);
-            return ResponseEntity.internalServerError().build();
-        }
+        UUID userId = AuthUtil.currentUserId();
+        byte[] pdf = pdfService.generateResumePdf(userId, userJobId);
+        pdfResponse(pdf, "tailored-resume.pdf", response);
+        return pdf;
     }
 
     // ================================================================
     // UTILITIES
     // ================================================================
 
-    private ResponseEntity<byte[]> pdfResponse(byte[] pdf, String filename) {
-        return ResponseEntity.ok()
-                .header(HttpHeaders.CONTENT_DISPOSITION,
-                        "attachment; filename=\"" + filename + "\"")
-                .header(HttpHeaders.CONTENT_TYPE, MediaType.APPLICATION_PDF_VALUE)
-                .header("X-Content-Type-Options", "nosniff")
-                .body(pdf);
-    }
-
-    /**
-     * Extract authenticated user ID from JWT bearer token.
-     * Never accepts userId from request body or path — always from token.
-     */
-    private UUID extractUserId(String authHeader) {
-        String token = authHeader.replace("Bearer ", "").trim();
-        String subject = jwtService.parseUserId(token);
-        return UUID.fromString(subject);
+    private void pdfResponse(byte[] pdf, String filename, jakarta.servlet.http.HttpServletResponse response) {
+        response.setHeader(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=\"" + filename + "\"");
+        response.setContentType(MediaType.APPLICATION_PDF_VALUE);
+        response.setHeader("X-Content-Type-Options", "nosniff");
     }
 }

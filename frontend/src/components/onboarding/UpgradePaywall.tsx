@@ -5,7 +5,7 @@ import { useExperiment } from '../../context/ExperimentContext';
 
 interface UpgradePaywallProps {
   feature: string;         // e.g. 'mock_interview', 'workspace_invite'
-  onUpgrade: () => void;
+  onUpgrade?: () => void;
   onDismiss?: () => void;
   inline?: boolean;        // true = banner, false = modal-style blocker
 }
@@ -28,6 +28,12 @@ const COPY_VARIANTS: Record<string, { headline: string; subtext: string; cta: st
   },
 };
 
+const DEFAULT_COPY = {
+  headline: 'Premium feature',
+  subtext: 'Upgrade your plan to unlock this and all other premium CareerOps features.',
+  cta: 'Upgrade to Premium',
+};
+
 export const UpgradePaywall: React.FC<UpgradePaywallProps> = ({
   feature,
   onUpgrade,
@@ -36,7 +42,8 @@ export const UpgradePaywall: React.FC<UpgradePaywallProps> = ({
 }) => {
   const { getVariant } = useExperiment();
   const variant = getVariant('paywall_messaging', 'control');
-  const copy = COPY_VARIANTS[variant] ?? COPY_VARIANTS.control;
+  const copy = COPY_VARIANTS[variant] ?? COPY_VARIANTS.control ?? DEFAULT_COPY;
+  const canUpgrade = typeof onUpgrade === 'function';
 
   const featureLabel: Record<string, string> = {
     mock_interview:   'Mock Interviews',
@@ -56,15 +63,23 @@ export const UpgradePaywall: React.FC<UpgradePaywallProps> = ({
         </p>
       )}
       <div className="paywall__actions">
-        <button className="btn btn-primary paywall__cta" onClick={onUpgrade}>
-          {copy.cta}
+        <button
+          type="button"
+          className="btn btn-primary paywall__cta disabled:cursor-not-allowed disabled:opacity-60"
+          onClick={() => onUpgrade?.()}
+          disabled={!canUpgrade}
+        >
+          {canUpgrade ? copy.cta : 'Billing coming soon'}
         </button>
         {onDismiss && (
-          <button className="btn btn-ghost paywall__dismiss" onClick={onDismiss}>
+          <button type="button" className="btn btn-ghost paywall__dismiss" onClick={onDismiss}>
             Maybe later
           </button>
         )}
       </div>
+      {!canUpgrade && (
+        <p className="paywall__subtext">Billing is not enabled in this environment yet.</p>
+      )}
     </div>
   );
 };

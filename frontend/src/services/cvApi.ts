@@ -4,96 +4,104 @@
  */
 import { api } from '@/services/api';
 
+type UserCvDto = {
+  id: string;
+  fileName: string;
+  fileUrl: string;
+  contentType: string;
+  fileSize?: number;
+  active: boolean;
+  createdAt: string;
+};
+
 export type CvRecord = {
   id: string;
   name: string;
-  originalName: string;
   url: string;
+  contentType: string;
   isActive: boolean;
-  sizeBytes: number;
+  sizeBytes: number | null;
   createdAt: string;
 };
+
+const toCvRecord = (cv: UserCvDto): CvRecord => ({
+  id: cv.id,
+  name: cv.fileName,
+  url: cv.fileUrl,
+  contentType: cv.contentType,
+  isActive: cv.active,
+  sizeBytes: cv.fileSize ?? null,
+  createdAt: cv.createdAt,
+});
 
 export const cvApi = {
   /** List all CVs for the authenticated user */
   list: (): Promise<CvRecord[]> =>
-    api.get('/cv').then(r => r.data),
+    api.get<UserCvDto[]>('/cv').then(r => r.data.map(toCvRecord)),
 
   /** Upload a new CV (multipart/form-data) — no progress tracking */
   upload: (file: File): Promise<CvRecord> => {
     const fd = new FormData();
     fd.append('file', file);
-    return api.post('/cv', fd, {
+    return api.post<UserCvDto>('/cv/upload', fd, {
       headers: { 'Content-Type': 'multipart/form-data' },
       timeout: 60_000,
-    }).then(r => r.data);
+    }).then(r => toCvRecord(r.data));
   },
 
   /**
-   * Upload a new CV with XHR-based progress reporting.
+   * Upload a new CV with progress reporting.
    * @param file         The file to upload.
    * @param onProgress   Called with a percentage (0-100) as the upload progresses.
-   * @param controller   Optional AbortController; abort() cancels the XHR.
+   * @param signal       Optional AbortSignal; abort() cancels the request.
    */
   uploadWithProgress: (
     file: File,
     onProgress: (pct: number) => void,
-    controller?: AbortController,
+    signal?: AbortSignal,
   ): Promise<CvRecord> => {
-    return new Promise((resolve, reject) => {
-      const xhr = new XMLHttpRequest();
-      const fd = new FormData();
-      fd.append('file', file);
-
-      xhr.upload.addEventListener('progress', (e) => {
-        if (e.lengthComputable) onProgress(Math.round((e.loaded / e.total) * 100));
-      });
-
-      xhr.addEventListener('load', () => {
-        if (xhr.status >= 200 && xhr.status < 300) {
-          try { resolve(JSON.parse(xhr.responseText)); }
-          catch { reject(new Error('Invalid server response.')); }
-        } else {
-          reject(new Error(`Upload failed (HTTP ${xhr.status}).`));
-        }
-      });
-
-      xhr.addEventListener('error', () => reject(new Error('Network error during upload.')));
-      xhr.addEventListener('abort', () => reject(new DOMException('Upload aborted.', 'AbortError')));
-
-      if (controller) {
-        controller.signal.addEventListener('abort', () => xhr.abort());
-      }
-
-      const baseUrl = (import.meta as unknown as Record<string, Record<string, string>>).env?.VITE_API_URL ?? '/api';
-      xhr.open('POST', `${baseUrl}/cv`);
-
-      // Forward the auth token if present
-      const token = localStorage.getItem('token');
-      if (token) xhr.setRequestHeader('Authorization', `Bearer ${token}`);
-
-      xhr.send(fd);
-    });
+    const fd = new FormData();
+    fd.append('file', file);
+    return api.post<UserCvDto>('/cv/upload', fd, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+      timeout: 60_000,
+      ...(signal ? { signal } : {}),
+      onUploadProgress: event => {
+        if (!event.total) return;
+        onProgress(Math.round((event.loaded / event.total) * 100));
+      },
+    }).then(r => toCvRecord(r.data));
   },
 
   /** Delete a CV by id */
-  remove: (id: string): Promise<{ success: boolean }> =>
-    api.delete(`/cv/${id}`).then(r => r.data),
+  remove: (id: string): Promise<void> =>
+    api.delete(`/cv/${id}`).then(() => undefined),
 
   /** Set a CV as the active/default one used in skill runs */
-  setActive: (id: string): Promise<CvRecord> =>
-    api.post(`/cv/${id}/activate`).then(r => r.data),
+  setActive: async (id: string): Promise<CvRecord> => {
+    const records = await api.patch<UserCvDto[]>(`/cv/${id}/activate`).then(r => r.data.map(toCvRecord));
+    const activeCv = records.find(cv => cv.id === id && cv.isActive);
+    if (!activeCv) {
+      throw new Error('Activated CV was not returned by the server.');
+    }
+    return activeCv;
+  },
 
   /** Download a CV as a blob */
-  download: (id: string, fileName: string): Promise<void> =>
-    api.get(`/cv/${id}/download`, { responseType: 'blob', timeout: 30_000 }).then(r => {
-      const url = window.URL.createObjectURL(r.data);
-      const link = document.createElement('a');
-      link.href = url;
-      link.download = fileName;
-      document.body.appendChild(link);
-      link.click();
-      document.body.removeChild(link);
-      window.URL.revokeObjectURL(url);
-    }),
+  download: async (id: string, fileName: string): Promise<void> => {
+    const { url } = await api.get<{ url: string }>(`/cv/${id}/download`, { timeout: 30_000 }).then(r => r.data);
+    const response = await fetch(url);
+    if (!response.ok) {
+      throw new Error(`Download failed with status ${response.status}.`);
+    }
+    const blob = await response.blob();
+    const objectUrl = window.URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = objectUrl;
+    link.download = fileName;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    window.URL.revokeObjectURL(objectUrl);
+  },
 };

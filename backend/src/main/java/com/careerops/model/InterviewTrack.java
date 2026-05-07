@@ -8,8 +8,9 @@ import java.time.Instant;
 import java.util.UUID;
 
 @Entity
-@Table(name = "interview_tracks")
-@Data
+@Table(name = "interview_tracks", schema = "career_operations")
+@Getter
+@Setter
 @Builder
 @NoArgsConstructor
 @AllArgsConstructor
@@ -31,6 +32,7 @@ public class InterviewTrack {
     @Column(name = "role_title")
     private String roleTitle;
 
+    @Builder.Default
     @Column(name = "current_stage")
     private String currentStage = "applied";
 
@@ -39,6 +41,10 @@ public class InterviewTrack {
 
     @Column(columnDefinition = "text")
     private String notes;
+
+    @Builder.Default
+    @Column(name = "reminder_sent", nullable = false)
+    private boolean reminderSent = false;
 
     @Column(name = "created_at", updatable = false)
     @Builder.Default

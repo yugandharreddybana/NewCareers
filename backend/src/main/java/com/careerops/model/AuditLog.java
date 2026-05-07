@@ -10,7 +10,10 @@ import java.util.Map;
 import java.util.UUID;
 
 @Entity
-@Table(name = "audit_logs", schema = "career_operations")
+@Table(name = "audit_logs", schema = "career_operations",
+       indexes = {
+           @Index(name = "idx_audit_logs_user_created", columnList = "user_id, created_at DESC")
+       })
 @Getter @Setter @NoArgsConstructor @AllArgsConstructor @Builder
 public class AuditLog {
 

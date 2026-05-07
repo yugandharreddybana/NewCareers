@@ -5,7 +5,7 @@
  * Shows kit generation + mock interview flow for a selected job.
  * Falls back to browsing all sessions if no jobId is provided.
  */
-import React, { useState } from 'react';
+import { useState } from 'react';
 import InterviewKitPanel from '../components/interview/InterviewKitPanel';
 import MockInterviewPanel from '../components/interview/MockInterviewPanel';
 

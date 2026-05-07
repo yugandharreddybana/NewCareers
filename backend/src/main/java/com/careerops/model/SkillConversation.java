@@ -28,10 +28,12 @@ import java.util.UUID;
     schema = "career_operations",
     indexes = {
         @Index(name = "idx_skill_conv_user_status", columnList = "user_id, status"),
-        @Index(name = "idx_skill_conv_expires",     columnList = "expires_at")
+        @Index(name = "idx_skill_conv_expires",     columnList = "expires_at"),
+        @Index(name = "idx_skill_conv_user_skill_status", columnList = "user_id, skill, status")
     }
 )
-@Data
+@Getter
+@Setter
 @Builder
 @NoArgsConstructor
 @AllArgsConstructor

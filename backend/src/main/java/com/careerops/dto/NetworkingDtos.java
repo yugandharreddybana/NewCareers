@@ -53,6 +53,11 @@ public class NetworkingDtos {
             LocalDate nextStepDueDate
     ) {}
 
+    @org.springframework.validation.annotation.Validated
+    public record UpdateStageRequest(
+            @jakarta.validation.constraints.NotNull(message = "stage is required") ContactPipelineStage stage
+    ) {}
+
     // ── Responses ──────────────────────────────────────────────────────────────
 
     public record ContactResponse(

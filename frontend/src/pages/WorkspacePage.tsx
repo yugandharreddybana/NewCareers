@@ -1,16 +1,17 @@
 import React, { useEffect, useState } from 'react';
 import { PageMeta } from '@/components/PageMeta';
-import { api } from '@/services/api';
 import * as mocks from '@/services/mockApi';
+import { workspaceApi, type Workspace } from '@/services/workspaceApi';
 import toast from 'react-hot-toast';
 import { Briefcase, Plus, Users, Trash2, Crown, X } from 'lucide-react';
 import EmptyState from '@/components/ui/EmptyState';
 
-interface WorkspaceMember { userId: string; name: string; email: string; role: 'owner' | 'member'; }
-interface Workspace { id: string; name: string; description: string | null; createdAt: string; members: WorkspaceMember[]; ownerId: string; }
-
 const USE_MOCKS = import.meta.env.VITE_USE_MOCKS === 'true';
-const MOCK_WS: Workspace[] = mocks.MOCK_WORKSPACES as unknown as Workspace[];
+const MOCK_WS: Workspace[] = mocks.MOCK_WORKSPACES;
+
+const memberLabel = (member: Workspace['members'][number]): string => {
+  return member.invitedEmail ?? member.userId ?? 'Pending member';
+};
 
 const CreateModal: React.FC<{ onClose: () => void; onCreate: (w: Workspace) => void }> = ({ onClose, onCreate }) => {
   const [name, setName]   = useState('');
@@ -22,8 +23,8 @@ const CreateModal: React.FC<{ onClose: () => void; onCreate: (w: Workspace) => v
     setSaving(true);
     try {
       const w: Workspace = USE_MOCKS
-        ? { id: `ws-${Date.now()}`, name, description: desc || null, createdAt: new Date().toISOString(), members: [], ownerId: 'dev-user-123' }
-        : await api.post('/workspaces', { name, description: desc }).then(r => r.data);
+        ? { id: `ws-${Date.now()}`, name, description: desc || null, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(), members: [], ownerId: 'dev-user-123' }
+        : await workspaceApi.create({ name, ...(desc ? { description: desc } : {}) });
       onCreate(w); toast.success('Workspace created!'); onClose();
     } catch { toast.error('Failed to create workspace.'); }
     finally { setSaving(false); }
@@ -48,27 +49,60 @@ const WorkspacePage: React.FC = () => {
   const [workspaces, setWorkspaces] = useState<Workspace[]>([]);
   const [loading, setLoading]       = useState(true);
   const [showModal, setShowModal]   = useState(false);
+  const [loadFailed, setLoadFailed] = useState(false);
+
+  const loadWorkspaces = async () => {
+    setLoadFailed(false);
+    setLoading(true);
+    try {
+      if (USE_MOCKS) {
+        await new Promise(r => setTimeout(r, 400));
+        setWorkspaces(MOCK_WS);
+        return;
+      }
+
+      const data = await workspaceApi.list();
+      setWorkspaces(data);
+    } catch {
+      setLoadFailed(true);
+      toast.error('Failed to load workspaces.');
+    } finally {
+      setLoading(false);
+    }
+  };
 
   useEffect(() => {
-    const load = async () => {
-      try {
-        if (USE_MOCKS) { await new Promise(r => setTimeout(r, 400)); setWorkspaces(MOCK_WS); }
-        else { const d = await api.get('/workspaces').then(r => r.data).catch(() => MOCK_WS); setWorkspaces(d as Workspace[]); }
-      } finally { setLoading(false); }
-    };
-    load();
+    void loadWorkspaces();
   }, []);
 
   const handleDelete = async (id: string) => {
     if (!window.confirm('Delete this workspace? This cannot be undone.')) return;
     try {
-      if (!USE_MOCKS) await api.delete(`/workspaces/${id}`);
+      if (!USE_MOCKS) {
+        toast.error('Workspace deletion is not available yet.');
+        return;
+      }
       setWorkspaces(prev => prev.filter(w => w.id !== id));
       toast.success('Workspace deleted.');
     } catch { toast.error('Failed to delete workspace.'); }
   };
 
   if (loading) return <div className="flex items-center justify-center min-h-[50vh] text-gray-400 text-sm">Loading workspaces…</div>;
+
+  if (loadFailed) return (
+    <>
+      <PageMeta title="Workspace — CareerOps" />
+      <div className="max-w-3xl mx-auto px-4 sm:px-6 py-8">
+        <EmptyState
+          icon={<Briefcase size={28} className="text-slate-300" />}
+          message="Could not load workspaces"
+          description="The workspace service did not respond. Try again."
+          cta="Retry"
+          onCta={() => { void loadWorkspaces(); }}
+        />
+      </div>
+    </>
+  );
 
   return (
     <>
@@ -93,16 +127,18 @@ const WorkspacePage: React.FC = () => {
                       <p className="text-[10px] text-gray-400 mt-1">Created {new Date(w.createdAt).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' })}</p>
                     </div>
                   </div>
-                  <button onClick={() => handleDelete(w.id)} className="text-gray-300 hover:text-red-500 transition-colors p-1 shrink-0"><Trash2 size={14} /></button>
+                  {USE_MOCKS && (
+                    <button onClick={() => handleDelete(w.id)} className="text-gray-300 hover:text-red-500 transition-colors p-1 shrink-0"><Trash2 size={14} /></button>
+                  )}
                 </div>
                 {w.members.length > 0 && (
                   <div className="mt-4 pt-4 border-t border-gray-100">
                     <p className="text-xs font-semibold text-gray-500 mb-2 flex items-center gap-1"><Users size={12} /> Members ({w.members.length})</p>
                     <div className="flex flex-wrap gap-2">
                       {w.members.map(m => (
-                        <div key={m.userId} className="flex items-center gap-1.5 px-2.5 py-1 bg-gray-100 rounded-full text-xs text-gray-700">
+                        <div key={m.id} className="flex items-center gap-1.5 px-2.5 py-1 bg-gray-100 rounded-full text-xs text-gray-700">
                           {m.role === 'owner' && <Crown size={11} className="text-amber-500" />}
-                          {m.name}
+                          {memberLabel(m)}
                         </div>
                       ))}
                     </div>

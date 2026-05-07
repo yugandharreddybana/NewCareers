@@ -1,5 +1,5 @@
-import React, { useState } from 'react';
-import { Copy, CheckCircle2, Clock } from 'lucide-react';
+import { useState } from 'react';
+import { Copy, CheckCircle2 } from 'lucide-react';
 
 interface SalaryBand { min: number; mid: number; max: number; currency?: string; }
 interface SalaryNegotiationOutput {

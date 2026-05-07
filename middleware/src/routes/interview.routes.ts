@@ -10,7 +10,7 @@
  * GET  /api/interviews/tracks                   — all interview tracks
  * PATCH /api/interviews/tracks/:userJobId/stage — update stage
  */
-import express from 'express';
+import express, { Response } from 'express';
 import { authGuard } from '../authGuard.js';
 import { createProxyMiddleware } from 'http-proxy-middleware';
 
@@ -24,7 +24,9 @@ const javaProxy = createProxyMiddleware({
   timeout: 90_000,
   on: {
     error: (err, _req, res) => {
-      (res as any).status(502).json({ error: 'Interview service unavailable', details: err.message });
+      if (res && 'status' in res && typeof res.status === 'function') {
+        (res as Response).status(502).json({ error: 'Interview service unavailable', details: err.message });
+      }
     },
   },
 });

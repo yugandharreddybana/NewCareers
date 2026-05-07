@@ -21,8 +21,8 @@ public class ReedSource implements JobSource {
     private final WebClient client;
     private final String key;
 
-    public ReedSource(WebClient.Builder b, @Value("${reed.api.key}") String key) {
-        this.client = b.baseUrl("https://www.reed.co.uk/api/1.0").build();
+    public ReedSource(JobApiHttpClient httpClient, @Value("${reed.api.key}") String key) {
+        this.client = httpClient.createClient("https://www.reed.co.uk/api/1.0");
         this.key = key;
     }
 
@@ -41,7 +41,9 @@ public class ReedSource implements JobSource {
                     .queryParam("locationName", "Ireland")
                     .queryParam("resultsToTake", 30).build())
                 .header("Authorization", "Basic " + basic)
-                .retrieve().bodyToMono(JsonNode.class).block();
+                .retrieve().bodyToMono(JsonNode.class)
+                .timeout(java.time.Duration.ofSeconds(15))
+                .block();
             if (root == null) return out;
             for (JsonNode r : root.path("results")) {
                 Job j = Job.builder()

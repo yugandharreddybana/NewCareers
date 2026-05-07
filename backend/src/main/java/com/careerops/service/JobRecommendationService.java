@@ -44,9 +44,8 @@ public class JobRecommendationService {
 
     // ── Public API ───────────────────────────────────────────────────────────────
 
-    @Transactional(readOnly = true)
-    public List<Map<String, Object>> getRecommendations(UUID userId) {
-
+    @Transactional(timeout = 10, readOnly = true)
+    public List<com.careerops.dto.JobDtos.RecommendationResponse> getRecommendations(UUID userId) {
         // Step 1 — User profile preferences
         ProfileData profile  = loadProfile(userId);
 
@@ -116,24 +115,24 @@ public class JobRecommendationService {
             .collect(Collectors.toList());
 
         // Step 6 — Map to output
-        List<Map<String, Object>> results = new ArrayList<>();
+        List<com.careerops.dto.JobDtos.RecommendationResponse> results = new ArrayList<>();
         for (Scored s : scored) {
             Object[] row  = s.row();
-            Map<String, Object> item = new LinkedHashMap<>();
-            item.put("userJobId",      row[0]);
-            item.put("title",          row[1]);
-            item.put("company",        row[2]);
-            item.put("location",       row[3]);
-            item.put("matchPercent",   row[4] != null ? ((Number) row[4]).intValue() : 0);
-            item.put("salaryMin",      row[6]);
-            item.put("salaryMax",      row[7]);
-            item.put("currency",       row[8]);
-            item.put("sourceUrl",      row[9]);
-            item.put("sourceName",     row[10]);
-            item.put("postedAt",       row[11]);
-            item.put("sponsorship",    row[12]);
-            item.put("whyRecommended", s.reason());
-            results.add(item);
+            results.add(new com.careerops.dto.JobDtos.RecommendationResponse(
+                (UUID) row[0],
+                (String) row[1],
+                (String) row[2],
+                (String) row[3],
+                row[4] != null ? ((Number) row[4]).intValue() : 0,
+                row[6] != null ? ((Number) row[6]).intValue() : null,
+                row[7] != null ? ((Number) row[7]).intValue() : null,
+                (String) row[8],
+                (String) row[9],
+                (String) row[10],
+                row[11] != null ? ((java.sql.Timestamp) row[11]).toInstant() : null,
+                (Boolean) row[12],
+                s.reason()
+            ));
         }
 
         log.debug("Returning {} recommendations for user {}", results.size(), userId);

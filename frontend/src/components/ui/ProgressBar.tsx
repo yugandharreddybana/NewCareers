@@ -51,4 +51,6 @@ export function ProgressBar({
   );
 }
 
+ProgressBar.displayName = 'ProgressBar';
+
 export default ProgressBar;

@@ -54,3 +54,5 @@ export default function PageShell({
     </div>
   );
 }
+
+PageShell.displayName = 'PageShell';

@@ -15,6 +15,9 @@ import static org.assertj.core.api.Assertions.assertThat;
 @ExtendWith(MockitoExtension.class)
 class JobMatchingServiceTest {
 
+    @org.mockito.Mock
+    private java.time.Clock clock;
+
     @InjectMocks
     private JobMatchingService service;
 
