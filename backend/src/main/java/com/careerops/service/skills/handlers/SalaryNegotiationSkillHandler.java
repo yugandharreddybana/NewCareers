@@ -1,12 +1,11 @@
 package com.careerops.service.skills.handlers;
 
 import com.careerops.model.Job;
-import com.careerops.model.UserJob;
 import com.careerops.model.UserProfile;
 import com.careerops.repository.JobRepository;
 import com.careerops.repository.UserJobRepository;
 import com.careerops.repository.UserProfileRepository;
-import com.careerops.service.ClaudeDirectService;
+import com.careerops.service.NvidiaService;
 import com.careerops.service.CvService;
 import com.careerops.service.skills.SkillHandler;
 import com.fasterxml.jackson.databind.JsonNode;
@@ -74,7 +73,7 @@ public class SalaryNegotiationSkillHandler implements SkillHandler {
         }
         """;
 
-    private final ClaudeDirectService      claude;
+    private final NvidiaService            nvidia;
     private final UserProfileRepository    profiles;
     private final UserJobRepository        userJobs;
     private final JobRepository            jobs;
@@ -82,13 +81,13 @@ public class SalaryNegotiationSkillHandler implements SkillHandler {
     private final ObjectMapper             mapper;
 
     public SalaryNegotiationSkillHandler(
-            ClaudeDirectService claude,
+            NvidiaService nvidia,
             UserProfileRepository profiles,
             UserJobRepository userJobs,
             JobRepository jobs,
             CvService cvService,
             ObjectMapper mapper) {
-        this.claude   = claude;
+        this.nvidia   = nvidia;
         this.profiles = profiles;
         this.userJobs = userJobs;
         this.jobs     = jobs;
@@ -110,7 +109,7 @@ public class SalaryNegotiationSkillHandler implements SkillHandler {
         Job job             = resolveJob(userId, userJobId);
 
         String userPrompt = buildUserPrompt(profile, job, cvText);
-        return claude.generateJson(SYSTEM_PROMPT, userPrompt, userId, skillName());
+        return nvidia.generateJson(SYSTEM_PROMPT, userPrompt, userId, skillName());
     }
 
     private String buildUserPrompt(UserProfile p, Job job, String cv) {

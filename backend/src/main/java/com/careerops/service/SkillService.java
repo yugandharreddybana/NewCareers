@@ -39,14 +39,14 @@ import java.util.*;
  * Orchestrates all 14 CareerOps skills (9 Phase 1 + 5 Phase 2).
  *
  * Routing:
- *   Phase 1 skills  → ClaudeAgentService (multi-turn agentic tool loop)
- *   Phase 2 skills  → SkillHandlerRegistry (Claude direct single-turn, structured JSON)
+ *   Phase 1 skills  → NvidiaAgentService (multi-turn agentic tool loop, OpenAI format)
+ *   Phase 2 skills  → SkillHandlerRegistry (NvidiaService direct single-turn, structured JSON)
  *
  * Flow (Phase 1):
  *   1. Validate profile completeness (ProfileValidator)
  *   2. Check TTL cache (SkillRunRepository)
  *   3. Build system prompt (SkillPromptLibrary)
- *   4. Run Claude agentic loop (ClaudeAgentService)
+ *   4. Run NVIDIA agentic loop (NvidiaAgentService)
  *   5. Handle result: Done | NeedsAnswer | Error
  *   6. Save SkillRun with appropriate TTL
  *
@@ -84,23 +84,23 @@ public class SkillService {
     @PersistenceContext
     private EntityManager em;
 
-    private final ClaudeAgentService          claude;
+    private final NvidiaAgentService          nvidia;
     private final SkillPromptLibrary          prompts;
     private final ProfileValidator            validator;
     private final SkillRunRepository          skillRuns;
-    private final BatchSkillRunRepository     batchRuns; // 3.055
-    private final UserJobRepository           userJobs;  // 3.056
-    private final JobRepository               jobs;      // 3.056
+    private final BatchSkillRunRepository     batchRuns;
+    private final UserJobRepository           userJobs;
+    private final JobRepository               jobs;
     private final SkillConversationRepository conversations;
     private final SkillHandlerRegistry        registry;
     private final ObjectMapper                mapper;
     private final ResendEmailService          emailService;
     private final NotificationService         notificationService;
     private final TokenUsageService           tokenUsageService;
-    private final MeterRegistry               meterRegistry; // 3.060
+    private final MeterRegistry               meterRegistry;
 
-    // 3.055 - Executor for background batch runs
-    private final java.util.concurrent.ExecutorService batchExecutor = java.util.concurrent.Executors.newFixedThreadPool(4);
+    private final java.util.concurrent.ExecutorService batchExecutor =
+            java.util.concurrent.Executors.newFixedThreadPool(4);
 
     @Value("${skill.conversation.expire.minutes:30}")
     private int conversationExpireMinutes;
@@ -109,7 +109,7 @@ public class SkillService {
     private long dailyTokenBudget;
 
     public SkillService(
-            ClaudeAgentService claude,
+            NvidiaAgentService nvidia,
             SkillPromptLibrary prompts,
             ProfileValidator validator,
             SkillRunRepository skillRuns,
@@ -123,7 +123,7 @@ public class SkillService {
             NotificationService notificationService,
             TokenUsageService tokenUsageService,
             MeterRegistry meterRegistry) {
-        this.claude               = claude;
+        this.nvidia               = nvidia;
         this.prompts              = prompts;
         this.validator            = validator;
         this.skillRuns            = skillRuns;
@@ -189,12 +189,12 @@ public class SkillService {
             }
         }
 
-        // Step 4: Phase 1 — Claude agentic loop
+        // Step 4: Phase 1 — NVIDIA agentic loop
         String systemPrompt = prompts.buildFullSystemPrompt(skill, userId);
         ArrayNode messages  = buildInitialMessages(req, userId);
 
         return handleAgentResult(
-                claude.run(systemPrompt, messages, userId, userJobId),
+                nvidia.run(systemPrompt, messages, userId, userJobId),
                 skill, userId, userJobId, messages
         );
     }
@@ -207,12 +207,10 @@ public class SkillService {
     public SkillRunResponse resumeConversation(UUID conversationId, String answer, UUID userId) {
         log.info("resumeConversation: id={}, userId={}", conversationId, userId);
 
-        // 3.061 — Length limit to prevent cost amplification
         if (answer != null && answer.length() > 4000) {
             throw new ApiException(HttpStatus.BAD_REQUEST, "Answer is too long (max 4000 chars)");
         }
 
-        // 3.059 — Use pessimistic lock to prevent concurrent resumes
         SkillConversation conv = conversations.findByIdAndUserIdForUpdate(conversationId, userId)
                 .orElse(null);
 
@@ -229,19 +227,17 @@ public class SkillService {
 
         ArrayNode history = (ArrayNode) conv.getMessages();
 
+        // OpenAI-format tool result message (role: "tool", tool_call_id)
+        // This is compatible with NVIDIA NIM's /chat/completions endpoint.
         ObjectNode toolResultMsg = mapper.createObjectNode();
-        toolResultMsg.put("role", "user");
-        ArrayNode toolResultContent = mapper.createArrayNode();
-        ObjectNode toolResult = mapper.createObjectNode();
-        toolResult.put("type",        "tool_result");
-        toolResult.put("tool_use_id", conv.getToolUseId());
-        toolResult.put("content",     answer.isBlank() ? "[User skipped this question]" : answer);
-        toolResultContent.add(toolResult);
-        toolResultMsg.set("content", toolResultContent);
+        toolResultMsg.put("role", "tool");
+        toolResultMsg.put("tool_call_id", conv.getToolUseId());
+        toolResultMsg.put("content", answer == null || answer.isBlank()
+                ? "[User skipped this question]" : answer);
         history.add(toolResultMsg);
 
         String systemPrompt = prompts.buildFullSystemPrompt(conv.getSkill(), userId);
-        AgentResult result  = claude.run(systemPrompt, history, userId, conv.getUserJobId());
+        AgentResult result  = nvidia.run(systemPrompt, history, userId, conv.getUserJobId());
 
         conv.setStatus("completed");
         conversations.save(conv);
@@ -263,17 +259,18 @@ public class SkillService {
 
         for (String skill : SkillPromptLibrary.ALL_SKILLS) {
             try {
-                SkillRunResponse resp = startSkill(new SkillStartRequest(skill, userJobId, null, null, null, null, null), userId);
+                SkillRunResponse resp = startSkill(
+                        new SkillStartRequest(skill, userJobId, null, null, null, null, null), userId);
                 results.put(skill, resp);
                 if (resp.type() == SkillRunResponse.Type.RESULT) {
                     succeeded++;
                 } else if (resp.type() == SkillRunResponse.Type.QUESTION) {
                     pending++;
                 } else if (resp.type() == SkillRunResponse.Type.PROFILE_INCOMPLETE) {
-                    // Short-circuit: if a skill returns PROFILE_INCOMPLETE, abort and return single response listing missing fields.
                     results.clear();
                     results.put(skill, resp);
-                    return new RunAllSkillsResponse(SkillPromptLibrary.ALL_SKILLS.size(), 0, 1, 0, results);
+                    return new RunAllSkillsResponse(
+                            SkillPromptLibrary.ALL_SKILLS.size(), 0, 1, 0, results);
                 } else {
                     failed++;
                 }
@@ -283,7 +280,8 @@ public class SkillService {
                 failed++;
             }
         }
-        return new RunAllSkillsResponse(SkillPromptLibrary.ALL_SKILLS.size(), succeeded, failed, pending, results);
+        return new RunAllSkillsResponse(
+                SkillPromptLibrary.ALL_SKILLS.size(), succeeded, failed, pending, results);
     }
 
     // ================================================================
@@ -309,19 +307,25 @@ public class SkillService {
                     startSkill(new SkillStartRequest(s, userJobId, null, null, null, null, null), userId);
                 } catch (Exception e) {
                     log.error("Batch {}: skill {} failed: {}", batchId, s, e.getMessage());
-                    // 3.060 — Emit metric for failure visibility
                     meterRegistry.counter("skill.run.failed", "skill", s).increment();
                 } finally {
                     comp++;
                     final int curr = comp;
-                    batchRuns.findById(batchId).ifPresent(b -> { b.setCompletedSkills(curr); batchRuns.save(b); });
+                    batchRuns.findById(batchId).ifPresent(b -> {
+                        b.setCompletedSkills(curr);
+                        batchRuns.save(b);
+                    });
                 }
             }
-            batchRuns.findById(batchId).ifPresent(b -> { b.setStatus("completed"); batchRuns.save(b); });
+            batchRuns.findById(batchId).ifPresent(b -> {
+                b.setStatus("completed");
+                batchRuns.save(b);
+            });
         });
 
         return new com.careerops.dto.BatchRunStatusResponse(
-            batchId, userJobId, "in_progress", SkillPromptLibrary.ALL_SKILLS.size(), 0, Instant.now(), Map.of()
+            batchId, userJobId, "in_progress",
+            SkillPromptLibrary.ALL_SKILLS.size(), 0, Instant.now(), Map.of()
         );
     }
 
@@ -329,14 +333,17 @@ public class SkillService {
         BatchSkillRun b = batchRuns.findByIdAndUserId(batchId, userId)
             .orElseThrow(() -> new ApiException(HttpStatus.NOT_FOUND, "Batch not found"));
 
-        List<SkillRun> runs = skillRuns.findAllByUserIdAndUserJobIdOrderByCreatedAtDesc(userId, b.getUserJobId());
+        List<SkillRun> runs = skillRuns
+                .findAllByUserIdAndUserJobIdOrderByCreatedAtDesc(userId, b.getUserJobId());
         Map<String, SkillRunResponse> results = new LinkedHashMap<>();
         for (SkillRun r : runs) {
             if (r.getCreatedAt().isAfter(b.getCreatedAt()) && !results.containsKey(r.getSkill())) {
                 results.put(r.getSkill(), SkillRunResponse.result(r.getSkill(), r.getOutput()));
             }
         }
-        return new com.careerops.dto.BatchRunStatusResponse(b.getId(), b.getUserJobId(), b.getStatus(), b.getTotalSkills(), b.getCompletedSkills(), b.getCreatedAt(), results);
+        return new com.careerops.dto.BatchRunStatusResponse(
+                b.getId(), b.getUserJobId(), b.getStatus(),
+                b.getTotalSkills(), b.getCompletedSkills(), b.getCreatedAt(), results);
     }
 
     // ================================================================
@@ -367,7 +374,6 @@ public class SkillService {
             case AgentResult.Done done -> {
                 JsonNode output = parseOutput(done.text());
 
-                // 3.058 — 'Upsert' logic: delete old run for this combo to prevent table bloat
                 skillRuns.deleteByUserIdAndUserJobIdAndSkill(userId, userJobId, skill);
 
                 SkillRun run = SkillRun.builder()
@@ -382,8 +388,6 @@ public class SkillService {
 
                 log.info("Skill {} completed and saved for userId={}", skill, userId);
 
-                // Section 8 — Task 88: fire skill-complete email + in-app notification.
-                // Non-fatal: any failure here must never roll back the skill save.
                 triggerSkillCompleteEvents(skill, userId, userJobId);
 
                 yield SkillRunResponse.result(skill, output);
@@ -412,7 +416,6 @@ public class SkillService {
 
             case AgentResult.Error err -> {
                 log.warn("Skill {} error for userId={}: {}", skill, userId, err.message());
-                // 3.060 — Emit metric for monitoring
                 meterRegistry.counter("skill.run.failed", "skill", skill).increment();
                 yield SkillRunResponse.error(skill, err.message());
             }
@@ -421,13 +424,7 @@ public class SkillService {
 
     /**
      * Fires after a Phase 1 skill successfully completes (AgentResult.Done).
-     *
-     * Sends:
-     *   1. Transactional email via ResendEmailService.sendSkillCompleteEmail()
-     *   2. In-app SKILL_COMPLETE notification via NotificationService.create()
-     *
-     * Completely non-fatal — wrapped in try/catch so failures here never
-     * affect the skill save or the HTTP response.
+     * Non-fatal — failures never affect the skill save or HTTP response.
      */
     private void triggerSkillCompleteEvents(String skill, UUID userId, UUID userJobId) {
         try {
@@ -437,10 +434,8 @@ public class SkillService {
             );
             String jobTitle = fetchJobTitle(userJobId);
 
-            // Email (Task 88)
             emailService.sendSkillCompleteEmail(userId, displayName, jobTitle);
 
-            // In-app notification
             Map<String, Object> meta = new LinkedHashMap<>();
             meta.put("skill", skill);
             meta.put("skillDisplayName", displayName);
@@ -449,7 +444,7 @@ public class SkillService {
             notificationService.create(
                     userId,
                     Notification.TYPE_SKILL_COMPLETE,
-                    "✨ " + displayName + " complete",
+                    "\u2728 " + displayName + " complete",
                     displayName + " finished for \"" + jobTitle + "\". View the results in your job detail page.",
                     meta
             );
@@ -459,10 +454,6 @@ public class SkillService {
         }
     }
 
-    /**
-     * Fetches the job title for a given userJobId (3.056).
-     * Now uses repositories instead of native query with hardcoded schema.
-     */
     private String fetchJobTitle(UUID userJobId) {
         if (userJobId == null) return "your application";
         return userJobs.findById(userJobId)
@@ -499,10 +490,6 @@ public class SkillService {
         return messages;
     }
 
-    /**
-     * Robustly extracts JSON from agent output (3.057 / 3.072).
-     * Now delegates to shared JsonExtractor utility.
-     */
     private JsonNode parseOutput(String text) {
         return com.careerops.util.JsonExtractor.extract(text, mapper);
     }

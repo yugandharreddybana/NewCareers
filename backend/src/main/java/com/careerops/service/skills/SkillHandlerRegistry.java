@@ -21,8 +21,8 @@ import java.util.stream.Collectors;
 /**
  * Dispatches Phase 2 skill execution to the correct SkillHandler.
  *
- * Phase 2 skills bypass the Claude agentic tool loop and instead use
- * ClaudeDirectService via their dedicated handlers — faster, cheaper,
+ * Phase 2 skills bypass the agentic tool loop and instead use
+ * NvidiaService via their dedicated handlers — faster, cheaper,
  * and fully deterministic structured output.
  *
  * All 5 Phase 2 handlers are auto-discovered via Spring's List<SkillHandler> injection.
@@ -106,7 +106,7 @@ public class SkillHandlerRegistry {
                     "Skill execution failed. Please try again. (" + e.getMessage() + ")");
         }
 
-        // Check if Claude returned an error node
+        // Check if NVIDIA returned an error node
         if (output.has("error") && output.size() == 1) {
             return SkillRunResponse.error(skillName, output.path("error").asText());
         }

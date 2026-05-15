@@ -1,12 +1,11 @@
 package com.careerops.service.skills.handlers;
 
 import com.careerops.model.Job;
-import com.careerops.model.UserJob;
 import com.careerops.model.UserProfile;
 import com.careerops.repository.JobRepository;
 import com.careerops.repository.UserJobRepository;
 import com.careerops.repository.UserProfileRepository;
-import com.careerops.service.ClaudeDirectService;
+import com.careerops.service.NvidiaService;
 import com.careerops.service.CvService;
 import com.careerops.service.skills.SkillHandler;
 import com.fasterxml.jackson.databind.JsonNode;
@@ -60,41 +59,41 @@ public class SkillsGapPlanSkillHandler implements SkillHandler {
 
         Return ONLY valid JSON (no markdown, no text outside JSON) with this exact structure:
         {
-          "gaps": [
+          \"gaps\": [
             {
-              "skill": "<skill name>",
-              "priority": "high" | "medium" | "low",
-              "reason": "<1 sentence: why this is a gap based on JD vs CV>",
-              "course": {
-                "title": "<exact course title>",
-                "platform": "Coursera" | "Udemy" | "LinkedIn Learning" | "Pluralsight" | "freeCodeCamp" | "edX" | "YouTube",
-                "url": "<full URL or search path>",
-                "durationHours": <number>,
-                "level": "Beginner" | "Intermediate" | "Advanced"
+              \"skill\": \"<skill name>\",
+              \"priority\": \"high\" | \"medium\" | \"low\",
+              \"reason\": \"<1 sentence: why this is a gap based on JD vs CV>\",
+              \"course\": {
+                \"title\": \"<exact course title>\",
+                \"platform\": \"Coursera\" | \"Udemy\" | \"LinkedIn Learning\" | \"Pluralsight\" | \"freeCodeCamp\" | \"edX\" | \"YouTube\",
+                \"url\": \"<full URL or search path>\",
+                \"durationHours\": <number>,
+                \"level\": \"Beginner\" | \"Intermediate\" | \"Advanced\"
               },
-              "milestone30": "<specific, measurable outcome by day 30>",
-              "milestone60": "<specific, measurable outcome by day 60>",
-              "milestone90": "<specific, measurable outcome by day 90>",
-              "weeklyHours": <number — realistic weekly time commitment>
+              \"milestone30\": \"<specific, measurable outcome by day 30>\",
+              \"milestone60\": \"<specific, measurable outcome by day 60>\",
+              \"milestone90\": \"<specific, measurable outcome by day 90>\",
+              \"weeklyHours\": <number — realistic weekly time commitment>
             }
           ],
-          "totalWeeklyHours": <sum of all weeklyHours>,
-          "priorityOrder": ["<skill name in priority order from highest to lowest>"],
-          "summary": "<2-3 sentence overview of the gaps and overall learning journey>",
-          "estimatedReadyDate": "<e.g. 'Interview-ready in 90 days' or specific milestone>"
+          \"totalWeeklyHours\": <sum of all weeklyHours>,
+          \"priorityOrder\": [\"<skill name in priority order from highest to lowest>\"],
+          \"summary\": \"<2-3 sentence overview of the gaps and overall learning journey>\",
+          \"estimatedReadyDate\": \"<e.g. 'Interview-ready in 90 days' or specific milestone>\"
         }
 
         If the user's CV covers all major JD requirements, return:
         {
-          "gaps": [],
-          "totalWeeklyHours": 0,
-          "priorityOrder": [],
-          "summary": "Your CV is a strong match for this role. No critical skill gaps identified.",
-          "estimatedReadyDate": "Ready now"
+          \"gaps\": [],
+          \"totalWeeklyHours\": 0,
+          \"priorityOrder\": [],
+          \"summary\": \"Your CV is a strong match for this role. No critical skill gaps identified.\",
+          \"estimatedReadyDate\": \"Ready now\"
         }
         """;
 
-    private final ClaudeDirectService   claude;
+    private final NvidiaService         nvidia;
     private final UserProfileRepository profiles;
     private final UserJobRepository     userJobs;
     private final JobRepository         jobs;
@@ -102,13 +101,13 @@ public class SkillsGapPlanSkillHandler implements SkillHandler {
     private final ObjectMapper          mapper;
 
     public SkillsGapPlanSkillHandler(
-            ClaudeDirectService claude,
+            NvidiaService nvidia,
             UserProfileRepository profiles,
             UserJobRepository userJobs,
             JobRepository jobs,
             CvService cvService,
             ObjectMapper mapper) {
-        this.claude   = claude;
+        this.nvidia   = nvidia;
         this.profiles = profiles;
         this.userJobs = userJobs;
         this.jobs     = jobs;
@@ -130,7 +129,7 @@ public class SkillsGapPlanSkillHandler implements SkillHandler {
         Job job             = resolveJob(userId, userJobId);
 
         String userPrompt = buildUserPrompt(profile, job, cvText);
-        return claude.generateJson(SYSTEM_PROMPT, userPrompt, userId, skillName());
+        return nvidia.generateJson(SYSTEM_PROMPT, userPrompt, userId, skillName());
     }
 
     private String buildUserPrompt(UserProfile p, Job job, String cv) {

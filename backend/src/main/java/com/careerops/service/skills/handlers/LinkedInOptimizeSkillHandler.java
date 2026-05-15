@@ -1,12 +1,11 @@
 package com.careerops.service.skills.handlers;
 
 import com.careerops.model.Job;
-import com.careerops.model.UserJob;
 import com.careerops.model.UserProfile;
 import com.careerops.repository.JobRepository;
 import com.careerops.repository.UserJobRepository;
 import com.careerops.repository.UserProfileRepository;
-import com.careerops.service.ClaudeDirectService;
+import com.careerops.service.NvidiaService;
 import com.careerops.service.CvService;
 import com.careerops.service.skills.SkillHandler;
 import com.fasterxml.jackson.databind.JsonNode;
@@ -39,54 +38,54 @@ public class LinkedInOptimizeSkillHandler implements SkillHandler {
 
         Rules:
         - Headline: MAX 120 characters, must include job title keyword + specialisation + value statement
-        - About: First-person voice. Start with a hook (NOT "I am a..."). Include 3 clear value points.
-          End with a call-to-action ("Currently open to..."). ~300 words.
+        - About: First-person voice. Start with a hook (NOT \"I am a...\"). Include 3 clear value points.
+          End with a call-to-action (\"Currently open to...\"). ~300 words.
         - Experience bullets: Use CAR framework (Challenge → Action → Result).
           Every bullet must be quantified (€, %, headcount, time saved).
           Mirror exact keywords from the JD naturally.
         - Irish English spelling throughout (organisation, optimise, colour, etc.)
-        - BANNED phrases: "leveraged", "spearheaded", "passionate about", "team player",
-          "results-driven", "dynamic professional", "thought leader"
+        - BANNED phrases: \"leveraged\", \"spearheaded\", \"passionate about\", \"team player\",
+          \"results-driven\", \"dynamic professional\", \"thought leader\"
 
         You will receive the user's CV (which contains their current experience) and the target JD.
-        Infer their "current" LinkedIn sections from their CV.
+        Infer their \"current\" LinkedIn sections from their CV.
 
         Return ONLY valid JSON (no markdown) with this exact structure:
         {
-          "headline": {
-            "current": "<inferred from CV/profile or 'Not provided'>",
-            "rewritten": "<new headline, MAX 120 chars>",
-            "charCount": <number>,
-            "keywordsAdded": ["<keyword 1>", "<keyword 2>"]
+          \"headline\": {
+            \"current\": \"<inferred from CV/profile or 'Not provided'>\",
+            \"rewritten\": \"<new headline, MAX 120 chars>\",
+            \"charCount\": <number>,
+            \"keywordsAdded\": [\"<keyword 1>\", \"<keyword 2>\"]
           },
-          "about": {
-            "current": "<inferred from CV summary section or 'Not provided'>",
-            "rewritten": "<full about section, ~300 words, first-person>",
-            "wordCount": <number>
+          \"about\": {
+            \"current\": \"<inferred from CV summary section or 'Not provided'>\",
+            \"rewritten\": \"<full about section, ~300 words, first-person>\",
+            \"wordCount\": <number>
           },
-          "experienceBullets": [
+          \"experienceBullets\": [
             {
-              "role": "<job title at company>",
-              "original": "<existing bullet from CV>",
-              "rewritten": "<CAR-framework quantified rewrite>"
+              \"role\": \"<job title at company>\",
+              \"original\": \"<existing bullet from CV>\",
+              \"rewritten\": \"<CAR-framework quantified rewrite>\"
             },
             {
-              "role": "<job title at company>",
-              "original": "<existing bullet>",
-              "rewritten": "<CAR rewrite>"
+              \"role\": \"<job title at company>\",
+              \"original\": \"<existing bullet>\",
+              \"rewritten\": \"<CAR rewrite>\"
             },
             {
-              "role": "<job title at company>",
-              "original": "<existing bullet>",
-              "rewritten": "<CAR rewrite>"
+              \"role\": \"<job title at company>\",
+              \"original\": \"<existing bullet>\",
+              \"rewritten\": \"<CAR rewrite>\"
             }
           ],
-          "keywordsAdded": ["<all JD keywords woven into the profile>"],
-          "optimisationScore": <number 0-100, how well the new profile targets the JD>
+          \"keywordsAdded\": [\"<all JD keywords woven into the profile>\"],
+          \"optimisationScore\": <number 0-100, how well the new profile targets the JD>
         }
         """;
 
-    private final ClaudeDirectService   claude;
+    private final NvidiaService         nvidia;
     private final UserProfileRepository profiles;
     private final UserJobRepository     userJobs;
     private final JobRepository         jobs;
@@ -94,13 +93,13 @@ public class LinkedInOptimizeSkillHandler implements SkillHandler {
     private final ObjectMapper          mapper;
 
     public LinkedInOptimizeSkillHandler(
-            ClaudeDirectService claude,
+            NvidiaService nvidia,
             UserProfileRepository profiles,
             UserJobRepository userJobs,
             JobRepository jobs,
             CvService cvService,
             ObjectMapper mapper) {
-        this.claude    = claude;
+        this.nvidia    = nvidia;
         this.profiles  = profiles;
         this.userJobs  = userJobs;
         this.jobs      = jobs;
@@ -117,7 +116,7 @@ public class LinkedInOptimizeSkillHandler implements SkillHandler {
         UserProfile profile = profiles.findByUserId(userId).orElse(null);
         String cvText       = getCvText(userId);
         Job job             = resolveJob(userId, userJobId);
-        return claude.generateJson(SYSTEM_PROMPT, buildUserPrompt(profile, job, cvText), userId, skillName());
+        return nvidia.generateJson(SYSTEM_PROMPT, buildUserPrompt(profile, job, cvText), userId, skillName());
     }
 
     private String buildUserPrompt(UserProfile p, Job job, String cv) {
