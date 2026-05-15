@@ -14,22 +14,20 @@ import java.util.regex.Pattern;
 /**
  * CV quality scoring service used by the tailor-resume skill.
  *
- * Primary path  — Claude (ClaudeDirectService.generateJson):
+ * Primary path  — NvidiaService (NvidiaService.generateJson):
  *   Evaluates the CV against the job description, returning:
- *     • atsScore   (0-100): keyword coverage vs JD
- *     • humanScore (0-100): natural, human-sounding writing quality
- *     • flaggedPhrases: AI clichés to rewrite with specific suggestions
+ *     - atsScore   (0-100): keyword coverage vs JD
+ *     - humanScore (0-100): natural, human-sounding writing quality
+ *     - flaggedPhrases: AI clichés to rewrite with specific suggestions
  *
  * Fallback path — regex heuristics:
- *   Used when Claude is unavailable or the API call fails.
- *   Preserves the original keyword-matching + deduction logic.
+ *   Used when NVIDIA NIM is unavailable or the API call fails.
  */
 @Service
 public class CvHumanScoreService {
 
     private static final Logger log = LoggerFactory.getLogger(CvHumanScoreService.class);
 
-    // ── Claude system prompt ──────────────────────────────────────────────────
     private static final String SYSTEM_PROMPT = """
         You are an expert ATS (Applicant Tracking System) analyst and senior UK/Ireland hiring consultant.
         You will be given a tailored CV and a job description.
@@ -74,7 +72,6 @@ public class CvHumanScoreService {
         Return ONLY the JSON object. No markdown, no commentary, no code fences.
         """;
 
-    // ── Regex fallback phrase list ────────────────────────────────────────────
     private static final List<String> AI_PATTERN_PHRASES = List.of(
         "leveraged", "spearheaded", "synergies", "passionate about",
         "team player", "results-driven", "dynamic professional", "go-getter",
@@ -86,45 +83,31 @@ public class CvHumanScoreService {
         "move the needle", "circle back", "touch base", "at the end of the day"
     );
 
-    private final ClaudeDirectService claude;
-    private final ObjectMapper        mapper;
+    private final NvidiaService nvidia;
+    private final ObjectMapper  mapper;
 
-    public CvHumanScoreService(ClaudeDirectService claude, ObjectMapper mapper) {
-        this.claude = claude;
+    public CvHumanScoreService(NvidiaService nvidia, ObjectMapper mapper) {
+        this.nvidia = nvidia;
         this.mapper = mapper;
     }
 
-    // ── Public API ────────────────────────────────────────────────────────────
-
-    /**
-     * Scores a CV against a job description.
-     * Attempts Claude first; falls back to regex heuristics on any failure.
-     *
-     * @param cvText   Generated/tailored CV text
-     * @param jobText  Full job description (may be null)
-     * @return CvScoreResult with atsScore, humanScore, flaggedPhrases
-     */
     public CvScoreResult score(String cvText, String jobText, java.util.UUID userId) {
         if (cvText == null || cvText.isBlank()) {
             return new CvScoreResult(0, 0, List.of());
         }
         try {
-            return scoreWithClaude(cvText, jobText, userId);
+            return scoreWithNvidia(cvText, jobText, userId);
         } catch (Exception e) {
-            log.warn("CvHumanScoreService: Claude scoring failed, using regex fallback. reason={}",
-                    e.getMessage());
+            log.warn("CvHumanScoreService: NVIDIA scoring failed, using regex fallback. reason={}", e.getMessage());
             return scoreWithRegex(cvText, jobText);
         }
     }
 
-    // ── Claude primary scorer ─────────────────────────────────────────────────
-
-    private CvScoreResult scoreWithClaude(String cvText, String jobText, java.util.UUID userId) {
-        // Truncate to stay within Claude's context limit
-        String cvSnippet  = cvText.length() > 6000  ? cvText.substring(0, 6000)  : cvText;
-        String jdSnippet  = (jobText == null || jobText.isBlank())
-                            ? "No job description provided."
-                            : (jobText.length() > 3000 ? jobText.substring(0, 3000) : jobText);
+    private CvScoreResult scoreWithNvidia(String cvText, String jobText, java.util.UUID userId) {
+        String cvSnippet = cvText.length() > 6000  ? cvText.substring(0, 6000)  : cvText;
+        String jdSnippet = (jobText == null || jobText.isBlank())
+                           ? "No job description provided."
+                           : (jobText.length() > 3000 ? jobText.substring(0, 3000) : jobText);
 
         String userPrompt = """
                 CV TO EVALUATE:
@@ -140,8 +123,8 @@ public class CvHumanScoreService {
                 Evaluate the CV against the job description and return the JSON scores.
                 """.formatted(cvSnippet, jdSnippet);
 
-        JsonNode root      = claude.generateJson(SYSTEM_PROMPT, userPrompt, userId, "tailor-resume");
-        int      atsScore  = clamp(root.path("atsScore").asInt(0));
+        JsonNode root       = nvidia.generateJson(SYSTEM_PROMPT, userPrompt, userId, "tailor-resume");
+        int      atsScore   = clamp(root.path("atsScore").asInt(0));
         int      humanScore = clamp(root.path("humanScore").asInt(0));
 
         List<FlaggedPhrase> flaggedPhrases = new ArrayList<>();
@@ -150,27 +133,18 @@ public class CvHumanScoreService {
             for (JsonNode fp : phrases) {
                 String phrase  = fp.path("phrase").asText("");
                 String context = fp.path("context").asText("");
-                String rewrite = fp.path("suggestedRewrite").asText(
-                        "Replace with a specific, quantified achievement");
-                if (!phrase.isBlank()) {
-                    flaggedPhrases.add(new FlaggedPhrase(phrase, context, rewrite));
-                }
+                String rewrite = fp.path("suggestedRewrite").asText("Replace with a specific, quantified achievement");
+                if (!phrase.isBlank()) flaggedPhrases.add(new FlaggedPhrase(phrase, context, rewrite));
             }
         }
-
-        log.info("CvHumanScoreService (Claude): atsScore={}, humanScore={}, flaggedCount={}",
-                atsScore, humanScore, flaggedPhrases.size());
+        log.info("CvHumanScoreService (NVIDIA): atsScore={}, humanScore={}, flaggedCount={}", atsScore, humanScore, flaggedPhrases.size());
         return new CvScoreResult(atsScore, humanScore, flaggedPhrases);
     }
 
-    // ── Regex fallback ────────────────────────────────────────────────────────
-
     private CvScoreResult scoreWithRegex(String cvText, String jobText) {
-        int                 atsScore      = calculateAtsScore(cvText, jobText);
+        int                 atsScore       = calculateAtsScore(cvText, jobText);
         List<FlaggedPhrase> flaggedPhrases = detectAiPhrases(cvText);
-        int                 humanScore    = calculateHumanScore(cvText, flaggedPhrases.size());
-        log.debug("CvHumanScoreService (regex): atsScore={}, humanScore={}, flaggedCount={}",
-                atsScore, humanScore, flaggedPhrases.size());
+        int                 humanScore     = calculateHumanScore(cvText, flaggedPhrases.size());
         return new CvScoreResult(atsScore, humanScore, flaggedPhrases);
     }
 
@@ -237,25 +211,13 @@ public class CvHumanScoreService {
     }
 
     private boolean isStopWord(String word) {
-        return Map.of(
-            "with", true, "that", true, "this", true, "from", true,
-            "your", true, "have", true, "will", true, "they", true
-        ).containsKey(word) || Map.of(
-            "what", true, "able", true, "been", true, "also", true
-        ).containsKey(word);
+        return Map.of("with", true, "that", true, "this", true, "from", true,
+                      "your", true, "have", true, "will", true, "they", true).containsKey(word)
+            || Map.of("what", true, "able", true, "been", true, "also", true).containsKey(word);
     }
 
-    private int clamp(int value) {
-        return Math.max(0, Math.min(100, value));
-    }
-
-    // ── Value objects ─────────────────────────────────────────────────────────
+    private int clamp(int value) { return Math.max(0, Math.min(100, value)); }
 
     public record FlaggedPhrase(String phrase, String context, String suggestedRewrite) {}
-
-    public record CvScoreResult(
-        int atsScore,
-        int humanScore,
-        List<FlaggedPhrase> flaggedPhrases
-    ) {}
+    public record CvScoreResult(int atsScore, int humanScore, List<FlaggedPhrase> flaggedPhrases) {}
 }

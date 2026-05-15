@@ -1,13 +1,12 @@
 package com.careerops.service.skills.handlers;
 
 import com.careerops.model.Job;
-import com.careerops.model.UserJob;
 import com.careerops.model.UserProfile;
 import com.careerops.repository.JobRepository;
 import com.careerops.repository.UserJobRepository;
 import com.careerops.repository.UserProfileRepository;
-import com.careerops.service.ClaudeDirectService;
 import com.careerops.service.CvService;
+import com.careerops.service.NvidiaService;
 import com.careerops.service.skills.SkillHandler;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -20,15 +19,7 @@ import java.util.UUID;
 
 /**
  * Task 28 — Cover Letter Skill Handler
- *
- * Generates a formal, personalised cover letter for the Irish job market.
- * Rules:
- *   - Opening paragraph references ONE specific company detail from JD (not generic)
- *   - 2 body paragraphs using CAR framework (Challenge → Action → Result)
- *   - Quantified achievements from the user's CV
- *   - Closing paragraph with clear CTA and availability
- *   - Banned phrases enforced
- * Output: full letter (400-500 words), tone indicator, 3 personalisation highlights, word count
+ * AI engine migrated from ClaudeDirectService to NvidiaService.
  */
 @Service
 public class CoverLetterSkillHandler implements SkillHandler {
@@ -80,7 +71,7 @@ public class CoverLetterSkillHandler implements SkillHandler {
         }
         """;
 
-    private final ClaudeDirectService   claude;
+    private final NvidiaService         nvidia;
     private final UserProfileRepository profiles;
     private final UserJobRepository     userJobs;
     private final JobRepository         jobs;
@@ -88,40 +79,35 @@ public class CoverLetterSkillHandler implements SkillHandler {
     private final ObjectMapper          mapper;
 
     public CoverLetterSkillHandler(
-            ClaudeDirectService claude,
+            NvidiaService nvidia,
             UserProfileRepository profiles,
             UserJobRepository userJobs,
             JobRepository jobs,
             CvService cvService,
             ObjectMapper mapper) {
-        this.claude   = claude;
-        this.profiles = profiles;
-        this.userJobs = userJobs;
-        this.jobs     = jobs;
+        this.nvidia    = nvidia;
+        this.profiles  = profiles;
+        this.userJobs  = userJobs;
+        this.jobs      = jobs;
         this.cvService = cvService;
-        this.mapper   = mapper;
+        this.mapper    = mapper;
     }
 
     @Override
-    public String skillName() {
-        return "cover-letter";
-    }
+    public String skillName() { return "cover-letter"; }
 
     @Override
     public JsonNode execute(UUID userId, UUID userJobId) {
         log.info("CoverLetterSkillHandler.execute userId={} userJobId={}", userId, userJobId);
-
         UserProfile profile = profiles.findByUserId(userId).orElse(null);
         String cvText       = getCvText(userId);
         Job job             = resolveJob(userId, userJobId);
-
-        String userPrompt = buildUserPrompt(profile, job, cvText);
-        return claude.generateJson(SYSTEM_PROMPT, userPrompt, userId, skillName());
+        String userPrompt   = buildUserPrompt(profile, job, cvText);
+        return nvidia.generateJson(SYSTEM_PROMPT, userPrompt, userId, skillName());
     }
 
     private String buildUserPrompt(UserProfile p, Job job, String cv) {
         StringBuilder sb = new StringBuilder();
-
         sb.append("## User Career Profile\n");
         if (p != null) {
             sb.append("Target roles: ").append(arr(p.getTargetRoles())).append("\n");
@@ -131,29 +117,23 @@ public class CoverLetterSkillHandler implements SkillHandler {
         } else {
             sb.append("Profile not available.\n");
         }
-
         sb.append("\n## CV / Resume (source of achievements)\n");
         sb.append(cv != null && !cv.isBlank()
                 ? trim(cv, 5000)
                 : "CV not uploaded — generate best possible letter from job context only.");
-
         sb.append("\n\n## Job Description\n");
         if (job != null) {
             sb.append("Role title: ").append(job.getTitle()).append("\n");
             sb.append("Company: ").append(job.getCompany()).append("\n");
             sb.append("Location: ").append(job.getLocation()).append("\n");
             if (job.getSalaryMin() != null)
-                sb.append("Salary: €").append(job.getSalaryMin())
-                  .append(" - €").append(job.getSalaryMax()).append("\n");
+                sb.append("Salary: \u20ac").append(job.getSalaryMin()).append(" - \u20ac").append(job.getSalaryMax()).append("\n");
             sb.append("\nFull job description:\n").append(trim(job.getDescription(), 4500));
         } else {
-            sb.append("No specific job provided. Write a strong general cover letter ");
-            sb.append("for the user's target role based on their profile.");
+            sb.append("No specific job provided. Write a strong general cover letter for the user's target role based on their profile.");
         }
-
         sb.append("\n\nGenerate the cover letter now. Follow ALL rules. ");
-        sb.append("Ensure every paragraph references specific, verifiable details ");
-        sb.append("from the CV and job description above.");
+        sb.append("Ensure every paragraph references specific, verifiable details from the CV and job description above.");
         return sb.toString();
     }
 
@@ -169,10 +149,8 @@ public class CoverLetterSkillHandler implements SkillHandler {
     }
 
     private static String arr(String[] a) {
-        return a == null ? "N/A" : Arrays.stream(a)
-                .reduce((x, y) -> x + ", " + y).orElse("N/A");
+        return a == null ? "N/A" : Arrays.stream(a).reduce((x, y) -> x + ", " + y).orElse("N/A");
     }
-
     private static String trim(String s, int max) {
         if (s == null) return "";
         return s.length() <= max ? s : s.substring(0, max) + "...[truncated]";

@@ -23,7 +23,10 @@ import java.util.concurrent.CompletableFuture;
 import java.util.stream.Collectors;
 
 /**
- * Wires scrape -> dedup -> JobMatchingService pre-rank -> parallel Gemini score -> top-N -> persist.
+ * Wires scrape -> dedup -> JobMatchingService pre-rank -> parallel NvidiaService score -> top-N -> persist.
+ *
+ * AI engine migrated from GeminiService to NvidiaService (NVIDIA NIM, OpenAI-compatible).
+ * Output contract is identical: generateJsonAsync returns a JsonNode with matchPercent, overallScore, etc.
  */
 @Service
 @SuppressWarnings("all")
@@ -32,15 +35,15 @@ public class JobDeliveryService {
 
     private final JobScrapeService      scrape;
     private final DeduplicationService  dedup;
-    private final GeminiService         gemini;
+    private final NvidiaService         nvidia;
     private final SkillPromptLibrary    prompts;
     private final UserProfileRepository profiles;
     private final UserJobRepository     userJobs;
     private final CvService             cvService;
     private final DailyLimitService     limits;
     private final JobMatchingService    matcher;
-    private final ObjectMapper          mapper; // 3.048 - Injected
-    private final TransactionTemplate   transactionTemplate; // 3.047
+    private final ObjectMapper          mapper;
+    private final TransactionTemplate   transactionTemplate;
 
     @Value("${jobs.cron.daily.count:3}")
     private int cronShare;
@@ -49,19 +52,18 @@ public class JobDeliveryService {
     private int preRankPool;
 
     public JobDeliveryService(JobScrapeService scrape, DeduplicationService dedup,
-                              GeminiService gemini, SkillPromptLibrary prompts,
+                              NvidiaService nvidia, SkillPromptLibrary prompts,
                               UserProfileRepository profiles, UserJobRepository userJobs,
                               CvService cv, DailyLimitService limits,
                               JobMatchingService matcher, ObjectMapper mapper,
                               PlatformTransactionManager transactionManager) {
-        this.scrape   = scrape;    this.dedup    = dedup;    this.gemini   = gemini;
+        this.scrape   = scrape;    this.dedup    = dedup;    this.nvidia   = nvidia;
         this.prompts  = prompts;   this.profiles = profiles; this.userJobs = userJobs;
         this.cvService = cv;       this.limits   = limits;   this.matcher  = matcher;
         this.mapper   = mapper;
         this.transactionTemplate = new TransactionTemplate(transactionManager);
     }
 
-    // 3.047 — Removed @Transactional(timeout = 10) from long-running async method
     @SuppressWarnings("unchecked")
     public FetchSummary deliver(UUID userId, int desiredCount) {
         UserProfile p = profiles.findByUserId(userId)
@@ -82,7 +84,7 @@ public class JobDeliveryService {
                 deduped.stream().filter(j -> j.getCompany() != null && !j.getCompany().isBlank()).toList(),
                 p, preRankPool)
             .stream().map(JobMatchingService.ScoredJob::job).toList();
-        log.info("User {} pre-ranked pool for Gemini: {}", userId, preRanked.size());
+        log.info("User {} pre-ranked pool for NVIDIA NIM: {}", userId, preRanked.size());
 
         if (preRanked.isEmpty()) {
             return new FetchSummary(0, limits.getCount(userId), limits.max(), limits.remaining(userId));
@@ -93,15 +95,14 @@ public class JobDeliveryService {
         int    minPct       = p.getMinMatchPercent() == null ? UserProfile.DEFAULT_MIN_MATCH_PERCENT : p.getMinMatchPercent();
 
         List<CompletableFuture<Scored>> futures = preRanked.stream()
-            .map(j -> gemini.generateJsonAsync(systemPrompt, buildPrompt(j, p, cvText), userId, "job-match")
+            .map(j -> nvidia.generateJsonAsync(systemPrompt, buildPrompt(j, p, cvText), userId, "job-match")
                 .thenApply(json -> new Scored(j, json, json.path("matchPercent").asInt(0)))
                 .exceptionally(ex -> {
-                    log.warn("Gemini async failed for job {}: {}", j.getId(), ex.getMessage());
+                    log.warn("NVIDIA async failed for job {}: {}", j.getId(), ex.getMessage());
                     return new Scored(j, emptyJson(), 0);
                 }))
             .toList();
 
-        // 3.047 — Async wait happens OUTSIDE transactional boundary
         CompletableFuture.allOf(futures.toArray(new CompletableFuture[0])).join();
 
         List<Scored> scored = futures.stream()
@@ -120,13 +121,10 @@ public class JobDeliveryService {
             persistResults(userId, top);
             return null;
         });
-        
+
         return new FetchSummary(top.size(), limits.getCount(userId), limits.max(), limits.remaining(userId));
     }
 
-    /**
-     * Performs DB writes (3.047).
-     */
     protected void persistResults(UUID userId, List<Scored> top) {
         for (Scored s : top) {
             if (userJobs.findByUserIdAndJobId(userId, s.job().getId()).isPresent()) continue;
