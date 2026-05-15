@@ -21,9 +21,18 @@ import jakarta.annotation.PreDestroy;
  * Section 7 — Task 67
  * Orchestrates all JobSource implementations using the Strategy pattern.
  *
- * fetchRaw(profile)   — background scrape across all sources
+ * fetchRaw(profile)       — background parallel scrape across all sources
  * search(params, profile) — on-demand keyword search across sources that support it
- *                           (SerpApiJobSource, IndeedRssSource override search())
+ *
+ * Sources registered (15 total):
+ *   Free/no-key:  IrishJobsSource, JobsIeSource, JsoupCompanySource,
+ *                 RemotiveSource, TheMuseSource, JobicySource, RssSource,
+ *                 WeWorkRemotelySource, EuroJobsSource, TwinAiSource
+ *   API-key:      ReedSource, AdzunaSource
+ *   On-demand:    SerpApiJobSource, IndeedRssSource
+ *
+ * All sources are fail-safe: exceptions and timeouts return empty list.
+ * Thread pool: 10 threads to accommodate the expanded source list.
  */
 @Service
 public class JobScrapeService {
@@ -31,8 +40,8 @@ public class JobScrapeService {
     private static final Logger log = LoggerFactory.getLogger(JobScrapeService.class);
 
     private final List<JobSource> sources;
-    private final ExecutorService executor = Executors.newFixedThreadPool(8); // 3.043
- 
+    private final ExecutorService executor = Executors.newFixedThreadPool(10);
+
     @Value("${jobs.freshness.default.hours:96}")
     private int defaultFreshnessHours;
 
@@ -44,20 +53,26 @@ public class JobScrapeService {
             ReedSource r, AdzunaSource a,
             TwinAiSource twin,
             SerpApiJobSource serp,
-            IndeedRssSource indeed) {
-        // Order: free/scraper sources first, budgeted API sources next,
+            IndeedRssSource indeed,
+            WeWorkRemotelySource wwr,
+            EuroJobsSource euro) {
+        // Order: free/no-key sources first, API-key sources next,
         // on-demand search sources last (serp, indeed)
         this.sources = List.of(
-            irish, jobsIe, companies, rm, tm,
-            jb, rs, r, a, twin, serp, indeed
+            irish, jobsIe, companies,
+            rm, tm, jb, rs,
+            wwr, euro,
+            r, a, twin,
+            serp, indeed
         );
     }
 
-    // ── Background scrape (unchanged from Phase 1) ───────────────────────────────
+    // ── Background scrape ────────────────────────────────────────────────────
 
     public List<Job> fetchRaw(UserProfile profile) {
-        log.info("Starting parallel fetch across {} sources for userId={}", sources.size(), profile.getUserId());
-        
+        log.info("Starting parallel fetch across {} sources for userId={}",
+                sources.size(), profile.getUserId());
+
         List<CompletableFuture<List<Job>>> futures = sources.stream()
             .filter(JobSource::hasBudget)
             .map(s -> CompletableFuture.supplyAsync(() -> {
@@ -79,19 +94,16 @@ public class JobScrapeService {
             .toList();
 
         List<Job> fresh = applyFreshness(allJobs, profile);
-        log.info("Total collected: {}. After freshness filter: {}/{}", allJobs.size(), fresh.size(), allJobs.size());
+        log.info("Total collected: {}. After freshness filter: {}/{}",
+                allJobs.size(), fresh.size(), allJobs.size());
         return fresh;
     }
 
-    // ── On-demand search (Section 7) ─────────────────────────────────────────
+    // ── On-demand search ──────────────────────────────────────────────────────
 
-    /**
-     * Calls search(SearchParams, UserProfile) on every source that supports it.
-     * Background-only sources return empty list and are silently skipped.
-     * Results are aggregated and returned unsorted (caller handles ranking).
-     */
     public List<Job> search(SearchParams params, UserProfile profile) {
-        log.info("Starting parallel search across {} sources for query='{}'", sources.size(), params.toSearchQuery());
+        log.info("Starting parallel search across {} sources for query='{}'",
+                sources.size(), params.toSearchQuery());
 
         List<CompletableFuture<List<Job>>> futures = sources.stream()
             .filter(JobSource::hasBudget)
@@ -99,7 +111,7 @@ public class JobScrapeService {
                 try {
                     return s.search(params, profile);
                 } catch (com.careerops.exception.ApiException apiEx) {
-                    throw apiEx; // Rethrow to letExceptionally handle if needed, though we join
+                    throw apiEx;
                 } catch (Exception e) {
                     log.warn("Search source '{}' failed: {}", s.name(), e.getMessage());
                     return Collections.<Job>emptyList();
@@ -128,7 +140,8 @@ public class JobScrapeService {
     // ── Helpers ────────────────────────────────────────────────────────────
 
     private List<Job> applyFreshness(List<Job> jobs, UserProfile profile) {
-        int hours = profile.getFreshnessHours() == null ? defaultFreshnessHours : profile.getFreshnessHours();
+        int hours = profile.getFreshnessHours() == null
+                ? defaultFreshnessHours : profile.getFreshnessHours();
         Instant cutoff = Instant.now().minus(hours, ChronoUnit.HOURS);
         return jobs.stream()
                 .filter(j -> j.getPostedAt() == null || j.getPostedAt().isAfter(cutoff))

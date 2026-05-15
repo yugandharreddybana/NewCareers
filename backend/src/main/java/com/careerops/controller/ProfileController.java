@@ -2,6 +2,8 @@ package com.careerops.controller;
 
 import com.careerops.dto.ProfileDtos.*;
 import com.careerops.exception.ApiException;
+import com.careerops.model.UserProfile;
+import com.careerops.repository.UserProfileRepository;
 import com.careerops.service.CvService;
 import com.careerops.service.JobDeliveryService;
 import com.careerops.service.LinkedInImportService;
@@ -14,6 +16,7 @@ import org.springframework.web.multipart.MultipartFile;
 
 import java.io.IOException;
 import java.util.Map;
+import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 
 /**
@@ -26,9 +29,9 @@ import java.util.concurrent.CompletableFuture;
  * - Exposed: X-RateLimit-Remaining, X-RateLimit-Reset, Retry-After
  *
  * First-time job delivery:
- *   After PUT /profile, if the profile transitions to onboarded=true,
- *   an async background fetch is fired immediately so the user sees jobs
- *   right away without waiting for the 08:00 cron.
+ *   After PUT /profile, if the profile transitions to onboarded=true for the first time,
+ *   an async background fetch fires immediately so the user sees jobs right away
+ *   without waiting for the 08:00 cron.
  */
 @RestController
 @RequestMapping("/profile")
@@ -37,20 +40,23 @@ public class ProfileController {
 
     private static final Logger log = LoggerFactory.getLogger(ProfileController.class);
 
-    private final ProfileService          profile;
-    private final CvService               cv;
-    private final LinkedInImportService   linkedIn;
+    private final ProfileService            profile;
+    private final CvService                 cv;
+    private final LinkedInImportService     linkedIn;
     private final com.careerops.service.VirusScannerService scanner;
-    private final JobDeliveryService      delivery;
+    private final JobDeliveryService        delivery;
+    private final UserProfileRepository     profiles;
 
     public ProfileController(ProfileService p, CvService c, LinkedInImportService li,
                              com.careerops.service.VirusScannerService s,
-                             JobDeliveryService delivery) {
+                             JobDeliveryService delivery,
+                             UserProfileRepository profiles) {
         this.profile  = p;
         this.cv       = c;
         this.linkedIn = li;
         this.scanner  = s;
         this.delivery = delivery;
+        this.profiles = profiles;
     }
 
     // ── Core profile ─────────────────────────────────────────────────────
@@ -64,16 +70,21 @@ public class ProfileController {
      * PUT /profile
      *
      * Saves the profile. If the saved profile is now onboarded=true AND
-     * the user had no jobs yet (i.e. this is their first save completing onboarding),
-     * fires an async job fetch in the background so jobs appear immediately.
-     * The HTTP response returns immediately — the fetch runs in a daemon thread.
+     * the user was NOT onboarded before this save, fires an async first-time
+     * job fetch so jobs appear immediately without waiting for the 08:00 cron.
      */
     @PutMapping
     public ProfileResponse upsert(
             @RequestHeader(value = "If-Match", required = false) Long ifMatch,
             @jakarta.validation.Valid @RequestBody ProfileRequest req) {
-        java.util.UUID userId = AuthUtil.currentUserId();
-        boolean wasOnboardedBefore = profile.isOnboarded(userId);
+        UUID userId = AuthUtil.currentUserId();
+
+        // Check onboarded status BEFORE the save using the repository directly
+        // (ProfileService has no isOnboarded() helper — we resolve it here)
+        boolean wasOnboardedBefore = profiles.findByUserId(userId)
+                .map(p -> Boolean.TRUE.equals(p.getOnboarded()))
+                .orElse(false);
+
         ProfileResponse saved = profile.upsert(userId, req, ifMatch);
 
         // Fire first-time job fetch async if this PUT completed onboarding
