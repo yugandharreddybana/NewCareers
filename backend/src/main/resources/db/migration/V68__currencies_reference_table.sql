@@ -1,4 +1,4 @@
-SET search_path TO career_operations;
+SET search_path TO careerops;
 
 -- V68 — Currencies Reference Schema Table.
 -- Enables per-market currencies to support SaaS expansion to non-EU markets.
@@ -14,3 +14,4 @@ INSERT INTO currencies (code, name, symbol) VALUES
 ('USD', 'US Dollar', '$'),
 ('GBP', 'British Pound', '£')
 ON CONFLICT (code) DO NOTHING;
+

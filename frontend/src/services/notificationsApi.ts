@@ -1,5 +1,4 @@
 /**
- * Section 8 — Task 84
  * Notifications API service.
  */
 
@@ -35,13 +34,7 @@ const toAppNotification = (notification: NotificationDto): AppNotification => ({
   ...(notification.metadata ? { metadata: notification.metadata } : {}),
 });
 
-// ── API ─────────────────────────────────────────────────────────────────
-
 export const notificationsApi = {
-  /**
-   * GET /api/notifications?page=0&size=20
-   * Returns paginated notifications + unread count.
-   */
   getNotifications: async (page = 0, size = 20): Promise<NotificationsResponse> => {
     const [pageResponse, unreadResponse] = await Promise.all([
       api.get<NotificationPageDto>('/notifications', {
@@ -60,26 +53,14 @@ export const notificationsApi = {
     };
   },
 
-  /**
-   * PATCH /api/notifications/:id/read
-   * Marks a single notification as read.
-   */
   markRead: async (id: string): Promise<void> => {
     await api.patch(`/notifications/${id}/read`);
   },
 
-  /**
-   * PATCH /api/notifications/read-all
-   * Marks ALL notifications as read for the current user.
-   */
   markAllRead: async (): Promise<void> => {
     await api.patch('/notifications/mark-all-read');
   },
 
-  /**
-   * DELETE /api/notifications
-   * Clears all notifications for the current user.
-   */
   clearAll: async (): Promise<void> => {
     await api.delete('/notifications');
   },

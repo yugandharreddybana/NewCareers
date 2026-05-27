@@ -9,25 +9,12 @@
  */
 import express from 'express';
 import { authGuard } from '../authGuard.js';
-import { createProxyMiddleware } from 'http-proxy-middleware';
 import axios from 'axios';
+import { createJavaRouteProxy } from '../services/backendProxy.js';
 
 const router = express.Router();
-
-const JAVA = process.env.JAVA_BACKEND_URL || 'http://localhost:8080';
 const AGENT_MEMORY_URL = process.env.AGENTMEMORY_URL || 'http://localhost:3111';
-
-const javaProxy = createProxyMiddleware({
-  target: JAVA,
-  changeOrigin: true,
-  proxyTimeout: 30_000,
-  timeout: 30_000,
-  on: {
-    error: (err, _req, res) => {
-      res.status(502).json({ error: 'Backend unavailable', details: err.message });
-    },
-  },
-});
+const javaProxy = createJavaRouteProxy('/agent-memory');
 
 // Middleware to sync with local agentmemory daemon
 const syncWithAgentMemoryDaemon = async (req: express.Request, _res: express.Response, next: express.NextFunction) => {

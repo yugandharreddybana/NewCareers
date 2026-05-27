@@ -11,14 +11,14 @@ import java.time.Instant;
 import java.util.UUID;
 
 @Entity
-@Table(name = "user_jobs", schema = "career_operations",
+@Table(name = "user_jobs", schema = "careerops",
        uniqueConstraints = @UniqueConstraint(columnNames = {"user_id","job_id"}),
        indexes = {
            @Index(name = "idx_user_jobs_user_delivered", columnList = "user_id, delivered_at DESC"),
            @Index(name = "idx_user_jobs_user_kanban", columnList = "user_id, kanban_column")
        })
 @org.hibernate.annotations.SQLRestriction("deleted_at IS NULL")
-@org.hibernate.annotations.SQLDelete(sql = "UPDATE career_operations.user_jobs SET deleted_at = CURRENT_TIMESTAMP WHERE id = ?")
+@org.hibernate.annotations.SQLDelete(sql = "UPDATE careerops.user_jobs SET deleted_at = CURRENT_TIMESTAMP WHERE id = ?")
 @org.hibernate.annotations.DynamicUpdate
 @Getter @Setter @NoArgsConstructor @AllArgsConstructor @Builder
 public class UserJob {
@@ -35,15 +35,15 @@ public class UserJob {
     @Column(name = "match_percent") private Integer matchPercent;
 
     @Type(StringArrayType.class)
-    @Column(name = "matched_skills", columnDefinition = "text[]")
+    @Column(name = "matched_skills", columnDefinition = "text array")
     private String[] matchedSkills;
 
     @Type(StringArrayType.class)
-    @Column(name = "unmatched_skills", columnDefinition = "text[]")
+    @Column(name = "unmatched_skills", columnDefinition = "text array")
     private String[] unmatchedSkills;
 
     @Type(StringArrayType.class)
-    @Column(name = "cv_improvement_tips", columnDefinition = "text[]")
+    @Column(name = "cv_improvement_tips", columnDefinition = "text array")
     private String[] cvImprovementTips;
 
     @Basic(fetch = FetchType.LAZY)
@@ -76,3 +76,4 @@ public class UserJob {
         if (kanbanColumn == null) kanbanColumn = "Discovered";
     }
 }
+

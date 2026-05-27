@@ -7,7 +7,7 @@ import java.time.Instant;
 import java.util.UUID;
 
 @Entity
-@Table(name = "workspace_members", schema = "career_operations")
+@Table(name = "workspace_members", schema = "careerops")
 @Getter
 @Setter
 @NoArgsConstructor
@@ -58,3 +58,4 @@ public class WorkspaceMember {
         if (this.inviteStatus == null) this.inviteStatus = InviteStatus.pending;
     }
 }
+

@@ -8,7 +8,7 @@ import java.time.Instant;
 import java.util.UUID;
 
 @Entity
-@Table(name = "interview_tracks", schema = "career_operations")
+@Table(name = "interview_tracks", schema = "careerops")
 @Getter
 @Setter
 @Builder
@@ -54,3 +54,4 @@ public class InterviewTrack {
     @Column(name = "updated_at")
     private Instant updatedAt;
 }
+

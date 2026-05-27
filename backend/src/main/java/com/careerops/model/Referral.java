@@ -8,10 +8,10 @@ import java.util.UUID;
 
 /**
  * Section 9 — Task 94.
- * Maps to career_operations.referrals.
+ * Maps to careerops.referrals.
  */
 @Entity
-@Table(name = "referrals", schema = "career_operations")
+@Table(name = "referrals", schema = "careerops")
 @Getter @Setter @NoArgsConstructor @AllArgsConstructor @Builder
 public class Referral {
 
@@ -50,3 +50,4 @@ public class Referral {
         if (status    == null) status    = STATUS_PENDING;
     }
 }
+

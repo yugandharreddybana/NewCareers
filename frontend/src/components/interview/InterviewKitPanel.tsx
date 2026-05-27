@@ -8,6 +8,7 @@
 import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { interviewApi } from '../../services/interviewApi';
+import { LoadingSpinner } from '@/components/LoadingSpinner';
 
 const SKILL_COLOURS: Record<string, string> = {
   behavioural:  'bg-blue-100 text-blue-800',
@@ -88,7 +89,7 @@ export default function InterviewKitPanel({
         </div>
       )}
 
-      {isLoading && <p className="text-sm text-gray-500">Loading kit…</p>}
+      {isLoading && <LoadingSpinner size="sm" />}
 
       {questions.length > 0 && (
         <div className="flex gap-2 flex-wrap">

@@ -17,13 +17,12 @@ import {
   type LucideIcon,
 } from 'lucide-react';
 import { PageMeta } from '@/components/PageMeta';
+import { PageLoader } from '@/components/LoadingSpinner';
 import {
   autoApplyApi,
   type AnswerBankEntry,
   type ApplicationRun,
 } from '@/services/autoApplyApi';
-
-const USE_MOCKS = import.meta.env.VITE_USE_MOCKS === 'true';
 
 type AnswerCategory = 'experience' | 'education' | 'skills' | 'personal' | 'other';
 type AutoApplyRunStatus = 'pending' | 'running' | 'awaiting_approval' | 'submitted' | 'failed' | 'cancelled';
@@ -46,50 +45,6 @@ interface AutoApplyRun {
   completedAt: string | null;
   errorMessage: string | null;
 }
-
-const MOCK_ANSWERS: AutoApplyAnswer[] = [
-  { id: 'a-1', question: 'Do you have the right to work in Ireland?', answer: 'Yes', category: 'personal' },
-  { id: 'a-2', question: 'Years of experience with React?', answer: '4', category: 'skills' },
-  { id: 'a-3', question: 'What is your notice period?', answer: '4 weeks', category: 'personal' },
-  { id: 'a-4', question: 'Are you willing to relocate?', answer: 'Within Ireland', category: 'personal' },
-  { id: 'a-5', question: 'Highest level of education?', answer: 'MSc Data Analytics', category: 'education' },
-];
-
-const MOCK_HISTORY: AutoApplyRun[] = [
-  {
-    id: 'run-1',
-    userJobId: 'uj-1',
-    jobTitle: 'Senior Frontend Engineer',
-    company: 'TechWave Ireland',
-    status: 'submitted',
-    steps: [],
-    startedAt: new Date(Date.now() - 3_600_000).toISOString(),
-    completedAt: new Date(Date.now() - 3_000_000).toISOString(),
-    errorMessage: null,
-  },
-  {
-    id: 'run-2',
-    userJobId: 'uj-2',
-    jobTitle: 'Lead Full Stack Developer',
-    company: 'EcoGrowth',
-    status: 'awaiting_approval',
-    steps: [],
-    startedAt: new Date(Date.now() - 900_000).toISOString(),
-    completedAt: null,
-    errorMessage: null,
-  },
-  {
-    id: 'run-3',
-    userJobId: 'uj-3',
-    jobTitle: 'Product Designer',
-    company: 'DesignScale',
-    status: 'failed',
-    steps: [],
-    startedAt: new Date(Date.now() - 7_200_000).toISOString(),
-    completedAt: new Date(Date.now() - 7_000_000).toISOString(),
-    errorMessage: 'Login wall detected',
-  },
-];
 
 const STATUS_META: Record<AutoApplyRunStatus, { label: string; color: string; icon: LucideIcon; animate?: boolean }> = {
   pending: { label: 'Pending', color: 'bg-gray-100 text-gray-600', icon: Clock },
@@ -218,12 +173,10 @@ const AddAnswerForm = ({ onAdd }: { onAdd: (answer: AutoApplyAnswer) => void }) 
 
     setSaving(true);
     try {
-      const result = USE_MOCKS
-        ? { id: `a-${Date.now()}`, question, answer, category }
-        : toAnswerRecord(await autoApplyApi.upsertAnswer({
-            questionKey: question,
-            answerText: answer,
-          }));
+      const result = toAnswerRecord(await autoApplyApi.upsertAnswer({
+        questionKey: question,
+        answerText: answer,
+      }));
       onAdd(result);
       setQuestion('');
       setAnswer('');
@@ -332,16 +285,9 @@ const AutoApplyPage = () => {
   useEffect(() => {
     const load = async () => {
       try {
-        if (USE_MOCKS) {
-          await new Promise(resolve => setTimeout(resolve, 500));
-          setAnswers(MOCK_ANSWERS);
-          setHistory(MOCK_HISTORY);
-          return;
-        }
-
         const [answerEntries, runResponse] = await Promise.all([
-          autoApplyApi.listAnswers().catch(() => [] as AnswerBankEntry[]),
-          autoApplyApi.listRuns().catch(() => ({ runs: [] as ApplicationRun[], total: 0 })),
+          autoApplyApi.listAnswers(),
+          autoApplyApi.listRuns(),
         ]);
         setAnswers(answerEntries.map(toAnswerRecord));
         setHistory(runResponse.runs.map(toRunRecord));
@@ -355,12 +301,10 @@ const AutoApplyPage = () => {
 
   const handleSaveAnswer = async (updated: AutoApplyAnswer) => {
     try {
-      const saved = USE_MOCKS
-        ? updated
-        : toAnswerRecord(await autoApplyApi.upsertAnswer({
-            questionKey: updated.question,
-            answerText: updated.answer,
-          }));
+      const saved = toAnswerRecord(await autoApplyApi.upsertAnswer({
+        questionKey: updated.question,
+        answerText: updated.answer,
+      }));
       setAnswers(prev => prev.map(answer => answer.id === updated.id ? saved : answer));
       toast.success('Answer updated.');
     } catch {
@@ -370,7 +314,7 @@ const AutoApplyPage = () => {
 
   const handleDeleteAnswer = async (id: string) => {
     try {
-      if (!USE_MOCKS) await autoApplyApi.deleteAnswer(id);
+      await autoApplyApi.deleteAnswer(id);
       setAnswers(prev => prev.filter(answer => answer.id !== id));
       toast.success('Answer removed.');
     } catch {
@@ -380,9 +324,7 @@ const AutoApplyPage = () => {
 
   const handleApprove = async (runId: string) => {
     try {
-      const updated = USE_MOCKS
-        ? history.find(run => run.id === runId)
-        : toRunRecord(await autoApplyApi.approveRun(runId, true));
+      const updated = toRunRecord(await autoApplyApi.approveRun(runId, true));
       if (!updated) return;
 
       setHistory(prev => prev.map(run => run.id === runId ? { ...updated, status: 'submitted' } : run));
@@ -394,9 +336,7 @@ const AutoApplyPage = () => {
 
   const handleRetry = async (runId: string) => {
     try {
-      const updated = USE_MOCKS
-        ? history.find(run => run.id === runId)
-        : toRunRecord(await autoApplyApi.retryRun(runId));
+      const updated = toRunRecord(await autoApplyApi.retryRun(runId));
       if (!updated) return;
 
       setHistory(prev => prev.map(run => run.id === runId ? { ...updated, status: 'running' } : run));
@@ -407,7 +347,7 @@ const AutoApplyPage = () => {
   };
 
   if (loading) {
-    return <div className="flex items-center justify-center min-h-[50vh] text-gray-400 text-sm">Loading Auto-Apply...</div>;
+    return <PageLoader />;
   }
 
   const pendingApprovals = history.filter(run => run.status === 'awaiting_approval').length;

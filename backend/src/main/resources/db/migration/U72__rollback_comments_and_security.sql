@@ -1,4 +1,4 @@
-SET search_path TO career_operations;
+SET search_path TO careerops;
 
 COMMENT ON TABLE users IS NULL;
 COMMENT ON TABLE jobs IS NULL;
@@ -13,3 +13,4 @@ COMMENT ON TABLE contact_interactions IS NULL;
 
 COMMENT ON COLUMN cv_documents.parsed_text IS NULL;
 COMMENT ON COLUMN password_resets.otp_hash IS NULL;
+

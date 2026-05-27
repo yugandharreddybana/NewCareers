@@ -29,7 +29,8 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
-import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.support.TransactionTemplate;
 
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
@@ -98,6 +99,13 @@ public class SkillService {
     private final NotificationService         notificationService;
     private final TokenUsageService           tokenUsageService;
     private final MeterRegistry               meterRegistry;
+    private final CatalogSkillService         catalogSkills;
+    private final EvaluationReportValidator   evaluationValidator;
+    private final CvHumanScoreService         cvHumanScoreService;
+    private final CvService                   cvService;
+    private final TailorResumePendingStore    tailorResumePending;
+    private final TransactionTemplate           readTx;
+    private final TransactionTemplate           writeTx;
 
     private final java.util.concurrent.ExecutorService batchExecutor =
             java.util.concurrent.Executors.newFixedThreadPool(4);
@@ -122,7 +130,13 @@ public class SkillService {
             ResendEmailService emailService,
             NotificationService notificationService,
             TokenUsageService tokenUsageService,
-            MeterRegistry meterRegistry) {
+            MeterRegistry meterRegistry,
+            CatalogSkillService catalogSkills,
+            EvaluationReportValidator evaluationValidator,
+            CvHumanScoreService cvHumanScoreService,
+            CvService cvService,
+            TailorResumePendingStore tailorResumePending,
+            PlatformTransactionManager transactionManager) {
         this.nvidia               = nvidia;
         this.prompts              = prompts;
         this.validator            = validator;
@@ -137,13 +151,22 @@ public class SkillService {
         this.notificationService  = notificationService;
         this.tokenUsageService    = tokenUsageService;
         this.meterRegistry        = meterRegistry;
+        this.catalogSkills        = catalogSkills;
+        this.evaluationValidator  = evaluationValidator;
+        this.cvHumanScoreService  = cvHumanScoreService;
+        this.cvService            = cvService;
+        this.tailorResumePending  = tailorResumePending;
+        this.readTx = new TransactionTemplate(transactionManager);
+        this.readTx.setReadOnly(true);
+        this.readTx.setTimeout(10);
+        this.writeTx = new TransactionTemplate(transactionManager);
+        this.writeTx.setTimeout(60);
     }
 
     // ================================================================
     // START A SKILL
     // ================================================================
 
-    @Transactional(timeout = 10)
     public SkillRunResponse startSkill(SkillStartRequest req, UUID userId) {
         String skill     = req.skillName();
         UUID   userJobId = req.userJobId();
@@ -167,11 +190,18 @@ public class SkillService {
             return SkillRunResponse.error(skill, "Daily token budget exhausted. Please try again tomorrow.");
         }
 
-        // Step 1: Profile validation (applies to all 14 skills)
-        List<String> missing = validator.validateForSkill(userId, skill);
-        if (!missing.isEmpty()) {
-            log.debug("Profile incomplete for skill={}: {}", skill, missing);
-            return SkillRunResponse.profileIncomplete(skill, missing);
+        // Step 1: Profile validation (catalog skills skip resume requirements)
+        if (!catalogSkills.handles(skill)) {
+            List<String> missing = validator.validateForSkill(userId, skill);
+            if (!missing.isEmpty()) {
+                log.debug("Profile incomplete for skill={}: {}", skill, missing);
+                return SkillRunResponse.profileIncomplete(skill, missing);
+            }
+        }
+
+        // Step 1b: Catalog skills (help, track) — no AI loop
+        if (catalogSkills.handles(skill)) {
+            return catalogSkills.execute(skill, userId, userJobId);
         }
 
         // Step 2: Phase 2 routing — delegate to SkillHandlerRegistry
@@ -182,28 +212,27 @@ public class SkillService {
 
         // Step 3: Phase 1 — TTL cache check
         if (userJobId != null && CACHE_TTL_DAYS.containsKey(skill)) {
-            Optional<SkillRun> cached = skillRuns.findValidCachedRun(userId, userJobId, skill, Instant.now());
-            if (cached.isPresent()) {
+            Optional<SkillRun> cached = readTx.execute(status ->
+                    skillRuns.findValidCachedRun(userId, userJobId, skill, Instant.now()));
+            if (cached != null && cached.isPresent()) {
                 log.debug("Cache hit for Phase 1 skill={}, userId={}", skill, userId);
                 return SkillRunResponse.result(skill, cached.get().getOutput());
             }
         }
 
-        // Step 4: Phase 1 — NVIDIA agentic loop
+        // Step 4: Phase 1 — NVIDIA agentic loop (no DB connection held during AI call)
         String systemPrompt = prompts.buildFullSystemPrompt(skill, userId);
         ArrayNode messages  = buildInitialMessages(req, userId);
+        AgentResult result  = nvidia.run(systemPrompt, messages, userId, userJobId);
 
-        return handleAgentResult(
-                nvidia.run(systemPrompt, messages, userId, userJobId),
-                skill, userId, userJobId, messages
-        );
+        return writeTx.execute(status ->
+                handleAgentResult(result, skill, userId, userJobId, messages));
     }
 
     // ================================================================
     // RESUME A PAUSED CONVERSATION (Phase 1 only — Phase 2 is single-turn)
     // ================================================================
 
-    @Transactional(timeout = 10)
     public SkillRunResponse resumeConversation(UUID conversationId, String answer, UUID userId) {
         log.info("resumeConversation: id={}, userId={}", conversationId, userId);
 
@@ -211,24 +240,24 @@ public class SkillService {
             throw new ApiException(HttpStatus.BAD_REQUEST, "Answer is too long (max 4000 chars)");
         }
 
-        SkillConversation conv = conversations.findByIdAndUserIdForUpdate(conversationId, userId)
-                .orElse(null);
+        SkillConversation conv = writeTx.execute(status ->
+                conversations.findByIdAndUserIdForUpdate(conversationId, userId).orElse(null));
 
         if (conv == null) {
             return SkillRunResponse.error("unknown", "Conversation not found.");
         }
 
         if (conv.getExpiresAt().isBefore(Instant.now())) {
-            conv.setStatus("expired");
-            conversations.save(conv);
+            writeTx.executeWithoutResult(status -> {
+                conv.setStatus("expired");
+                conversations.save(conv);
+            });
             return SkillRunResponse.error(conv.getSkill(),
                     "This conversation has expired. Please start the skill again.");
         }
 
         ArrayNode history = (ArrayNode) conv.getMessages();
 
-        // OpenAI-format tool result message (role: "tool", tool_call_id)
-        // This is compatible with NVIDIA NIM's /chat/completions endpoint.
         ObjectNode toolResultMsg = mapper.createObjectNode();
         toolResultMsg.put("role", "tool");
         toolResultMsg.put("tool_call_id", conv.getToolUseId());
@@ -236,20 +265,23 @@ public class SkillService {
                 ? "[User skipped this question]" : answer);
         history.add(toolResultMsg);
 
-        String systemPrompt = prompts.buildFullSystemPrompt(conv.getSkill(), userId);
-        AgentResult result  = nvidia.run(systemPrompt, history, userId, conv.getUserJobId());
+        String skill = conv.getSkill();
+        UUID userJobId = conv.getUserJobId();
+        String systemPrompt = prompts.buildFullSystemPrompt(skill, userId);
+        AgentResult result  = nvidia.run(systemPrompt, history, userId, userJobId);
 
-        conv.setStatus("completed");
-        conversations.save(conv);
+        writeTx.executeWithoutResult(status -> {
+            conv.setStatus("completed");
+            conversations.save(conv);
+        });
 
-        return handleAgentResult(result, conv.getSkill(), userId, conv.getUserJobId(), history);
+        return writeTx.execute(status -> handleAgentResult(result, skill, userId, userJobId, history));
     }
 
     // ================================================================
     // RUN ALL 14 SKILLS (Synchronous)
     // ================================================================
 
-    @Transactional(timeout = 10)
     public RunAllSkillsResponse runAllSkills(UUID userId, UUID userJobId) {
         log.info("runAllSkills: userId={}, userJobId={}", userId, userJobId);
         Map<String, SkillRunResponse> results = new LinkedHashMap<>();
@@ -288,16 +320,14 @@ public class SkillService {
     // RUN ALL 14 SKILLS (Asynchronous)
     // ================================================================
 
-    @Transactional(timeout = 10)
     public com.careerops.dto.BatchRunStatusResponse runAllSkillsAsync(UUID userId, UUID userJobId) {
-        BatchSkillRun batch = BatchSkillRun.builder()
+        BatchSkillRun batch = writeTx.execute(status -> batchRuns.save(BatchSkillRun.builder()
             .userId(userId)
             .userJobId(userJobId)
             .status("in_progress")
             .totalSkills(SkillPromptLibrary.ALL_SKILLS.size())
             .completedSkills(0)
-            .build();
-        batch = batchRuns.save(batch);
+            .build()));
 
         final UUID batchId = batch.getId();
         batchExecutor.submit(() -> {
@@ -311,16 +341,18 @@ public class SkillService {
                 } finally {
                     comp++;
                     final int curr = comp;
-                    batchRuns.findById(batchId).ifPresent(b -> {
-                        b.setCompletedSkills(curr);
-                        batchRuns.save(b);
-                    });
+                    writeTx.executeWithoutResult(status ->
+                            batchRuns.findById(batchId).ifPresent(b -> {
+                                b.setCompletedSkills(curr);
+                                batchRuns.save(b);
+                            }));
                 }
             }
-            batchRuns.findById(batchId).ifPresent(b -> {
-                b.setStatus("completed");
-                batchRuns.save(b);
-            });
+            writeTx.executeWithoutResult(status ->
+                    batchRuns.findById(batchId).ifPresent(b -> {
+                        b.setStatus("completed");
+                        batchRuns.save(b);
+                    }));
         });
 
         return new com.careerops.dto.BatchRunStatusResponse(
@@ -350,12 +382,21 @@ public class SkillService {
     // GET LAST RUN
     // ================================================================
 
-    public SkillRunResponse getLastRun(UUID userId, UUID userJobId, String skillName) {
+    /**
+     * Returns the most recent saved run, or empty when the user has never completed this skill
+     * for the job. Callers should treat empty as "run fresh" — not an error condition.
+     */
+    public Optional<SkillRunResponse> findLastRun(UUID userId, UUID userJobId, String skillName) {
         return skillRuns
                 .findFirstByUserIdAndUserJobIdAndSkillOrderByCreatedAtDesc(userId, userJobId, skillName)
-                .map(sr -> SkillRunResponse.result(skillName, sr.getOutput()))
-                .orElse(SkillRunResponse.error(skillName,
-                        "No previous run found. Run the skill first."));
+                .map(run -> SkillRunResponse.result(skillName, run.getOutput()));
+    }
+
+    /** @deprecated Prefer {@link #findLastRun}; kept for internal callers that expect an exception. */
+    public SkillRunResponse getLastRun(UUID userId, UUID userJobId, String skillName) {
+        return findLastRun(userId, userJobId, skillName)
+                .orElseThrow(() -> new ApiException(HttpStatus.NOT_FOUND,
+                        "No previous run found for this skill."));
     }
 
     // ================================================================
@@ -373,17 +414,31 @@ public class SkillService {
 
             case AgentResult.Done done -> {
                 JsonNode output = parseOutput(done.text());
+                if ("evaluate".equals(skill)) {
+                    output = normalizeEvaluateOutput(output, userJobId);
+                }
+                TailorResumePendingStore.Pending pendingResume = null;
+                if ("tailor-resume".equals(skill) && userJobId != null) {
+                    pendingResume = tailorResumePending.take(userId, userJobId);
+                    output = normalizeTailorResumeOutput(
+                            enrichTailorResumeOutput(output, userId, userJobId, pendingResume),
+                            userId);
+                }
 
                 skillRuns.deleteByUserIdAndUserJobIdAndSkill(userId, userJobId, skill);
 
-                SkillRun run = SkillRun.builder()
+                SkillRun.SkillRunBuilder runBuilder = SkillRun.builder()
                         .userId(userId)
                         .userJobId(userJobId)
                         .skill(skill)
                         .input(mapper.createObjectNode())
                         .output(output)
-                        .expiresAt(computeExpiry(skill))
-                        .build();
+                        .expiresAt(computeExpiry(skill));
+                if (pendingResume != null) {
+                    runBuilder.resumeHtml(pendingResume.html());
+                    runBuilder.resumeFilename(pendingResume.storagePath());
+                }
+                SkillRun run = runBuilder.build();
                 skillRuns.save(run);
 
                 log.info("Skill {} completed and saved for userId={}", skill, userId);
@@ -492,6 +547,151 @@ public class SkillService {
 
     private JsonNode parseOutput(String text) {
         return com.careerops.util.JsonExtractor.extract(text, mapper);
+    }
+
+    /**
+     * Ensures the tailor skill always returns a panel-friendly shape (summary + sections)
+     * even when the agent omits fields or only calls save_resume_html.
+     */
+    private JsonNode normalizeTailorResumeOutput(JsonNode output, UUID userId) {
+        com.fasterxml.jackson.databind.node.ObjectNode out = output != null && output.isObject()
+                ? (com.fasterxml.jackson.databind.node.ObjectNode) output.deepCopy()
+                : mapper.createObjectNode();
+        if (output != null && output.isTextual()) {
+            out.put("summary", output.asText());
+        }
+        JsonNode sectionsNode = out.path("sections");
+        if (!sectionsNode.isArray() || sectionsNode.isEmpty()) {
+            String baseline = "";
+            try {
+                baseline = cvService.activeCvText(userId);
+            } catch (Exception e) {
+                log.debug("Could not load baseline CV for tailor sections: {}", e.getMessage());
+            }
+            String summary = out.path("summary").asText("");
+            if (summary.isBlank() && !baseline.isBlank()) {
+                summary = baseline.lines()
+                        .map(String::trim)
+                        .filter(line -> !line.isBlank())
+                        .limit(3)
+                        .reduce((a, b) -> a + " " + b)
+                        .orElse("Tailored CV for this role.");
+                out.put("summary", summary);
+            }
+            com.fasterxml.jackson.databind.node.ArrayNode sections = mapper.createArrayNode();
+            com.fasterxml.jackson.databind.node.ObjectNode row = mapper.createObjectNode();
+            row.put("name", "Professional summary");
+            row.put("original", truncateForPanel(baseline, 1200));
+            row.put("rewritten", summary.isBlank()
+                    ? "Tailored content is being prepared — re-run if this stays empty."
+                    : summary);
+            row.put("rationale", "Baseline CV versus role-targeted opening aligned to the job description.");
+            sections.add(row);
+            out.set("sections", sections);
+        }
+        if (!out.has("keywordsAdded") || !out.get("keywordsAdded").isArray()) {
+            out.set("keywordsAdded", mapper.createArrayNode());
+        }
+        if (!out.has("warnings") || !out.get("warnings").isArray()) {
+            out.set("warnings", mapper.createArrayNode());
+        }
+        return out;
+    }
+
+    private static String truncateForPanel(String text, int maxLen) {
+        if (text == null || text.isBlank()) {
+            return "(Upload your CV in Settings to see a before/after comparison.)";
+        }
+        String trimmed = text.trim();
+        return trimmed.length() <= maxLen ? trimmed : trimmed.substring(0, maxLen) + "…";
+    }
+
+    private JsonNode enrichTailorResumeOutput(
+            JsonNode raw,
+            UUID userId,
+            UUID userJobId,
+            TailorResumePendingStore.Pending pendingResume) {
+        com.fasterxml.jackson.databind.node.ObjectNode out = raw != null && raw.isObject()
+                ? (com.fasterxml.jackson.databind.node.ObjectNode) raw.deepCopy()
+                : mapper.createObjectNode();
+        if (raw != null && raw.isTextual()) {
+            out.put("text", raw.asText());
+        }
+        String cvText = pendingResume != null && pendingResume.html() != null
+                ? htmlToPlainText(pendingResume.html())
+                : out.path("text").asText("");
+        if (cvText.isBlank()) {
+            try {
+                cvText = cvService.activeCvText(userId);
+            } catch (Exception e) {
+                log.debug("Could not load CV for tailor scoring: {}", e.getMessage());
+            }
+        }
+        if (!cvText.isBlank()) {
+            String jobText = fetchJobDescriptionText(userJobId);
+            CvHumanScoreService.CvScoreResult scores =
+                    cvHumanScoreService.score(cvText, jobText, userId);
+            out.put("atsScore", scores.atsScore());
+            out.put("humanScore", scores.humanScore());
+            com.fasterxml.jackson.databind.node.ArrayNode flagged = mapper.createArrayNode();
+            for (CvHumanScoreService.FlaggedPhrase fp : scores.flaggedPhrases()) {
+                com.fasterxml.jackson.databind.node.ObjectNode row = mapper.createObjectNode();
+                row.put("phrase", fp.phrase());
+                row.put("context", fp.context());
+                row.put("suggestedRewrite", fp.suggestedRewrite());
+                flagged.add(row);
+            }
+            out.set("flaggedPhrases", flagged);
+        }
+        if (pendingResume != null) {
+            out.put("resumeReady", true);
+        }
+        return out;
+    }
+
+    private String fetchJobDescriptionText(UUID userJobId) {
+        if (userJobId == null) {
+            return "";
+        }
+        return userJobs.findById(userJobId)
+                .flatMap(uj -> jobs.findById(uj.getJobId()))
+                .map(j -> {
+                    StringBuilder sb = new StringBuilder();
+                    if (j.getTitle() != null) {
+                        sb.append(j.getTitle()).append("\n");
+                    }
+                    if (j.getDescription() != null) {
+                        sb.append(j.getDescription());
+                    }
+                    return sb.toString();
+                })
+                .orElse("");
+    }
+
+    private static String htmlToPlainText(String html) {
+        if (html == null || html.isBlank()) {
+            return "";
+        }
+        return org.jsoup.Jsoup.parse(html).text();
+    }
+
+    private JsonNode normalizeEvaluateOutput(JsonNode raw, UUID userJobId) {
+        var norm = evaluationValidator.normalizeOrPartial(raw, "skill_evaluate");
+        JsonNode report = norm.report();
+        if (userJobId != null) {
+            userJobs.findById(userJobId).ifPresent(uj -> {
+                uj.setMatchPercent(report.path("matchPercent").asInt(uj.getMatchPercent() != null ? uj.getMatchPercent() : 0));
+                uj.setAiScore(report.path("overallScore").asInt(uj.getAiScore() != null ? uj.getAiScore() : 0));
+                uj.setHumanSummary(report.path("humanSummary").asText(uj.getHumanSummary()));
+                uj.setVerdict(report.path("verdict").asText(uj.getVerdict()));
+                uj.setScoreBreakdown(report);
+                userJobs.save(uj);
+            });
+        }
+        if (!norm.valid()) {
+            log.warn("Evaluate skill partial for userJobId={}: {}", userJobId, norm.error());
+        }
+        return report;
     }
 
     private @Nullable Instant computeExpiry(String skill) {

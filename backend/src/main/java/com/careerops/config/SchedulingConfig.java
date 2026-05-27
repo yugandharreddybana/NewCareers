@@ -20,9 +20,10 @@ public class SchedulingConfig {
         return new JdbcTemplateLockProvider(
             JdbcTemplateLockProvider.Configuration.builder()
                 .withJdbcTemplate(new JdbcTemplate(dataSource))
-                .withTableName("career_operations.shedlock") // 3.039 - use schema
+                .withTableName("careerops.shedlock") // 3.039 - use schema
                 .usingDbTime()
                 .build()
         );
     }
 }
+

@@ -1,5 +1,5 @@
 -- Phase 6 seed data for demo/dev
-SET search_path TO career_operations;
+SET search_path TO careerops;
 
 DO $$
 DECLARE
@@ -74,3 +74,4 @@ BEGIN
     (v_user_id, 'useful');
 
 END $$;
+

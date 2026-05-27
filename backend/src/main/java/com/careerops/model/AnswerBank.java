@@ -8,7 +8,7 @@ import java.util.UUID;
 @Entity
 @Table(
     name = "answer_bank",
-    schema = "career_operations",
+    schema = "careerops",
     uniqueConstraints = @UniqueConstraint(columnNames = {"user_id", "question_key"})
 )
 @Getter @Setter @NoArgsConstructor @AllArgsConstructor @Builder
@@ -42,3 +42,4 @@ public class AnswerBank {
     @PreUpdate
     void preUpdate() { updatedAt = Instant.now(); }
 }
+

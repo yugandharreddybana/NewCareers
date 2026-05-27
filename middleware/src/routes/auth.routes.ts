@@ -49,7 +49,21 @@ router.post('/signup',
       const r = await forward({ method: 'POST', path: '/auth/register', data: req.body });
       if (r.status >= 400) return res.status(r.status).json(r.data);
       res.cookie(COOKIE, r.data.token, cookieOpts());
-      res.json({ user: r.data.user, refreshToken: r.data.refreshToken });
+      res.json({ token: r.data.token, user: r.data.user, refreshToken: r.data.refreshToken });
+    } catch (e) { next(e); }
+  });
+
+// ── Google Sign-In (GIS ID token) ─────────────────────────────────────────
+router.post('/google',
+  authLimiter, trimStrings,
+  body('idToken').isString().isLength({ min: 100, max: 8192 }),
+  checkValidation,
+  async (req, res, next) => {
+    try {
+      const r = await forward({ method: 'POST', path: '/auth/google', data: req.body });
+      if (r.status >= 400) return res.status(r.status).json(r.data);
+      res.cookie(COOKIE, r.data.token, cookieOpts());
+      res.json({ token: r.data.token, user: r.data.user, refreshToken: r.data.refreshToken });
     } catch (e) { next(e); }
   });
 
@@ -64,7 +78,7 @@ router.post('/login',
       const r = await forward({ method: 'POST', path: '/auth/login', data: req.body });
       if (r.status >= 400) return res.status(r.status).json(r.data);
       res.cookie(COOKIE, r.data.token, cookieOpts());
-      res.json({ user: r.data.user, refreshToken: r.data.refreshToken });
+      res.json({ token: r.data.token, user: r.data.user, refreshToken: r.data.refreshToken });
     } catch (e) { next(e); }
   });
 
@@ -82,7 +96,7 @@ router.post('/refresh',
       });
       if (r.status >= 400) return res.status(r.status).json(r.data);
       res.cookie(COOKIE, r.data.token, cookieOpts());
-      res.json({ refreshToken: r.data.refreshToken, user: r.data.user });
+      res.json({ token: r.data.token, refreshToken: r.data.refreshToken, user: r.data.user });
     } catch (e) { next(e); }
   });
 
@@ -95,6 +109,8 @@ router.post('/logout',
         method: 'POST',
         path: '/auth/logout',
         userId: req.userId,
+        data: {},
+        headers: { 'Content-Type': 'application/json' },
       });
       if (r.status >= 400) {
         throw new Error(`Backend logout failed with status: ${r.status}`);
@@ -114,6 +130,9 @@ router.post('/forgot-password',
   async (req, res, next) => {
     try {
       const r = await forward({ method: 'POST', path: '/auth/forgot-password', data: req.body });
+      if (r.status === 429) {
+        return res.status(429).json(r.data ?? { error: 'Please wait before requesting another code.' });
+      }
       if (r.status >= 400) {
         console.warn(`Forgot-password backend returned non-success status: ${r.status}`);
       }
@@ -124,18 +143,26 @@ router.post('/forgot-password',
     }
   });
 
-// ── Reset Password ─────────────────────────────────────────────────────────
-// A5 fix: validators now match actual frontend + Java backend contract:
-//   { token: string (the reset token from the email link), password: string }
+// ── Reset Password (OTP + new password) ────────────────────────────────────
 router.post('/reset-password',
   authLimiter, trimStrings,
-  body('token').isString().isLength({ min: 8 }),
-  body('password').isString().isLength({ min: 8 }),
+  body('email').isEmail().normalizeEmail(),
+  body('otp').isString().matches(/^\d{6}$/),
+  body('newPassword').isString().isLength({ min: 8 }),
   checkValidation,
   async (req, res, next) => {
     try {
-      const r = await forward({ method: 'POST', path: '/auth/reset-password', data: req.body });
-      res.status(r.status).json(r.data ?? {});
+      const r = await forward({
+        method: 'POST',
+        path: '/auth/reset-password',
+        data: {
+          email: req.body.email,
+          otp: req.body.otp,
+          newPassword: req.body.newPassword,
+        },
+      });
+      if (r.status >= 400) return res.status(r.status).json(r.data ?? {});
+      res.status(200).json(r.data ?? { ok: true });
     } catch (e) { next(e); }
   });
 

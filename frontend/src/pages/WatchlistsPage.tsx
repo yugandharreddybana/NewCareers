@@ -15,84 +15,14 @@ import {
   Zap,
 } from 'lucide-react';
 import { PageMeta } from '@/components/PageMeta';
+import { PageLoader } from '@/components/LoadingSpinner';
 import EmptyState from '@/components/ui/EmptyState';
 import { watchlistsApi, type Watchlist } from '@/services/watchlistsApi';
-
-const USE_MOCKS = import.meta.env.VITE_USE_MOCKS === 'true';
 
 interface WatchlistSuggestion {
   query: string;
   location: string | null;
 }
-
-const MOCK_WATCHLISTS: Watchlist[] = [
-  {
-    id: 'wl-1',
-    name: 'Dublin Senior React Roles',
-    queryKeywords: 'React TypeScript senior',
-    location: 'Dublin',
-    minSalary: 70000,
-    maxSalary: null,
-    remoteOnly: false,
-    sponsorshipRequired: false,
-    minMatchScore: 0,
-    alertEmail: true,
-    alertInApp: true,
-    status: 'active',
-    lastRunAt: new Date(Date.now() - 3_600_000).toISOString(),
-    matchedTotal: 8,
-    clickedTotal: 3,
-    appliedTotal: 1,
-    createdAt: new Date(Date.now() - 86_400_000 * 7).toISOString(),
-    updatedAt: new Date().toISOString(),
-  },
-  {
-    id: 'wl-2',
-    name: 'Remote Full Stack 80k+',
-    queryKeywords: 'Node.js full stack',
-    location: null,
-    minSalary: 80000,
-    maxSalary: null,
-    remoteOnly: true,
-    sponsorshipRequired: false,
-    minMatchScore: 0,
-    alertEmail: true,
-    alertInApp: true,
-    status: 'active',
-    lastRunAt: new Date(Date.now() - 7_200_000).toISOString(),
-    matchedTotal: 3,
-    clickedTotal: 1,
-    appliedTotal: 0,
-    createdAt: new Date(Date.now() - 86_400_000 * 4).toISOString(),
-    updatedAt: new Date().toISOString(),
-  },
-  {
-    id: 'wl-3',
-    name: 'Tech Lead Cork',
-    queryKeywords: 'tech lead engineering',
-    location: 'Cork',
-    minSalary: null,
-    maxSalary: null,
-    remoteOnly: false,
-    sponsorshipRequired: false,
-    minMatchScore: 0,
-    alertEmail: true,
-    alertInApp: true,
-    status: 'paused',
-    lastRunAt: null,
-    matchedTotal: 0,
-    clickedTotal: 0,
-    appliedTotal: 0,
-    createdAt: new Date(Date.now() - 86_400_000 * 2).toISOString(),
-    updatedAt: new Date().toISOString(),
-  },
-];
-
-const MOCK_SUGGESTIONS: WatchlistSuggestion[] = [
-  { query: 'Senior Full Stack Developer React TypeScript', location: 'Dublin' },
-  { query: 'Node.js Backend Engineer microservices', location: null },
-  { query: 'Java Spring Boot developer fintech', location: 'Dublin' },
-];
 
 function fmtSalary(min: number | null, max: number | null) {
   if (!min && !max) return null;
@@ -127,36 +57,15 @@ const CreateModal = ({ onClose, onCreate }: { onClose: () => void; onCreate: (wa
 
     setSaving(true);
     try {
-      const watchlist = USE_MOCKS
-        ? {
-            id: `wl-${Date.now()}`,
-            name,
-            queryKeywords: query,
-            location: location || null,
-            minSalary: salaryMin ? Number(salaryMin) : null,
-            maxSalary: null,
-            remoteOnly: false,
-            sponsorshipRequired: false,
-            minMatchScore: 0,
-            alertEmail: true,
-            alertInApp: true,
-            status: 'active' as const,
-            lastRunAt: null,
-            matchedTotal: 0,
-            clickedTotal: 0,
-            appliedTotal: 0,
-            createdAt: new Date().toISOString(),
-            updatedAt: new Date().toISOString(),
-          }
-        : await watchlistsApi.create({
-            name,
-            queryKeywords: query,
-            location: location || null,
-            minSalary: salaryMin ? Number(salaryMin) : null,
-            status: 'active',
-            alertEmail: true,
-            alertInApp: true,
-          });
+      const watchlist = await watchlistsApi.create({
+        name,
+        queryKeywords: query,
+        location: location || null,
+        minSalary: salaryMin ? Number(salaryMin) : null,
+        status: 'active',
+        alertEmail: true,
+        alertInApp: true,
+      });
 
       onCreate(watchlist);
       toast.success('Watchlist created!');
@@ -257,16 +166,9 @@ const WatchlistsPage = () => {
   useEffect(() => {
     const load = async () => {
       try {
-        if (USE_MOCKS) {
-          await new Promise(resolve => setTimeout(resolve, 500));
-          setWatchlists(MOCK_WATCHLISTS);
-          setSuggestions(MOCK_SUGGESTIONS);
-          return;
-        }
-
         const [watchlistResponse, suggestionResponse] = await Promise.all([
-          watchlistsApi.list().catch(() => ({ watchlists: [] as Watchlist[], total: 0 })),
-          watchlistsApi.getSuggestions().catch(() => [] as string[]),
+          watchlistsApi.list(),
+          watchlistsApi.getSuggestions(),
         ]);
         setWatchlists(watchlistResponse.watchlists);
         setSuggestions(suggestionResponse.map(query => ({ query, location: null })));
@@ -280,16 +182,7 @@ const WatchlistsPage = () => {
 
   const handleToggle = async (id: string) => {
     try {
-      const existing = watchlists.find(watchlist => watchlist.id === id);
-      const updated = USE_MOCKS
-        ? existing
-          ? {
-              ...existing,
-              status: existing.status === 'active' ? 'paused' as const : 'active' as const,
-              updatedAt: new Date().toISOString(),
-            }
-          : null
-        : await watchlistsApi.toggle(id);
+      const updated = await watchlistsApi.toggle(id);
       if (!updated) return;
 
       setWatchlists(prev => prev.map(watchlist => watchlist.id === id ? updated : watchlist));
@@ -304,7 +197,7 @@ const WatchlistsPage = () => {
 
     setDeleting(id);
     try {
-      if (!USE_MOCKS) await watchlistsApi.delete(id);
+      await watchlistsApi.delete(id);
       setWatchlists(prev => prev.filter(watchlist => watchlist.id !== id));
       toast.success('Watchlist deleted.');
     } catch {
@@ -316,35 +209,14 @@ const WatchlistsPage = () => {
 
   const handleAddSuggestion = async (suggestion: WatchlistSuggestion) => {
     try {
-      const created = USE_MOCKS
-        ? {
-            id: `wl-${Date.now()}`,
-            name: suggestion.query.slice(0, 40),
-            queryKeywords: suggestion.query,
-            location: suggestion.location,
-            minSalary: null,
-            maxSalary: null,
-            remoteOnly: false,
-            sponsorshipRequired: false,
-            minMatchScore: 0,
-            alertEmail: true,
-            alertInApp: true,
-            status: 'active' as const,
-            lastRunAt: null,
-            matchedTotal: 0,
-            clickedTotal: 0,
-            appliedTotal: 0,
-            createdAt: new Date().toISOString(),
-            updatedAt: new Date().toISOString(),
-          }
-        : await watchlistsApi.create({
-            name: suggestion.query.slice(0, 40),
-            queryKeywords: suggestion.query,
-            location: suggestion.location,
-            status: 'active',
-            alertEmail: true,
-            alertInApp: true,
-          });
+      const created = await watchlistsApi.create({
+        name: suggestion.query.slice(0, 40),
+        queryKeywords: suggestion.query,
+        location: suggestion.location,
+        status: 'active',
+        alertEmail: true,
+        alertInApp: true,
+      });
       setWatchlists(prev => [created, ...prev]);
       toast.success('Watchlist added from suggestion!');
     } catch {
@@ -353,7 +225,7 @@ const WatchlistsPage = () => {
   };
 
   if (loading) {
-    return <div className="flex items-center justify-center min-h-[50vh] text-gray-400 text-sm">Loading watchlists...</div>;
+    return <PageLoader />;
   }
 
   const activeCount = watchlists.filter(watchlist => watchlist.status === 'active').length;

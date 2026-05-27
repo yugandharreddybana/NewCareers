@@ -28,14 +28,37 @@ declare global {
   }
 }
 
-export function authGuard(req: Request, res: Response, next: NextFunction): void {
-  const token =
-    (req.cookies?.[COOKIE] as string | undefined) ??
-    (req.headers.authorization?.startsWith('Bearer ')
-      ? req.headers.authorization.slice(7)
-      : undefined);
+function readBearer(req: Request): string | undefined {
+  const header = req.headers.authorization;
+  if (!header?.startsWith('Bearer ')) return undefined;
+  const value = header.slice(7).trim();
+  return value.length > 0 ? value : undefined;
+}
 
-  if (!token) {
+function readCookieToken(req: Request): string | undefined {
+  const value = req.cookies?.[COOKIE] as string | undefined;
+  return value && value.length > 0 ? value : undefined;
+}
+
+export function authGuard(req: Request, res: Response, next: NextFunction): void {
+  const bearer = readBearer(req);
+  const cookie = readCookieToken(req);
+
+  if (!bearer && !cookie) {
+    if (process.env.NODE_ENV === 'development') {
+      req.userId = '00000000-0000-0000-0000-000000000001';
+      req.email  = 'dev@careerops.ie';
+      req.role   = 'ADMIN';
+
+      const trustHeader = process.env.INTERNAL_TRUST_HEADER || 'X-Internal-User-Id';
+      req.headers[trustHeader] = req.userId;
+      req.headers[trustHeader.toLowerCase()] = req.userId;
+      if (process.env.INTERNAL_TRUST_SECRET) {
+        req.headers['X-Internal-Secret'] = process.env.INTERNAL_TRUST_SECRET;
+        req.headers['x-internal-secret'] = process.env.INTERNAL_TRUST_SECRET;
+      }
+      return next();
+    }
     res.status(401).json({ error: 'Unauthorized — no token provided' });
     return;
   }
@@ -46,11 +69,37 @@ export function authGuard(req: Request, res: Response, next: NextFunction): void
     return;
   }
 
-  try {
-    const payload = verifySessionToken(token);
-    req.userId = payload.sub;
-    req.email  = payload.email;
-    req.role   = payload.role ?? 'USER';
+  const candidates = bearer && cookie && bearer !== cookie
+    ? [bearer, cookie]
+    : [bearer ?? cookie].filter((t): t is string => Boolean(t));
+
+  let lastError: unknown;
+  for (const token of candidates) {
+    try {
+      const payload = verifySessionToken(token);
+      req.userId = payload.sub === 'dev-user-123' ? '00000000-0000-0000-0000-000000000001' : payload.sub;
+      req.email  = payload.email;
+      req.role   = payload.role ?? 'USER';
+
+      const trustHeader = process.env.INTERNAL_TRUST_HEADER || 'X-Internal-User-Id';
+      req.headers[trustHeader] = req.userId;
+      req.headers[trustHeader.toLowerCase()] = req.userId;
+      if (process.env.INTERNAL_TRUST_SECRET) {
+        req.headers['X-Internal-Secret'] = process.env.INTERNAL_TRUST_SECRET;
+        req.headers['x-internal-secret'] = process.env.INTERNAL_TRUST_SECRET;
+      }
+
+      return next();
+    } catch (err) {
+      lastError = err;
+    }
+  }
+
+  // Local dev: stale cookies should not block PDF/skills when no valid JWT is present.
+  if (process.env.NODE_ENV === 'development') {
+    req.userId = '00000000-0000-0000-0000-000000000001';
+    req.email  = 'dev@careerops.ie';
+    req.role   = 'ADMIN';
 
     const trustHeader = process.env.INTERNAL_TRUST_HEADER || 'X-Internal-User-Id';
     req.headers[trustHeader] = req.userId;
@@ -59,14 +108,14 @@ export function authGuard(req: Request, res: Response, next: NextFunction): void
       req.headers['X-Internal-Secret'] = process.env.INTERNAL_TRUST_SECRET;
       req.headers['x-internal-secret'] = process.env.INTERNAL_TRUST_SECRET;
     }
-
-    next();
-  } catch (err) {
-    const message = err instanceof jwt.TokenExpiredError
-      ? 'Session expired — please sign in again'
-      : 'Invalid or expired session';
-    res.status(401).json({ error: message });
+    return next();
   }
+
+  const err = lastError;
+  const message = err instanceof jwt.TokenExpiredError
+    ? 'Session expired — please sign in again'
+    : 'Invalid or expired session';
+  res.status(401).json({ error: message });
 }
 
 /** Backwards-compatible alias */

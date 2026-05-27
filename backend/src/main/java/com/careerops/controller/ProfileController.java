@@ -3,21 +3,16 @@ package com.careerops.controller;
 import com.careerops.dto.ProfileDtos.*;
 import com.careerops.exception.ApiException;
 import com.careerops.model.UserProfile;
-import com.careerops.repository.UserProfileRepository;
 import com.careerops.service.CvService;
-import com.careerops.service.JobDeliveryService;
 import com.careerops.service.LinkedInImportService;
 import com.careerops.service.ProfileService;
 import com.careerops.util.AuthUtil;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
 
 import java.io.IOException;
 import java.util.Map;
 import java.util.UUID;
-import java.util.concurrent.CompletableFuture;
 
 /**
  * Section 10 — Task 110
@@ -28,35 +23,25 @@ import java.util.concurrent.CompletableFuture;
  * - Headers: Content-Type, Authorization, X-Requested-With, X-CSRF-Token, X-Internal-Secret, X-Internal-User-Id
  * - Exposed: X-RateLimit-Remaining, X-RateLimit-Reset, Retry-After
  *
- * First-time job delivery:
- *   After PUT /profile, if the profile transitions to onboarded=true for the first time,
- *   an async background fetch fires immediately so the user sees jobs right away
- *   without waiting for the 08:00 cron.
+ * First-time job delivery is started explicitly via POST /onboarding/delivery/start
+ * after CV upload (Track A), not from this controller.
  */
 @RestController
 @RequestMapping("/profile")
 @io.micrometer.core.annotation.Timed
 public class ProfileController {
 
-    private static final Logger log = LoggerFactory.getLogger(ProfileController.class);
-
     private final ProfileService            profile;
     private final CvService                 cv;
     private final LinkedInImportService     linkedIn;
     private final com.careerops.service.VirusScannerService scanner;
-    private final JobDeliveryService        delivery;
-    private final UserProfileRepository     profiles;
 
     public ProfileController(ProfileService p, CvService c, LinkedInImportService li,
-                             com.careerops.service.VirusScannerService s,
-                             JobDeliveryService delivery,
-                             UserProfileRepository profiles) {
+                             com.careerops.service.VirusScannerService s) {
         this.profile  = p;
         this.cv       = c;
         this.linkedIn = li;
         this.scanner  = s;
-        this.delivery = delivery;
-        this.profiles = profiles;
     }
 
     // ── Core profile ─────────────────────────────────────────────────────
@@ -66,42 +51,12 @@ public class ProfileController {
         return profile.get(AuthUtil.currentUserId());
     }
 
-    /**
-     * PUT /profile
-     *
-     * Saves the profile. If the saved profile is now onboarded=true AND
-     * the user was NOT onboarded before this save, fires an async first-time
-     * job fetch so jobs appear immediately without waiting for the 08:00 cron.
-     */
+    /** PUT /profile — saves profile; onboarding job delivery starts via /onboarding/delivery/start. */
     @PutMapping
     public ProfileResponse upsert(
             @RequestHeader(value = "If-Match", required = false) Long ifMatch,
             @jakarta.validation.Valid @RequestBody ProfileRequest req) {
-        UUID userId = AuthUtil.currentUserId();
-
-        // Check onboarded status BEFORE the save using the repository directly
-        // (ProfileService has no isOnboarded() helper — we resolve it here)
-        boolean wasOnboardedBefore = profiles.findByUserId(userId)
-                .map(p -> Boolean.TRUE.equals(p.getOnboarded()))
-                .orElse(false);
-
-        ProfileResponse saved = profile.upsert(userId, req, ifMatch);
-
-        // Fire first-time job fetch async if this PUT completed onboarding
-        if (!wasOnboardedBefore && Boolean.TRUE.equals(saved.onboarded())) {
-            CompletableFuture.runAsync(() -> {
-                try {
-                    log.info("First-time onboarding complete for userId={} — firing immediate job fetch", userId);
-                    delivery.deliver(userId, 10);
-                    log.info("First-time job fetch complete for userId={}", userId);
-                } catch (Exception e) {
-                    // Non-fatal — cron will catch up at 08:00
-                    log.warn("First-time job fetch failed for userId={}: {}", userId, e.getMessage());
-                }
-            });
-        }
-
-        return saved;
+        return profile.upsert(AuthUtil.currentUserId(), req, ifMatch);
     }
 
     // ── CV ────────────────────────────────────────────────────────────────
@@ -131,6 +86,22 @@ public class ProfileController {
             throw ApiException.notFound("No active CV");
         }
         return Map.of("url", url);
+    }
+
+    @GetMapping(value = "/cv/download/{cvId}/content", produces = org.springframework.http.MediaType.APPLICATION_OCTET_STREAM_VALUE)
+    public org.springframework.http.ResponseEntity<byte[]> downloadLocalContent(@PathVariable UUID cvId) {
+        UUID userId = AuthUtil.currentUserId();
+        var cvDoc = cv.requireCv(userId, cvId);
+        byte[] data = cv.downloadContent(userId, cvId);
+        String fileName = cvDoc.getFileName() != null ? cvDoc.getFileName() : "cv.pdf";
+        String contentType = cvDoc.getFileType() != null && !cvDoc.getFileType().isBlank()
+                ? cvDoc.getFileType()
+                : "application/octet-stream";
+        return org.springframework.http.ResponseEntity.ok()
+                .header(org.springframework.http.HttpHeaders.CONTENT_TYPE, contentType)
+                .header(org.springframework.http.HttpHeaders.CONTENT_DISPOSITION,
+                        "inline; filename=\"" + fileName.replace("\"", "") + "\"")
+                .body(data);
     }
 
     // ── Stats ─────────────────────────────────────────────────────────────

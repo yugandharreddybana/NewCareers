@@ -9,7 +9,6 @@ interface ImportMetaEnv {
   readonly VITE_API_URL: string
   readonly VITE_MIDDLEWARE_URL: string
   readonly VITE_DEV_BYPASS_GUARDS: string
-  readonly VITE_USE_MOCKS: string
 
   // Feature flags
   readonly VITE_FEATURE_AGENT_MEMORY: string
@@ -25,6 +24,9 @@ interface ImportMetaEnv {
 
   // Stripe
   readonly VITE_STRIPE_PUBLIC_KEY: string
+
+  // Google Sign-In
+  readonly VITE_GOOGLE_CLIENT_ID: string
 }
 
 interface ImportMeta {

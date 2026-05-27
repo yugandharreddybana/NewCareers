@@ -9,7 +9,7 @@ import java.time.Instant;
 import java.util.UUID;
 
 @Entity
-@Table(name = "memory_embeddings", schema = "career_operations")
+@Table(name = "memory_embeddings", schema = "careerops")
 @Getter @Setter @NoArgsConstructor @AllArgsConstructor @Builder
 public class MemoryEmbedding {
 
@@ -37,3 +37,4 @@ public class MemoryEmbedding {
         if (createdAt == null) createdAt = Instant.now();
     }
 }
+

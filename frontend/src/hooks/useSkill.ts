@@ -1,12 +1,18 @@
 import { useCallback, useState } from 'react';
+
 import toast from 'react-hot-toast';
+
 import { skillsApi } from '../services/skillsApi';
+
 import type {
   SkillName,
   UseSkillState,
   SkillStartRequest,
   SkillRunResponse,
 } from '../types/skills';
+
+/** Skills that always run fresh (no TTL cache on the backend). */
+const ALWAYS_FRESH_SKILLS = new Set<SkillName>(['tailor-resume']);
 
 /**
  * useSkill — state machine hook for running CareerOps skills.
@@ -16,9 +22,6 @@ import type {
  *   idle → loading → waiting_answer → loading → done  (ask_user flow)
  *   idle → loading → profile_incomplete               (missing CV/profile)
  *   idle → loading → error                            (API error)
- *
- * Usage:
- *   const { state, data, question, startSkill, handleAnswer, downloadPdf } = useSkill();
  */
 export function useSkill() {
   const [skillState, setSkillState] = useState<UseSkillState>({
@@ -31,80 +34,6 @@ export function useSkill() {
     skillName:      null,
   });
 
-  // ── Start a skill ───────────────────────────────────────────
-  const startSkill = useCallback(async (req: SkillStartRequest) => {
-    setSkillState(prev => ({
-      ...prev,
-      state:     'loading',
-      data:      null,
-      question:  null,
-      conversationId: null,
-      missingFields: [],
-      error:     null,
-      skillName: req.skillName,
-    }));
-
-    try {
-      const res = await skillsApi.start(req);
-      applyResponse(res);
-    } catch (err: unknown) {
-      const msg = (err as { normalizedMessage?: string })?.normalizedMessage
-               || 'Something went wrong. Please try again.';
-      setSkillState(prev => ({ ...prev, state: 'error', error: msg }));
-    }
-  }, []);
-
-  // ── Answer Claude's question ────────────────────────────────
-  const handleAnswer = useCallback(async (answer: string) => {
-    const { conversationId, skillName } = skillState;
-    if (!conversationId || !skillName) return;
-
-    setSkillState(prev => ({
-      ...prev,
-      state: 'loading',
-      question: null,
-      error: null,
-    }));
-
-    try {
-      const res = await skillsApi.reply({ conversationId, answer });
-      applyResponse(res, skillName);
-    } catch (err: unknown) {
-      const msg = (err as { normalizedMessage?: string })?.normalizedMessage
-               || 'Something went wrong. Please try again.';
-      setSkillState(prev => ({ ...prev, state: 'error', error: msg }));
-    }
-  }, [skillState]);
-
-  // ── Download PDF ────────────────────────────────────────────
-  const downloadPdf = useCallback(async (
-    userJobId: string,
-    skillName: string
-  ) => {
-    try {
-      await skillsApi.downloadSkillPdf(userJobId, skillName);
-      setSkillState(prev => ({ ...prev, error: null }));
-    } catch {
-      const message = 'PDF download failed. Please try again.';
-      setSkillState(prev => ({ ...prev, error: message }));
-      toast.error(message);
-    }
-  }, []);
-
-  // ── Reset to idle ───────────────────────────────────────────
-  const reset = useCallback(() => {
-    setSkillState({
-      state:          'idle',
-      data:           null,
-      question:       null,
-      conversationId: null,
-      missingFields:  [],
-      error:          null,
-      skillName:      null,
-    });
-  }, []);
-
-  // ── Internal response handler ───────────────────────────────
   function applyResponse(res: SkillRunResponse, activeSkillName: SkillName | null = null) {
     switch (res.type) {
       case 'RESULT':
@@ -163,8 +92,112 @@ export function useSkill() {
     }
   }
 
+  const prepareSkill = useCallback((skillName: SkillName) => {
+    setSkillState(prev => ({
+      ...prev,
+      state:     'loading',
+      skillName,
+      data:      null,
+      question:  null,
+      conversationId: null,
+      missingFields: [],
+      error:     null,
+    }));
+  }, []);
+
+  const startSkill = useCallback(async (req: SkillStartRequest) => {
+    setSkillState(prev => ({
+      ...prev,
+      state:     'loading',
+      data:      null,
+      question:  null,
+      conversationId: null,
+      missingFields: [],
+      error:     null,
+      skillName: req.skillName,
+    }));
+
+    try {
+      const res = await skillsApi.start(req);
+      applyResponse(res);
+    } catch (err: unknown) {
+      const msg = (err as { normalizedMessage?: string })?.normalizedMessage
+               || 'Something went wrong. Please try again.';
+      setSkillState(prev => ({ ...prev, state: 'error', error: msg }));
+    }
+  }, []);
+
+  const handleAnswer = useCallback(async (answer: string) => {
+    const { conversationId, skillName } = skillState;
+    if (!conversationId || !skillName) return;
+
+    setSkillState(prev => ({
+      ...prev,
+      state: 'loading',
+      question: null,
+      error: null,
+    }));
+
+    try {
+      const res = await skillsApi.reply({ conversationId, answer });
+      applyResponse(res, skillName);
+    } catch (err: unknown) {
+      const msg = (err as { normalizedMessage?: string })?.normalizedMessage
+               || 'Something went wrong. Please try again.';
+      setSkillState(prev => ({ ...prev, state: 'error', error: msg }));
+    }
+  }, [skillState]);
+
+  const downloadPdf = useCallback(async (
+    userJobId: string,
+    skillName: string,
+  ) => {
+    try {
+      await skillsApi.downloadSkillPdf(userJobId, skillName);
+      setSkillState(prev => ({ ...prev, error: null }));
+    } catch {
+      const message = 'PDF download failed. Please try again.';
+      setSkillState(prev => ({ ...prev, error: message }));
+      toast.error(message);
+    }
+  }, []);
+
+  const reset = useCallback(() => {
+    setSkillState({
+      state:          'idle',
+      data:           null,
+      question:       null,
+      conversationId: null,
+      missingFields:  [],
+      error:          null,
+      skillName:      null,
+    });
+  }, []);
+
+  const loadLastRun = useCallback(async (userJobId: string, skill: SkillName) => {
+    if (ALWAYS_FRESH_SKILLS.has(skill)) {
+      return false;
+    }
+
+    try {
+      const res = await skillsApi.getLastRun(userJobId, skill);
+      if (!res) {
+        return false;
+      }
+      if (res.type === 'RESULT' && res.data) {
+        applyResponse(res, skill);
+        return true;
+      }
+      if (res.type === 'ERROR') {
+        return false;
+      }
+    } catch {
+      // Any lookup failure means "no cached run" — never surface as a skill error.
+    }
+    return false;
+  }, []);
+
   return {
-    // State
     state:          skillState.state,
     data:           skillState.data,
     question:       skillState.question,
@@ -176,10 +209,11 @@ export function useSkill() {
     isDone:         skillState.state === 'done',
     needsAnswer:    skillState.state === 'waiting_answer',
 
-    // Actions
     startSkill,
+    prepareSkill,
     handleAnswer,
     downloadPdf,
+    loadLastRun,
     reset,
   };
 }

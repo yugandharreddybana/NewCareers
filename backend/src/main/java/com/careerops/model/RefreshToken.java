@@ -9,7 +9,7 @@ import java.util.UUID;
  * 3.008 — Separate refresh tokens for multi-device support.
  */
 @Entity
-@Table(name = "refresh_tokens", schema = "career_operations")
+@Table(name = "refresh_tokens", schema = "careerops")
 @Getter @Setter @NoArgsConstructor @AllArgsConstructor @Builder
 public class RefreshToken {
 
@@ -41,3 +41,4 @@ public class RefreshToken {
         if (lastUsedAt == null) lastUsedAt = Instant.now();
     }
 }
+

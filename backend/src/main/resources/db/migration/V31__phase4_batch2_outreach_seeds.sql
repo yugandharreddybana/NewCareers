@@ -35,8 +35,8 @@ BEGIN
   INSERT INTO outreach_messages
     (campaign_id, sequence_id, user_id, contact_name, contact_linkedin, personalised_body, status, sent_at, replied_at, score)
   VALUES
-    (v_camp1, v_seq1, v_user, 'Sarah O''Brien',   'https://linkedin.com/in/sarahobrien',  'Hi Sarah, I came across your profile while researching the engineering team at Stripe…', 'replied',   now() - interval '5 days', now() - interval '2 days', 85),
-    (v_camp1, v_seq1, v_user, 'James Murphy',     'https://linkedin.com/in/jamesmurphy',  'Hi James, I came across your profile while researching the engineering team at Stripe…', 'sent',      now() - interval '3 days', null, 78),
-    (v_camp1, v_seq1, v_user, 'Aoife Kelly',      'https://linkedin.com/in/aoifekelly',   'Hi Aoife, I came across your profile while researching the engineering team at Stripe…', 'opened',    now() - interval '4 days', null, 72);
+    (v_camp1, v_seq1, v_user, 'Sarah O''Brien',   'https://linkedin.com/in/sarahobrien',  'Hi Sarah, I came across your profile while researching the engineering team at Stripe…', 'replied',   now() - INTERVAL '5' DAY, now() - INTERVAL '2' DAY, 85),
+    (v_camp1, v_seq1, v_user, 'James Murphy',     'https://linkedin.com/in/jamesmurphy',  'Hi James, I came across your profile while researching the engineering team at Stripe…', 'sent',      now() - INTERVAL '3' DAY, null, 78),
+    (v_camp1, v_seq1, v_user, 'Aoife Kelly',      'https://linkedin.com/in/aoifekelly',   'Hi Aoife, I came across your profile while researching the engineering team at Stripe…', 'opened',    now() - INTERVAL '4' DAY, null, 72);
 
 END $$;

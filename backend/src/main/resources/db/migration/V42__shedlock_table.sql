@@ -1,6 +1,6 @@
 -- V42: Create ShedLock table for distributed coordination
 -- 3.068, 3.069 — Required for distributed locking in horizontally scaled environments
-SET search_path TO career_operations;
+SET search_path TO careerops;
 
 CREATE TABLE shedlock (
     name       VARCHAR(64) NOT NULL,
@@ -9,3 +9,4 @@ CREATE TABLE shedlock (
     locked_by  VARCHAR(255) NOT NULL,
     PRIMARY KEY (name)
 );
+

@@ -1,9 +1,12 @@
-import React, { useEffect, useState } from 'react';
+import React, { useMemo, useState } from 'react';
+import { useQueryClient } from '@tanstack/react-query';
 import toast from 'react-hot-toast';
 import { PageMeta } from '@/components/PageMeta';
-import { jobsApi } from '@/services/api';
-import { analyticsApi, type TimeSeriesPoint } from '@/services/analyticsApi';
-import type { JobCard, JobsListResponse, Stats } from '@/types';
+import { PageLoader } from '@/components/LoadingSpinner';
+import type { TimeSeriesPoint } from '@/services/analyticsApi';
+import { useJobsList, useJobsStats, useAnalyticsTimeSeries } from '@/hooks/queries';
+import { queryKeys } from '@/lib/queryKeys';
+import type { JobCard, Stats } from '@/types';
 import {
   TrendingUp, Target, MessageSquare, Award,
   BarChart2, RefreshCw, ChevronRight,
@@ -22,31 +25,6 @@ interface AnalyticsData {
 const EMPTY_STATS: Stats = { total: 0, applied: 0, interviews: 0, offers: 0, avgMatch: 0 };
 
 // ── Helpers ────────────────────────────────────────────────────────────────────
-const USE_MOCKS = import.meta.env.VITE_USE_MOCKS === 'true';
-
-function buildMockData(): AnalyticsData {
-  const today = Date.now();
-  return {
-    stats: { total: 42, applied: 12, interviews: 4, offers: 1, avgMatch: 78 },
-    dailySeries: Array.from({ length: 14 }, (_, i) => ({
-      date: new Date(today - (13 - i) * 86400000).toLocaleDateString('en-GB', { day: '2-digit', month: 'short' }),
-      applications: Math.floor(Math.random() * 4),
-      responses: Math.floor(Math.random() * 2),
-    })),
-    topSources: [
-      { name: 'LinkedIn', count: 18 },
-      { name: 'IrishJobs', count: 11 },
-      { name: 'Indeed', count: 8 },
-      { name: 'Direct', count: 5 },
-    ],
-    topRoles: [
-      { title: 'Senior Full Stack Developer', count: 14, avgMatch: 84 },
-      { title: 'Frontend Engineer', count: 10, avgMatch: 79 },
-      { title: 'Tech Lead', count: 8, avgMatch: 72 },
-      { title: 'Software Architect', count: 5, avgMatch: 68 },
-    ],
-  };
-}
 
 function formatChartDate(input: string): string {
   const parsed = new Date(input);
@@ -199,61 +177,46 @@ const StatCard: React.FC<{ label: string; value: string | number; icon: React.Re
 
 // ── Main page ──────────────────────────────────────────────────────────────────
 const AnalyticsPage: React.FC = () => {
-  const [data, setData] = useState<AnalyticsData | null>(null);
-  const [loading, setLoading] = useState(true);
+  const queryClient = useQueryClient();
   const [refreshing, setRefreshing] = useState(false);
 
-  const load = async (silent = false) => {
-    if (!silent) setLoading(true);
-    else setRefreshing(true);
+  const { data: jobsData, isLoading: jobsLoading, isError: jobsError } = useJobsList();
+  const { data: statsFromApi, isLoading: statsLoading } = useJobsStats();
+  const { data: trendPoints, isLoading: trendLoading } = useAnalyticsTimeSeries(8);
+
+  const jobs = jobsData?.items ?? [];
+  const loading = jobsLoading || statsLoading || trendLoading;
+
+  const data = useMemo((): AnalyticsData | null => {
+    if (loading) return null;
+    const stats: Stats = statsFromApi ?? (jobs.length > 0 ? deriveStatsFromJobs(jobs) : EMPTY_STATS);
+    if (jobsError && !statsFromApi && jobs.length === 0) return null;
+
+    return {
+      stats,
+      dailySeries: trendPoints && trendPoints.length > 0
+        ? buildTrendSeries(trendPoints)
+        : buildTrendSeriesFromJobs(jobs),
+      topSources: buildTopSources(jobs),
+      topRoles: buildTopRoles(jobs),
+    };
+  }, [loading, statsFromApi, jobs, trendPoints, jobsError]);
+
+  const refresh = async () => {
+    setRefreshing(true);
     try {
-      if (USE_MOCKS) {
-        await new Promise(r => setTimeout(r, 600));
-        setData(buildMockData());
-      } else {
-        const [statsResult, jobsResult, trendResult] = await Promise.allSettled([
-          jobsApi.stats() as Promise<Stats>,
-          jobsApi.list() as Promise<JobsListResponse>,
-          analyticsApi.getTimeSeries(8),
-        ]);
-
-        const jobs = jobsResult.status === 'fulfilled' ? jobsResult.value.items : [];
-        const stats = statsResult.status === 'fulfilled'
-          ? statsResult.value
-          : (jobsResult.status === 'fulfilled' ? deriveStatsFromJobs(jobs) : null);
-
-        if (!stats) {
-          throw new Error('Analytics data unavailable');
-        }
-
-        setData({
-          stats,
-          dailySeries: trendResult.status === 'fulfilled' && trendResult.value.length > 0
-            ? buildTrendSeries(trendResult.value)
-            : buildTrendSeriesFromJobs(jobs),
-          topSources: buildTopSources(jobs),
-          topRoles: buildTopRoles(jobs),
-        });
-      }
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: queryKeys.jobs.all }),
+        queryClient.invalidateQueries({ queryKey: queryKeys.analytics.all }),
+      ]);
     } catch {
-      if (!data) setData({
-        stats: EMPTY_STATS,
-        dailySeries: [],
-        topSources: [],
-        topRoles: [],
-      });
       toast.error('Failed to load analytics.');
     } finally {
-      setLoading(false);
       setRefreshing(false);
     }
   };
 
-  useEffect(() => { load(); }, []);
-
-  if (loading) return (
-    <div className="flex items-center justify-center min-h-[50vh] text-gray-400 text-sm">Loading analytics…</div>
-  );
+  if (loading) return <PageLoader />;
 
   if (!data) return (
     <div className="flex items-center justify-center min-h-[50vh] text-gray-400 text-sm">Analytics are unavailable right now.</div>
@@ -283,7 +246,7 @@ const AnalyticsPage: React.FC = () => {
             <p className="text-sm text-gray-500 mt-1">Your job search performance at a glance.</p>
           </div>
           <button
-            onClick={() => load(true)}
+            onClick={() => void refresh()}
             disabled={refreshing}
             className="flex items-center gap-2 px-3 py-2 border border-gray-300 rounded-lg text-sm text-gray-600 hover:bg-gray-50 transition-colors disabled:opacity-50"
           >

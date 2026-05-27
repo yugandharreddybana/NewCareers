@@ -1,0 +1,35 @@
+{
+  "schemaVersion": 2,
+  "applyScore": 4.2,
+  "archetype": "Product builder",
+  "evaluationStatus": "complete",
+  "overallScore": 84,
+  "matchPercent": 84,
+  "verdict": "Worth applying",
+  "humanSummary": "Strong alignment on systems thinking and SaaS delivery.",
+  "matchedSkills": ["Design systems", "Figma", "User research"],
+  "unmatchedSkills": ["Formal mentorship"],
+  "cvImprovementTips": ["Add a mentoring bullet."],
+  "sponsorshipMatch": true,
+  "salaryMatch": true,
+  "dimensions": [
+    { "key": "role_fit", "label": "Role fit", "score": 4.5, "weight": 0.1, "reason": "Title and scope match your target roles." },
+    { "key": "skills_match", "label": "Skills match", "score": 4.2, "weight": 0.1, "reason": "Core stack overlap is high." },
+    { "key": "experience_depth", "label": "Experience depth", "score": 4.0, "weight": 0.1, "reason": "Years and seniority align." },
+    { "key": "cv_evidence", "label": "CV evidence", "score": 4.1, "weight": 0.1, "reason": "Portfolio bullets support claims." },
+    { "key": "location_work_model", "label": "Location & work model", "score": 4.3, "weight": 0.1, "reason": "Hybrid preference matches posting." },
+    { "key": "compensation", "label": "Compensation", "score": 4.0, "weight": 0.1, "reason": "Band within your target range." },
+    { "key": "sponsorship_visa", "label": "Sponsorship / visa", "score": 5.0, "weight": 0.1, "reason": "No sponsorship required." },
+    { "key": "company_stage", "label": "Company stage", "score": 3.8, "weight": 0.1, "reason": "Growth-stage SaaS fits your history." },
+    { "key": "growth_learning", "label": "Growth & learning", "score": 4.2, "weight": 0.1, "reason": "Clear learning surface in posting." },
+    { "key": "culture_signals", "label": "Culture signals", "score": 3.9, "weight": 0.1, "reason": "Collaboration cues present; limited detail." }
+  ],
+  "sections": {
+    "executiveSummary": "Solid fit for a senior product design IC role.",
+    "backgroundMatch": "Your SaaS portfolio maps cleanly to the team mandate.",
+    "positioningStrategy": "Lead with systems outcomes in outreach.",
+    "compensationAndMarket": "Band is competitive for the region.",
+    "tailoringPlan": "Mirror accessibility and design-system keywords.",
+    "interviewPrep": "Prepare a complex workflow case study."
+  }
+}

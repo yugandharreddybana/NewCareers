@@ -8,11 +8,13 @@ import type { SkillRunResponse } from '@/types/skills';
 
 const mockStart = vi.fn();
 const mockReply = vi.fn();
+const mockGetLastRun = vi.fn();
 
 vi.mock('@/services/skillsApi', () => ({
   skillsApi: {
     start: (...args: unknown[]) => mockStart(...args),
     reply: (...args: unknown[]) => mockReply(...args),
+    getLastRun: (...args: unknown[]) => mockGetLastRun(...args),
     downloadSkillPdf: vi.fn(),
   },
 }));
@@ -93,6 +95,38 @@ describe('useSkill', () => {
 
     await waitFor(() => expect(result.current.state).toBe('error'));
     expect(result.current.error).toContain('API down');
+  });
+
+  it('loadLastRun skips tailor-resume and does not call API', async () => {
+    const { result } = renderHook(() => useSkill());
+
+    let restored = false;
+    await act(async () => {
+      restored = await result.current.loadLastRun('job-1', 'tailor-resume');
+    });
+
+    expect(restored).toBe(false);
+    expect(mockGetLastRun).not.toHaveBeenCalled();
+    expect(result.current.state).toBe('idle');
+  });
+
+  it('loadLastRun restores cached evaluate run', async () => {
+    mockGetLastRun.mockResolvedValueOnce({
+      type: 'RESULT',
+      skillName: 'evaluate',
+      data: { summary: 'cached' },
+    });
+
+    const { result } = renderHook(() => useSkill());
+
+    let restored = false;
+    await act(async () => {
+      restored = await result.current.loadLastRun('job-1', 'evaluate');
+    });
+
+    expect(restored).toBe(true);
+    expect(result.current.state).toBe('done');
+    expect(result.current.data).toEqual({ summary: 'cached' });
   });
 
   it('reset returns to idle', async () => {

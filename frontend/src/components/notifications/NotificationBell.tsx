@@ -9,56 +9,35 @@
  * - Badge animates in/out with Framer Motion scale.
  */
 
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useState } from 'react';
 import { Bell } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { notificationsApi } from '@/services/notificationsApi';
+import { useNotificationUnreadCount, useInvalidateNotifications } from '@/hooks/queries';
 import NotificationDrawer from './NotificationDrawer';
 import { Button } from '@/components/ui';
 
-const POLL_INTERVAL_MS = 60_000;
-
 export default function NotificationBell() {
-  const [unreadCount, setUnreadCount] = useState(0);
-  const [drawerOpen,  setDrawerOpen]  = useState(false);
+  const invalidateNotifications = useInvalidateNotifications();
+  const { data: unreadCount = 0, refetch } = useNotificationUnreadCount();
+  const [drawerOpen, setDrawerOpen] = useState(false);
 
-  const fetchCount = useCallback(async () => {
-    try {
-      const res = await notificationsApi.getNotifications(0, 1);
-      setUnreadCount(res.unreadCount);
-    } catch { /* silent — badge just stays at last known count */ }
-  }, []);
-
-  // Initial fetch + 60s polling
   useEffect(() => {
-    void fetchCount();
-
     const refreshWhenVisible = () => {
       if (document.visibilityState === 'visible') {
-        void fetchCount();
+        void refetch();
       }
     };
-
-    const id = setInterval(() => {
-      if (document.visibilityState === 'visible') {
-        void fetchCount();
-      }
-    }, POLL_INTERVAL_MS);
-
     document.addEventListener('visibilitychange', refreshWhenVisible);
     window.addEventListener('focus', refreshWhenVisible);
-
     return () => {
-      clearInterval(id);
       document.removeEventListener('visibilitychange', refreshWhenVisible);
       window.removeEventListener('focus', refreshWhenVisible);
     };
-  }, [fetchCount]);
+  }, [refetch]);
 
-  // Re-fetch count when drawer closes (user may have read things)
   function handleDrawerClose() {
     setDrawerOpen(false);
-    void fetchCount();
+    void invalidateNotifications();
   }
 
   const badgeLabel = unreadCount > 99 ? '99+' : String(unreadCount);
@@ -96,7 +75,7 @@ export default function NotificationBell() {
       <NotificationDrawer
         open={drawerOpen}
         onClose={handleDrawerClose}
-        onCountChange={setUnreadCount}
+        onCountChange={() => void invalidateNotifications()}
       />
     </>
   );

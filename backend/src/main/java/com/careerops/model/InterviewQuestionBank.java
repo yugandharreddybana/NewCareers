@@ -8,7 +8,7 @@ import java.time.Instant;
 import java.util.UUID;
 
 @Entity
-@Table(name = "interview_question_bank", schema = "career_operations")
+@Table(name = "interview_question_bank", schema = "careerops")
 @Getter
 @Setter
 @Builder
@@ -58,3 +58,4 @@ public class InterviewQuestionBank {
     @Builder.Default
     private Instant createdAt = Instant.now();
 }
+

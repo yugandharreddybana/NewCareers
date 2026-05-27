@@ -1,4 +1,4 @@
-SET search_path TO career_operations;
+SET search_path TO careerops;
 
 ALTER TABLE org_invitations
 ADD COLUMN IF NOT EXISTS token_hash VARCHAR(128);
@@ -15,7 +15,7 @@ BEGIN
     IF EXISTS (
         SELECT 1
         FROM pg_indexes
-        WHERE schemaname = 'career_operations'
+        WHERE schemaname = 'careerops'
           AND tablename = 'org_invitations'
           AND indexname = 'idx_org_invitations_token'
     ) THEN

@@ -35,6 +35,12 @@ public class AuthController {
         return auth.login(req, httpRequest);
     }
 
+    @PostMapping("/google")
+    public AuthResponse google(@RequestBody @Valid GoogleAuthRequest req,
+                               HttpServletRequest httpRequest) {
+        return auth.authenticateWithGoogle(req, httpRequest);
+    }
+
     @PostMapping("/forgot-password")
     @ResponseStatus(org.springframework.http.HttpStatus.ACCEPTED)
     public void forgot(@RequestBody @Valid ForgotRequest req) {

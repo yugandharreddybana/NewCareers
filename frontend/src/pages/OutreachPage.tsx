@@ -1,10 +1,9 @@
 import { useEffect, useState } from 'react';
 import toast from 'react-hot-toast';
 import { PageMeta } from '@/components/PageMeta';
+import { PageLoader } from '@/components/LoadingSpinner';
 import { outreachApi, type OutreachCampaign } from '@/services/outreachApi';
 import { BarChart2, Mail, MessageSquare, Play, Plus, Send, Trash2, X } from 'lucide-react';
-
-const USE_MOCKS = import.meta.env.VITE_USE_MOCKS === 'true';
 
 type OutreachChannel = 'linkedin' | 'email' | 'twitter';
 
@@ -27,17 +26,6 @@ interface OutreachCampaignView {
   replyRate: number | null;
   createdAt: string;
 }
-
-const MOCK_CAMPAIGNS: OutreachCampaignView[] = [
-  { id: 'c-1', name: 'Q2 Dublin Fintech Push', status: 'active', channel: 'linkedin', totalMessages: 20, sentMessages: 8, openRate: 0.62, replyRate: 0.375, createdAt: new Date(Date.now() - 86_400_000 * 5).toISOString() },
-  { id: 'c-2', name: 'Remote Node.js Roles', status: 'draft', channel: 'email', totalMessages: 15, sentMessages: 0, openRate: null, replyRate: null, createdAt: new Date(Date.now() - 86_400_000 * 2).toISOString() },
-  { id: 'c-3', name: 'Cork Tech Companies', status: 'completed', channel: 'email', totalMessages: 12, sentMessages: 12, openRate: 0.5, replyRate: 0.25, createdAt: new Date(Date.now() - 86_400_000 * 14).toISOString() },
-];
-
-const MOCK_TEMPLATES: OutreachTemplate[] = [
-  { id: 't-1', name: 'LinkedIn Cold Connect', subject: '', body: "Hi {{name}}, I came across your profile and noticed you work at {{company}}. I'm a Senior Full Stack Developer (React/Node) exploring opportunities and would love to connect.", channel: 'linkedin' },
-  { id: 't-2', name: 'Email Follow-up', subject: 'Following up — {{jobTitle}} application', body: "Hi {{name}},\n\nI wanted to follow up on my application for the {{jobTitle}} role. I'm very excited about the opportunity at {{company}} and would love to discuss further.\n\nBest regards,\n{{yourName}}", channel: 'email' },
-];
 
 const STATUS_STYLES: Record<OutreachCampaignView['status'], string> = {
   draft: 'bg-gray-100 text-gray-600',
@@ -107,25 +95,13 @@ const CreateCampaignModal = ({
 
     setSaving(true);
     try {
-      const campaign = USE_MOCKS
-        ? {
-            id: `c-${Date.now()}`,
-            name,
-            status: 'draft' as const,
-            channel,
-            totalMessages: 0,
-            sentMessages: 0,
-            openRate: null,
-            replyRate: null,
-            createdAt: new Date().toISOString(),
-          }
-        : toCampaignView(await outreachApi.createCampaign({
-            name,
-            campaignType: channel,
-          }));
+      const campaign = toCampaignView(await outreachApi.createCampaign({
+        name,
+        campaignType: channel,
+      }));
 
       onCreate(campaign);
-      if (!USE_MOCKS && templateId) {
+      if (templateId) {
         toast.success('Campaign created. Template selection is not wired to the current backend yet.');
       } else {
         toast.success('Campaign created!');
@@ -269,14 +245,7 @@ const OutreachPage = () => {
   useEffect(() => {
     const load = async () => {
       try {
-        if (USE_MOCKS) {
-          await new Promise(resolve => setTimeout(resolve, 500));
-          setCampaigns(MOCK_CAMPAIGNS);
-          setTemplates(MOCK_TEMPLATES);
-          return;
-        }
-
-        const response = await outreachApi.listCampaigns().catch(() => ({ campaigns: [] as OutreachCampaign[], total: 0 }));
+        const response = await outreachApi.listCampaigns();
         setCampaigns(response.campaigns.map(toCampaignView));
         setTemplates([]);
       } finally {
@@ -289,9 +258,7 @@ const OutreachPage = () => {
 
   const handleLaunch = async (id: string) => {
     try {
-      const updated = USE_MOCKS
-        ? campaigns.find(campaign => campaign.id === id)
-        : toCampaignView(await outreachApi.launchCampaign(id));
+      const updated = toCampaignView(await outreachApi.launchCampaign(id));
       if (!updated) return;
 
       setCampaigns(prev => prev.map(campaign => campaign.id === id ? { ...updated, status: 'active' } : campaign));
@@ -305,7 +272,7 @@ const OutreachPage = () => {
     if (!window.confirm('Delete this campaign?')) return;
 
     try {
-      if (!USE_MOCKS) await outreachApi.deleteCampaign(id);
+      await outreachApi.deleteCampaign(id);
       setCampaigns(prev => prev.filter(campaign => campaign.id !== id));
       toast.success('Campaign deleted.');
     } catch {
@@ -313,18 +280,12 @@ const OutreachPage = () => {
     }
   };
 
-  const handleDeleteTemplate = async (id: string) => {
-    if (!USE_MOCKS) {
-      toast.error('Template management is not available with the current backend yet.');
-      return;
-    }
-
-    setTemplates(prev => prev.filter(template => template.id !== id));
-    toast.success('Template deleted.');
+  const handleDeleteTemplate = async (_id: string) => {
+    toast.error('Template management is not available with the current backend yet.');
   };
 
   if (loading) {
-    return <div className="flex items-center justify-center min-h-[50vh] text-gray-400 text-sm">Loading outreach...</div>;
+    return <PageLoader />;
   }
 
   const activeCampaigns = campaigns.filter(campaign => campaign.status === 'active').length;
@@ -406,9 +367,7 @@ const OutreachPage = () => {
               <div className="bg-gray-50 border border-gray-200 rounded-xl p-8 text-center">
                 <MessageSquare size={24} className="mx-auto text-gray-300 mb-2" />
                 <p className="text-sm text-gray-500">
-                  {USE_MOCKS
-                    ? 'No templates yet. Templates are auto-generated by the AI Outreach Skill.'
-                    : 'Template management is not exposed by the current backend contract yet.'}
+                  Template management is not exposed by the current backend contract yet.
                 </p>
               </div>
             )}

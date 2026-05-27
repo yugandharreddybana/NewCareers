@@ -8,7 +8,7 @@ import java.time.Instant;
 import java.util.UUID;
 
 @Entity
-@Table(name = "interview_sessions", schema = "career_operations",
+@Table(name = "interview_sessions", schema = "careerops",
        indexes = {
            @Index(name = "idx_interview_sessions_user_created", columnList = "user_id, created_at DESC")
        })
@@ -60,3 +60,4 @@ public class InterviewSession {
     @Builder.Default
     private Instant createdAt = Instant.now();
 }
+

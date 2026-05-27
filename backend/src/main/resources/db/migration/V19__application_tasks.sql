@@ -2,7 +2,7 @@
 -- Per-job to-do items generated or added manually by the user
 
 CREATE TABLE IF NOT EXISTS application_tasks (
-    id            UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
+    id            UUID        DEFAULT gen_random_uuid() PRIMARY KEY,
     user_job_id   UUID        NOT NULL REFERENCES user_jobs(id) ON DELETE CASCADE,
     user_id       UUID        NOT NULL REFERENCES users(id)     ON DELETE CASCADE,
 

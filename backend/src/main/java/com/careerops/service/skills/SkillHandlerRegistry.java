@@ -7,12 +7,14 @@ import com.fasterxml.jackson.databind.JsonNode;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
-import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.support.TransactionTemplate;
 
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
 import java.util.function.Function;
@@ -52,11 +54,21 @@ public class SkillHandlerRegistry {
 
     private final Map<String, SkillHandler> handlers;
     private final SkillRunRepository        skillRuns;
+    private final TransactionTemplate       readTx;
+    private final TransactionTemplate       writeTx;
 
-    public SkillHandlerRegistry(List<SkillHandler> handlerList, SkillRunRepository skillRuns) {
+    public SkillHandlerRegistry(
+            List<SkillHandler> handlerList,
+            SkillRunRepository skillRuns,
+            PlatformTransactionManager transactionManager) {
         this.handlers  = handlerList.stream()
                 .collect(Collectors.toMap(SkillHandler::skillName, Function.identity()));
         this.skillRuns = skillRuns;
+        this.readTx = new TransactionTemplate(transactionManager);
+        this.readTx.setReadOnly(true);
+        this.readTx.setTimeout(5);
+        this.writeTx = new TransactionTemplate(transactionManager);
+        this.writeTx.setTimeout(15);
         log.info("SkillHandlerRegistry: registered {} Phase 2 handlers: {}",
                 this.handlers.size(), this.handlers.keySet());
     }
@@ -71,19 +83,18 @@ public class SkillHandlerRegistry {
     /**
      * Executes the skill:
      *   1. Check cache (TTL-based)
-     *   2. Dispatch to handler
+     *   2. Dispatch to handler (outside DB transaction — AI may take minutes)
      *   3. Persist result as SkillRun
      *   4. Return SkillRunResponse
      */
-    @Transactional(timeout = 10)
     public SkillRunResponse execute(String skillName, UUID userId, UUID userJobId) {
         log.info("SkillHandlerRegistry.execute: skill={}, userId={}, userJobId={}",
                 skillName, userId, userJobId);
 
-        // Cache check
         if (userJobId != null) {
-            var cached = skillRuns.findValidCachedRun(userId, userJobId, skillName, Instant.now());
-            if (cached.isPresent()) {
+            Optional<SkillRun> cached = readTx.execute(status ->
+                    skillRuns.findValidCachedRun(userId, userJobId, skillName, Instant.now()));
+            if (cached != null && cached.isPresent()) {
                 log.debug("Cache hit for Phase 2 skill={}, userId={}", skillName, userId);
                 return SkillRunResponse.result(skillName, cached.get().getOutput());
             }
@@ -106,12 +117,10 @@ public class SkillHandlerRegistry {
                     "Skill execution failed. Please try again. (" + e.getMessage() + ")");
         }
 
-        // Check if NVIDIA returned an error node
         if (output.has("error") && output.size() == 1) {
             return SkillRunResponse.error(skillName, output.path("error").asText());
         }
 
-        // Persist
         int ttlDays = CACHE_TTL_DAYS.getOrDefault(skillName, 3);
         SkillRun run = new SkillRun();
         run.setUserId(userId);
@@ -119,7 +128,7 @@ public class SkillHandlerRegistry {
         run.setSkill(skillName);
         run.setOutput(output);
         run.setExpiresAt(Instant.now().plus(ttlDays, ChronoUnit.DAYS));
-        skillRuns.save(run);
+        writeTx.executeWithoutResult(status -> skillRuns.save(run));
 
         log.info("Phase 2 skill={} completed and persisted for userId={}", skillName, userId);
         return SkillRunResponse.result(skillName, output);

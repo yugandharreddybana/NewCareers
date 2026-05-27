@@ -17,7 +17,7 @@ import java.util.UUID;
  *        goal_location, open_to_remote
  */
 @Entity
-@Table(name = "user_profiles", schema = "career_operations",
+@Table(name = "user_profiles", schema = "careerops",
        uniqueConstraints = @UniqueConstraint(columnNames = "user_id"))
 @Getter @Setter @NoArgsConstructor @AllArgsConstructor @Builder
 public class UserProfile {
@@ -28,7 +28,8 @@ public class UserProfile {
     private UUID id;
 
     @Version
-    private Long version;
+    @Builder.Default
+    private Long version = 0L;
 
     @Column(name = "user_id", nullable = false, unique = true)
     private UUID userId;
@@ -40,11 +41,11 @@ public class UserProfile {
     // ── Existing matching prefs ──────────────────────────────────────────
 
     @Type(StringArrayType.class)
-    @Column(name = "target_roles", columnDefinition = "text[]")
+    @Column(name = "target_roles", columnDefinition = "text array")
     private String[] targetRoles;
 
     @Type(StringArrayType.class)
-    @Column(name = "tech_stack", columnDefinition = "text[]")
+    @Column(name = "tech_stack", columnDefinition = "text array")
     private String[] techStack;
 
     private String location;
@@ -55,7 +56,7 @@ public class UserProfile {
     @Column(name = "salary_currency") private String salaryCurrency = "EUR";
 
     @Type(StringArrayType.class)
-    @Column(name = "sectors", columnDefinition = "text[]")
+    @Column(name = "sectors", columnDefinition = "text array")
     private String[] sectors;
 
     @Column(name = "freshness_hours")   private Integer freshnessHours;
@@ -82,6 +83,35 @@ public class UserProfile {
     @Column(name = "goal_salary_max")               private Integer goalSalaryMax;
     @Column(name = "goal_location",   length = 100) private String  goalLocation;
     @Column(name = "open_to_remote")                private Boolean openToRemote;
+
+    // ── Onboarding: experience & work preferences ───────────────────────
+
+    @Column(name = "experience_level", length = 32)
+    private String experienceLevel;
+
+    @Type(JsonType.class)
+    @Column(name = "work_experience", columnDefinition = "jsonb")
+    @Builder.Default
+    private List<WorkExperienceEntry> workExperience = new ArrayList<>();
+
+    @Type(JsonType.class)
+    @Column(name = "education", columnDefinition = "jsonb")
+    @Builder.Default
+    private List<EducationEntry> education = new ArrayList<>();
+
+    @Column(name = "remote_policy", length = 32)
+    private String remotePolicy;
+
+    @Column(name = "hybrid_onsite_days", length = 64)
+    private String hybridOnsiteDays;
+
+    @Column(name = "availability", length = 64)
+    private String availability;
+
+    /** First onboarding job-delivery progress (stage, counts, message). */
+    @Type(JsonType.class)
+    @Column(name = "onboarding_delivery", columnDefinition = "jsonb")
+    private com.fasterxml.jackson.databind.JsonNode onboardingDelivery;
 
     @Column(name = "updated_at") private Instant updatedAt;
 
@@ -111,4 +141,23 @@ public class UserProfile {
 
         private List<String> techTags;
     }
+
+    @Getter @Setter @NoArgsConstructor @AllArgsConstructor @Builder
+    public static class WorkExperienceEntry {
+        private String  jobTitle;
+        private String  companyName;
+        private String  startDate;
+        private String  endDate;
+        private boolean current;
+        private String  description;
+    }
+
+    @Getter @Setter @NoArgsConstructor @AllArgsConstructor @Builder
+    public static class EducationEntry {
+        private String schoolName;
+        private String degree;
+        private String fieldOfStudy;
+        private String graduationYear;
+    }
 }
+

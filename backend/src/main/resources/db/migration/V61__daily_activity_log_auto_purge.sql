@@ -1,4 +1,4 @@
-SET search_path TO career_operations;
+SET search_path TO careerops;
 
 -- V61 — Configure auto-purge mechanism on daily_activity_log via DB trigger.
 -- Ensures self-cleaning database operations that bound the table size without relying on external cron jobs.
@@ -6,7 +6,7 @@ SET search_path TO career_operations;
 CREATE OR REPLACE FUNCTION prune_old_activity_logs()
 RETURNS TRIGGER AS $$
 BEGIN
-    DELETE FROM daily_activity_log WHERE activity_date < CURRENT_DATE - INTERVAL '1 year';
+    DELETE FROM daily_activity_log WHERE activity_date < CURRENT_DATE - INTERVAL '1' YEAR;
     RETURN NULL;
 END;
 $$ LANGUAGE plpgsql;
@@ -17,3 +17,4 @@ CREATE TRIGGER trg_prune_old_activity_logs
 AFTER INSERT ON daily_activity_log
 FOR EACH STATEMENT
 EXECUTE FUNCTION prune_old_activity_logs();
+

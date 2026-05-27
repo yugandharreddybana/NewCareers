@@ -15,32 +15,14 @@
  */
 import { useEffect, useRef, useState } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
-import { Eye, EyeOff, Zap, ArrowRight, Loader2 } from 'lucide-react';
+import { Eye, EyeOff, Loader2 } from 'lucide-react';
 import { useAuth } from '@/context/AuthContext';
 import { PageMeta } from '@/components/PageMeta';
-import { publicApi } from '@/services/api';
-import { DEV_BYPASS, USE_MOCKS } from '@/lib/env';
+import { GoogleSignInButton } from '@/components/auth/GoogleSignInButton';
 import { isApiError } from '@/types';
 
-interface Stat {
-  value: string;
-  label: string;
-}
-
-const FALLBACK_STATS: Stat[] = [
-  { value: '14',  label: 'AI career skills' },
-  { value: 'EU',  label: 'Built for the Irish market' },
-  { value: '24/7', label: 'Daily fresh job feed' },
-];
-
-const formatCount = (n: number): string => {
-  if (n >= 1000) return `${Math.floor(n / 100) / 10}k+`;
-  if (n > 0)     return `${n}+`;
-  return '—';
-};
-
 export default function Login() {
-  const { signIn, user } = useAuth();
+  const { signIn, signInWithGoogle, user, actionLoading } = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
 
@@ -67,10 +49,6 @@ export default function Login() {
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError('');
-    if (DEV_BYPASS || USE_MOCKS) {
-      // The bypass calls signIn anyway (which short-circuits to MOCK_USER) so
-      // the UI behaves identically to a real sign-in.
-    }
     setSubmitting(true);
     try {
       await signIn(form.email, form.password);
@@ -89,159 +67,164 @@ export default function Login() {
     }
   };
 
-  // ── Real social-proof stats from backend ───────────────────────────────
-  const [stats, setStats] = useState<Stat[]>(FALLBACK_STATS);
-  useEffect(() => {
-    let cancelled = false;
-    publicApi.stats()
-      .then(s => {
-        if (cancelled) return;
-        const next: Stat[] = [
-          { value: formatCount(s.jobs),  label: 'Live jobs tracked' },
-          { value: String(s.skills),    label: 'AI career skills' },
-          { value: formatCount(s.users), label: 'Job seekers onboarded' },
-        ];
-        setStats(next);
-      })
-      .catch(() => { /* silently keep fallback — no toast on home page */ });
-    return () => { cancelled = true; };
-  }, []);
+  const handleGoogle = async (idToken: string) => {
+    setError('');
+    setSubmitting(true);
+    try {
+      await signInWithGoogle(idToken);
+    } catch (err: unknown) {
+      if (isApiError(err)) {
+        setError(err.normalizedMessage || 'Google sign-in failed.');
+      } else if (err instanceof Error) {
+        setError(err.message || 'Google sign-in failed.');
+      } else {
+        setError('Google sign-in failed.');
+      }
+    } finally {
+      setSubmitting(false);
+    }
+  };
 
   return (
-    <div className="min-h-screen flex">
+    <div className="bg-surface-container-low min-h-screen flex items-center justify-center p-margin-mobile md:p-margin-desktop antialiased text-on-surface w-full">
       <PageMeta title="Sign In" />
 
-      {/* ── Left brand panel (desktop only) ── */}
-      <div className="hidden lg:flex lg:w-[45%] flex-col bg-slate-900 px-12 py-14 relative overflow-hidden">
-        <div className="absolute -top-24 -right-24 w-80 h-80 rounded-full bg-emerald-500/10 pointer-events-none" />
-        <div className="absolute -bottom-32 -left-16 w-96 h-96 rounded-full bg-emerald-500/5 pointer-events-none" />
-
-        <div className="flex items-center gap-2.5 mb-auto">
-          <div className="w-9 h-9 bg-emerald-500 rounded-xl flex items-center justify-center shadow-lg">
-            <Zap size={17} className="text-white" fill="white" />
-          </div>
-          <span className="font-bold text-lg text-white">
-            Career<span className="text-emerald-400">Ops</span>
-          </span>
+      <main className="w-full max-w-[440px]">
+        {/* Brand Header (Standalone for Transactional Page) */}
+        <div className="text-center mb-8">
+          <h1 className="font-headline-lg text-headline-lg text-primary font-bold tracking-tight">NewCareers</h1>
         </div>
 
-        <div className="my-auto space-y-4">
-          <h1 className="text-4xl font-black text-white leading-tight">
-            Land your next role<br />
-            <span className="text-emerald-400">faster, smarter.</span>
-          </h1>
-          <p className="text-slate-400 text-base leading-relaxed max-w-sm">
-            AI-powered job matching for the Irish market. Your personalised pipeline, daily.
-          </p>
-
-          <div className="grid grid-cols-3 gap-4 pt-4">
-            {stats.map(s => (
-              <div key={s.label} className="bg-white/5 rounded-xl p-4 border border-white/10">
-                <p className="text-2xl font-black text-emerald-400">{s.value}</p>
-                <p className="text-xs text-slate-400 mt-1 leading-tight">{s.label}</p>
-              </div>
-            ))}
+        {/* Authentication Card */}
+        <div className="bg-surface-container-lowest rounded-lg border border-outline-variant shadow-sm p-6 md:p-8 flex flex-col gap-6">
+          <div className="text-center flex flex-col gap-2">
+            <h2 className="font-headline-md text-headline-md text-on-surface">Welcome back</h2>
+            <p className="font-body-sm text-body-sm text-on-surface-variant">Please enter your details to sign in.</p>
           </div>
-        </div>
 
-        <p className="text-xs text-slate-600 mt-auto">
-          &copy; {new Date().getFullYear()} CareerOps — Built for Ireland
-        </p>
-      </div>
+          <div className="flex flex-col gap-3">
+            <GoogleSignInButton
+              mode="signin"
+              disabled={submitting}
+              loading={actionLoading}
+              onCredential={handleGoogle}
+              onError={msg => setError(msg)}
+            />
+          </div>
 
-      {/* ── Right form panel ── */}
-      <div className="flex-1 flex items-center justify-center px-6 py-12 bg-white">
-        <div className="w-full max-w-[400px]">
-
-          <div className="flex items-center gap-2 mb-8 lg:hidden">
-            <div className="w-8 h-8 bg-emerald-500 rounded-lg flex items-center justify-center">
-              <Zap size={15} className="text-white" fill="white" />
-            </div>
-            <span className="font-bold text-slate-900">
-              Career<span className="text-emerald-500">Ops</span>
+          {/* Divider */}
+          <div className="flex items-center gap-4">
+            <div className="flex-1 h-px bg-outline-variant/50"></div>
+            <span className="font-label-sm text-label-sm text-on-surface-variant uppercase tracking-wider">
+              or continue with email
             </span>
+            <div className="flex-1 h-px bg-outline-variant/50"></div>
           </div>
 
-          <h2 className="text-2xl font-bold text-slate-900 mb-1">Welcome back</h2>
-          <p className="text-slate-400 text-sm mb-8">Sign in to your CareerOps account</p>
+          {/* Form */}
+          <form onSubmit={submit} className="flex flex-col gap-5" noValidate>
+            {error && (
+              <div
+                role="alert"
+                aria-live="polite"
+                className="px-4 py-3 rounded bg-error-container border border-error text-on-error-container text-body-sm font-body-sm"
+              >
+                {error}
+              </div>
+            )}
 
-          {error && (
-            <div
-              role="alert"
-              aria-live="polite"
-              className="mb-4 px-4 py-3 rounded-xl bg-red-50 border border-red-200 text-red-600 text-sm"
-            >
-              {error}
-            </div>
-          )}
-
-          <form onSubmit={submit} className="space-y-4" noValidate>
-            <div>
-              <label htmlFor="email" className="block text-sm font-semibold text-slate-700 mb-1.5">
-                Email address
+            <div className="flex flex-col gap-1.5">
+              <label className="font-label-sm text-label-sm text-on-surface" htmlFor="email">
+                Email Address
               </label>
               <input
+                className="w-full px-3 py-2.5 bg-surface-container-lowest border border-outline-variant rounded text-on-surface font-body-sm text-body-sm focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary transition-shadow placeholder:text-outline"
                 id="email"
+                name="email"
+                placeholder="Enter your email"
+                required
                 type="email"
-                autoComplete="email"
-                placeholder="you@example.com"
                 value={form.email}
                 onChange={set('email')}
-                required
-                className="w-full px-4 h-12 rounded-xl border border-slate-200 text-slate-700 text-sm placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-emerald-500/25 focus:border-emerald-400 transition-all bg-white"
               />
             </div>
 
-            <div>
-              <div className="flex items-center justify-between mb-1.5">
-                <label htmlFor="password" className="block text-sm font-semibold text-slate-700">
+            <div className="flex flex-col gap-1.5">
+              <div className="flex items-center justify-between">
+                <label className="font-label-sm text-label-sm text-on-surface" htmlFor="password">
                   Password
                 </label>
-                <Link to="/forgot-password" className="text-xs text-emerald-600 hover:text-emerald-700 font-medium">
+                <Link
+                  className="font-label-sm text-label-sm text-primary hover:text-primary-container hover:underline transition-colors"
+                  to="/forgot-password"
+                >
                   Forgot password?
                 </Link>
               </div>
               <div className="relative">
                 <input
+                  className="w-full px-3 py-2.5 bg-surface-container-lowest border border-outline-variant rounded text-on-surface font-body-sm text-body-sm focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary transition-shadow placeholder:text-outline pr-10"
                   id="password"
-                  type={showPw ? 'text' : 'password'}
-                  autoComplete="current-password"
+                  name="password"
                   placeholder="••••••••"
+                  required
+                  type={showPw ? 'text' : 'password'}
                   value={form.password}
                   onChange={set('password')}
-                  required
-                  className="w-full px-4 pr-11 h-12 rounded-xl border border-slate-200 text-slate-700 text-sm placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-emerald-500/25 focus:border-emerald-400 transition-all bg-white"
                 />
                 <button
                   type="button"
                   onClick={() => setShowPw(v => !v)}
                   aria-label={showPw ? 'Hide password' : 'Show password'}
-                  className="absolute right-3.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600"
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-outline hover:text-on-surface-variant transition-colors"
                 >
                   {showPw ? <EyeOff size={16} /> : <Eye size={16} />}
                 </button>
               </div>
             </div>
 
+            <div className="flex items-center justify-between mt-1">
+              <label className="flex items-center gap-2 cursor-pointer group">
+                <input
+                  className="w-4 h-4 rounded border-outline-variant text-primary focus:ring-primary bg-surface-container-lowest"
+                  name="remember"
+                  type="checkbox"
+                />
+                <span className="font-body-sm text-body-sm text-on-surface-variant group-hover:text-on-surface transition-colors">
+                  Remember me
+                </span>
+              </label>
+            </div>
+
             <button
+              className="w-full py-3 mt-2 bg-primary text-on-primary font-label-md text-label-md rounded hover:bg-primary-container transition-colors duration-200 shadow-sm flex items-center justify-center gap-2 disabled:opacity-60"
               type="submit"
               disabled={submitting}
-              className="w-full h-12 bg-slate-900 hover:bg-slate-800 text-white rounded-xl font-bold text-sm transition-all disabled:opacity-60 flex items-center justify-center gap-2 mt-2"
             >
-              {submitting ? <Loader2 size={17} className="animate-spin" /> : (
-                <><span>Sign in</span><ArrowRight size={16} /></>
+              {submitting ? (
+                <Loader2 size={17} className="animate-spin" />
+              ) : (
+                <>
+                  Sign In
+                  <span aria-hidden="true" className="material-symbols-outlined text-[18px]" data-icon="arrow_forward">
+                    arrow_forward
+                  </span>
+                </>
               )}
             </button>
           </form>
+        </div>
 
-          <p className="text-center text-sm text-slate-500 mt-6">
+        {/* Footer Links */}
+        <div className="text-center mt-6">
+          <p className="font-body-sm text-body-sm text-on-surface-variant">
             Don't have an account?{' '}
-            <Link to="/signup" className="font-semibold text-emerald-600 hover:text-emerald-700">
-              Create one free
+            <Link className="text-primary font-medium hover:underline hover:text-primary-container transition-colors" to="/get-started">
+              Get Started
             </Link>
           </p>
         </div>
-      </div>
+      </main>
     </div>
   );
 }

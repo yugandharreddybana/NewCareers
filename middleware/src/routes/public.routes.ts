@@ -25,8 +25,9 @@ router.get('/stats', statsLimiter, async (_req, res, next) => {
   try {
     const r = await forward({ method: 'GET', path: '/public/stats' });
     res.status(r.status);
-    if (r.headers['cache-control']) {
-      res.setHeader('cache-control', r.headers['cache-control']);
+    const cacheControl = r.headers['cache-control'];
+    if (typeof cacheControl === 'string') {
+      res.setHeader('cache-control', cacheControl);
     }
     res.json(r.data);
   } catch (e) {

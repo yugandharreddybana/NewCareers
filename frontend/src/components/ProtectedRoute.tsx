@@ -27,7 +27,16 @@ export function ProtectedRoute() {
   const { user, loading } = useAuth();
   const location = useLocation();
 
-  if (DEV_BYPASS) return <AppShell />;
+  const fullWidthPaths = ['/onboarding', '/welcome', '/dashboard', '/account', '/jobs', '/kanban'];
+  const isFullWidth =
+    fullWidthPaths.includes(location.pathname) || location.pathname.startsWith('/jobs/');
+
+  if (DEV_BYPASS) {
+    if (isFullWidth) {
+      return <Outlet />;
+    }
+    return <AppShell />;
+  }
 
   if (loading) return <PageLoader />;
 
@@ -45,6 +54,10 @@ export function ProtectedRoute() {
   // ProtectedRoute, so we exempt that path to avoid a redirect loop.
   if (!user.onboarded && location.pathname !== '/onboarding') {
     return <Navigate to="/onboarding" replace />;
+  }
+
+  if (isFullWidth) {
+    return <Outlet />;
   }
 
   return <AppShell />;

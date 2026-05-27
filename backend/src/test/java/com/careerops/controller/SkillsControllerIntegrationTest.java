@@ -1,6 +1,7 @@
 package com.careerops.controller;
 
 import com.careerops.model.AgentResult;
+import com.careerops.ratelimit.RateLimitFilter;
 import com.careerops.service.ClaudeAgentService;
 import com.careerops.service.ClaudeDirectService;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -18,6 +19,7 @@ import org.springframework.boot.test.mock.mockito.MockBean;
 import org.springframework.http.MediaType;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.context.ActiveProfiles;
+import org.springframework.test.util.ReflectionTestUtils;
 import org.springframework.test.web.servlet.MockMvc;
 
 import java.util.UUID;
@@ -25,6 +27,7 @@ import java.util.UUID;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.lenient;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.*;
 
@@ -40,6 +43,7 @@ class SkillsControllerIntegrationTest {
     @Autowired MockMvc mockMvc;
     @Autowired JdbcTemplate jdbc;
     @Autowired ObjectMapper mapper;
+    @Autowired RateLimitFilter rateLimitFilter;
 
     @MockBean ClaudeAgentService claudeAgentService;
     @MockBean ClaudeDirectService claudeDirectService;
@@ -55,7 +59,7 @@ class SkillsControllerIntegrationTest {
         UUID userId = UUID.fromString(INTERNAL_USER_ID);
         jdbc.update(
             """
-            DELETE FROM career_operations.users
+            DELETE FROM careerops.users
             WHERE (email = ? OR username = ?) AND id <> ?
             """,
             INTERNAL_EMAIL,
@@ -66,7 +70,7 @@ class SkillsControllerIntegrationTest {
         Integer existingUsers = jdbc.queryForObject(
             """
             SELECT COUNT(*)
-            FROM career_operations.users
+            FROM careerops.users
             WHERE id = ?
             """,
             Integer.class,
@@ -76,7 +80,7 @@ class SkillsControllerIntegrationTest {
         if (existingUsers != null && existingUsers > 0) {
             jdbc.update(
                 """
-                UPDATE career_operations.users
+                UPDATE careerops.users
                 SET name = ?,
                     username = ?,
                     email = ?,
@@ -106,7 +110,7 @@ class SkillsControllerIntegrationTest {
 
         jdbc.update(
             """
-            INSERT INTO career_operations.users (
+            INSERT INTO careerops.users (
                 id,
                 name,
                 username,
@@ -143,6 +147,12 @@ class SkillsControllerIntegrationTest {
             );
     }
 
+    @BeforeEach
+    void resetRateLimitBuckets() {
+        clearRateLimitCache("buckets");
+        clearRateLimitCache("ipBuckets");
+    }
+
     @ParameterizedTest(name = "POST /skills/start — skill: {0}")
     @ValueSource(strings = {
         "evaluate", "tailor-resume", "research", "outreach",
@@ -172,6 +182,17 @@ class SkillsControllerIntegrationTest {
     }
 
     @Test
+    @DisplayName("GET /skills/last-run — no prior run returns 204")
+    void getLastRun_noPriorRun_returns204() throws Exception {
+        mockMvc.perform(
+            get("/skills/last-run/{userJobId}/{skillName}", USER_JOB_ID, "tailor-resume")
+                .header("X-Internal-Secret", INTERNAL_SECRET)
+                .header("X-Internal-User-Id", INTERNAL_USER_ID)
+        )
+        .andExpect(status().isNoContent());
+    }
+
+    @Test
     @DisplayName("POST /skills/start — unauthenticated returns 401")
     void postSkillStart_unauthenticated_returns401() throws Exception {
         mockMvc.perform(
@@ -181,4 +202,12 @@ class SkillsControllerIntegrationTest {
         )
         .andExpect(status().isUnauthorized());
     }
+
+    private void clearRateLimitCache(String fieldName) {
+        Object cache = ReflectionTestUtils.getField(rateLimitFilter, fieldName);
+        if (cache instanceof com.github.benmanes.caffeine.cache.Cache<?, ?> caffeineCache) {
+            caffeineCache.invalidateAll();
+        }
+    }
 }
+

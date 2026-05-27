@@ -40,8 +40,8 @@ html, body, #root { height: 100%; margin: 0; padding: 0; }
 
 body {
   font-family: 'Inter', system-ui, -apple-system, sans-serif;
-  background-color: var(--bg-app);
-  color: var(--text-primary);
+  background-color: #f7f9fb;
+  color: #191c1e;
   transition: background-color 180ms ease, color 180ms ease;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
@@ -119,8 +119,16 @@ body {
   /* ── Page layout helpers ── */
   .page-container { @apply max-w-6xl mx-auto px-6 py-8; }
   .section-label  { @apply text-2xs font-bold uppercase tracking-widest text-text-tertiary; }
-  .app-shell-content-offset { margin-left: var(--sidebar-width, 240px); }
-  .topbar-shell-offset { left: var(--sidebar-width, 240px); }
+  .app-shell-content-offset {
+    margin-left: var(--sidebar-width, 240px);
+    width: calc(100% - var(--sidebar-width, 240px));
+    transition: margin-left 0.22s cubic-bezier(0.4, 0, 0.2, 1), width 0.22s cubic-bezier(0.4, 0, 0.2, 1);
+  }
+  .topbar-shell-offset {
+    left: var(--sidebar-width, 240px);
+    width: calc(100% - var(--sidebar-width, 240px));
+    transition: left 0.22s cubic-bezier(0.4, 0, 0.2, 1), width 0.22s cubic-bezier(0.4, 0, 0.2, 1);
+  }
   .bottom-nav-safe { padding-bottom: env(safe-area-inset-bottom); }
   .sidebar-scrollbarless::-webkit-scrollbar { display: none; }
   .thread-skeleton-line--wide { width: 80%; }
@@ -357,3 +365,117 @@ body {
 /* Form inputs (shared for planner forms) */
 .form-input { width: 100%; padding: var(--space-2) var(--space-3); border: 1px solid var(--color-border); border-radius: var(--radius-md); background: var(--color-surface); font-size: var(--text-sm); color: var(--color-text); transition: border-color var(--transition-interactive); }
 .form-input:focus { outline: none; border-color: var(--color-primary); }
+
+/* Landing Page Helpers */
+/* ── Landing Page Helpers & Custom Animations ────────────────────────────── */
+.soft-shadow {
+  box-shadow: 0 8px 32px -8px rgba(0, 0, 0, 0.06);
+  transition: transform 0.3s ease, box-shadow 0.3s ease;
+}
+
+.glass-card {
+  background: rgba(255, 255, 255, 0.85) !important;
+  backdrop-filter: blur(12px) !important;
+  border: 1px solid #c2c6d6 !important;
+  box-shadow: 0 4px 24px -4px rgba(0, 0, 0, 0.04) !important;
+  transition: transform 0.3s ease, box-shadow 0.3s ease !important;
+}
+
+.marquee-container {
+  overflow: hidden;
+  white-space: nowrap;
+  width: 100%;
+  position: relative;
+}
+
+.marquee-content {
+  display: inline-flex;
+  animation: marquee 30s linear infinite;
+}
+
+.marquee-content:hover {
+  animation-play-state: paused;
+}
+
+@keyframes marquee {
+  0% { transform: translateX(0); }
+  100% { transform: translateX(-50%); }
+}
+
+/* Custom Entrance Animations */
+.fade-in-up {
+  opacity: 0;
+  transform: translateY(20px);
+  transition: opacity 0.6s ease-out, transform 0.6s ease-out;
+}
+
+.fade-in-up.visible {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+/* Floating Hero Animation */
+@keyframes float {
+  0%, 100% { transform: translateY(0px); }
+  50% { transform: translateY(-15px); }
+}
+
+.animate-float {
+  animation: float 6s ease-in-out infinite;
+}
+
+/* Shimmer Effect */
+@keyframes shimmer {
+  0% { background-position: -200% 0; }
+  100% { background-position: 200% 0; }
+}
+
+.shimmer-btn {
+  background: linear-gradient(90deg, #0058be 0%, #3b82f6 25%, #0058be 50%, #3b82f6 75%, #0058be 100%);
+  background-size: 200% 100%;
+  transition: all 0.3s ease;
+}
+
+.shimmer-btn:hover {
+  animation: shimmer 2s infinite linear;
+}
+
+/* Micro-interactions */
+.hover-lift:hover {
+  transform: translateY(-4px);
+  box-shadow: 0 12px 40px -12px rgba(0, 0, 0, 0.12);
+}
+
+.btn-transition {
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.btn-transition:active {
+  transform: scale(0.96);
+}
+
+/* Google Sign-In button host — full width on auth cards */
+.google-signin-host > div,
+.google-signin-host iframe {
+  width: 100% !important;
+  max-width: 400px;
+}
+
+/* Material Symbols (NewCareers onboarding / auth) */
+.material-symbols-outlined {
+  font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24;
+}
+
+/* Reduced Motion */
+@media (prefers-reduced-motion: reduce) {
+  .fade-in-up,
+  .marquee-content,
+  .animate-float,
+  .shimmer-btn:hover {
+    animation: none !important;
+    transform: none !important;
+    transition: none !important;
+    opacity: 1 !important;
+  }
+}
+

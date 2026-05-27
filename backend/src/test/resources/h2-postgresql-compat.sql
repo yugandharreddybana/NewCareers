@@ -1,4 +1,4 @@
-CREATE TABLE IF NOT EXISTS career_operations.user_profiles (
+CREATE TABLE IF NOT EXISTS careerops.user_profiles (
     id UUID PRIMARY KEY,
     version BIGINT,
     user_id UUID NOT NULL UNIQUE,
@@ -19,11 +19,32 @@ CREATE TABLE IF NOT EXISTS career_operations.user_profiles (
     goal_salary_max INTEGER,
     goal_location VARCHAR(100),
     open_to_remote BOOLEAN,
+    experience_level VARCHAR(32),
+    work_experience JSON DEFAULT '[]',
+    education JSON DEFAULT '[]',
+    remote_policy VARCHAR(32),
+    hybrid_onsite_days VARCHAR(64),
+    availability VARCHAR(64),
+    onboarding_delivery JSON,
     updated_at TIMESTAMP WITH TIME ZONE,
-    CONSTRAINT fk_h2_user_profiles_user FOREIGN KEY (user_id) REFERENCES career_operations.users(id) ON DELETE CASCADE
+    CONSTRAINT fk_h2_user_profiles_user FOREIGN KEY (user_id) REFERENCES careerops.users(id) ON DELETE CASCADE
 );
 
-CREATE TABLE IF NOT EXISTS career_operations.audit_logs (
+CREATE TABLE IF NOT EXISTS careerops.user_cvs (
+    id UUID PRIMARY KEY,
+    user_id UUID NOT NULL,
+    file_name VARCHAR(255) NOT NULL,
+    storage_path VARCHAR(500) NOT NULL,
+    file_type VARCHAR(128),
+    parsed_text CLOB,
+    cv_markdown CLOB,
+    vector_json JSON,
+    uploaded_at TIMESTAMP WITH TIME ZONE,
+    is_active BOOLEAN,
+    CONSTRAINT fk_h2_user_cvs_user FOREIGN KEY (user_id) REFERENCES careerops.users(id) ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS careerops.audit_logs (
     id UUID PRIMARY KEY,
     user_id UUID,
     org_id UUID,
@@ -39,9 +60,9 @@ CREATE TABLE IF NOT EXISTS career_operations.audit_logs (
 );
 
 CREATE INDEX IF NOT EXISTS idx_audit_logs_user_created
-    ON career_operations.audit_logs (user_id, created_at DESC);
+    ON careerops.audit_logs (user_id, created_at DESC);
 
-CREATE TABLE IF NOT EXISTS career_operations.user_jobs (
+CREATE TABLE IF NOT EXISTS careerops.user_jobs (
     id UUID PRIMARY KEY,
     version BIGINT,
     user_id UUID NOT NULL,
@@ -59,7 +80,8 @@ CREATE TABLE IF NOT EXISTS career_operations.user_jobs (
     kanban_column VARCHAR(255),
     notes VARCHAR(255),
     deleted_at TIMESTAMP WITH TIME ZONE,
-    CONSTRAINT fk_h2_user_jobs_user FOREIGN KEY (user_id) REFERENCES career_operations.users(id) ON DELETE CASCADE,
-    CONSTRAINT fk_h2_user_jobs_job FOREIGN KEY (job_id) REFERENCES career_operations.jobs(id) ON DELETE CASCADE,
+    CONSTRAINT fk_h2_user_jobs_user FOREIGN KEY (user_id) REFERENCES careerops.users(id) ON DELETE CASCADE,
+    CONSTRAINT fk_h2_user_jobs_job FOREIGN KEY (job_id) REFERENCES careerops.jobs(id) ON DELETE CASCADE,
     UNIQUE (user_id, job_id)
 );
+

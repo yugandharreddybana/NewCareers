@@ -52,7 +52,8 @@ public class RateLimitFilter extends OncePerRequestFilter {
     private static final Set<String> IP_LIMITED_PATHS = Set.of(
         "/auth/login",
         "/auth/register",
-        "/auth/forgot-password"
+        "/auth/forgot-password",
+        "/auth/google"
     );
 
     private final com.github.benmanes.caffeine.cache.Cache<String, Bucket> buckets =
@@ -83,6 +84,9 @@ public class RateLimitFilter extends OncePerRequestFilter {
 
     @Value("${ratelimit.require-shared-store:false}")
     private boolean requireSharedStore;
+
+    @Value("${spring.data.redis.host:}")
+    private String redisHost;
 
     public RateLimitFilter(Bandwidth apiBandwidth,
                            ObjectMapper mapper,
@@ -198,7 +202,7 @@ public class RateLimitFilter extends OncePerRequestFilter {
         boolean allowedByRedis = false;
         boolean redisAttempted = false;
 
-        if (redisTemplate != null) {
+        if (redisTemplate != null && redisHost != null && !redisHost.isBlank()) {
             try {
                 String key = "ratelimit:" + bucketKey;
                 Long current = redisTemplate.opsForValue().increment(key);

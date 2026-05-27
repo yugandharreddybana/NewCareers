@@ -1,0 +1,71 @@
+.not-found-page {
+  --nc-primary: #0058be;
+  --nc-on-primary: #ffffff;
+  --nc-background: #f7f9fb;
+  --nc-on-surface: #191c1e;
+  --nc-on-surface-variant: #424754;
+  --nc-outline-variant: #c2c6d6;
+  --nc-surface-container-lowest: #ffffff;
+
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+  background-color: var(--nc-background);
+  color: var(--nc-on-surface);
+  font-family: Inter, system-ui, sans-serif;
+}
+
+.not-found-canvas {
+  background: radial-gradient(circle at 50% 50%, rgba(0, 88, 190, 0.03) 0%, rgba(247, 249, 251, 1) 70%);
+}
+
+.not-found-bg-404 {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  pointer-events: none;
+  user-select: none;
+  opacity: 0.03;
+}
+
+.not-found-bg-404 span {
+  font-weight: 900;
+  font-size: 30vw;
+  letter-spacing: -0.05em;
+  color: var(--nc-primary);
+  line-height: 1;
+}
+
+.not-found-illustration {
+  transition: transform 0.7s ease-out;
+}
+
+.not-found-illustration:hover {
+  transform: scale(1.02);
+}
+
+.not-found-cta-pulse {
+  animation: not-found-cta-pulse 3s ease-in-out infinite;
+}
+
+@keyframes not-found-cta-pulse {
+  0%,
+  100% {
+    transform: scale(1);
+  }
+  50% {
+    transform: scale(1.02);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .not-found-illustration:hover {
+    transform: none;
+  }
+
+  .not-found-cta-pulse {
+    animation: none;
+  }
+}

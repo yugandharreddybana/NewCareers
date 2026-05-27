@@ -13,7 +13,7 @@ import java.util.UUID;
  * Represents a per-job to-do item with priority and status tracking.
  */
 @Entity
-@Table(name = "application_tasks", schema = "career_operations",
+@Table(name = "application_tasks", schema = "careerops",
        indexes = {
            @Index(name = "idx_app_tasks_user_due", columnList = "user_id, due_date ASC"),
            @Index(name = "idx_app_tasks_job_due", columnList = "user_job_id, due_date ASC")
@@ -71,3 +71,4 @@ public class ApplicationTask {
     @Column(name = "updated_at")
     private Instant updatedAt;
 }
+

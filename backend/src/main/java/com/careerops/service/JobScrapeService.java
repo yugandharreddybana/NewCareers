@@ -24,8 +24,9 @@ import jakarta.annotation.PreDestroy;
  * fetchRaw(profile)       — background parallel scrape across all sources
  * search(params, profile) — on-demand keyword search across sources that support it
  *
- * Sources registered (15 total):
- *   Free/no-key:  IrishJobsSource, JobsIeSource, JsoupCompanySource,
+ * Sources registered (16 total):
+ *   Free/no-key:  IrishJobsSource, JobsIeSource, JobsIrelandSource,
+ *                 LinkedInPublicSource, JsoupCompanySource,
  *                 RemotiveSource, TheMuseSource, JobicySource, RssSource,
  *                 WeWorkRemotelySource, EuroJobsSource, TwinAiSource
  *   API-key:      ReedSource, AdzunaSource
@@ -47,6 +48,7 @@ public class JobScrapeService {
 
     public JobScrapeService(
             IrishJobsSource irish, JobsIeSource jobsIe,
+            JobsIrelandSource jobsIreland, LinkedInPublicSource linkedIn,
             JsoupCompanySource companies,
             RemotiveSource rm, TheMuseSource tm,
             JobicySource jb, RssSource rs,
@@ -56,10 +58,10 @@ public class JobScrapeService {
             IndeedRssSource indeed,
             WeWorkRemotelySource wwr,
             EuroJobsSource euro) {
-        // Order: free/no-key sources first, API-key sources next,
-        // on-demand search sources last (serp, indeed)
+        // Order: Irish-focused sources first, then general free/no-key,
+        // API-key sources next, on-demand search sources last (serp, indeed)
         this.sources = List.of(
-            irish, jobsIe, companies,
+            irish, jobsIe, jobsIreland, linkedIn, companies,
             rm, tm, jb, rs,
             wwr, euro,
             r, a, twin,

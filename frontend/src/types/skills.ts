@@ -17,7 +17,9 @@ export type SkillName =
   | 'salary-negotiation'
   | 'culture-fit'
   | 'linkedin-optimize'
-  | 'skills-gap-plan';
+  | 'skills-gap-plan'
+  | 'track'
+  | 'help';
 
 export type SkillResponseType =
   | 'RESULT'

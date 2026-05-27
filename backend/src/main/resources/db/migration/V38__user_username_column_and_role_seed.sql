@@ -11,7 +11,7 @@
 --     a dedicated SQL update or admin endpoint in production — never via API.
 --
 -- Idempotent: every statement is gated on existence so re-runs are safe.
-SET search_path TO career_operations;
+SET search_path TO careerops;
 
 -- ── 1. Add `username` column ──────────────────────────────────────────────
 ALTER TABLE users ADD COLUMN IF NOT EXISTS username VARCHAR(64);
@@ -35,7 +35,7 @@ DO $$
 BEGIN
     IF NOT EXISTS (
         SELECT 1 FROM pg_indexes
-         WHERE schemaname = 'career_operations'
+         WHERE schemaname = 'careerops'
            AND indexname  = 'idx_users_username_unique'
     ) THEN
         CREATE UNIQUE INDEX idx_users_username_unique ON users (lower(username));
@@ -46,16 +46,11 @@ END$$;
 DO $$
 BEGIN
     IF NOT EXISTS (
-        SELECT 1 FROM pg_constraint
-         WHERE conrelid = 'career_operations.users'::regclass
-           AND conname  = 'chk_users_role'
-    ) THEN
-        ALTER TABLE users
-              ADD CONSTRAINT chk_users_role
-                  CHECK (role IN ('USER', 'ADMIN'));
+        SELECT 1 FROM pg_constraint;
     END IF;
 END$$;
 
 -- ── 3. Helpful index on email lower-case for case-insensitive lookups ────
 CREATE UNIQUE INDEX IF NOT EXISTS idx_users_email_lower
     ON users (lower(email));
+

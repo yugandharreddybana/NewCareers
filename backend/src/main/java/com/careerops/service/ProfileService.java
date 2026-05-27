@@ -10,6 +10,7 @@ import com.careerops.model.UserProfile.PortfolioItem;
 import com.careerops.repository.UserCvRepository;
 import com.careerops.repository.UserProfileRepository;
 import com.careerops.repository.UserJobRepository;
+import com.careerops.repository.UserRepository;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.cache.annotation.CacheEvict;
@@ -20,6 +21,7 @@ import org.springframework.transaction.annotation.Transactional;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.UUID;
 
 /**
@@ -46,15 +48,18 @@ public class ProfileService {
     private final UserProfileRepository profiles;
     private final UserCvRepository      cvs;
     private final UserJobRepository     userJobs;
+    private final UserRepository        users;
     private final AuditLogService       audit; // Task 125
 
     public ProfileService(UserProfileRepository profiles,
                           UserCvRepository cvs,
                           UserJobRepository userJobs,
+                          UserRepository users,
                           AuditLogService audit) {
         this.profiles = profiles;
         this.cvs      = cvs;
         this.userJobs = userJobs;
+        this.users    = users;
         this.audit    = audit;
     }
 
@@ -62,10 +67,7 @@ public class ProfileService {
 
     public ProfileResponse get(UUID userId) {
         var profile = requireProfile(userId);
-        String activeCvFileName = cvs
-            .findFirstByUserIdAndIsActiveTrueOrderByUploadedAtDesc(userId)
-            .map(UserCv::getFileName).orElse(null);
-        return toResponse(profile, activeCvFileName);
+        return toResponse(profile, activeCv(userId).orElse(null));
     }
 
     // ─── Upsert profile ────────────────────────────────────────────────────────
@@ -74,6 +76,9 @@ public class ProfileService {
     @CacheEvict(value = "user-profile", key = "#userId")
     public ProfileResponse upsert(UUID userId, ProfileRequest req, @Nullable Long ifMatch) {
         var profile = requireProfile(userId);
+        if (profile.getVersion() == null) {
+            profile.setVersion(0L);
+        }
         validateVersion(profile, ifMatch);
 
         // 3.037 — Validate salary ranges (min <= max)
@@ -89,11 +94,19 @@ public class ProfileService {
             throw new ApiException(HttpStatus.BAD_REQUEST, "Goal salary minimum (" + gMin + ") cannot be greater than maximum (" + gMax + ")");
         }
 
+        if (req.name() != null && !req.name().isBlank()) {
+            var user = users.findById(userId)
+                .orElseThrow(() -> new ApiException(HttpStatus.NOT_FOUND, "User not found"));
+            user.setName(req.name().trim());
+            users.save(user);
+        }
+
         if (req.targetRoles()        != null) profile.setTargetRoles(req.targetRoles());
         if (req.techStack()          != null) profile.setTechStack(req.techStack());
         if (req.location()           != null) profile.setLocation(req.location());
         if (req.salaryMin()          != null) profile.setSalaryMin(req.salaryMin());
         if (req.salaryMax()          != null) profile.setSalaryMax(req.salaryMax());
+        if (req.salaryCurrency()     != null) profile.setSalaryCurrency(req.salaryCurrency());
         if (req.sectors()            != null) profile.setSectors(req.sectors());
         if (req.freshnessHours()     != null) profile.setFreshnessHours(req.freshnessHours());
         if (req.minMatchPercent()    != null) profile.setMinMatchPercent(req.minMatchPercent());
@@ -103,11 +116,25 @@ public class ProfileService {
         if (req.goalSalaryMax()      != null) profile.setGoalSalaryMax(req.goalSalaryMax());
         if (req.goalLocation()       != null) profile.setGoalLocation(req.goalLocation());
         if (req.openToRemote()       != null) profile.setOpenToRemote(req.openToRemote());
+        if (req.experienceLevel() != null) {
+            String level = req.experienceLevel().trim();
+            if (!level.matches("junior|mid|senior|lead")) {
+                throw new ApiException(HttpStatus.BAD_REQUEST,
+                    "experienceLevel must be one of: junior, mid, senior, lead");
+            }
+            profile.setExperienceLevel(level);
+        }
+        if (req.workExperience()     != null) profile.setWorkExperience(new ArrayList<>(req.workExperience()));
+        if (req.education()          != null) profile.setEducation(new ArrayList<>(req.education()));
+        if (req.remotePolicy()       != null) profile.setRemotePolicy(req.remotePolicy());
+        if (req.hybridOnsiteDays()   != null) profile.setHybridOnsiteDays(req.hybridOnsiteDays());
+        if (req.availability()       != null) profile.setAvailability(req.availability());
 
-        boolean completingOnboarding = Boolean.TRUE.equals(req.onboarded())
-                && !Boolean.TRUE.equals(profile.getOnboarded());
-        if (completingOnboarding) profile.setOnboarded(true);
-
+        boolean wasOnboarded = Boolean.TRUE.equals(profile.getOnboarded());
+        if (Boolean.TRUE.equals(req.onboarded())) {
+            profile.setOnboarded(true);
+        }
+        boolean completingOnboarding = Boolean.TRUE.equals(req.onboarded()) && !wasOnboarded;
         profiles.save(profile);
 
         // Task 125 — audit
@@ -118,10 +145,7 @@ public class ProfileService {
             audit.log(userId, "ONBOARDING_COMPLETE", Map.of("targetRole", role));
         }
 
-        String activeCvFileName = cvs
-            .findFirstByUserIdAndIsActiveTrueOrderByUploadedAtDesc(userId)
-            .map(UserCv::getFileName).orElse(null);
-        return toResponse(profile, activeCvFileName);
+        return toResponse(profile, activeCv(userId).orElse(null));
     }
 
     // ─── Stats ─────────────────────────────────────────────────────────────────
@@ -253,7 +277,18 @@ public class ProfileService {
 
     private UserProfile requireProfile(UUID userId) {
         return profiles.findByUserId(userId)
-            .orElseThrow(() -> new ApiException(HttpStatus.NOT_FOUND, "Profile not found"));
+            .orElseGet(() -> {
+                UserProfile p = UserProfile.builder()
+                        .userId(userId)
+                        .location("Unknown")
+                        .freshnessHours(96)
+                        .minMatchPercent(UserProfile.DEFAULT_MIN_MATCH_PERCENT)
+                        .sponsorshipRequired(false)
+                        .onboarded(false)
+                        .version(0L)
+                        .build();
+                return profiles.save(p);
+            });
     }
 
     private void validateVersion(UserProfile profile, @Nullable Long ifMatch) {
@@ -269,17 +304,30 @@ public class ProfileService {
             : new ArrayList<>();
     }
 
-    private ProfileResponse toResponse(UserProfile p, @Nullable String activeCvFileName) {
+    private Optional<UserCv> activeCv(UUID userId) {
+        return cvs.findFirstByUserIdAndIsActiveTrueOrderByUploadedAtDesc(userId);
+    }
+
+    private ProfileResponse toResponse(UserProfile p, @Nullable UserCv activeCv) {
         int score = computeCompleteness(p);
+        String activeCvFileName = activeCv != null ? activeCv.getFileName() : null;
+        String activeCvId = activeCv != null && activeCv.getId() != null
+            ? activeCv.getId().toString()
+            : null;
         return new ProfileResponse(
             p.getTargetRoles(), p.getTechStack(), p.getLocation(),
-            p.getSalaryMin(), p.getSalaryMax(), p.getSectors(),
+            p.getSalaryMin(), p.getSalaryMax(), p.getSalaryCurrency(), p.getSectors(),
             p.getFreshnessHours(), p.getMinMatchPercent(),
             p.getSponsorshipRequired(), p.getOnboarded(),
             activeCvFileName,
+            activeCvId,
             p.getPortfolioItems(),
             p.getGoalTitle(), p.getGoalSalaryMin(), p.getGoalSalaryMax(),
             p.getGoalLocation(), p.getOpenToRemote(),
+            p.getExperienceLevel(),
+            p.getWorkExperience() != null ? p.getWorkExperience() : List.of(),
+            p.getEducation() != null ? p.getEducation() : List.of(),
+            p.getRemotePolicy(), p.getHybridOnsiteDays(), p.getAvailability(),
             score,
             p.getVersion()
         );

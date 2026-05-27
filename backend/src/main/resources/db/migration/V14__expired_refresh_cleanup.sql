@@ -3,6 +3,8 @@
 -- WHERE refresh_token_expires_at < NOW();
 -- This partial index makes that sweep O(expired rows) rather than O(all users).
 
+SET search_path TO careerops;
+
 CREATE INDEX IF NOT EXISTS idx_users_refresh_expires
-    ON career_operations.users (refresh_token_expires_at)
-    WHERE refresh_token_expires_at IS NOT NULL;
+    ON users (refresh_token_expires_at);
+

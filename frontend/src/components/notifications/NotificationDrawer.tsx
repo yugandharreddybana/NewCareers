@@ -17,6 +17,7 @@
  */
 
 import { useEffect, useState } from 'react';
+import { useNotificationsPage, useInvalidateNotifications } from '@/hooks/queries';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   X, Sparkles, Calendar, Briefcase, BarChart2,
@@ -83,41 +84,36 @@ interface Props {
 // ── Drawer ────────────────────────────────────────────────────────────
 
 export default function NotificationDrawer({ open, onClose, onCountChange }: Props) {
-  const [items,   setItems]   = useState<AppNotification[]>([]);
-  const [loading, setLoading] = useState(false);
+  const invalidateNotifications = useInvalidateNotifications();
+  const { data, isLoading: loading } = useNotificationsPage(0, 50, { enabled: open });
+  const [localItems, setLocalItems] = useState<AppNotification[] | null>(null);
 
+  const items = localItems ?? data?.items ?? [];
   const unreadCount = items.filter(n => !n.read).length;
 
-  async function load() {
-    setLoading(true);
-    try {
-      const res = await notificationsApi.getNotifications(0, 50);
-      setItems(res.items);
-      onCountChange?.(res.unreadCount);
-    } catch { /* silent */ }
-    finally { setLoading(false); }
-  }
-
   useEffect(() => {
-    if (open) load();
+    if (open) setLocalItems(null);
   }, [open]);
 
   async function handleMarkRead(id: string) {
     await notificationsApi.markRead(id).catch(() => {});
-    setItems(prev => prev.map(n => n.id === id ? { ...n, read: true } : n));
+    setLocalItems(prev => (prev ?? items).map(n => n.id === id ? { ...n, read: true } : n));
     onCountChange?.(Math.max(0, unreadCount - 1));
+    void invalidateNotifications();
   }
 
   async function handleMarkAllRead() {
     await notificationsApi.markAllRead().catch(() => {});
-    setItems(prev => prev.map(n => ({ ...n, read: true })));
+    setLocalItems(prev => (prev ?? items).map(n => ({ ...n, read: true })));
     onCountChange?.(0);
+    void invalidateNotifications();
   }
 
   async function handleClearAll() {
     await notificationsApi.clearAll().catch(() => {});
-    setItems([]);
+    setLocalItems([]);
     onCountChange?.(0);
+    void invalidateNotifications();
   }
 
   return (

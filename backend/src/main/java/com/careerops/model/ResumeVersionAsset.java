@@ -6,7 +6,7 @@ import java.time.Instant;
 import java.util.UUID;
 
 @Entity
-@Table(name = "resume_version_assets", schema = "career_operations")
+@Table(name = "resume_version_assets", schema = "careerops")
 @Getter @Setter @NoArgsConstructor @AllArgsConstructor @Builder
 public class ResumeVersionAsset {
 
@@ -37,3 +37,4 @@ public class ResumeVersionAsset {
         if (createdAt == null) createdAt = Instant.now();
     }
 }
+

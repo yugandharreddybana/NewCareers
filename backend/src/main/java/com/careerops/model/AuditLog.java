@@ -10,7 +10,7 @@ import java.util.Map;
 import java.util.UUID;
 
 @Entity
-@Table(name = "audit_logs", schema = "career_operations",
+@Table(name = "audit_logs", schema = "careerops",
        indexes = {
            @Index(name = "idx_audit_logs_user_created", columnList = "user_id, created_at DESC")
        })
@@ -60,3 +60,4 @@ public class AuditLog {
         if (createdAt == null) createdAt = Instant.now();
     }
 }
+

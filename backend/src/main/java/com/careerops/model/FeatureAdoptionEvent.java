@@ -10,7 +10,7 @@ import java.time.Instant;
 import java.util.UUID;
 
 @Entity
-@Table(name = "feature_adoption_events", schema = "career_operations")
+@Table(name = "feature_adoption_events", schema = "careerops")
 @Getter @Setter @NoArgsConstructor @AllArgsConstructor @Builder
 public class FeatureAdoptionEvent {
     @Id @GeneratedValue(strategy = GenerationType.UUID) private UUID id;
@@ -29,3 +29,4 @@ public class FeatureAdoptionEvent {
         if (createdAt == null) createdAt = Instant.now();
     }
 }
+

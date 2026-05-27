@@ -7,7 +7,7 @@ import java.time.Instant;
 import java.util.UUID;
 
 @Entity
-@Table(name = "shared_workspaces", schema = "career_operations")
+@Table(name = "shared_workspaces", schema = "careerops")
 @Getter
 @Setter
 @NoArgsConstructor
@@ -49,3 +49,4 @@ public class SharedWorkspace {
         this.updatedAt = Instant.now();
     }
 }
+

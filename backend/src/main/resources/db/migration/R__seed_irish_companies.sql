@@ -1,4 +1,4 @@
-SET search_path TO career_operations;
+SET search_path TO careerops;
 
 -- R__seed_irish_companies.sql
 -- Repeatable migration to keep the irish_companies reference table synchronized across environments.
@@ -31,3 +31,4 @@ INSERT INTO irish_companies (name, careers_url, category) VALUES
 ON CONFLICT (name) DO UPDATE SET 
     careers_url = EXCLUDED.careers_url,
     category = EXCLUDED.category;
+

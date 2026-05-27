@@ -6,12 +6,12 @@ import java.time.Instant;
 import java.util.UUID;
 
 @Entity
-@Table(name = "job_watchlists", schema = "career_operations",
+@Table(name = "job_watchlists", schema = "careerops",
        indexes = {
            @Index(name = "idx_job_watchlists_user", columnList = "user_id")
        })
 @org.hibernate.annotations.SQLRestriction("deleted_at IS NULL")
-@org.hibernate.annotations.SQLDelete(sql = "UPDATE career_operations.job_watchlists SET deleted_at = CURRENT_TIMESTAMP WHERE id = ?")
+@org.hibernate.annotations.SQLDelete(sql = "UPDATE careerops.job_watchlists SET deleted_at = CURRENT_TIMESTAMP WHERE id = ?")
 @Getter @Setter @NoArgsConstructor @AllArgsConstructor @Builder
 public class JobWatchlist {
 
@@ -97,3 +97,4 @@ public class JobWatchlist {
         updatedAt = Instant.now();
     }
 }
+

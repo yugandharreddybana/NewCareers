@@ -1,0 +1,37 @@
+@keyframes welcome-shimmer {
+  0% { background-position: -200% 0; }
+  100% { background-position: 200% 0; }
+}
+
+.welcome-shimmer {
+  background: linear-gradient(
+    90deg,
+    rgba(255, 255, 255, 0) 0%,
+    rgba(255, 255, 255, 0.3) 50%,
+    rgba(255, 255, 255, 0) 100%
+  );
+  background-size: 200% 100%;
+  animation: welcome-shimmer 3s infinite linear;
+}
+
+.welcome-stagger-in {
+  opacity: 0;
+  transform: translateY(20px);
+  animation: welcome-slide-up 0.6s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+@keyframes welcome-slide-up {
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.welcome-bg-radial-premium {
+  background: radial-gradient(circle at top center, #1a365d 0%, #001a42 100%);
+}
+
+.welcome-dot-grid {
+  background-image: radial-gradient(#ffffff 0.5px, transparent 0.5px);
+  background-size: 24px 24px;
+}

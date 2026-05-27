@@ -10,7 +10,7 @@ import java.time.Instant;
 import java.util.UUID;
 
 @Entity
-@Table(name = "onboarding_events", schema = "career_operations")
+@Table(name = "onboarding_events", schema = "careerops")
 @Getter @Setter @NoArgsConstructor @AllArgsConstructor @Builder
 public class OnboardingEvent {
     @Id @GeneratedValue(strategy = GenerationType.UUID) private UUID id;
@@ -29,3 +29,4 @@ public class OnboardingEvent {
         if (createdAt == null) createdAt = Instant.now();
     }
 }
+

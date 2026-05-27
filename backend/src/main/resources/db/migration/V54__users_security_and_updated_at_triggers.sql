@@ -1,4 +1,4 @@
-SET search_path TO career_operations;
+SET search_path TO careerops;
 
 -- V54 — Security hardening and updated_at database triggers.
 
@@ -30,3 +30,4 @@ CREATE TRIGGER trg_user_jobs_updated_at
     BEFORE UPDATE ON user_jobs
     FOR EACH ROW
     EXECUTE FUNCTION set_updated_at();
+

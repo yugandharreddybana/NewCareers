@@ -1,6 +1,9 @@
 package com.careerops.controller;
 
+import com.careerops.dto.OnboardingDeliveryDtos.DeliveryStatusResponse;
+import com.careerops.dto.OnboardingDeliveryDtos.StartDeliveryResponse;
 import com.careerops.service.OnboardingAnalyticsService;
+import com.careerops.service.OnboardingDeliveryService;
 import com.careerops.util.AuthUtil;
 import lombok.RequiredArgsConstructor;
 import org.springframework.web.bind.annotation.*;
@@ -23,6 +26,7 @@ import java.util.UUID;
 public class OnboardingController {
 
     private final OnboardingAnalyticsService analyticsService;
+    private final OnboardingDeliveryService deliveryService;
 
     public record TrackEventRequest(
         String type,
@@ -42,6 +46,18 @@ public class OnboardingController {
         return Map.of(
             "completedSteps", completedSteps
         );
+    }
+
+    /** Track A — start first-run job delivery (CV normalize → scrape → evaluate). */
+    @PostMapping("/delivery/start")
+    public StartDeliveryResponse startDelivery() {
+        return deliveryService.start(AuthUtil.currentUserId());
+    }
+
+    /** Track A — poll delivery progress for the onboarding loader. */
+    @GetMapping("/delivery/status")
+    public DeliveryStatusResponse deliveryStatus() {
+        return deliveryService.status(AuthUtil.currentUserId());
     }
 
     // Tasks 69+70 — POST /onboarding/event

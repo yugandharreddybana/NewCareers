@@ -1,11 +1,3 @@
-/**
- * agentMemoryApi.ts — typed client for /agent-memory.
- *
- * Pass 6 #6.011 — consolidated from src/api/agentMemoryApi.ts. The shape
- * preserved here is the one actually consumed by AgentMemoryPage.tsx
- * (CareerMemory). The earlier services/ duplicate (AgentMemory) was a
- * scaffolded stub; it is replaced by this canonical implementation.
- */
 import { api } from './api';
 
 export interface CareerMemory {
@@ -24,20 +16,25 @@ export interface CareerMemory {
 export type AgentMemorySearchResult = Record<string, unknown>;
 
 export const agentMemoryApi = {
-  list:     (category?: string) =>
+  list: (category?: string): Promise<{ memories: CareerMemory[]; total: number }> =>
     api.get<{ memories: CareerMemory[]; total: number }>('/agent-memory', {
       params: category ? { category } : {},
     }).then(r => r.data),
-  upsert:   (body: Partial<CareerMemory>) =>
+
+  upsert: (body: Partial<CareerMemory>): Promise<CareerMemory> =>
     api.post<CareerMemory>('/agent-memory', body).then(r => r.data),
-  search:   (query: string) =>
+
+  search: (query: string): Promise<AgentMemorySearchResult[] | { results: AgentMemorySearchResult[] }> =>
     api.get<AgentMemorySearchResult[] | { results: AgentMemorySearchResult[] }>('/agent-memory/search', {
       params: { query },
     }).then(r => r.data),
-  toggle:   (id: string, memoryEnabled: boolean) =>
+
+  toggle: (id: string, memoryEnabled: boolean): Promise<CareerMemory> =>
     api.patch<CareerMemory>(`/agent-memory/${id}/toggle`, { memoryEnabled }).then(r => r.data),
-  delete:   (id: string) =>
-    api.delete(`/agent-memory/${id}`),
-  resetAll: () =>
-    api.delete('/agent-memory'),
+
+  delete: (id: string): Promise<unknown> =>
+    api.delete(`/agent-memory/${id}`).then(r => r.data),
+
+  resetAll: (): Promise<unknown> =>
+    api.delete('/agent-memory').then(r => r.data),
 };

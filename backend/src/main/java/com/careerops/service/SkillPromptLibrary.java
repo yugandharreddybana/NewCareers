@@ -34,12 +34,13 @@ public class SkillPromptLibrary {
 
     private static final Logger log = LoggerFactory.getLogger(SkillPromptLibrary.class);
 
-    // All 14 skill names (9 Phase 1 + 5 Phase 2)
+    // Phase 1 + Phase 2 + plugin catalog skills (help, track)
     static final List<String> ALL_SKILLS = List.of(
         "evaluate", "tailor-resume", "apply", "outreach",
         "research", "prep-interview", "compare", "triage", "scan",
         "salary-negotiation", "culture-fit", "linkedin-optimize",
-        "cover-letter", "skills-gap-plan"
+        "cover-letter", "skills-gap-plan",
+        "track", "help"
     );
 
     static final List<String> REFERENCE_DOCS = List.of(
@@ -66,7 +67,9 @@ public class SkillPromptLibrary {
         Map.entry("culture-fit",         List.of("profile-schema.md", "scoring-rubric.md")),
         Map.entry("linkedin-optimize",   List.of("profile-schema.md", "ats-rules.md")),
         Map.entry("cover-letter",        List.of("profile-schema.md", "ats-rules.md")),
-        Map.entry("skills-gap-plan",     List.of("profile-schema.md", "scoring-rubric.md"))
+        Map.entry("skills-gap-plan",     List.of("profile-schema.md", "scoring-rubric.md")),
+        Map.entry("track",               List.of("states.md", "profile-schema.md")),
+        Map.entry("help",                List.of())
     );
 
     private final CareerMemoryService careerMemoryService;
@@ -81,7 +84,7 @@ public class SkillPromptLibrary {
     @Value("${skill.prompt.upstream.repo:career-ops-plugin}")
     private String upstreamRepo;
 
-    @Value("${skill.prompt.fork.owner:}")
+    @Value("${skill.prompt.fork.owner:yugandharreddybana}")
     private String forkOwner;
 
     @Value("${skill.prompt.fork.repo:career-ops-plugin}")
@@ -174,6 +177,13 @@ Apply ALL of the following rules when generating the tailored resume:\n
 5. First-person authentic voice throughout. Irish English spelling.
 6. Every bullet must showcase unique candidate value and business impact to THIS specific employer.
 7. Mirror exact keywords from the JD naturally — do not keyword-stuff.
+
+After calling save_resume_html with the full ATS HTML resume, return ONLY valid JSON (no markdown fences) with:
+- summary: string (2-3 sentences)
+- keywordsAdded: string[] (JD keywords woven in)
+- sections: [{ name, original, rewritten, rationale }] for Summary, Experience, Skills (min 3 sections)
+- warnings: string[] (optional ATS issues)
+Do NOT include raw HTML in the JSON — HTML is saved via save_resume_html only.
 """);
         }
 
@@ -251,10 +261,16 @@ Apply ALL of the following rules when generating the tailored resume:\n
 
     private @Nullable String loadFromClasspath(String filePath) {
         try {
-            String resource = "/career-ops-skills/" + filePath;
+            // GitHub layout: skills/evaluate/SKILL.md — bundled: career-ops-skills/evaluate/SKILL.md
+            String bundledPath = filePath.startsWith("skills/")
+                ? filePath.substring("skills/".length())
+                : filePath;
+            String resource = "/career-ops-skills/" + bundledPath;
             InputStream is = getClass().getResourceAsStream(resource);
             if (is == null) return null;
-            return new String(is.readAllBytes(), StandardCharsets.UTF_8);
+            String content = new String(is.readAllBytes(), StandardCharsets.UTF_8);
+            log.info("[Layer 3-classpath] loaded: {}", bundledPath);
+            return content;
         } catch (Exception e) {
             log.debug("Classpath load failed for: {} — {}", filePath, e.getMessage());
             return null;
@@ -324,6 +340,16 @@ Apply ALL of the following rules when generating the tailored resume:\n
                 - toneIndicator: string (e.g. \"Professional & Direct\")
                 - personalisationHighlights: string[] (3 elements that make this letter specific)
                 - wordCount: number
+                """;
+            case "track" -> """
+                You are CareerOps AI — Application Tracker.
+                Summarize the user's saved applications and Kanban statuses from tool data.
+                Output valid JSON with fields: type ("application_tracker"), applications[], stats{}, message.
+                """;
+            case "help" -> """
+                You are CareerOps AI — Skill directory.
+                List available skills and suggest the best next action for the user's job-search stage.
+                Output valid JSON with fields: type ("skill_directory"), skills[], suggestion, message.
                 """;
             case "skills-gap-plan" -> """
                 You are CareerOps AI — Learning Roadmap Builder.

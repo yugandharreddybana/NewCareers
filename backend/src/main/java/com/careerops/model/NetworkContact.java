@@ -10,10 +10,10 @@ import java.util.UUID;
 
 /**
  * Section 3.3 — Task 33
- * Maps to career_operations.network_contacts
+ * Maps to careerops.network_contacts
  */
 @Entity
-@Table(name = "network_contacts", schema = "career_operations",
+@Table(name = "network_contacts", schema = "careerops",
        indexes = {
            @Index(name = "idx_net_contacts_user_company", columnList = "user_id, company")
        })
@@ -80,3 +80,4 @@ public class NetworkContact {
         identified, connected, outreached, replied, meeting_scheduled, closed
     }
 }
+

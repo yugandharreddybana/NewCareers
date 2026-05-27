@@ -16,7 +16,6 @@ import { Sparkles, Mail, Loader2, CheckCircle } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { PageMeta } from '@/components/PageMeta';
 import { useAuth } from '@/context/AuthContext';
-import { USE_MOCKS } from '@/lib/env';
 
 const PLAN_PREVIEWS = [
   {
@@ -46,7 +45,7 @@ const PLAN_PREVIEWS = [
 export default function BillingPage() {
   const { user } = useAuth();
   const billingInterestKey = user
-    ? `${USE_MOCKS ? 'co_billing_interest_mock_' : 'co_billing_interest_'}${user.id}`
+    ? `co_billing_interest_${user.id}`
     : null;
   const [interested, setInterested] = useState(() =>
     billingInterestKey ? window.localStorage.getItem(billingInterestKey) === '1' : false,

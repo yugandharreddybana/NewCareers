@@ -1,82 +1,18 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { useMutation } from '@tanstack/react-query';
-import { kanbanApi } from '@/services/api';
+import { useKanbanPatchMutation } from '@/hooks/queries';
 import type { JobCard, KanbanColumn } from '@/types';
-import { KANBAN_COLUMNS } from '@/types';
 import AppliedCvModal from './AppliedCvModal';
 import toast from 'react-hot-toast';
 
-// Curated high-end enterprise SaaS color tokens
-const COLUMN_STYLES: Record<KanbanColumn, {
-  bg: string;
-  dot: string;
-  headerBg: string;
-  dropRing: string;
-  icon: string;
-  border: string;
-  accent: string;
-  label: string;
-}> = {
-  Discovered: {
-    bg: 'bg-slate-50/40 backdrop-blur-sm',
-    dot: 'bg-slate-400',
-    headerBg: 'bg-slate-100/80 border-slate-200/60',
-    border: 'border-slate-200/50',
-    dropRing: 'ring-slate-400/40',
-    accent: 'bg-slate-500',
-    icon: '🔍',
-    label: 'Discovered',
-  },
-  Saved: {
-    bg: 'bg-indigo-50/20 backdrop-blur-sm',
-    dot: 'bg-indigo-500',
-    headerBg: 'bg-indigo-50/60 border-indigo-100/50',
-    border: 'border-indigo-100/40',
-    dropRing: 'ring-indigo-400/40',
-    accent: 'bg-indigo-600',
-    icon: '⭐️',
-    label: 'Saved',
-  },
-  Applied: {
-    bg: 'bg-amber-50/20 backdrop-blur-sm',
-    dot: 'bg-amber-500',
-    headerBg: 'bg-amber-50/60 border-amber-100/50',
-    border: 'border-amber-100/40',
-    dropRing: 'ring-amber-400/40',
-    accent: 'bg-amber-600',
-    icon: '✉️',
-    label: 'Applied',
-  },
-  Interview: {
-    bg: 'bg-violet-50/20 backdrop-blur-sm',
-    dot: 'bg-violet-500',
-    headerBg: 'bg-violet-50/60 border-violet-100/50',
-    border: 'border-violet-100/40',
-    dropRing: 'ring-violet-400/40',
-    accent: 'bg-violet-600',
-    icon: '📅',
-    label: 'Interviewing',
-  },
-  Offer: {
-    bg: 'bg-emerald-50/20 backdrop-blur-sm',
-    dot: 'bg-emerald-500',
-    headerBg: 'bg-emerald-50/60 border-emerald-100/50',
-    border: 'border-emerald-100/40',
-    dropRing: 'ring-emerald-400/40',
-    accent: 'bg-emerald-600',
-    icon: '🎉',
-    label: 'Offered',
-  },
-  Rejected: {
-    bg: 'bg-rose-50/20 backdrop-blur-sm',
-    dot: 'bg-rose-400',
-    headerBg: 'bg-rose-50/60 border-rose-100/50',
-    border: 'border-rose-100/40',
-    dropRing: 'ring-rose-400/40',
-    accent: 'bg-rose-600',
-    icon: '❌',
-    label: 'Archived',
-  },
+const DISPLAY_COLUMNS: KanbanColumn[] = ['Discovered', 'Saved', 'Applied', 'Interview', 'Offer', 'Rejected'];
+
+const COLUMN_META: Record<KanbanColumn, { label: string; dot: string }> = {
+  Saved: { label: 'Saved', dot: 'bg-tertiary' },
+  Applied: { label: 'Applied', dot: 'bg-primary' },
+  Interview: { label: 'Interviewing', dot: 'bg-secondary' },
+  Offer: { label: 'Offer', dot: 'bg-primary-container' },
+  Discovered: { label: 'Discovered', dot: 'bg-outline' },
+  Rejected: { label: 'Archived', dot: 'bg-outline' },
 };
 
 interface Props {
@@ -96,23 +32,36 @@ interface MoveJobPayload {
   targetCol: KanbanColumn;
 }
 
+function getCardInitial(company: string): string {
+  const trimmed = company.trim();
+  return trimmed ? trimmed.charAt(0).toUpperCase() : 'J';
+}
+
+function timeAgoLabel(iso?: string): string {
+  if (!iso) return 'Recently';
+  const diffMs = Date.now() - new Date(iso).getTime();
+  if (Number.isNaN(diffMs)) return 'Recently';
+  const days = Math.max(0, Math.floor(diffMs / 86_400_000));
+  if (days <= 0) return 'Today';
+  if (days === 1) return '1 day ago';
+  return `${days} days ago`;
+}
+
 export const KanbanBoard: React.FC<Props> = ({ jobs: initialJobs, onJobClick, onColumnChange }) => {
   const [jobs, setJobs] = useState<JobCard[]>(initialJobs);
   const [dragging, setDragging] = useState<DragState | null>(null);
   const [overCol, setOverCol] = useState<KanbanColumn | null>(null);
   const [cvModal, setCvModal] = useState<{ userJobId: string; jobTitle: string } | null>(null);
   const patchInFlight = useRef<Set<string>>(new Set());
+  const moveJobMutation = useKanbanPatchMutation();
 
   useEffect(() => { setJobs(initialJobs); }, [initialJobs]);
 
   const byColumn = useCallback((col: KanbanColumn) =>
     jobs.filter(j => j.kanbanColumn === col), [jobs]);
 
-  const moveJobMutation = useMutation<void, unknown, MoveJobPayload>({
-    mutationFn: async ({ job, targetCol }) => {
-      await kanbanApi.patch(job.userJobId, { kanbanColumn: targetCol });
-    },
-    onMutate: ({ job, targetCol }) => {
+  const runMove = {
+    mutate: ({ job, sourceCol, targetCol }: MoveJobPayload) => {
       patchInFlight.current.add(job.userJobId);
       setJobs(prev => prev.map(item =>
         item.userJobId === job.userJobId ? { ...item, kanbanColumn: targetCol } : item,
@@ -121,20 +70,24 @@ export const KanbanBoard: React.FC<Props> = ({ jobs: initialJobs, onJobClick, on
       if (targetCol === 'Applied') {
         setCvModal({ userJobId: job.userJobId, jobTitle: job.title });
       }
+
+      moveJobMutation.mutate(
+        { userJobId: job.userJobId, body: { kanbanColumn: targetCol } },
+        {
+          onSuccess: () => onColumnChange?.(job, targetCol),
+          onError: () => {
+            setJobs(prev => prev.map(item =>
+              item.userJobId === job.userJobId ? { ...item, kanbanColumn: sourceCol } : item,
+            ));
+            toast.error('Failed to move card. Please try again.');
+          },
+          onSettled: () => {
+            patchInFlight.current.delete(job.userJobId);
+          },
+        },
+      );
     },
-    onSuccess: (_data, { job, targetCol }) => {
-      onColumnChange?.(job, targetCol);
-    },
-    onError: (_error, { job, sourceCol }) => {
-      setJobs(prev => prev.map(item =>
-        item.userJobId === job.userJobId ? { ...item, kanbanColumn: sourceCol } : item,
-      ));
-      toast.error('Failed to move card. Please try again.');
-    },
-    onSettled: (_data, _error, { job }) => {
-      patchInFlight.current.delete(job.userJobId);
-    },
-  });
+  };
 
   const handleDragStart = (e: React.DragEvent, job: JobCard) => {
     setDragging({ jobId: job.userJobId, sourceCol: job.kanbanColumn });
@@ -163,15 +116,14 @@ export const KanbanBoard: React.FC<Props> = ({ jobs: initialJobs, onJobClick, on
     setDragging(null);
     setOverCol(null);
 
-    moveJobMutation.mutate({ job, sourceCol, targetCol });
+    runMove.mutate({ job, sourceCol, targetCol });
   };
 
   return (
     <>
-      {/* SaaS Flexible Board Layout — each column gets generous width & horizontal scroll if needed */}
-      <div className="flex gap-4 overflow-x-auto pb-6 pt-1 min-h-[calc(100vh-210px)] select-none">
-        {KANBAN_COLUMNS.map(col => {
-          const style = COLUMN_STYLES[col];
+      <div className="flex overflow-x-auto gap-0 pb-8 select-none">
+        {DISPLAY_COLUMNS.map((col, index) => {
+          const meta = COLUMN_META[col];
           const colJobs = byColumn(col);
           const isOver = overCol === col;
 
@@ -179,35 +131,44 @@ export const KanbanBoard: React.FC<Props> = ({ jobs: initialJobs, onJobClick, on
             <div
               key={col}
               className={`
-                flex-shrink-0 w-[310px] rounded-2xl border flex flex-col transition-all duration-200
-                ${style.bg} ${style.border}
-                ${isOver ? `ring-2 ${style.dropRing} shadow-xl scale-[1.01] bg-white/70` : 'shadow-sm hover:shadow-md'}
+                min-w-[320px] max-w-[320px] flex flex-col gap-4 transition-all px-3
+                ${index < DISPLAY_COLUMNS.length - 1 ? 'border-r border-outline-variant/70' : ''}
+                ${isOver ? 'scale-[1.01]' : ''}
               `}
               onDragOver={e => { e.preventDefault(); setOverCol(col); }}
               onDragLeave={() => setOverCol(null)}
               onDrop={e => handleDrop(e, col)}
             >
-              {/* Column header */}
-              <div className={`flex items-center justify-between px-3.5 py-3 border-b rounded-t-2xl bg-white/50 ${style.headerBg}`}>
+              <div className="flex items-center justify-between px-1">
                 <div className="flex items-center gap-2">
-                  <span className="text-sm select-none">{style.icon}</span>
-                  <span className="text-[12px] font-bold text-slate-700 uppercase tracking-wider">{style.label}</span>
+                  <span className={`w-2.5 h-2.5 rounded-full ${meta.dot}`} />
+                  <h3 className="font-headline-sm text-headline-sm text-on-surface">{meta.label}</h3>
                 </div>
-                <span className="text-xs font-bold text-slate-500 bg-white/80 border border-slate-100 rounded-full px-2.5 py-0.5 min-w-[24px] text-center shadow-sm">
-                  {colJobs.length}
-                </span>
+                <div className="flex items-center gap-2">
+                  <span className="bg-surface-container-highest text-on-surface-variant px-2 py-0.5 rounded-full font-label-sm text-label-sm">
+                    {colJobs.length}
+                  </span>
+                  <button
+                    type="button"
+                    className="material-symbols-outlined text-on-surface-variant hover:text-primary transition-colors"
+                  >
+                    more_horiz
+                  </button>
+                </div>
               </div>
 
-              {/* Cards area */}
-              <div className="flex-1 p-3 space-y-3 overflow-y-auto" style={{ maxHeight: 'calc(100vh - 290px)' }}>
-                {colJobs.length === 0 && (
-                  <div className={`
-                    flex flex-col items-center justify-center py-12 rounded-xl
-                    border-2 border-dashed border-slate-200/50 text-slate-300
-                    transition-all duration-200 ${isOver ? 'border-indigo-300 bg-white/40 text-indigo-400' : ''}
-                  `}>
-                    <span className="text-3xl mb-1.5 opacity-40 select-none">{style.icon}</span>
-                    <span className="text-xs font-medium">Drag jobs here</span>
+              <div className="flex flex-col gap-3">
+                {colJobs.length === 0 && col === 'Offer' && (
+                  <div className="flex flex-col items-center justify-center h-48 border-2 border-dashed border-outline-variant rounded-xl bg-surface-container-low">
+                    <span className="material-symbols-outlined text-outline mb-2 text-[32px]">celebration</span>
+                    <p className="font-body-sm text-body-sm text-on-surface-variant text-center px-8">
+                      No offers yet. Keep momentum high!
+                    </p>
+                  </div>
+                )}
+                {colJobs.length === 0 && col !== 'Offer' && (
+                  <div className={`flex flex-col items-center justify-center h-36 border-2 border-dashed rounded-xl bg-surface-container-low transition-colors ${isOver ? 'border-primary' : 'border-outline-variant'}`}>
+                    <p className="font-body-sm text-body-sm text-on-surface-variant">Drag jobs here</p>
                   </div>
                 )}
                 {colJobs.map(job => (
@@ -217,55 +178,43 @@ export const KanbanBoard: React.FC<Props> = ({ jobs: initialJobs, onJobClick, on
                     onDragStart={e => handleDragStart(e, job)}
                     onClick={() => onJobClick?.(job)}
                     className="
-                      bg-white rounded-xl border border-slate-100/80 p-3.5
+                      bg-surface-container-lowest p-gutter rounded-xl border border-outline-variant
+                      shadow-[0_4px_12px_rgba(0,0,0,0.04)] transition-all
                       cursor-grab active:cursor-grabbing
-                      shadow-sm hover:shadow-lg hover:border-indigo-100
-                      transition-all duration-200 select-none
-                      hover:-translate-y-1 active:scale-[0.98]
-                      group relative overflow-hidden
+                      hover:-translate-y-[2px] hover:border-primary
+                      select-none
+                      relative
+                      ${col === 'Interview' ? 'border-l-4 border-l-primary' : ''}
                     "
                   >
-                    {/* Left Accent Bar */}
-                    <div className={`absolute top-0 left-0 bottom-0 w-1 ${style.accent} opacity-0 group-hover:opacity-100 transition-all duration-200`} />
-
-                    {/* Job Title */}
-                    <p className="text-[13px] font-bold text-slate-800 leading-normal line-clamp-2 group-hover:text-indigo-600 transition-colors pl-1">
-                      {job.title}
-                    </p>
-
-                    {/* Company */}
-                    <p className="text-xs font-medium text-slate-400 mt-1 pl-1 truncate select-none">
-                      {job.company}
-                    </p>
-
-                    {/* Match Indicator */}
-                    {job.matchPercent !== undefined && (
-                      <div className="mt-3 pl-1 flex items-center gap-2 select-none">
-                        <div className="flex-1 h-1.5 bg-slate-100 rounded-full overflow-hidden border border-slate-50">
-                          <div
-                            className={`h-full rounded-full transition-all duration-500 ${
-                              job.matchPercent >= 75 ? 'bg-emerald-500' :
-                              job.matchPercent >= 50 ? 'bg-amber-400' : 'bg-rose-400'
-                            }`}
-                            style={{ width: `${job.matchPercent}%` }}
-                          />
-                        </div>
-                        <span className={`text-[11px] font-bold tabular-nums tracking-tight ${
-                          job.matchPercent >= 75 ? 'text-emerald-600' :
-                          job.matchPercent >= 50 ? 'text-amber-600' : 'text-rose-500'
-                        }`}>
-                          {job.matchPercent}%
+                    <div className="flex justify-between items-start mb-3">
+                      <div className="w-10 h-10 rounded-lg bg-secondary-fixed border border-outline-variant flex items-center justify-center text-[11px] font-bold text-on-secondary-fixed-variant">
+                        {getCardInitial(job.company)}
+                      </div>
+                      {job.matchPercent !== undefined && (
+                        <span className="text-primary bg-primary-fixed text-[10px] px-2 py-1 rounded font-bold uppercase tracking-wider">
+                          {job.matchPercent}% Match
                         </span>
+                      )}
+                    </div>
+                    <h4 className="font-headline-sm text-[16px] text-on-surface mb-1 line-clamp-2">{job.title}</h4>
+                    <p className="font-body-sm text-body-sm text-on-surface-variant mb-4 truncate">
+                      {job.company}{job.location ? ` • ${job.location}` : ''}
+                    </p>
+                    {col === 'Interview' && (
+                      <div className="bg-surface-container p-2 rounded-lg mb-4">
+                        <div className="flex items-center gap-2 text-primary">
+                          <span className="material-symbols-outlined text-[18px]">event</span>
+                          <span className="font-label-sm text-label-sm font-bold">Interview: Scheduled</span>
+                        </div>
                       </div>
                     )}
-
-                    {/* Location Tag */}
-                    {job.location && (
-                      <div className="mt-2.5 pl-1 flex items-center gap-1.5 select-none">
-                        <span className="text-[10px] text-slate-300">📍</span>
-                        <span className="text-[11px] font-medium text-slate-400 truncate">{job.location}</span>
-                      </div>
-                    )}
+                    <div className="flex items-center justify-between">
+                      <span className="font-label-sm text-label-sm text-on-surface-variant flex items-center gap-1">
+                        <span className="material-symbols-outlined text-[16px]">schedule</span>
+                        {timeAgoLabel(job.deliveredAt ?? job.postedAt)}
+                      </span>
+                    </div>
                   </div>
                 ))}
               </div>

@@ -8,7 +8,7 @@ import java.time.Instant;
 import java.util.UUID;
 
 @Entity
-@Table(name = "batch_skill_runs", schema = "career_operations")
+@Table(name = "batch_skill_runs", schema = "careerops")
 @Getter @Setter @NoArgsConstructor @AllArgsConstructor @Builder
 public class BatchSkillRun {
 
@@ -40,3 +40,4 @@ public class BatchSkillRun {
     @PreUpdate
     void touch() { updatedAt = Instant.now(); }
 }
+

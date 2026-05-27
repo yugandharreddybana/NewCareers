@@ -70,18 +70,38 @@ export interface Profile {
   location?: string;
   salaryMin?: number;
   salaryMax?: number;
+  salaryCurrency?: string;
+  availability?: string;
   sectors?: string[];
   freshnessHours?: number;
   minMatchPercent?: number;
   sponsorshipRequired?: boolean;
   onboarded?: boolean;
   activeCvFileName?: string | null;
+  activeCvId?: string | null;
   portfolioItems?: PortfolioItem[];
   goalTitle?: string;
   goalSalaryMin?: number;
   goalSalaryMax?: number;
   goalLocation?: string;
   openToRemote?: boolean;
+  experienceLevel?: string;
+  workExperience?: Array<{
+    jobTitle?: string;
+    companyName?: string;
+    startDate?: string;
+    endDate?: string;
+    current?: boolean;
+    description?: string;
+  }>;
+  education?: Array<{
+    schoolName?: string;
+    degree?: string;
+    fieldOfStudy?: string;
+    graduationYear?: string;
+  }>;
+  remotePolicy?: string;
+  hybridOnsiteDays?: string;
   completenessScore?: number;
   version?: number;
 }
@@ -121,6 +141,8 @@ export interface JobDetail extends JobCard {
   sector?: string;
   aiScore?: number;
   cvImprovementTips?: string[];
+  /** Full evaluate-skill JSON from daily job delivery (sections, scores, tips). */
+  scoreBreakdown?: Record<string, unknown> | null;
 }
 
 export interface JobsListResponse {

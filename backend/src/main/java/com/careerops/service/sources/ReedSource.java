@@ -29,6 +29,11 @@ public class ReedSource implements JobSource {
     @Override public String name() { return "reed"; }
 
     @Override
+    public boolean hasBudget() {
+        return key != null && !key.isBlank() && !key.startsWith("YOUR_");
+    }
+
+    @Override
     public List<Job> fetch(UserProfile profile) {
         List<Job> out = new ArrayList<>();
         if (key == null || key.isBlank() || key.startsWith("YOUR_")) return out;

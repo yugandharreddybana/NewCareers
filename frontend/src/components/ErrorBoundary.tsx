@@ -136,7 +136,15 @@ export class ErrorBoundary extends Component<Props, State> {
  * boundaries. Avoids the loop where the Dashboard route fails and links to
  * itself (Pass 6 #6.034).
  */
-export function RouteFallback({ label }: { label: string }) {
+export function RouteFallback({
+  label,
+  error,
+  onRetry,
+}: {
+  label: string;
+  error?: Error | null;
+  onRetry?: () => void;
+}) {
   const path = typeof window !== 'undefined' ? window.location.pathname : '';
   const safeHref =
     path === '/dashboard' ? '/login' :
@@ -148,12 +156,26 @@ export function RouteFallback({ label }: { label: string }) {
     'Go to Dashboard';
 
   return (
-    <div className="flex flex-col items-center justify-center min-h-[40vh] gap-3 text-gray-500 px-6 text-center">
+    <div className="flex flex-col items-center justify-center min-h-[40vh] gap-3 text-gray-500 px-6 text-center max-w-lg mx-auto">
       <span className="text-3xl" aria-hidden="true">⚠️</span>
       <p className="text-sm">
         {label} failed to load.{' '}
         <a href={safeHref} className="underline text-indigo-500">{safeLabel}</a>.
       </p>
+      {IS_DEV && error?.message && (
+        <pre className="text-left text-xs bg-gray-100 rounded-lg p-3 w-full overflow-auto max-h-28 text-red-600">
+          {error.message}
+        </pre>
+      )}
+      {onRetry && (
+        <button
+          type="button"
+          onClick={onRetry}
+          className="px-4 py-2 rounded-lg bg-indigo-600 text-white text-sm hover:bg-indigo-700 transition"
+        >
+          Try again
+        </button>
+      )}
     </div>
   );
 }

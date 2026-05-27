@@ -150,8 +150,8 @@ public class JobRecommendationService {
                        uj.match_percent, uj.matched_skills,
                        j.salary_min, j.salary_max, j.currency,
                        j.source_url, j.source_name, j.posted_at, j.sponsorship
-                FROM user_jobs uj
-                JOIN jobs j ON j.id = uj.job_id
+                FROM careerops.user_jobs uj
+                JOIN careerops.jobs j ON j.id = uj.job_id
                 WHERE uj.user_id         = :userId
                   AND uj.kanban_column   = 'Discovered'
                   AND uj.match_percent   IS NOT NULL
@@ -170,7 +170,7 @@ public class JobRecommendationService {
         @SuppressWarnings("unchecked")
         List<Object[]> rows = em.createNativeQuery("""
                 SELECT skill, COUNT(*) AS cnt
-                FROM skill_runs
+                FROM careerops.skill_runs
                 WHERE user_id = :userId
                 GROUP BY skill
                 ORDER BY cnt DESC
@@ -195,7 +195,7 @@ public class JobRecommendationService {
     private Set<String> getEvaluatedSkills(UUID userId) {
         List<String> rows = em.createNativeQuery("""
                 SELECT uj.matched_skills
-                FROM user_jobs uj
+                FROM careerops.user_jobs uj
                 WHERE uj.user_id       = :userId
                   AND uj.kanban_column IN ('Applied', 'Interview', 'Offer')
                   AND uj.matched_skills IS NOT NULL
@@ -227,7 +227,7 @@ public class JobRecommendationService {
                            salary_min,
                            sponsorship_required,
                            array_to_string(target_roles, ',')
-                    FROM user_profiles
+                    FROM careerops.user_profiles
                     WHERE user_id = :userId
                     """)
                     .setParameter("userId", userId)

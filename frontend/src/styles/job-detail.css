@@ -1,0 +1,32 @@
+.job-detail-page .job-detail-company-card::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 8px;
+  background: #0058be;
+  border-radius: 0.75rem 0.75rem 0 0;
+}
+
+.job-detail-page .job-detail-map-pin {
+  animation: job-detail-pulse 2s ease-in-out infinite;
+}
+
+@keyframes job-detail-pulse {
+  0%, 100% { transform: scale(1); opacity: 1; }
+  50% { transform: scale(1.15); opacity: 0.85; }
+}
+
+.job-detail-page .job-detail-skill-panel .rounded-xl {
+  border-color: var(--color-outline-variant, #e5e7eb);
+  background: var(--color-surface-container-lowest, #fff);
+}
+
+.job-detail-page .job-detail-skill-panel button.bg-indigo-600 {
+  background-color: #0058be;
+}
+
+.job-detail-page .job-detail-skill-panel button.bg-indigo-600:hover {
+  background-color: #004a9f;
+}

@@ -23,13 +23,18 @@ public class AuthDtos {
         String captchaToken
     ) {}
 
+    /** Body for POST /auth/google — Google Identity Services ID token (JWT). */
+    public record GoogleAuthRequest(
+        @NotBlank @Size(min = 100, max = 8192) String idToken
+    ) {}
+
     public record ForgotRequest(
         @NotBlank @Email String email
     ) {}
 
     public record VerifyOtpRequest(
         @NotBlank @Email @Size(max = 254) String email,
-        @NotBlank @Size(max = 20) String otp,
+        @NotBlank @Pattern(regexp = "^\\d{6}$", message = "OTP must be a 6-digit code") String otp,
         @NotBlank @Size(min = 8, max = 128) @Pattern(regexp = "^(?=.*[a-z])(?=.*[A-Z])(?=.*\\d).{8,128}$") String newPassword
     ) {}
 

@@ -8,7 +8,7 @@ import java.util.Objects;
 import java.util.UUID;
 
 @Entity
-@Table(name = "seen_jobs", schema = "career_operations",
+@Table(name = "seen_jobs", schema = "careerops",
        indexes = {
            @Index(name = "idx_seen_jobs_seen_at", columnList = "seen_at")
        })
@@ -33,3 +33,4 @@ public class SeenJob {
         @Override public int hashCode(){return Objects.hash(userId,fingerprint);}
     }
 }
+

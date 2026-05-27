@@ -9,7 +9,7 @@ import java.time.Instant;
 import java.util.UUID;
 
 @Entity
-@Table(name = "watchlist_runs", schema = "career_operations",
+@Table(name = "watchlist_runs", schema = "careerops",
        indexes = {
            @Index(name = "idx_watchlist_runs_user", columnList = "user_id")
        })
@@ -46,3 +46,4 @@ public class WatchlistRun {
         if (runAt == null) runAt = Instant.now();
     }
 }
+

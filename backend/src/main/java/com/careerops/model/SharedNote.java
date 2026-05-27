@@ -7,7 +7,7 @@ import java.time.Instant;
 import java.util.UUID;
 
 @Entity
-@Table(name = "shared_notes", schema = "career_operations")
+@Table(name = "shared_notes", schema = "careerops")
 @Getter
 @Setter
 @NoArgsConstructor
@@ -59,3 +59,4 @@ public class SharedNote {
         this.updatedAt = Instant.now();
     }
 }
+

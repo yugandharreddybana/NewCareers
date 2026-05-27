@@ -10,7 +10,7 @@ import java.util.Map;
 import java.util.UUID;
 
 @Entity
-@Table(name = "sso_providers", schema = "career_operations")
+@Table(name = "sso_providers", schema = "careerops")
 @Getter @Setter @NoArgsConstructor @AllArgsConstructor @Builder
 public class SsoProvider {
 
@@ -57,3 +57,4 @@ public class SsoProvider {
         updatedAt = Instant.now();
     }
 }
+

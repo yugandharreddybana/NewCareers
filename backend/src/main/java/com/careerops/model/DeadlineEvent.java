@@ -13,7 +13,7 @@ import java.util.UUID;
  * Tracks important dates: application close, interview, follow-up, offer deadline.
  */
 @Entity
-@Table(name = "deadline_events", schema = "career_operations")
+@Table(name = "deadline_events", schema = "careerops")
 @Getter @Setter @NoArgsConstructor @AllArgsConstructor @Builder
 public class DeadlineEvent {
 
@@ -51,3 +51,4 @@ public class DeadlineEvent {
     @Column(name = "updated_at")
     private Instant updatedAt;
 }
+

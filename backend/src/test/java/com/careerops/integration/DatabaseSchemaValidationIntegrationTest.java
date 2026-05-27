@@ -30,12 +30,12 @@ public class DatabaseSchemaValidationIntegrationTest {
         try {
             // Verify that Irish companies are successfully seeded (if tables exist)
             Integer companyCount = jdbcTemplate.queryForObject(
-                "SELECT COUNT(*) FROM career_operations.companies", Integer.class);
+                "SELECT COUNT(*) FROM careerops.companies", Integer.class);
             assertThat(companyCount).isNotNull().isGreaterThan(0);
 
             // Verify currency reference table is successfully populated
             Integer currencyCount = jdbcTemplate.queryForObject(
-                "SELECT COUNT(*) FROM career_operations.currencies", Integer.class);
+                "SELECT COUNT(*) FROM careerops.currencies", Integer.class);
             assertThat(currencyCount).isNotNull().isGreaterThan(0);
         } catch (Exception e) {
             // Under in-memory tests with spring.flyway.enabled=false, tables may not be seeded.
@@ -44,3 +44,4 @@ public class DatabaseSchemaValidationIntegrationTest {
         }
     }
 }
+

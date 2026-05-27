@@ -8,10 +8,9 @@
 import express from 'express';
 import multer from 'multer';
 import { authGuard } from '../authGuard.js';
-import { createProxyMiddleware } from 'http-proxy-middleware';
+import { createJavaRouteProxy } from '../services/backendProxy.js';
 
 const router = express.Router();
-const JAVA = process.env.JAVA_BACKEND_URL || 'http://localhost:8080';
 
 const upload = multer({
   storage: multer.memoryStorage(),
@@ -26,16 +25,9 @@ const upload = multer({
   },
 });
 
-const javaProxy = createProxyMiddleware({
-  target: JAVA,
-  changeOrigin: true,
-  proxyTimeout: 60_000,
-  timeout: 60_000,
-  on: {
-    error: (err, _req, res) => {
-      (res as express.Response).status(502).json({ error: 'CV service unavailable', details: err.message });
-    },
-  },
+const javaProxy = createJavaRouteProxy('/cv', {
+  errorMessage: 'CV service unavailable',
+  timeoutMs: 60_000,
 });
 
 // GET    /api/cv                   -> list all CVs (history), newest first

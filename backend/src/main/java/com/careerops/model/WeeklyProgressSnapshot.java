@@ -9,7 +9,7 @@ import java.time.LocalDate;
 import java.util.UUID;
 
 @Entity
-@Table(name = "weekly_progress_snapshots", schema = "career_operations")
+@Table(name = "weekly_progress_snapshots", schema = "careerops")
 @Getter @Setter @NoArgsConstructor @AllArgsConstructor @Builder
 public class WeeklyProgressSnapshot {
 
@@ -89,3 +89,4 @@ public class WeeklyProgressSnapshot {
     @PrePersist
     protected void onCreate() { this.createdAt = Instant.now(); }
 }
+

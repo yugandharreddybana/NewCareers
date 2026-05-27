@@ -8,23 +8,12 @@
  *    hung requests on a slow Java backend)
  */
 import express from 'express';
-import { createProxyMiddleware } from 'http-proxy-middleware';
 import { authGuard } from '../authGuard.js';
+import { createJavaRouteProxy } from '../services/backendProxy.js';
 
 const router = express.Router();
-const BACKEND_URL = process.env.JAVA_BACKEND_URL || process.env.BACKEND_URL || 'http://localhost:8080';
-
-const proxy = createProxyMiddleware({
-  target: BACKEND_URL,
-  changeOrigin: true,
-  proxyTimeout: 30_000,
-  timeout: 30_000,
-  on: {
-    error: (err, _req, res) => {
-      console.error('[progress proxy error]', err.message);
-      res.status(502).json({ error: 'Progress service temporarily unavailable.' });
-    },
-  },
+const proxy = createJavaRouteProxy('/progress', {
+  errorMessage: 'Progress service temporarily unavailable.',
 });
 
 // GET  /api/progress/weekly-summary   → weekly stats

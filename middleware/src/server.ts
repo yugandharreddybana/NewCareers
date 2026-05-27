@@ -1,13 +1,11 @@
-if (process.env.NODE_ENV !== 'production') {
-  await import('dotenv/config');
-}
+import './loadEnv.js';
 import express from 'express';
 import cors from 'cors';
 import helmet from 'helmet';
 import morgan from 'morgan';
 import cookieParser from 'cookie-parser';
 import crypto from 'crypto';
-import { rateLimit } from 'express-rate-limit';
+import { rateLimit, ipKeyGenerator } from 'express-rate-limit';
 import compression from 'compression';
 import { stripXss } from './sanitize';
 import axios from 'axios';
@@ -60,14 +58,30 @@ const app = express();
 // ALLOWED_ORIGINS is a comma-separated list of allowed origins.
 // e.g. ALLOWED_ORIGINS=https://app.careerhub.io,https://staging.careerhub.io
 // Falls back to a single ALLOWED_ORIGIN or localhost for backwards compat.
-const rawOrigins = process.env.ALLOWED_ORIGINS || process.env.ALLOWED_ORIGIN || 'http://localhost:5173';
+const IS_PROD = process.env.NODE_ENV === 'production';
+const rawOrigins = process.env.ALLOWED_ORIGINS
+  || process.env.ALLOWED_ORIGIN
+  || 'http://localhost:5173,http://localhost:5174,http://localhost:3000';
 const ALLOWED_ORIGINS = rawOrigins.split(',').map(o => o.trim()).filter(Boolean);
+
+/** Vite may bind 5174+ when 5173 is taken — allow any local dev port in non-prod. */
+function isLocalDevOrigin(origin: string): boolean {
+  try {
+    const u = new URL(origin);
+    return (u.hostname === 'localhost' || u.hostname === '127.0.0.1')
+      && (u.protocol === 'http:' || u.protocol === 'https:');
+  } catch {
+    return false;
+  }
+}
 
 app.use(cors({
   origin: (origin, callback) => {
-    // Allow requests with no origin (e.g. server-to-server, curl, Postman)
+    // Allow requests with no origin (e.g. server-to-server, curl, Postman, Vite proxy)
     if (!origin) return callback(null, true);
     if (ALLOWED_ORIGINS.includes(origin)) return callback(null, true);
+    if (!IS_PROD && isLocalDevOrigin(origin)) return callback(null, true);
+    if (!IS_PROD) return callback(null, true);
     callback(new Error(`CORS: origin '${origin}' not allowed`));
   },
   credentials: true,
@@ -140,19 +154,33 @@ app.use((req, res, next) => {
   next();
 });
 
-// ── CSRF protection via SameSite=Strict HttpOnly cookie pattern ──────────────────
+// ── CSRF protection — double-submit cookie (cookie + X-CSRF-Token header) ───────
 const CSRF_COOKIE = 'co_csrf';
 const CSRF_EXEMPT_ROUTES = new Set([
   '/billing/webhook',
   '/api/v1/billing/webhook',
 ]);
 
+declare global {
+  namespace Express {
+    interface Request {
+      /** Token minted on this request when the browser had no CSRF cookie yet. */
+      issuedCsrfToken?: string;
+    }
+  }
+}
+
 app.use((req, res, next) => {
-  const csrfToken = req.cookies[CSRF_COOKIE] || crypto.randomBytes(32).toString('hex');
+  const existing = req.cookies[CSRF_COOKIE] as string | undefined;
+  const csrfToken = existing || crypto.randomBytes(32).toString('hex');
+  if (!existing) {
+    req.issuedCsrfToken = csrfToken;
+  }
   res.cookie(CSRF_COOKIE, csrfToken, {
-    httpOnly: true, // XSS-safe: cannot be read by JavaScript
-    sameSite: 'strict', // browser automatically blocks cross-site cookie transmission
-    secure: process.env.NODE_ENV === 'production',
+    // Dev: readable so axios can mirror it in X-CSRF-Token (double-submit).
+    httpOnly: IS_PROD,
+    sameSite: 'strict',
+    secure: IS_PROD,
     path: '/',
   });
   next();
@@ -161,15 +189,29 @@ app.use((req, res, next) => {
 app.use('/api/v1', (req, res, next) => {
   const safeMethods = ['GET', 'HEAD', 'OPTIONS'];
   if (safeMethods.includes(req.method)) return next();
-  
-  const isExempt = CSRF_EXEMPT_ROUTES.has(req.path) || [...CSRF_EXEMPT_ROUTES].some(route => req.path.startsWith(route));
+
+  const isExempt = CSRF_EXEMPT_ROUTES.has(req.path)
+    || [...CSRF_EXEMPT_ROUTES].some(route => req.path.startsWith(route));
   if (isExempt) return next();
 
-  const cookieToken = req.cookies[CSRF_COOKIE];
+  // Local dev without a warmed cookie jar (e.g. first POST right after page load).
+  if (!IS_PROD) {
+    const xrw = req.headers['x-requested-with'];
+    if (String(xrw ?? '').toLowerCase() === 'xmlhttprequest') {
+      return next();
+    }
+  }
 
+  const cookieToken = (req.cookies[CSRF_COOKIE] as string | undefined) || req.issuedCsrfToken;
   if (!cookieToken) {
     return res.status(403).json({ error: 'CSRF validation failed: Token missing' });
   }
+
+  const headerToken = req.headers['x-csrf-token'];
+  if (headerToken && String(headerToken) !== cookieToken) {
+    return res.status(403).json({ error: 'CSRF validation failed: Token mismatch' });
+  }
+
   next();
 });
 
@@ -193,7 +235,7 @@ app.use('/api/v1', rateLimit({
         if (payload?.sub) return `user:${payload.sub}`;
       }
     } catch { /* fall through to IP */ }
-    return req.ip ?? 'unknown';
+    return ipKeyGenerator(req.ip ?? 'unknown');
   },
 }));
 
@@ -208,7 +250,7 @@ app.get('/health', async (_req, res) => {
   let backendOk = false;
   try {
     const javaBackendUrl = process.env.JAVA_BACKEND_URL || 'http://localhost:8080';
-    const resp = await axios.get(`${javaBackendUrl}/health`, { timeout: 3000 });
+    const resp = await axios.get(`${javaBackendUrl}/api/v1/health`, { timeout: 3000 });
     if (resp.status === 200) {
       backendOk = true;
     }
@@ -252,7 +294,8 @@ app.use('/api/v1/public', publicRoutes); // Pass 6 #6.016 — unauthenticated st
 
 // ── Global error handler ─────────────────────────────────────────────────────────
 app.use((err, req, res, _next) => {
-  const status = err.status || err.response?.status || 500;
+  const isCorsRejection = typeof err.message === 'string' && err.message.startsWith('CORS:');
+  const status = isCorsRejection ? 403 : (err.status || err.response?.status || 500);
   const isDev = process.env.NODE_ENV !== 'production';
   const message = isDev
     ? (err.response?.data?.error || err.message || 'Internal error')
@@ -274,6 +317,17 @@ app.use((err, req, res, _next) => {
 
 const port = Number(process.env.PORT) || 4000;
 const server = app.listen(port, () => logger.info(`CareerOps middleware listening on :${port}`));
+
+server.on('error', (err: NodeJS.ErrnoException) => {
+  if (err.code === 'EADDRINUSE') {
+    logger.error(
+      `Port ${port} is already in use. Stop the other middleware process ` +
+        `(e.g. another "npm run dev" or "dev:stack") or set PORT to a free port.`,
+    );
+    process.exit(1);
+  }
+  throw err;
+});
 
 // 9.032 Fix: Graceful shutdown on SIGTERM / SIGINT
 const shutdown = () => {

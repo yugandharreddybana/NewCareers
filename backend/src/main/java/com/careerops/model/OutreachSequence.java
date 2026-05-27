@@ -6,7 +6,7 @@ import java.time.Instant;
 import java.util.UUID;
 
 @Entity
-@Table(name = "outreach_sequences", schema = "career_operations")
+@Table(name = "outreach_sequences", schema = "careerops")
 @Getter @Setter @NoArgsConstructor @AllArgsConstructor @Builder
 public class OutreachSequence {
 
@@ -42,3 +42,4 @@ public class OutreachSequence {
     @PrePersist
     void prePersist() { if (createdAt == null) createdAt = Instant.now(); }
 }
+

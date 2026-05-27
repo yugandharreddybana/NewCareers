@@ -7,7 +7,7 @@ import java.time.Instant;
 import java.util.UUID;
 
 @Entity
-@Table(name = "experiment_assignments", schema = "career_operations",
+@Table(name = "experiment_assignments", schema = "careerops",
        uniqueConstraints = @UniqueConstraint(columnNames = {"user_id", "experiment_id"}))
 @Getter @Setter @NoArgsConstructor @AllArgsConstructor @Builder
 public class ExperimentAssignment {
@@ -32,3 +32,4 @@ public class ExperimentAssignment {
     @PrePersist
     protected void onCreate() { assignedAt = Instant.now(); }
 }
+

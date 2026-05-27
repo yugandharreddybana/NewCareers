@@ -1,5 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { PageMeta } from '@/components/PageMeta';
+import { PageLoader } from '@/components/LoadingSpinner';
 import { cvApi, type CvRecord } from '@/services/cvApi';
 import { useFileUpload } from '@/hooks/useFileUpload';
 import toast from 'react-hot-toast';
@@ -17,14 +18,6 @@ interface CvVersion {
   size?: string;
   source?: 'upload' | 'ai-generated';
 }
-
-const USE_MOCKS = import.meta.env.VITE_USE_MOCKS === 'true';
-
-const MOCK_VERSIONS: CvVersion[] = [
-  { id: 'cv-1', name: 'Senior FE — Fintech Focus.pdf', uploadedAt: new Date(Date.now() - 86400000 * 3).toISOString(), isActive: true,  size: '124 KB', source: 'upload' },
-  { id: 'cv-2', name: 'Fullstack — General.pdf',       uploadedAt: new Date(Date.now() - 86400000 * 7).toISOString(), isActive: false, size: '98 KB',  source: 'upload' },
-  { id: 'cv-3', name: 'TechWave Tailored (AI).pdf',    uploadedAt: new Date(Date.now() - 86400000 * 1).toISOString(), isActive: false, size: '131 KB', source: 'ai-generated' },
-];
 
 // ── Helpers ────────────────────────────────────────────────────────────────────
 function relativeTime(iso: string): string {
@@ -146,25 +139,8 @@ const CvManagerPage: React.FC = () => {
   const fileRef = useRef<HTMLInputElement>(null);
 
   const { upload, progress, uploading, error, abort } = useFileUpload<CvRecord>({
-    uploader: USE_MOCKS
-      ? async (file, onProgress) => {
-          // Simulate progress in mock mode
-          for (let p = 0; p <= 100; p += 20) {
-            await new Promise(r => setTimeout(r, 120));
-            onProgress(p);
-          }
-          return {
-            id: `cv-${Date.now()}`,
-            name: file.name,
-            url: '',
-            contentType: file.type || 'application/octet-stream',
-            isActive: true,
-            sizeBytes: file.size,
-            createdAt: new Date().toISOString(),
-          };
-        }
-      : (file, onProgress, signal) =>
-          cvApi.uploadWithProgress(file, onProgress, signal),
+    uploader: (file, onProgress, signal) =>
+      cvApi.uploadWithProgress(file, onProgress, signal),
     onSuccess: (res) => {
       const newCv = toCvVersion(res);
       setVersions(prev => [newCv, ...prev.filter(v => v.id !== newCv.id).map(v => ({ ...v, isActive: false }))]);
@@ -174,10 +150,6 @@ const CvManagerPage: React.FC = () => {
   });
 
   useEffect(() => {
-    if (USE_MOCKS) {
-      setTimeout(() => { setVersions(MOCK_VERSIONS); setLoading(false); }, 500);
-      return;
-    }
     cvApi.list()
       .then(cvs => setVersions(cvs.map(toCvVersion)))
       .catch(() => toast.error('Failed to load CV data.'))
@@ -191,7 +163,7 @@ const CvManagerPage: React.FC = () => {
 
   const handleSetActive = async (id: string) => {
     try {
-      if (!USE_MOCKS) await cvApi.setActive(id);
+      await cvApi.setActive(id);
       setVersions(prev => prev.map(v => ({ ...v, isActive: v.id === id })));
       toast.success('Active CV updated.');
     } catch {
@@ -202,7 +174,7 @@ const CvManagerPage: React.FC = () => {
   const handleDelete = async (id: string) => {
     setDeleting(id);
     try {
-      if (!USE_MOCKS) await cvApi.remove(id);
+      await cvApi.remove(id);
       setVersions(prev => prev.filter(v => v.id !== id));
       toast.success('CV version removed.');
     } catch { toast.error('Failed to delete CV.'); }
@@ -211,12 +183,11 @@ const CvManagerPage: React.FC = () => {
 
   const handleDownload = async (_id: string, name: string) => {
     try {
-      if (USE_MOCKS) { toast('Mock: download triggered for ' + name); return; }
       await cvApi.download(_id, name);
     } catch { toast.error('Download failed.'); }
   };
 
-  if (loading) return <div className="flex items-center justify-center min-h-[50vh] text-gray-400 text-sm">Loading CV Manager…</div>;
+  if (loading) return <PageLoader />;
 
   return (
     <>

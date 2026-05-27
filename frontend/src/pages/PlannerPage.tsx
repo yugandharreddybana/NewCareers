@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { PageMeta } from '@/components/PageMeta';
+import { PageLoader } from '@/components/LoadingSpinner';
 import { api } from '@/services/api';
 import toast from 'react-hot-toast';
 import {
@@ -23,20 +24,6 @@ interface Deadline {
   eventType: 'interview' | 'assessment' | 'offer_deadline' | 'follow_up';
   userJobId?: string;
 }
-
-const USE_MOCKS = import.meta.env.VITE_USE_MOCKS === 'true';
-
-const MOCK_TASKS: Task[] = [
-  { id: 't-1', title: 'Prepare for TechWave interview',        dueDate: new Date(Date.now() + 86400000 * 2).toISOString(), completed: false, priority: 'high' },
-  { id: 't-2', title: 'Research EcoGrowth company culture',    dueDate: new Date(Date.now() + 86400000 * 1).toISOString(), completed: false, priority: 'medium' },
-  { id: 't-3', title: 'Update LinkedIn headline',              dueDate: null, completed: true,  priority: 'low' },
-  { id: 't-4', title: 'Tailor CV for DesignScale role',        dueDate: new Date(Date.now() + 86400000 * 3).toISOString(), completed: false, priority: 'medium' },
-];
-
-const MOCK_DEADLINES: Deadline[] = [
-  { id: 'd-1', title: 'TechWave Technical Interview', eventDate: new Date(Date.now() + 86400000 * 2).toISOString(), eventType: 'interview' },
-  { id: 'd-2', title: 'EcoGrowth Take-Home Assessment', eventDate: new Date(Date.now() + 86400000 * 4).toISOString(), eventType: 'assessment' },
-];
 
 const PRIORITY_STYLES = {
   high:   { dot: 'bg-red-400',    label: 'bg-red-100 text-red-600' },
@@ -73,18 +60,12 @@ const PlannerPage: React.FC = () => {
   useEffect(() => {
     const load = async () => {
       try {
-        if (USE_MOCKS) {
-          await new Promise(r => setTimeout(r, 400));
-          setTasks(MOCK_TASKS);
-          setDeadlines(MOCK_DEADLINES);
-        } else {
-          const [t, d] = await Promise.all([
-            api.get('/planner/tasks').then(r => r.data).catch(() => MOCK_TASKS),
-            api.get('/planner/deadlines').then(r => r.data).catch(() => MOCK_DEADLINES),
-          ]);
-          setTasks(t as Task[]);
-          setDeadlines(d as Deadline[]);
-        }
+        const [t, d] = await Promise.all([
+          api.get('/planner/tasks').then(r => r.data),
+          api.get('/planner/deadlines').then(r => r.data),
+        ]);
+        setTasks(t as Task[]);
+        setDeadlines(d as Deadline[]);
       } finally { setLoading(false); }
     };
     load();
@@ -92,13 +73,13 @@ const PlannerPage: React.FC = () => {
 
   const handleToggle = async (id: string) => {
     setTasks(prev => prev.map(t => t.id === id ? { ...t, completed: !t.completed } : t));
-    try { if (!USE_MOCKS) await api.patch(`/planner/tasks/${id}/toggle`); }
+    try { await api.patch(`/planner/tasks/${id}/toggle`); }
     catch { toast.error('Failed to update task.'); }
   };
 
   const handleDelete = async (id: string) => {
     setTasks(prev => prev.filter(t => t.id !== id));
-    try { if (!USE_MOCKS) await api.delete(`/planner/tasks/${id}`); }
+    try { await api.delete(`/planner/tasks/${id}`); }
     catch { toast.error('Failed to delete task.'); }
   };
 
@@ -107,9 +88,7 @@ const PlannerPage: React.FC = () => {
     setAdding(true);
     try {
       const body = { title: newTitle, priority: newPriority, dueDate: newDue || null };
-      const task: Task = USE_MOCKS
-        ? { id: `t-${Date.now()}`, ...body, completed: false }
-        : await api.post('/planner/tasks', body).then(r => r.data);
+      const task: Task = await api.post('/planner/tasks', body).then(r => r.data);
       setTasks(prev => [task, ...prev]);
       setNewTitle(''); setNewDue(''); setNewPriority('medium'); setShowForm(false);
       toast.success('Task added!');
@@ -117,7 +96,7 @@ const PlannerPage: React.FC = () => {
     finally { setAdding(false); }
   };
 
-  if (loading) return <div className="flex items-center justify-center min-h-[50vh] text-gray-400 text-sm">Loading planner…</div>;
+  if (loading) return <PageLoader />;
 
   const pending   = tasks.filter(t => !t.completed);
   const completed = tasks.filter(t => t.completed);

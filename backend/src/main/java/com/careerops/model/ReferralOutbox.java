@@ -6,7 +6,7 @@ import java.time.Instant;
 import java.util.UUID;
 
 @Entity
-@Table(name = "referral_outbox", schema = "career_operations")
+@Table(name = "referral_outbox", schema = "careerops")
 @Getter @Setter @NoArgsConstructor @AllArgsConstructor @Builder
 public class ReferralOutbox {
     @Id @GeneratedValue(strategy = GenerationType.UUID)
@@ -40,3 +40,4 @@ public class ReferralOutbox {
         if (createdAt == null) createdAt = Instant.now();
     }
 }
+

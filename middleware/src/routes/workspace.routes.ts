@@ -1,13 +1,11 @@
 // Section 3.4 — workspace collaboration routes (tasks 49-53)
 import express from 'express';
-import { createProxyMiddleware } from 'http-proxy-middleware';
 import { verifyToken } from '../auth.js';
+import { createJavaRouteProxy } from '../services/backendProxy.js';
 
 const router = express.Router();
-const proxy = createProxyMiddleware({
-  target: process.env.JAVA_BACKEND_URL || process.env.BACKEND_URL || 'http://localhost:8080',
-  changeOrigin: true,
-  on: { error: (_e, _r, res) => res.status(502).json({ error: 'Workspace service unavailable.' }) },
+const proxy = createJavaRouteProxy('/workspaces', {
+  errorMessage: 'Workspace service unavailable.',
 });
 
 router.post('/',              verifyToken, proxy); // Task 49 — create workspace

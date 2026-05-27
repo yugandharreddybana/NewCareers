@@ -6,7 +6,7 @@ import java.time.Instant;
 import java.util.UUID;
 
 @Entity
-@Table(name = "application_cvs", schema = "career_operations")
+@Table(name = "application_cvs", schema = "careerops")
 @Getter @Setter @NoArgsConstructor @AllArgsConstructor @Builder
 public class ApplicationCv {
     @Id @GeneratedValue(strategy = GenerationType.UUID) private UUID id;
@@ -17,3 +17,4 @@ public class ApplicationCv {
 
     @PrePersist void onCreate() { if (uploadedAt == null) uploadedAt = Instant.now(); }
 }
+

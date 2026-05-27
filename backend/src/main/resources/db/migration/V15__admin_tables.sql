@@ -1,17 +1,17 @@
 -- Task 133 — Admin supporting tables
--- Schema: career_operations
+-- Schema: careerops
 
-SET search_path TO career_operations;
+SET search_path TO careerops;
 
 -- ───────────────────────────────────────────────────────────────────────────────
 -- 1. feature_flags — runtime feature toggles manageable via admin API
 -- ───────────────────────────────────────────────────────────────────────────────
 CREATE TABLE IF NOT EXISTS feature_flags (
-    id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    id          UUID DEFAULT gen_random_uuid() PRIMARY KEY,
     flag_key    TEXT NOT NULL UNIQUE,
     enabled     BOOLEAN NOT NULL DEFAULT FALSE,
     description TEXT,
-    updated_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+    updated_at  TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT now()
 );
 
 CREATE INDEX IF NOT EXISTS idx_feature_flags_key ON feature_flags (flag_key);
@@ -32,10 +32,10 @@ ON CONFLICT (flag_key) DO NOTHING;
 --    GET /admin/stats reads the live query (not this cache) at low traffic.
 -- ───────────────────────────────────────────────────────────────────────────────
 CREATE TABLE IF NOT EXISTS admin_stats_cache (
-    id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    id          UUID DEFAULT gen_random_uuid() PRIMARY KEY,
     stat_key    TEXT NOT NULL UNIQUE,
     stat_value  JSONB NOT NULL,
-    computed_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    computed_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT now()
 );
 
 CREATE INDEX IF NOT EXISTS idx_admin_stats_key ON admin_stats_cache (stat_key);
@@ -43,7 +43,7 @@ CREATE INDEX IF NOT EXISTS idx_admin_stats_key ON admin_stats_cache (stat_key);
 -- ───────────────────────────────────────────────────────────────────────────────
 -- 3. Soft-delete column on users (used by DELETE /admin/users/{id})
 -- ───────────────────────────────────────────────────────────────────────────────
-ALTER TABLE users ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMPTZ;
+ALTER TABLE users ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMP WITH TIME ZONE;
 
-CREATE INDEX IF NOT EXISTS idx_users_deleted_at ON users (deleted_at)
-    WHERE deleted_at IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_users_deleted_at ON users (deleted_at);
+

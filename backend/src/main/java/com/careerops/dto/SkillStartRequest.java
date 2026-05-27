@@ -8,13 +8,13 @@ import java.util.UUID;
 
 /**
  * Request body for POST /api/skills/start
- * Used to kick off any of the 14 career-ops skills.
+ * Used to kick off any of the 16 career-ops skills.
  */
 public record SkillStartRequest(
 
-    /** One of the 14 supported skill names. */
+    /** One of the supported skill names. */
     @NotBlank(message = "skillName is required")
-    @Pattern(regexp = "^(evaluate|tailor-resume|apply|outreach|research|prep-interview|compare|triage|scan|salary-negotiation|culture-fit|linkedin-optimize|cover-letter|skills-gap-plan)$")
+    @Pattern(regexp = "^(evaluate|tailor-resume|apply|outreach|research|prep-interview|compare|triage|scan|salary-negotiation|culture-fit|linkedin-optimize|cover-letter|skills-gap-plan|track|help)$")
     String skillName,
 
     /** The UserJob row this skill run is for. Null for triage (queue-wide). */

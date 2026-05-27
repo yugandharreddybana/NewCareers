@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { CANONICAL_MOCK_JOB_IDS } from '@/test/canonicalMockJob';
 import { authApi, jobsApi, publicApi } from './api';
 import { skillsApi } from './skillsApi';
 
@@ -12,11 +13,15 @@ describe('service layer MSW integration', () => {
 
     expect(stats).toEqual({ jobs: 0, users: 0, skills: 14 });
     expect(user.email).toBe('dev@careerops.ie');
-    expect(jobs.items).toHaveLength(3);
+    expect(jobs.items).toHaveLength(1);
+    expect(jobs.items[0]?.userJobId).toBe(CANONICAL_MOCK_JOB_IDS.userJobId);
   });
 
   it('intercepts skill POST requests and returns mock result payloads', async () => {
-    const result = await skillsApi.start({ skillName: 'evaluate', userJobId: 'uj-1' });
+    const result = await skillsApi.start({
+      skillName: 'evaluate',
+      userJobId: CANONICAL_MOCK_JOB_IDS.userJobId,
+    });
 
     expect(result.type).toBe('RESULT');
     expect(result.skillName).toBe('evaluate');

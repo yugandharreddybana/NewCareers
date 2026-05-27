@@ -8,7 +8,7 @@ import java.time.LocalDate;
 import java.util.UUID;
 
 @Entity
-@Table(name = "daily_activity_log", schema = "career_operations")
+@Table(name = "daily_activity_log", schema = "careerops")
 @Getter @Setter @NoArgsConstructor @AllArgsConstructor @Builder
 @IdClass(DailyActivity.DailyActivityId.class)
 public class DailyActivity {
@@ -37,3 +37,4 @@ public class DailyActivity {
         private LocalDate activityDate;
     }
 }
+

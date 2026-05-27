@@ -17,7 +17,7 @@ import java.util.UUID;
  */
 @Entity
 @EntityListeners(AuditEntityListener.class)
-@Table(name = "users", schema = "career_operations")
+@Table(name = "users", schema = "careerops")
 @org.hibernate.annotations.SQLRestriction("deleted_at IS NULL")
 @Getter @Setter @NoArgsConstructor @AllArgsConstructor @Builder
 public class User {
@@ -25,13 +25,24 @@ public class User {
     /** Application-level role. Promotion to ADMIN happens out-of-band. */
     public enum Role { USER, ADMIN }
 
+    /** How the user authenticates. */
+    public enum AuthProvider { LOCAL, GOOGLE }
+
     @Id @GeneratedValue(strategy = GenerationType.UUID)
     private UUID id;
 
     @Column(nullable = false) private String name;
     @Column(unique = true, nullable = false) private String username;
     @Column(unique = true, nullable = false) private String email;
-    @Column(name = "password_hash", nullable = false) private String passwordHash;
+    @Column(name = "password_hash") private String passwordHash;
+
+    @Enumerated(EnumType.STRING)
+    @Column(name = "auth_provider", nullable = false)
+    @Builder.Default
+    private AuthProvider authProvider = AuthProvider.LOCAL;
+
+    @Column(name = "google_sub", unique = true)
+    private String googleSub;
     @Column(name = "created_at") private Instant createdAt;
 
     /**
@@ -69,7 +80,7 @@ public class User {
  
     @Column(name = "ai_processing_consent", nullable = false)
     @Builder.Default
-    private boolean aiProcessingConsent = false;
+    private boolean aiProcessingConsent = true;
 
     @PrePersist void onCreate() {
         if (createdAt == null) createdAt = Instant.now();
@@ -82,3 +93,4 @@ public class User {
         if (email != null)     email     = email.toLowerCase();
     }
 }
+

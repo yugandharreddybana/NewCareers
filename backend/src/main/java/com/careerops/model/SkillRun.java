@@ -31,7 +31,7 @@ import java.util.UUID;
 @Entity
 @Table(
     name = "skill_runs",
-    schema = "career_operations",
+    schema = "careerops",
     indexes = {
         @Index(name = "idx_skill_runs_user_job_skill_date",
                columnList = "user_id, user_job_id, skill, created_at DESC")
@@ -98,3 +98,4 @@ public class SkillRun {
     @Column(name = "created_at", nullable = false, updatable = false)
     private Instant createdAt;
 }
+

@@ -7,20 +7,12 @@
  */
 
 import express from 'express';
-import { createProxyMiddleware } from 'http-proxy-middleware';
 import { authGuard } from '../authGuard.js';
+import { createJavaRouteProxy } from '../services/backendProxy.js';
 
 const router = express.Router();
-const JAVA   = process.env.JAVA_BACKEND_URL || 'http://localhost:8080';
-
-const javaProxy = createProxyMiddleware({
-  target: JAVA,
-  changeOrigin: true,
-  on: {
-    error: (err, _req, res) => {
-      res.status(502).json({ error: 'Analytics backend unavailable', details: err.message });
-    },
-  },
+const javaProxy = createJavaRouteProxy('/analytics', {
+  errorMessage: 'Analytics backend unavailable',
 });
 
 // GET /api/analytics/summary

@@ -2,7 +2,7 @@
 -- Follow-up dates, interview dates, application close dates per job
 
 CREATE TABLE IF NOT EXISTS deadline_events (
-    id              UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
+    id              UUID        DEFAULT gen_random_uuid() PRIMARY KEY,
     user_job_id     UUID        NOT NULL REFERENCES user_jobs(id) ON DELETE CASCADE,
     user_id         UUID        NOT NULL REFERENCES users(id)     ON DELETE CASCADE,
 
@@ -27,4 +27,4 @@ CREATE TABLE IF NOT EXISTS deadline_events (
 CREATE INDEX IF NOT EXISTS idx_deadline_events_user_job  ON deadline_events(user_job_id);
 CREATE INDEX IF NOT EXISTS idx_deadline_events_user      ON deadline_events(user_id);
 CREATE INDEX IF NOT EXISTS idx_deadline_events_date      ON deadline_events(event_date);
-CREATE INDEX IF NOT EXISTS idx_deadline_events_remind    ON deadline_events(remind_at) WHERE reminder_sent = FALSE;
+CREATE INDEX IF NOT EXISTS idx_deadline_events_remind    ON deadline_events(remind_at);

@@ -41,6 +41,39 @@ router.post('/fetch', fetchLimiter, async (req, res, next) => {
   } catch (e) { next(e); }
 });
 
+router.post('/fetch-live', fetchLimiter, async (req, res, next) => {
+  try {
+    const r = await forward({
+      method: 'POST',
+      path: '/jobs/fetch-live',
+      userId: req.userId,
+    });
+    bubble(r, res);
+  } catch (e) { next(e); }
+});
+
+router.post('/fetch-adzuna-live', fetchLimiter, async (req, res, next) => {
+  try {
+    const r = await forward({
+      method: 'POST',
+      path: '/jobs/fetch-adzuna-live',
+      userId: req.userId,
+    });
+    bubble(r, res);
+  } catch (e) { next(e); }
+});
+
+router.post('/fetch-indeed-live', fetchLimiter, async (req, res, next) => {
+  try {
+    const r = await forward({
+      method: 'POST',
+      path: '/jobs/fetch-indeed-live',
+      userId: req.userId,
+    });
+    bubble(r, res);
+  } catch (e) { next(e); }
+});
+
 // ── Section 7 — Task 73: GET /api/jobs/recommended ─────────────────────────
 // Must be declared BEFORE /:userJobId so the literal string
 // "recommended" is not swallowed by the param wildcard.

@@ -7,7 +7,7 @@ import java.time.Instant;
 import java.util.UUID;
 
 @Entity
-@Table(name = "recommendation_feedback", schema = "career_operations")
+@Table(name = "recommendation_feedback", schema = "careerops")
 @Getter @Setter @NoArgsConstructor @AllArgsConstructor @Builder
 public class RecommendationFeedback {
 
@@ -34,3 +34,4 @@ public class RecommendationFeedback {
         if (createdAt == null) createdAt = Instant.now();
     }
 }
+

@@ -1,115 +1,199 @@
-import axios from 'axios';
+import axios, { type AxiosInstance, type ResponseType } from 'axios';
 import crypto from 'crypto';
+import type { NextFunction, Request, Response } from 'express';
+import type { IncomingMessage, ServerResponse } from 'http';
+import type { Socket } from 'net';
 
-const BASE = process.env.JAVA_BACKEND_URL || 'http://localhost:8080';
+const stripTrailingSlash = (url: string): string => url.replace(/\/+$/, '');
+
+function javaBackendBase(): string {
+  return stripTrailingSlash(
+    process.env.JAVA_BACKEND_URL || process.env.BACKEND_URL || 'http://localhost:8080',
+  );
+}
+
 const TRUST_HEADER = process.env.INTERNAL_TRUST_HEADER || 'X-Internal-User-Id';
 const TRUST_SECRET = process.env.INTERNAL_TRUST_SECRET;
 
-const client = axios.create({
-  baseURL: `${BASE}/api/v1`,
-  timeout: 90_000,
-  validateStatus: () => true, // 9.019 Note: Caller must manually verify r.status, or use forwardOrThrow()
-});
+let apiClient: AxiosInstance | null = null;
 
-function buildHeaders(userId, extra: any = {}) {
-  const h = { ...extra };
+function getApiClient(): AxiosInstance {
+  if (!apiClient) {
+    apiClient = axios.create({
+      baseURL: `${javaBackendBase()}/api/v1`,
+      timeout: 90_000,
+      validateStatus: () => true,
+    });
+  }
+  return apiClient;
+}
+
+function buildHeaders(userId: string | undefined, extra: Record<string, unknown> = {}) {
+  const h: Record<string, string> = {};
+  for (const [key, value] of Object.entries(extra)) {
+    if (value !== undefined && value !== null) {
+      h[key] = String(value);
+    }
+  }
   if (userId) {
     h[TRUST_HEADER] = userId;
-    h['X-Internal-Secret'] = TRUST_SECRET;
+    if (TRUST_SECRET) h['X-Internal-Secret'] = TRUST_SECRET;
   }
-  
-  // 9.018 Fix: Generate and forward X-Correlation-Id for cross-tier log tracking
-  const correlationId = h['x-correlation-id'] || h['X-Correlation-Id'] || crypto.randomUUID();
+
+  const correlationId =
+    (h['x-correlation-id'] as string | undefined) ||
+    (h['X-Correlation-Id'] as string | undefined) ||
+    crypto.randomUUID();
   h['X-Correlation-Id'] = correlationId;
-  
+
   return h;
 }
 
-export async function forward({ method = 'GET', path, userId, data, params, headers, responseType, ip }: {
+export async function forward({
+  method = 'GET',
+  path,
+  userId,
+  data,
+  params,
+  headers,
+  responseType,
+  ip,
+}: {
   method?: string;
   path: string;
   userId?: string;
-  data?: any;
-  params?: any;
-  headers?: any;
-  responseType?: any;
+  data?: unknown;
+  params?: unknown;
+  headers?: Record<string, unknown>;
+  responseType?: ResponseType;
   ip?: string;
 }) {
   const finalHeaders = buildHeaders(userId, headers || {});
-  if (ip) {
-    finalHeaders['X-Forwarded-For'] = ip;
-  }
-  const res = await client.request({
-    method, url: path, params, data, responseType,
+  if (ip) finalHeaders['X-Forwarded-For'] = ip;
+
+  return getApiClient().request({
+    method,
+    url: path,
+    params,
+    data,
+    responseType,
     headers: finalHeaders,
   });
-  return res;
 }
 
-/**
- * 9.019 Fix: Helper that automatically throws on any 4xx/5xx responses
- * for callers expecting Axios-like exception-throwing behavior.
- */
-export async function forwardOrThrow(args: {
-  method?: string;
-  path: string;
-  userId?: string;
-  data?: any;
-  params?: any;
-  headers?: any;
-  responseType?: any;
-  ip?: string;
-}) {
+export async function forwardOrThrow(args: Parameters<typeof forward>[0]) {
   const res = await forward(args);
   if (res.status >= 400) {
     const err = new Error(`Proxy request failed with status ${res.status}`);
-    (err as any).status = res.status;
-    (err as any).response = res;
+    (err as Error & { status: number; response: typeof res }).status = res.status;
+    (err as Error & { response: typeof res }).response = res;
     throw err;
   }
   return res;
 }
 
-export function bubble(res, target) {
-  target.status(res.status);
-  if (res.headers['content-type']) target.setHeader('content-type', res.headers['content-type']);
-  
-  // 9.018 Fix: Echo X-Correlation-Id back to the client in response headers
-  const correlationId = res.config?.headers?.['X-Correlation-Id'];
-  if (correlationId) {
-    target.setHeader('X-Correlation-Id', correlationId);
-  }
-  
-  return target.send(res.data);
+/** http-proxy-middleware error handler — narrows Socket vs Express Response. */
+export function proxyOnError(
+  message = 'Backend unavailable',
+): (err: Error, req: Request | IncomingMessage, res: ServerResponse | Socket) => void {
+  return (_err, _req, res) => {
+    if (!res || !('status' in res) || typeof (res as Response).status !== 'function') {
+      return;
+    }
+    const httpRes = res as Response;
+    if (!httpRes.headersSent) {
+      httpRes.status(502).json({ error: message, details: _err.message });
+    }
+  };
 }
 
 /**
- * 9.030 Fix: Generic Express middleware that acts as a secure, unified replacement
- * for http-proxy-middleware (createProxyMiddleware) using forward() internally.
+ * Express handler that forwards to Java using the servlet path under /api/v1.
+ * Use when the middleware mount path differs from Java (e.g. auto-apply).
  */
-export function proxyMiddleware() {
-  return async (req: any, res: any) => {
+export function createJavaRouteProxy(
+  javaPath: string,
+  _options: { errorMessage?: string; timeoutMs?: number } = {},
+) {
+  const prefix = javaPath.startsWith('/') ? javaPath : `/${javaPath}`;
+
+  return async (req: Request, res: Response, next: NextFunction) => {
     try {
-      // Re-route path correctly
-      const path = req.baseUrl ? `${req.baseUrl}${req.path}` : req.path;
-      
-      // 9.037 Fix: Extract and forward client IP using X-Forwarded-For
-      const clientIp = req.headers['x-forwarded-for'] || req.ip || req.connection?.remoteAddress;
+      const suffix = req.path === '/' ? '' : req.path;
+      const path = `${prefix}${suffix}`.replace(/\/{2,}/g, '/');
+      const clientIp =
+        (typeof req.headers['x-forwarded-for'] === 'string'
+          ? req.headers['x-forwarded-for']
+          : undefined) ||
+        req.ip;
 
       const response = await forward({
         method: req.method,
         path,
-        userId: req.user?.id,
+        userId: req.userId,
         data: req.body,
         params: req.query,
-        headers: req.headers,
-        responseType: 'arraybuffer', // handles dynamic binary files like PDFs and JSON identically
+        headers: req.headers as Record<string, unknown>,
         ip: clientIp,
       });
       bubble(response, res);
-    } catch (err: any) {
-      console.error('Unified proxy error:', err.message);
-      res.status(502).json({ error: 'Backend unavailable', details: err.message });
+    } catch (err) {
+      next(err);
+    }
+  };
+}
+
+export function bubble(
+  res: Awaited<ReturnType<typeof forward>>,
+  target: Response,
+) {
+  target.status(res.status);
+  if (res.headers['content-type']) {
+    target.setHeader('content-type', res.headers['content-type'] as string);
+  }
+  if (res.headers['content-disposition']) {
+    target.setHeader('content-disposition', res.headers['content-disposition'] as string);
+  }
+
+  const correlationId = res.config?.headers?.['X-Correlation-Id'];
+  if (correlationId) {
+    target.setHeader('X-Correlation-Id', String(correlationId));
+  }
+
+  let bodyData = res.data;
+  if (bodyData instanceof ArrayBuffer) {
+    bodyData = Buffer.from(bodyData);
+  }
+
+  return target.send(bodyData);
+}
+
+export function proxyMiddleware() {
+  return async (req: Request, res: Response) => {
+    try {
+      const path = req.baseUrl ? `${req.baseUrl}${req.path}` : req.path;
+      const servletPath = path.replace(/^\/api\/v1/, '') || '/';
+      const clientIp =
+        (typeof req.headers['x-forwarded-for'] === 'string'
+          ? req.headers['x-forwarded-for']
+          : undefined) ||
+        req.ip;
+
+      const response = await forward({
+        method: req.method,
+        path: servletPath,
+        userId: (req as Request & { user?: { id?: string } }).user?.id ?? req.userId,
+        data: req.body,
+        params: req.query,
+        headers: req.headers as Record<string, unknown>,
+        responseType: 'arraybuffer',
+        ip: clientIp,
+      });
+      bubble(response, res);
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : String(err);
+      console.error('Unified proxy error:', message);
+      res.status(502).json({ error: 'Backend unavailable', details: message });
     }
   };
 }

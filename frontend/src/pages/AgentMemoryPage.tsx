@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import toast from 'react-hot-toast';
 import { Brain, Edit2, Save, ToggleLeft, ToggleRight, Trash2, X } from 'lucide-react';
 import { PageMeta } from '@/components/PageMeta';
+import { PageLoader } from '@/components/LoadingSpinner';
 import EmptyState from '@/components/ui/EmptyState';
 import {
   agentMemoryApi,
@@ -9,72 +10,7 @@ import {
   type CareerMemory,
 } from '@/services/agentMemoryApi';
 
-const USE_MOCKS = import.meta.env.VITE_USE_MOCKS === 'true';
-
 type MemoryCategory = 'skills' | 'experience' | 'preferences' | 'personal' | 'goals' | 'other';
-
-const MOCK_MEMORIES: CareerMemory[] = [
-  {
-    id: 'm-1',
-    key: 'target-role',
-    value: 'Target role: Senior Full Stack Developer (React + Node.js)',
-    category: 'goals',
-    source: 'onboarding',
-    whySuggested: null,
-    confidence: 100,
-    memoryEnabled: true,
-    createdAt: new Date().toISOString(),
-    updatedAt: new Date().toISOString(),
-  },
-  {
-    id: 'm-2',
-    key: 'core-skills',
-    value: '4 years React experience, 3 years Node.js, 2 years Java',
-    category: 'skills',
-    source: 'cv',
-    whySuggested: null,
-    confidence: 100,
-    memoryEnabled: true,
-    createdAt: new Date().toISOString(),
-    updatedAt: new Date().toISOString(),
-  },
-  {
-    id: 'm-3',
-    key: 'work-style',
-    value: 'Prefer hybrid roles in Dublin, open to fully remote',
-    category: 'preferences',
-    source: 'profile',
-    whySuggested: null,
-    confidence: 100,
-    memoryEnabled: true,
-    createdAt: new Date().toISOString(),
-    updatedAt: new Date().toISOString(),
-  },
-  {
-    id: 'm-4',
-    key: 'education',
-    value: 'MSc Data Analytics @ NCI, graduating 2026',
-    category: 'experience',
-    source: 'manual',
-    whySuggested: null,
-    confidence: 100,
-    memoryEnabled: true,
-    createdAt: new Date().toISOString(),
-    updatedAt: new Date().toISOString(),
-  },
-  {
-    id: 'm-5',
-    key: 'notice',
-    value: 'Notice period: 4 weeks',
-    category: 'personal',
-    source: 'manual',
-    whySuggested: null,
-    confidence: 100,
-    memoryEnabled: false,
-    createdAt: new Date().toISOString(),
-    updatedAt: new Date().toISOString(),
-  },
-];
 
 const CAT_COLORS: Record<MemoryCategory, string> = {
   skills: 'bg-emerald-100 text-emerald-700',
@@ -204,16 +140,7 @@ const AgentMemoryPage = () => {
   useEffect(() => {
     const load = async () => {
       try {
-        if (USE_MOCKS) {
-          await new Promise(resolve => setTimeout(resolve, 400));
-          setMemories(MOCK_MEMORIES);
-          return;
-        }
-
-        const response = await agentMemoryApi.list().catch(() => ({
-          memories: MOCK_MEMORIES,
-          total: MOCK_MEMORIES.length,
-        }));
+        const response = await agentMemoryApi.list();
         setMemories(response.memories);
       } finally {
         setLoading(false);
@@ -230,7 +157,7 @@ const AgentMemoryPage = () => {
     const nextEnabled = !current.memoryEnabled;
 
     try {
-      if (!USE_MOCKS) await agentMemoryApi.toggle(id, nextEnabled);
+      await agentMemoryApi.toggle(id, nextEnabled);
       setMemories(prev => prev.map(memory => memory.id === id ? { ...memory, memoryEnabled: nextEnabled } : memory));
     } catch {
       toast.error('Failed to toggle memory.');
@@ -239,7 +166,7 @@ const AgentMemoryPage = () => {
 
   const handleDelete = async (id: string) => {
     try {
-      if (!USE_MOCKS) await agentMemoryApi.delete(id);
+      await agentMemoryApi.delete(id);
       setMemories(prev => prev.filter(memory => memory.id !== id));
       toast.success('Memory deleted.');
     } catch {
@@ -252,16 +179,15 @@ const AgentMemoryPage = () => {
     if (!current) return;
 
     try {
-      const updated = USE_MOCKS
-        ? { ...current, value, updatedAt: new Date().toISOString() }
-        : await agentMemoryApi.upsert({
-            category: current.category,
-            key: current.key,
-            value,
-            source: current.source ?? 'manual',
-            whySuggested: current.whySuggested,
-            confidence: current.confidence,
-          });
+      const updated = await agentMemoryApi.upsert({
+        id: current.id,
+        category: current.category,
+        key: current.key,
+        value,
+        source: current.source ?? 'manual',
+        whySuggested: current.whySuggested,
+        confidence: current.confidence,
+      });
       setMemories(prev => prev.map(memory => memory.id === id ? updated : memory));
       toast.success('Memory updated.');
     } catch {
@@ -278,20 +204,7 @@ const AgentMemoryPage = () => {
     setAdding(true);
     try {
       const key = createMemoryKey(newCat, newContent);
-      const memory = USE_MOCKS
-        ? {
-            id: `m-${Date.now()}`,
-            key,
-            value: newContent,
-            category: newCat,
-            source: 'manual' as const,
-            whySuggested: null,
-            confidence: 100,
-            memoryEnabled: true,
-            createdAt: new Date().toISOString(),
-            updatedAt: new Date().toISOString(),
-          }
-        : await agentMemoryApi.upsert({
+      const memory = await agentMemoryApi.upsert({
             category: newCat,
             key,
             value: newContent,
@@ -351,7 +264,7 @@ const AgentMemoryPage = () => {
   const categories: (MemoryCategory | 'all')[] = ['all', 'skills', 'experience', 'preferences', 'personal', 'goals', 'other'];
 
   if (loading) {
-    return <div className="flex items-center justify-center min-h-[50vh] text-gray-400 text-sm">Loading memories...</div>;
+    return <PageLoader />;
   }
 
   return (

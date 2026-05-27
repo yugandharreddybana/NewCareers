@@ -11,7 +11,7 @@ import java.util.Map;
 import java.util.UUID;
 
 @Entity
-@Table(name = "organizations", schema = "career_operations")
+@Table(name = "organizations", schema = "careerops")
 @Getter @Setter @NoArgsConstructor @AllArgsConstructor @Builder
 public class Organization {
 
@@ -59,3 +59,4 @@ public class Organization {
         updatedAt = Instant.now();
     }
 }
+

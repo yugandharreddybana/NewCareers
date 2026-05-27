@@ -1,6 +1,7 @@
 import { http, HttpResponse } from 'msw';
 import { setupServer } from 'msw/node';
-import * as mocks from '../services/mockApi';
+import { MOCK_RECOMMENDED_JOBS } from './canonicalMockJob';
+import * as fixtures from './fixtures';
 
 const API_ROOT = '*/api/v1';
 
@@ -8,7 +9,7 @@ const clone = <T,>(value: T): T => JSON.parse(JSON.stringify(value)) as T;
 
 function mockSkillRun(skillName: string) {
 	const data = clone(
-		(mocks.MOCK_SKILL_RESULTS[skillName] as Record<string, unknown> | undefined)
+		(fixtures.MOCK_SKILL_RESULTS[skillName] as Record<string, unknown> | undefined)
 			?? { text: 'Skill execution complete.' },
 	);
 
@@ -23,12 +24,12 @@ const defaultHandlers = [
 	http.get(`${API_ROOT}/public/stats`, () => HttpResponse.json({ jobs: 0, users: 0, skills: 14 })),
 
 	http.post(`${API_ROOT}/auth/login`, () => HttpResponse.json({
-		user: clone(mocks.MOCK_USER),
+		user: clone(fixtures.MOCK_USER),
 		token: 'test-access-token',
 		refreshToken: 'test-refresh-token',
 	})),
 	http.post(`${API_ROOT}/auth/signup`, () => HttpResponse.json({
-		user: clone(mocks.MOCK_USER),
+		user: clone(fixtures.MOCK_USER),
 		token: 'test-access-token',
 		refreshToken: 'test-refresh-token',
 	})),
@@ -37,16 +38,16 @@ const defaultHandlers = [
 		refreshToken: 'test-refresh-token',
 	})),
 	http.post(`${API_ROOT}/auth/logout`, () => HttpResponse.json({ success: true })),
-	http.get(`${API_ROOT}/auth/me`, () => HttpResponse.json(clone(mocks.MOCK_USER))),
+	http.get(`${API_ROOT}/auth/me`, () => HttpResponse.json(clone(fixtures.MOCK_USER))),
 
 	http.get(`${API_ROOT}/profile`, () => HttpResponse.json({
-		...clone(mocks.MOCK_USER),
+		...clone(fixtures.MOCK_USER),
 		portfolioItems: [],
 	})),
 	http.put(`${API_ROOT}/profile`, async ({ request }) => {
 		const body = await request.json().catch(() => ({}));
 		return HttpResponse.json({
-			...clone(mocks.MOCK_USER),
+			...clone(fixtures.MOCK_USER),
 			...(typeof body === 'object' && body ? body : {}),
 		});
 	}),
@@ -60,21 +61,22 @@ const defaultHandlers = [
 	http.delete(`${API_ROOT}/profile/portfolio/:itemId`, () => new HttpResponse(null, { status: 204 })),
 
 	http.get(`${API_ROOT}/jobs`, () => HttpResponse.json({
-		items: clone(mocks.MOCK_JOBS),
-		dailyCount: mocks.MOCK_FETCH_SUMMARY.dailyCount,
-		dailyLimit: mocks.MOCK_FETCH_SUMMARY.dailyLimit,
-		remaining: mocks.MOCK_FETCH_SUMMARY.remaining,
+		items: clone(fixtures.MOCK_JOBS),
+		dailyCount: fixtures.MOCK_FETCH_SUMMARY.dailyCount,
+		dailyLimit: fixtures.MOCK_FETCH_SUMMARY.dailyLimit,
+		remaining: fixtures.MOCK_FETCH_SUMMARY.remaining,
 	})),
 	http.get(`${API_ROOT}/jobs/:id`, ({ params }) => {
-		const match = mocks.MOCK_JOBS.find((job) => job.userJobId === params.id || job.jobId === params.id);
-		return HttpResponse.json(match ? { ...clone(mocks.MOCK_JOB_DETAIL), ...match } : clone(mocks.MOCK_JOB_DETAIL));
+		const match = fixtures.MOCK_JOBS.find((job) => job.userJobId === params.id || job.jobId === params.id);
+		return HttpResponse.json(match ? { ...clone(fixtures.MOCK_JOB_DETAIL), ...match } : clone(fixtures.MOCK_JOB_DETAIL));
 	}),
-	http.post(`${API_ROOT}/jobs/fetch`, () => HttpResponse.json(clone(mocks.MOCK_FETCH_SUMMARY))),
-	http.get(`${API_ROOT}/jobs/limits`, () => HttpResponse.json(clone(mocks.MOCK_FETCH_SUMMARY))),
-	http.get(`${API_ROOT}/jobs/stats`, () => HttpResponse.json(clone(mocks.MOCK_STATS))),
+	http.post(`${API_ROOT}/jobs/fetch`, () => HttpResponse.json(clone(fixtures.MOCK_FETCH_SUMMARY))),
+	http.get(`${API_ROOT}/jobs/limits`, () => HttpResponse.json(clone(fixtures.MOCK_FETCH_SUMMARY))),
+	http.get(`${API_ROOT}/jobs/stats`, () => HttpResponse.json(clone(fixtures.MOCK_STATS))),
+	http.get(`${API_ROOT}/jobs/recommended`, () => HttpResponse.json(clone(MOCK_RECOMMENDED_JOBS))),
 
-	http.get(`${API_ROOT}/progress/weekly-summary`, () => HttpResponse.json(clone(mocks.MOCK_WEEKLY_SUMMARY))),
-	http.get(`${API_ROOT}/progress/streaks`, () => HttpResponse.json(clone(mocks.MOCK_STREAKS))),
+	http.get(`${API_ROOT}/progress/weekly-summary`, () => HttpResponse.json(clone(fixtures.MOCK_WEEKLY_SUMMARY))),
+	http.get(`${API_ROOT}/progress/streaks`, () => HttpResponse.json(clone(fixtures.MOCK_STREAKS))),
 
 	http.post(`${API_ROOT}/skills/start`, async ({ request }) => {
 		const body = await request.json() as { skillName?: string };
@@ -123,7 +125,9 @@ const defaultHandlers = [
 		},
 	})),
 
-	http.get(`${API_ROOT}/planner/upcoming`, () => HttpResponse.json(clone(mocks.MOCK_PLANNER_UPCOMING))),
+	http.get(`${API_ROOT}/planner/upcoming`, () => HttpResponse.json(clone(fixtures.MOCK_PLANNER_UPCOMING))),
+
+	http.get(`${API_ROOT}/experiments/variants`, () => HttpResponse.json({})),
 
 	http.get(`${API_ROOT}/notifications`, ({ request }) => {
 		const url = new URL(request.url);
@@ -142,7 +146,7 @@ const defaultHandlers = [
 	http.patch(`${API_ROOT}/notifications/mark-all-read`, () => new HttpResponse(null, { status: 204 })),
 	http.delete(`${API_ROOT}/notifications`, () => new HttpResponse(null, { status: 204 })),
 
-	http.get(`${API_ROOT}/workspaces`, () => HttpResponse.json(clone(mocks.MOCK_WORKSPACES))),
+	http.get(`${API_ROOT}/workspaces`, () => HttpResponse.json(clone(fixtures.MOCK_WORKSPACES))),
 	http.post(`${API_ROOT}/workspaces`, async ({ request }) => {
 		const body = await request.json().catch(() => ({}));
 		return HttpResponse.json({
@@ -151,7 +155,7 @@ const defaultHandlers = [
 			description: null,
 			createdAt: new Date().toISOString(),
 			members: [],
-			ownerId: mocks.MOCK_USER.id,
+			ownerId: fixtures.MOCK_USER.id,
 			...(typeof body === 'object' && body ? body : {}),
 		});
 	}),

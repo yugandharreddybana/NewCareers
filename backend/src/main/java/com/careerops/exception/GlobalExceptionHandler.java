@@ -103,9 +103,17 @@ public class GlobalExceptionHandler {
     @ExceptionHandler(org.springframework.http.converter.HttpMessageNotReadableException.class)
     public ResponseEntity<ErrorResponse> handleMessageNotReadable(org.springframework.http.converter.HttpMessageNotReadableException ex) {
         log.warn("Malformed HTTP message: {}", ex.getMessage());
+        String message = "Malformed or unreadable request payload.";
+        Throwable cause = ex.getCause();
+        if (cause instanceof com.fasterxml.jackson.databind.exc.InvalidFormatException ife) {
+            message = "Invalid value for " + ife.getPathReference()
+                    + " (expected " + ife.getTargetType().getSimpleName() + ").";
+        } else if (cause instanceof com.fasterxml.jackson.databind.exc.MismatchedInputException mie) {
+            message = "Invalid JSON field: " + mie.getPathReference() + ".";
+        }
         return ResponseEntity
             .badRequest()
-            .body(ErrorResponse.of("Malformed or unreadable request payload.", HttpStatus.BAD_REQUEST.value()));
+            .body(ErrorResponse.of(message, HttpStatus.BAD_REQUEST.value()));
     }
 
     @ExceptionHandler(org.springframework.web.method.annotation.MethodArgumentTypeMismatchException.class)
@@ -138,6 +146,14 @@ public class GlobalExceptionHandler {
         return ResponseEntity
             .badRequest()
             .body(ErrorResponse.of("Validation failed: " + ex.getMessage(), HttpStatus.BAD_REQUEST.value()));
+    }
+
+    @ExceptionHandler(org.springframework.web.servlet.resource.NoResourceFoundException.class)
+    public ResponseEntity<ErrorResponse> handleNoResource(org.springframework.web.servlet.resource.NoResourceFoundException ex) {
+        log.warn("No handler for path: {}", ex.getResourcePath());
+        return ResponseEntity
+            .status(HttpStatus.NOT_FOUND)
+            .body(ErrorResponse.of("Endpoint not found — restart the backend after pulling latest code.", HttpStatus.NOT_FOUND.value()));
     }
 
     // ── 6. Catch-all 500 ──────────────────────────────────────────────────

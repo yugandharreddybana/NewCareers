@@ -7,7 +7,7 @@ import java.time.Instant;
 import java.util.UUID;
 
 @Entity
-@Table(name = "org_teams", schema = "career_operations")
+@Table(name = "org_teams", schema = "careerops")
 @Getter @Setter @NoArgsConstructor @AllArgsConstructor @Builder
 public class OrgTeam {
 
@@ -42,3 +42,4 @@ public class OrgTeam {
         updatedAt = Instant.now();
     }
 }
+

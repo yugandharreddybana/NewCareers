@@ -56,4 +56,16 @@ class SkillServiceTest {
         assertThat(result.type()).isEqualTo(SkillRunResponse.Type.RESULT);
         assertThat(result.data().path("test").asText()).isEqualTo("data");
     }
+
+    @Test
+    @DisplayName("findLastRun — empty when no prior run")
+    void findLastRun_emptyWhenMissing() {
+        UUID userId = UUID.randomUUID();
+        UUID userJobId = UUID.randomUUID();
+
+        when(skillRuns.findFirstByUserIdAndUserJobIdAndSkillOrderByCreatedAtDesc(userId, userJobId, "tailor-resume"))
+                .thenReturn(Optional.empty());
+
+        assertThat(skillService.findLastRun(userId, userJobId, "tailor-resume")).isEmpty();
+    }
 }

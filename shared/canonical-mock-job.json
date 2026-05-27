@@ -1,0 +1,131 @@
+{
+  "ids": {
+    "userId": "00000000-0000-0000-0000-000000000001",
+    "profileId": "00000000-0000-0000-0000-000000000010",
+    "jobId": "cccccccc-cccc-cccc-cccc-ccccccccccc1",
+    "userJobId": "dddddddd-dddd-dddd-dddd-ddddddddddd1",
+    "fingerprint": "mock-techwave-senior-frontend-dublin"
+  },
+  "card": {
+    "userJobId": "dddddddd-dddd-dddd-dddd-ddddddddddd1",
+    "jobId": "cccccccc-cccc-cccc-cccc-ccccccccccc1",
+    "title": "Senior Frontend Engineer (React)",
+    "company": "TechWave Ireland",
+    "location": "Dublin (Hybrid)",
+    "salaryMin": 75000,
+    "salaryMax": 95000,
+    "currency": "EUR",
+    "sponsorship": true,
+    "matchPercent": 92,
+    "preMatchScore": 88,
+    "verdict": "Strong Match",
+    "humanSummary": "A senior role at a growing Dublin fintech using React and TypeScript.",
+    "sourceName": "LinkedIn",
+    "sourceUrl": "https://linkedin.com/jobs/view/mock-techwave-senior-frontend",
+    "postedAt": "2026-05-01T09:00:00.000Z",
+    "deliveredAt": "2026-05-19T08:00:00.000Z",
+    "kanbanColumn": "Discovered",
+    "status": "new",
+    "matchedSkills": ["React", "TypeScript", "Tailwind CSS", "Redux"],
+    "unmatchedSkills": ["GraphQL"]
+  },
+  "detail": {
+    "description": "## About the Role\n\nTechWave is looking for a Senior Frontend Engineer to lead our customer portal redesign. You will work closely with our design team to implement a premium, high-performance dashboard.\n\n## Requirements\n\n- 5+ years experience with React.\n- Strong TypeScript skills.\n- Experience with Tailwind CSS and Framer Motion.\n- Knowledge of accessibility best practices.\n\n## Benefits\n\n- Competitive salary and equity.\n- Full health insurance.\n- Flexible hybrid working model.",
+    "sector": "Fintech",
+    "aiScore": 94,
+    "cvImprovementTips": [
+      "Highlight your experience with high-traffic React applications.",
+      "Mention your contribution to design systems."
+    ]
+  },
+  "userJob": {
+    "aiScore": 94,
+    "matchPercent": 92,
+    "verdict": "Strong Match",
+    "humanSummary": "A senior role at a growing Dublin fintech using React and TypeScript.",
+    "status": "new",
+    "kanbanColumn": "Discovered",
+    "matchedSkills": ["React", "TypeScript", "Tailwind CSS", "Redux"],
+    "unmatchedSkills": ["GraphQL"],
+    "cvImprovementTips": [
+      "Highlight your experience with high-traffic React applications.",
+      "Mention your contribution to design systems."
+    ],
+    "scoreBreakdown": {
+      "overallScore": 94,
+      "matchPercent": 92,
+      "verdict": "Strong Match",
+      "humanSummary": "A senior role at a growing Dublin fintech using React and TypeScript.",
+      "matchedSkills": ["React", "TypeScript", "Tailwind CSS", "Redux"],
+      "unmatchedSkills": ["GraphQL"],
+      "cvImprovementTips": [
+        "Highlight your experience with high-traffic React applications.",
+        "Mention your contribution to design systems."
+      ],
+      "sponsorshipMatch": true,
+      "salaryMatch": true,
+      "sections": {
+        "executiveSummary": "Strong technical alignment for a senior frontend role in Dublin fintech.",
+        "backgroundMatch": "Your React and TypeScript depth maps directly to the posting requirements.",
+        "positioningStrategy": "Lead with measurable product outcomes and platform-scale delivery examples.",
+        "compensationAndMarket": "Salary band is competitive for Dublin hybrid roles at this seniority.",
+        "tailoringPlan": "Mirror keywords from the posting in your top third and link a relevant case study.",
+        "interviewPrep": "Prepare system design adjacent stories and collaboration examples with design and PM."
+      },
+      "technical": 94,
+      "culture": 90,
+      "growth": 88
+    }
+  },
+  "listMeta": {
+    "dailyCount": 1,
+    "dailyLimit": 10,
+    "remaining": 9
+  },
+  "fetchSummary": {
+    "delivered": 1,
+    "dailyCount": 1,
+    "dailyLimit": 10,
+    "remaining": 9
+  },
+  "stats": {
+    "total": 1,
+    "applied": 0,
+    "interviews": 0,
+    "offers": 0,
+    "avgMatch": 92
+  },
+  "recommended": {
+    "whyRecommended": "92% match — React and TypeScript align with your profile; hybrid Dublin role in Fintech."
+  },
+  "skillResults": {
+    "evaluate": {
+      "match": 92,
+      "pros": [
+        "Perfect tech stack alignment",
+        "Strong domain experience",
+        "Hybrid location fits preference"
+      ],
+      "cons": [
+        "Slightly above the listed salary range",
+        "Requires travel once a month"
+      ],
+      "verdict": "High priority. The tech stack is a 100% match for your background."
+    },
+    "research": {
+      "companySize": "250-500 employees",
+      "culture": "Fast-paced, engineering-led, remote-friendly but values hybrid connection.",
+      "funding": "Series C ($45M raised in 2023)",
+      "recentNews": "Recently expanded into the German market. Hired a new CTO from Stripe.",
+      "interviewProcess": "1. Recruiter Screen, 2. Technical Panel, 3. Design/Product Sync, 4. Final Leadership Chat."
+    },
+    "tailor-resume": {
+      "text": "Your resume has been tailored for TechWave. Key changes: Emphasized fintech experience and React leadership roles.",
+      "matchingScore": 95
+    },
+    "outreach": {
+      "linkedin": "Hi [Name], I noticed TechWave is hiring for a Senior Frontend Engineer. Given my background in React and Fintech, I'm very interested in the role. Would you be open to a brief chat?",
+      "email": "Subject: Senior Frontend Engineer Application\n\nDear [Name],\n\nI am writing to express my interest in the Senior Frontend Engineer position at TechWave Ireland."
+    }
+  }
+}

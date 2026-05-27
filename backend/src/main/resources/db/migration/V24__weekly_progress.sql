@@ -4,7 +4,7 @@
 -- ============================================================
 
 CREATE TABLE IF NOT EXISTS weekly_progress_snapshots (
-    id                      UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    id                      UUID DEFAULT gen_random_uuid() PRIMARY KEY,
     user_id                 UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
     week_start              DATE NOT NULL,
     week_end                DATE NOT NULL,
@@ -30,7 +30,7 @@ CREATE TABLE IF NOT EXISTS weekly_progress_snapshots (
     response_rate           NUMERIC(5,2),
     interview_rate          NUMERIC(5,2),
 
-    created_at              TIMESTAMPTZ NOT NULL DEFAULT now(),
+    created_at              TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT now(),
 
     CONSTRAINT wps_unique_user_week UNIQUE (user_id, week_start)
 );
@@ -40,14 +40,14 @@ CREATE INDEX idx_wps_week_start ON weekly_progress_snapshots(week_start DESC);
 
 -- Task 64: streak tracking table
 CREATE TABLE IF NOT EXISTS user_streaks (
-    id                    UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    id                    UUID DEFAULT gen_random_uuid() PRIMARY KEY,
     user_id               UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE UNIQUE,
     current_daily_streak  INT NOT NULL DEFAULT 0,
     longest_daily_streak  INT NOT NULL DEFAULT 0,
     last_active_date      DATE,
     total_jobs_reviewed   INT NOT NULL DEFAULT 0,
     total_apps_submitted  INT NOT NULL DEFAULT 0,
-    updated_at            TIMESTAMPTZ NOT NULL DEFAULT now()
+    updated_at            TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT now()
 );
 
 CREATE INDEX idx_user_streaks_user ON user_streaks(user_id);

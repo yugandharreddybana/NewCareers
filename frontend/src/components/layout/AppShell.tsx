@@ -35,7 +35,7 @@ interface AppShellProps {
 
 export default function AppShell({ children }: AppShellProps) {
   const location = useLocation();
-  const isKanban = location.pathname.startsWith('/kanban');
+  const isKanban = location.pathname.startsWith('/kanban') || location.pathname.startsWith('/jobs');
 
   const content = children ?? (
     <ErrorBoundary>
@@ -72,7 +72,7 @@ export default function AppShell({ children }: AppShellProps) {
 
       {/* ── Desktop content area ── */}
       <main
-        className={`hidden md:block ${isKanban ? 'pt-[5px]' : 'pt-[60px] app-shell-content-offset'} min-h-screen`}
+        className={`hidden md:block app-shell-content-offset min-h-screen ${isKanban ? 'pt-[5px]' : 'pt-[60px]'}`}
       >
         <div className="mx-auto px-6 py-6">
           <motion.div

@@ -1,4 +1,4 @@
-SET search_path TO career_operations;
+SET search_path TO careerops;
 
 -- V64 — Hardening and constraints across high-traffic tables.
 -- 1. Enable pgcrypto extension for gen_random_uuid() support on legacy PG versions (e.g., PG 12).
@@ -18,7 +18,7 @@ ALTER TABLE user_jobs ADD CONSTRAINT chk_user_jobs_status CHECK (status IN ('Dis
 -- Ensure application_runs table exists before adding the constraint (safety guard for non-monolithic databases)
 DO $$
 BEGIN
-    IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema = 'career_operations' AND table_name = 'application_runs') THEN
+    IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema = 'careerops' AND table_name = 'application_runs') THEN
         ALTER TABLE application_runs DROP CONSTRAINT IF EXISTS chk_application_runs_status;
         ALTER TABLE application_runs ADD CONSTRAINT chk_application_runs_status CHECK (status IN ('pending', 'in_progress', 'awaiting_approval', 'completed', 'cancelled', 'failed'));
     END IF;
@@ -28,18 +28,19 @@ END$$;
 DO $$
 BEGIN
     -- user_jobs -> users FK
-    IF EXISTS (SELECT 1 FROM information_schema.table_constraints WHERE constraint_schema = 'career_operations' AND table_name = 'user_jobs' AND constraint_name = 'user_jobs_user_id_fkey') THEN
+    IF EXISTS (SELECT 1 FROM information_schema.table_constraints WHERE constraint_schema = 'careerops' AND table_name = 'user_jobs' AND constraint_name = 'user_jobs_user_id_fkey') THEN
         ALTER TABLE user_jobs DROP CONSTRAINT user_jobs_user_id_fkey;
     END IF;
-    IF NOT EXISTS (SELECT 1 FROM information_schema.table_constraints WHERE constraint_schema = 'career_operations' AND table_name = 'user_jobs' AND constraint_name = 'fk_user_jobs_user') THEN
+    IF NOT EXISTS (SELECT 1 FROM information_schema.table_constraints WHERE constraint_schema = 'careerops' AND table_name = 'user_jobs' AND constraint_name = 'fk_user_jobs_user') THEN
         ALTER TABLE user_jobs ADD CONSTRAINT fk_user_jobs_user FOREIGN KEY (user_id) REFERENCES users(id) ON UPDATE CASCADE ON DELETE CASCADE;
     END IF;
 
     -- user_profiles -> users FK
-    IF EXISTS (SELECT 1 FROM information_schema.table_constraints WHERE constraint_schema = 'career_operations' AND table_name = 'user_profiles' AND constraint_name = 'user_profiles_user_id_fkey') THEN
+    IF EXISTS (SELECT 1 FROM information_schema.table_constraints WHERE constraint_schema = 'careerops' AND table_name = 'user_profiles' AND constraint_name = 'user_profiles_user_id_fkey') THEN
         ALTER TABLE user_profiles DROP CONSTRAINT user_profiles_user_id_fkey;
     END IF;
-    IF NOT EXISTS (SELECT 1 FROM information_schema.table_constraints WHERE constraint_schema = 'career_operations' AND table_name = 'user_profiles' AND constraint_name = 'fk_user_profiles_user') THEN
+    IF NOT EXISTS (SELECT 1 FROM information_schema.table_constraints WHERE constraint_schema = 'careerops' AND table_name = 'user_profiles' AND constraint_name = 'fk_user_profiles_user') THEN
         ALTER TABLE user_profiles ADD CONSTRAINT fk_user_profiles_user FOREIGN KEY (user_id) REFERENCES users(id) ON UPDATE CASCADE ON DELETE CASCADE;
     END IF;
 END$$;
+

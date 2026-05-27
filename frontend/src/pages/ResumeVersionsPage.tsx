@@ -12,6 +12,7 @@ import {
   X,
 } from 'lucide-react';
 import { PageMeta } from '@/components/PageMeta';
+import { PageLoader } from '@/components/LoadingSpinner';
 import { useFileUpload } from '@/hooks/useFileUpload';
 import {
   resumeVersionsApi,
@@ -19,8 +20,6 @@ import {
   type RecommendResult,
   type ResumeVersion,
 } from '@/services/resumeVersionsApi';
-
-const USE_MOCKS = import.meta.env.VITE_USE_MOCKS === 'true';
 
 type ResumeOutcome = 'interview' | 'offer' | 'rejected' | 'unknown';
 
@@ -33,60 +32,6 @@ const OUTCOME_STYLES: Record<ResumeOutcome, string> = {
   unknown: 'bg-gray-100 text-gray-500',
 };
 
-const MOCK_VERSIONS: ResumeVersion[] = [
-  {
-    id: 'rv-1',
-    name: 'Senior FE - Fintech Focus',
-    versionNumber: 1,
-    source: 'upload',
-    roleTags: ['frontend', 'fintech'],
-    isActive: true,
-    isFavorite: true,
-    outcomeAssociation: 'interview',
-    interviewCount: 2,
-    applicationCount: 5,
-    offerCount: 0,
-    bestForRoleType: 'Senior Frontend Engineer',
-    notes: null,
-    createdAt: new Date(Date.now() - 86_400_000 * 3).toISOString(),
-    updatedAt: new Date().toISOString(),
-  },
-  {
-    id: 'rv-2',
-    name: 'Fullstack - General',
-    versionNumber: 2,
-    source: 'upload',
-    roleTags: ['fullstack', 'typescript'],
-    isActive: false,
-    isFavorite: false,
-    outcomeAssociation: 'unknown',
-    interviewCount: 1,
-    applicationCount: 3,
-    offerCount: 0,
-    bestForRoleType: 'Full Stack Developer',
-    notes: null,
-    createdAt: new Date(Date.now() - 86_400_000 * 7).toISOString(),
-    updatedAt: new Date().toISOString(),
-  },
-  {
-    id: 'rv-3',
-    name: 'Tech Lead Variant',
-    versionNumber: 3,
-    source: 'upload',
-    roleTags: ['leadership', 'architecture'],
-    isActive: false,
-    isFavorite: false,
-    outcomeAssociation: null,
-    interviewCount: 0,
-    applicationCount: 1,
-    offerCount: 0,
-    bestForRoleType: 'Tech Lead',
-    notes: null,
-    createdAt: new Date(Date.now() - 86_400_000).toISOString(),
-    updatedAt: new Date().toISOString(),
-  },
-];
-
 function stripExtension(name: string) {
   return name.replace(/\.(pdf|docx)$/i, '');
 }
@@ -97,27 +42,6 @@ function isKnownOutcome(outcome: string | null): outcome is ResumeOutcome {
 
 function sortVersions(versions: ResumeVersion[]) {
   return [...versions].sort((left, right) => new Date(right.createdAt).getTime() - new Date(left.createdAt).getTime());
-}
-
-function buildMockRecommendation(versions: ResumeVersion[]): RecommendResult | null {
-  const recommended = versions.find(version => version.isActive) ?? versions[0];
-  if (!recommended) return null;
-  return {
-    recommended,
-    reason: `${recommended.name} is the strongest current default based on its activity and tracked outcomes.`,
-  };
-}
-
-function buildMockCompareResult(left: ResumeVersion, right: ResumeVersion): CompareResult {
-  const leftScore = left.interviewCount + left.offerCount * 2;
-  const rightScore = right.interviewCount + right.offerCount * 2;
-  const recommendation = leftScore === rightScore
-    ? `${left.name} and ${right.name} are performing similarly. Use the one that better matches your target role.`
-    : leftScore > rightScore
-      ? `${left.name} has stronger tracked outcomes so far.`
-      : `${right.name} has stronger tracked outcomes so far.`;
-
-  return { left, right, recommendation };
 }
 
 function mergeVersionList(current: ResumeVersion[], next: ResumeVersion) {
@@ -154,51 +78,24 @@ const ResumeVersionsPage = () => {
   const fileRef = useRef<HTMLInputElement>(null);
 
   const { upload, progress, uploading, error, abort } = useFileUpload<ResumeVersion>({
-    uploader: USE_MOCKS
-      ? async (file, onProgress) => {
-          for (let value = 0; value <= 100; value += 20) {
-            await new Promise(resolve => setTimeout(resolve, 120));
-            onProgress(value);
-          }
-
-          return {
-            id: `rv-${Date.now()}`,
-            name: stripExtension(file.name),
-            versionNumber: versions.length + 1,
-            source: 'upload',
-            roleTags: [],
-            isActive: versions.length === 0,
-            isFavorite: false,
-            outcomeAssociation: null,
-            interviewCount: 0,
-            applicationCount: 0,
-            offerCount: 0,
-            bestForRoleType: null,
-            notes: null,
-            createdAt: new Date().toISOString(),
-            updatedAt: new Date().toISOString(),
-          };
-        }
-      : async (file, onProgress, signal) => {
-          const uploaded = await resumeVersionsApi.uploadWithProgress(
-            file,
-            stripExtension(file.name),
-            undefined,
-            onProgress,
+    uploader: async (file, onProgress, signal) => {
+      const uploaded = await resumeVersionsApi.uploadWithProgress(
+        file,
+        stripExtension(file.name),
+        undefined,
+        onProgress,
         signal,
-          );
+      );
 
-          if (versions.length === 0) {
-            return resumeVersionsApi.update(uploaded.id, { isActive: true });
-          }
+      if (versions.length === 0) {
+        return resumeVersionsApi.update(uploaded.id, { isActive: true });
+      }
 
-          return uploaded;
-        },
+      return uploaded;
+    },
     onSuccess: version => {
       setVersions(prev => mergeVersionList(prev, version));
-      setRecommendation(prev => prev?.recommended.id === version.id
-        ? { ...prev, recommended: version }
-        : prev ?? buildMockRecommendation([version, ...versions]));
+      void refreshRecommendation(mergeVersionList(versions, version));
       toast.success('Resume version uploaded!');
     },
     onError: () => toast.error('Upload failed.'),
@@ -207,13 +104,6 @@ const ResumeVersionsPage = () => {
   useEffect(() => {
     const load = async () => {
       try {
-        if (USE_MOCKS) {
-          await new Promise(resolve => setTimeout(resolve, 400));
-          setVersions(sortVersions(MOCK_VERSIONS));
-          setRecommendation(buildMockRecommendation(MOCK_VERSIONS));
-          return;
-        }
-
         const [listResponse, recommendResponse] = await Promise.all([
           resumeVersionsApi.list(),
           resumeVersionsApi.recommend().catch(() => null),
@@ -230,12 +120,7 @@ const ResumeVersionsPage = () => {
     void load();
   }, []);
 
-  const refreshRecommendation = async (nextVersions?: ResumeVersion[]) => {
-    if (USE_MOCKS) {
-      setRecommendation(buildMockRecommendation(nextVersions ?? versions));
-      return;
-    }
-
+  const refreshRecommendation = async (_nextVersions?: ResumeVersion[]) => {
     try {
       setRecommendation(await resumeVersionsApi.recommend());
     } catch {
@@ -257,9 +142,7 @@ const ResumeVersionsPage = () => {
 
     setDeleting(id);
     try {
-      if (!USE_MOCKS) {
-        await resumeVersionsApi.delete(id);
-      }
+      await resumeVersionsApi.delete(id);
 
       const nextVersions = versions.filter(version => version.id !== id);
       setVersions(nextVersions);
@@ -280,9 +163,7 @@ const ResumeVersionsPage = () => {
       const existing = versions.find(version => version.id === id);
       if (!existing) return;
 
-      const updated = USE_MOCKS
-        ? { ...existing, isActive: true, updatedAt: new Date().toISOString() }
-        : await resumeVersionsApi.update(id, { isActive: true });
+      const updated = await resumeVersionsApi.update(id, { isActive: true });
 
       const nextVersions = versions.map(version => version.id === id ? updated : { ...version, isActive: false });
       setVersions(sortVersions(nextVersions));
@@ -296,11 +177,6 @@ const ResumeVersionsPage = () => {
   };
 
   const handleDownload = async (id: string) => {
-    if (USE_MOCKS) {
-      toast('Download is not available in mock mode.');
-      return;
-    }
-
     setDownloading(id);
     try {
       const { url } = await resumeVersionsApi.getDownloadUrl(id);
@@ -317,15 +193,7 @@ const ResumeVersionsPage = () => {
       const existing = versions.find(version => version.id === id);
       if (!existing) return;
 
-      const updated = USE_MOCKS
-        ? {
-            ...existing,
-            outcomeAssociation: outcome,
-            interviewCount: outcome === 'interview' ? existing.interviewCount + 1 : existing.interviewCount,
-            offerCount: outcome === 'offer' ? existing.offerCount + 1 : existing.offerCount,
-            updatedAt: new Date().toISOString(),
-          }
-        : await resumeVersionsApi.recordOutcome(id, outcome);
+      const updated = await resumeVersionsApi.recordOutcome(id, outcome);
 
       const nextVersions = mergeVersionList(versions, updated);
       setVersions(nextVersions);
@@ -342,14 +210,7 @@ const ResumeVersionsPage = () => {
 
     setComparing(true);
     try {
-      if (USE_MOCKS) {
-        const left = versions.find(version => version.id === compareA);
-        const right = versions.find(version => version.id === compareB);
-        if (!left || !right) return;
-        setCompareResult(buildMockCompareResult(left, right));
-      } else {
-        setCompareResult(await resumeVersionsApi.compare(compareA, compareB));
-      }
+      setCompareResult(await resumeVersionsApi.compare(compareA, compareB));
     } catch {
       toast.error('Failed to compare resume versions.');
     } finally {
@@ -358,7 +219,7 @@ const ResumeVersionsPage = () => {
   };
 
   if (loading) {
-    return <div className="flex items-center justify-center min-h-[50vh] text-gray-400 text-sm">Loading resume versions...</div>;
+    return <PageLoader />;
   }
 
   return (

@@ -18,6 +18,7 @@ import org.springframework.web.client.RestClientResponseException;
 
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.Semaphore;
 
 /**
  * Unified AI service backed by NVIDIA NIM (OpenAI-compatible endpoint).
@@ -45,6 +46,11 @@ public class NvidiaService {
 
     @Value("${nvidia.max.tokens:4096}")
     private int maxTokens;
+
+    @Value("${nvidia.max.concurrent:2}")
+    private int maxConcurrent;
+
+    private Semaphore callSemaphore;
 
     private final RestClient          restClient;
     private final ObjectMapper        mapper;
@@ -74,6 +80,8 @@ public class NvidiaService {
         } else {
             log.info("NvidiaService: initialised with model={}", model);
         }
+        callSemaphore = new Semaphore(Math.max(1, maxConcurrent));
+        log.info("NvidiaService: max concurrent calls={}", maxConcurrent);
     }
 
     // ─── Core text generation ────────────────────────────────────────────────
@@ -99,6 +107,18 @@ public class NvidiaService {
         return JsonExtractor.extract(raw, mapper);
     }
 
+    /**
+     * Plain-text completion (no JSON response_format) — used for CV markdown normalization.
+     */
+    public String generatePlainText(String systemPrompt, String userPrompt, UUID userId, String featureName) {
+        consentService.validateAiConsent(userId);
+        if (apiKey == null || apiKey.isBlank()) {
+            throw com.careerops.exception.ApiException.internalError("AI engine not configured (NVIDIA NIM)");
+        }
+        ObjectNode body = buildPlainBody(systemPrompt, userPrompt);
+        return callWithRetry(body, userId, featureName);
+    }
+
     // ─── Async JSON generation (replaces GeminiService.generateJsonAsync) ────
 
     public CompletableFuture<JsonNode> generateJsonAsync(String systemPrompt, String userPrompt,
@@ -117,12 +137,15 @@ public class NvidiaService {
     // ─── Request builder ─────────────────────────────────────────────────────
 
     private ObjectNode buildBody(String systemPrompt, String userPrompt) {
+        ObjectNode body = buildPlainBody(systemPrompt, userPrompt);
+        body.set("response_format", mapper.createObjectNode().put("type", "json_object"));
+        return body;
+    }
+
+    private ObjectNode buildPlainBody(String systemPrompt, String userPrompt) {
         ObjectNode body = mapper.createObjectNode();
         body.put("model", model);
         body.put("max_tokens", maxTokens);
-        // Force JSON output — equivalent to Gemini's responseMimeType: application/json
-        body.set("response_format", mapper.createObjectNode().put("type", "json_object"));
-
         ArrayNode messages = mapper.createArrayNode();
         messages.addObject().put("role", "system").put("content", systemPrompt);
         messages.addObject().put("role", "user").put("content", userPrompt);
@@ -135,6 +158,10 @@ public class NvidiaService {
     private String callWithRetry(ObjectNode body, UUID userId, String featureName) {
         int  maxAttempts = 3;
         long backoffMs   = 2000;
+        boolean acquired = false;
+        try {
+            callSemaphore.acquire();
+            acquired = true;
         for (int attempt = 1; attempt <= maxAttempts; attempt++) {
             try {
                 String raw = meterRegistry.timer("ai.nvidia.call", "feature", featureName)
@@ -189,5 +216,13 @@ public class NvidiaService {
             }
         }
         throw com.careerops.exception.ApiException.internalError("Max retries exceeded");
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw com.careerops.exception.ApiException.internalError("AI call interrupted");
+        } finally {
+            if (acquired) {
+                callSemaphore.release();
+            }
+        }
     }
 }

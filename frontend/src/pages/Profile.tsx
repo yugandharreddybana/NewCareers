@@ -1,5 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { PageMeta } from '@/components/PageMeta';
+import { PageLoader } from '@/components/LoadingSpinner';
 import { useAuth } from '@/context/AuthContext';
 import { profileApi } from '@/services/api';
 import type { Profile as ProfileType, PortfolioItem } from '@/types';
@@ -102,8 +103,9 @@ const ProfilePage: React.FC = () => {
   const handleCvUpload = async (file: File) => {
     setCvUploading(true);
     try {
-      const res = await profileApi.uploadCv(file);
-      setProfile(p => p ? { ...p, activeCvFileName: res.fileName } : p);
+      await profileApi.uploadCv(file);
+      const refreshed = await profileApi.get();
+      setProfile(refreshed);
       toast.success('CV uploaded!');
     } catch {
       toast.error('CV upload failed.');
@@ -139,11 +141,7 @@ const ProfilePage: React.FC = () => {
   const completeness = profile?.completenessScore ?? 0;
 
   if (loading) {
-    return (
-      <div className="flex items-center justify-center min-h-[50vh] text-gray-400 text-sm">
-        Loading profile…
-      </div>
-    );
+    return <PageLoader />;
   }
 
   return (

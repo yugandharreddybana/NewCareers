@@ -62,6 +62,9 @@ typings/
 .next
 
 # Java
+backend/data/
+*.mv.db
+*.trace.db
 target/
 *.class
 *.jar

@@ -25,7 +25,7 @@ import static org.mockito.Mockito.when;
 @ExtendWith(MockitoExtension.class)
 class SalaryNegotiationSkillTest {
 
-    @Mock private ClaudeDirectService claude;
+    @Mock private NvidiaService nvidia;
     @Mock private UserProfileRepository profiles;
     @Mock private UserJobRepository userJobs;
     @Mock private JobRepository jobs;
@@ -36,7 +36,7 @@ class SalaryNegotiationSkillTest {
     private SalaryNegotiationSkillHandler skill;
 
     @Test
-    @DisplayName("execute — triggers Claude with profile context")
+    @DisplayName("execute — triggers NVIDIA with profile context")
     void execute_triggersClaudeWithProfileContext() throws Exception {
         UUID userId = UUID.randomUUID();
         UUID userJobId = UUID.randomUUID();
@@ -46,7 +46,7 @@ class SalaryNegotiationSkillTest {
         when(profiles.findByUserId(userId)).thenReturn(Optional.of(p));
 
         JsonNode response = mapper.readTree("{\"salaryBand\": {\"min\": 60000}}");
-        when(claude.generateJson(anyString(), anyString(), any(UUID.class), anyString())).thenReturn(response);
+        when(nvidia.generateJson(anyString(), anyString(), any(UUID.class), anyString())).thenReturn(response);
 
         JsonNode result = skill.execute(userId, userJobId);
 

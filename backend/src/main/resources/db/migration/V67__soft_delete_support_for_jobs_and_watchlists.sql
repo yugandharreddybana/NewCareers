@@ -1,10 +1,11 @@
-SET search_path TO career_operations;
+SET search_path TO careerops;
 
 -- V67 — Soft-delete support for user_jobs and job_watchlists.
 -- Enhances auditability and prevents data loss by enabling a logical delete pattern.
 
-ALTER TABLE user_jobs ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMPTZ;
-CREATE INDEX IF NOT EXISTS idx_user_jobs_deleted_at ON user_jobs (deleted_at) WHERE deleted_at IS NOT NULL;
+ALTER TABLE user_jobs ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMP WITH TIME ZONE;
+CREATE INDEX IF NOT EXISTS idx_user_jobs_deleted_at ON user_jobs (deleted_at);
 
-ALTER TABLE job_watchlists ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMPTZ;
-CREATE INDEX IF NOT EXISTS idx_job_watchlists_deleted_at ON job_watchlists (deleted_at) WHERE deleted_at IS NOT NULL;
+ALTER TABLE job_watchlists ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMP WITH TIME ZONE;
+CREATE INDEX IF NOT EXISTS idx_job_watchlists_deleted_at ON job_watchlists (deleted_at);
+

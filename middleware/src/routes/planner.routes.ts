@@ -10,22 +10,12 @@
  *   POST   /jobs/:userJobId/deadlines
  */
 import express from 'express';
-import { createProxyMiddleware } from 'http-proxy-middleware';
 import { verifyToken } from '../auth.js';
+import { createJavaRouteProxy } from '../services/backendProxy.js';
 
 const router = express.Router();
-const proxy = createProxyMiddleware({
-  target: process.env.JAVA_BACKEND_URL || process.env.BACKEND_URL || 'http://localhost:8080',
-  changeOrigin: true,
-  proxyTimeout: 30_000,
-  timeout: 30_000,
-  on: {
-    error: (_e, _r, res) => {
-      if (res && 'status' in res && typeof res.status === 'function') {
-        res.status(502).json({ error: 'Planner service unavailable.' });
-      }
-    },
-  },
+const proxy = createJavaRouteProxy('/planner', {
+  errorMessage: 'Planner service unavailable.',
 });
 
 // ── Dashboard summary ─────────────────────────────────────────────────────────

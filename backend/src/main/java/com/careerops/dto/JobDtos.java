@@ -1,5 +1,7 @@
 package com.careerops.dto;
 
+import com.fasterxml.jackson.databind.JsonNode;
+
 import java.time.Instant;
 import java.util.UUID;
 
@@ -38,7 +40,8 @@ public class JobDtos {
         String description, String sourceUrl, String sourceName, String sector,
         Instant postedAt, Integer matchPercent, Integer aiScore,
         String[] matchedSkills, String[] unmatchedSkills, String[] cvImprovementTips,
-        String humanSummary, String verdict, String kanbanColumn, String status
+        String humanSummary, String verdict, String kanbanColumn, String status,
+        JsonNode scoreBreakdown
     ) {
         public static JobDetailResponse from(com.careerops.model.UserJob uj, com.careerops.model.Job j) {
             return new JobDetailResponse(
@@ -47,7 +50,8 @@ public class JobDtos {
                 j.getDescription(), j.getSourceUrl(), j.getSourceName(), j.getSector(),
                 j.getPostedAt(), uj.getMatchPercent(), uj.getAiScore(),
                 uj.getMatchedSkills(), uj.getUnmatchedSkills(), uj.getCvImprovementTips(),
-                uj.getHumanSummary(), uj.getVerdict(), uj.getKanbanColumn(), uj.getStatus()
+                uj.getHumanSummary(), uj.getVerdict(), uj.getKanbanColumn(), uj.getStatus(),
+                uj.getScoreBreakdown()
             );
         }
     }

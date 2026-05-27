@@ -1,8 +1,9 @@
 import { useEffect, useState } from 'react';
 import { PageMeta } from '@/components/PageMeta';
-import { jobsApi } from '@/services/api';
+import { LoadingSpinner } from '@/components/LoadingSpinner';
+import { useJobsList } from '@/hooks/queries';
 import { skillsApi } from '@/services/skillsApi';
-import type { JobCard, SkillName } from '@/types';
+import type { SkillName } from '@/types';
 import { ChevronDown, ChevronUp, Play, Download, CheckCircle2, Sparkles } from 'lucide-react';
 import toast from 'react-hot-toast';
 
@@ -46,24 +47,18 @@ function formatSkillOutput(data: unknown): string {
 }
 
 export default function Skills() {
-  const [jobs, setJobs] = useState<JobCard[]>([]);
-  const [loading, setLoading] = useState(true);
+  const { data: jobsData, isLoading: loading } = useJobsList();
+  const jobs = jobsData?.items ?? [];
   const [expandedJobId, setExpandedJobId] = useState<string | null>(null);
   const [runningSkills, setRunningSkills] = useState<Record<string, boolean>>({});
   const [downloadingSkills, setDownloadingSkills] = useState<Record<string, boolean>>({});
   const [skillResults, setSkillResults] = useState<Record<string, string>>({});
 
   useEffect(() => {
-    jobsApi.list()
-      .then(res => {
-        setJobs(res.items || []);
-        if (res.items && res.items.length > 0) {
-          setExpandedJobId(res.items[0].userJobId);
-        }
-      })
-      .catch(() => toast.error('Failed to load job roles.'))
-      .finally(() => setLoading(false));
-  }, []);
+    if (jobs.length > 0) {
+      setExpandedJobId(prev => prev ?? jobs[0]!.userJobId);
+    }
+  }, [jobs]);
 
   const handleRunSkill = async (jobId: string, skillId: SkillName) => {
     const key = `${jobId}-${skillId}`;
@@ -111,8 +106,7 @@ export default function Skills() {
 
         {loading && (
           <div className="flex flex-col items-center justify-center h-64 text-slate-400">
-            <div className="w-8 h-8 border-2 border-indigo-600 border-t-transparent rounded-full animate-spin mb-3" />
-            <span className="text-sm">Loading job roles…</span>
+            <LoadingSpinner size="md" />
           </div>
         )}
 

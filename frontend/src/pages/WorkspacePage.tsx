@@ -1,13 +1,10 @@
 import React, { useEffect, useState } from 'react';
 import { PageMeta } from '@/components/PageMeta';
-import * as mocks from '@/services/mockApi';
+import { PageLoader } from '@/components/LoadingSpinner';
 import { workspaceApi, type Workspace } from '@/services/workspaceApi';
 import toast from 'react-hot-toast';
-import { Briefcase, Plus, Users, Trash2, Crown, X } from 'lucide-react';
+import { Briefcase, Plus, Users, Crown, X } from 'lucide-react';
 import EmptyState from '@/components/ui/EmptyState';
-
-const USE_MOCKS = import.meta.env.VITE_USE_MOCKS === 'true';
-const MOCK_WS: Workspace[] = mocks.MOCK_WORKSPACES;
 
 const memberLabel = (member: Workspace['members'][number]): string => {
   return member.invitedEmail ?? member.userId ?? 'Pending member';
@@ -22,9 +19,7 @@ const CreateModal: React.FC<{ onClose: () => void; onCreate: (w: Workspace) => v
     if (!name.trim()) { toast.error('Workspace name required.'); return; }
     setSaving(true);
     try {
-      const w: Workspace = USE_MOCKS
-        ? { id: `ws-${Date.now()}`, name, description: desc || null, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(), members: [], ownerId: 'dev-user-123' }
-        : await workspaceApi.create({ name, ...(desc ? { description: desc } : {}) });
+      const w = await workspaceApi.create({ name, ...(desc ? { description: desc } : {}) });
       onCreate(w); toast.success('Workspace created!'); onClose();
     } catch { toast.error('Failed to create workspace.'); }
     finally { setSaving(false); }
@@ -55,12 +50,6 @@ const WorkspacePage: React.FC = () => {
     setLoadFailed(false);
     setLoading(true);
     try {
-      if (USE_MOCKS) {
-        await new Promise(r => setTimeout(r, 400));
-        setWorkspaces(MOCK_WS);
-        return;
-      }
-
       const data = await workspaceApi.list();
       setWorkspaces(data);
     } catch {
@@ -75,19 +64,7 @@ const WorkspacePage: React.FC = () => {
     void loadWorkspaces();
   }, []);
 
-  const handleDelete = async (id: string) => {
-    if (!window.confirm('Delete this workspace? This cannot be undone.')) return;
-    try {
-      if (!USE_MOCKS) {
-        toast.error('Workspace deletion is not available yet.');
-        return;
-      }
-      setWorkspaces(prev => prev.filter(w => w.id !== id));
-      toast.success('Workspace deleted.');
-    } catch { toast.error('Failed to delete workspace.'); }
-  };
-
-  if (loading) return <div className="flex items-center justify-center min-h-[50vh] text-gray-400 text-sm">Loading workspaces…</div>;
+  if (loading) return <PageLoader />;
 
   if (loadFailed) return (
     <>
@@ -127,9 +104,6 @@ const WorkspacePage: React.FC = () => {
                       <p className="text-[10px] text-gray-400 mt-1">Created {new Date(w.createdAt).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' })}</p>
                     </div>
                   </div>
-                  {USE_MOCKS && (
-                    <button onClick={() => handleDelete(w.id)} className="text-gray-300 hover:text-red-500 transition-colors p-1 shrink-0"><Trash2 size={14} /></button>
-                  )}
                 </div>
                 {w.members.length > 0 && (
                   <div className="mt-4 pt-4 border-t border-gray-100">

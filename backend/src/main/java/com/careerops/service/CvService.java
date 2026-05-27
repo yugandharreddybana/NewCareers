@@ -40,6 +40,8 @@ public class CvService {
     private final String bucket;
 
     private static final long MAX = 5L * 1024 * 1024;
+    /** DB-only CV rows when Supabase is not configured (local dev). */
+    private static final String LOCAL_DEV_PREFIX = "local-dev/";
 
     public CvService(UserCvRepository repo,
             SupabaseStorageService storage,
@@ -83,9 +85,17 @@ public class CvService {
 
         String path = userId + "/" + System.currentTimeMillis() + "-" + name;
 
-        // Re-use fileBytes for upload and parsing
-        storage.upload(bucket, path, fileBytes, file.getContentType(), userId);
         String parsed = parser.extract(new java.io.ByteArrayInputStream(fileBytes), file.getContentType(), name);
+
+        if (storage.isConfigured()) {
+            storage.upload(bucket, path, fileBytes, file.getContentType(), userId);
+        } else {
+            path = LOCAL_DEV_PREFIX + path;
+            log.warn(
+                    "Supabase not configured — stored parsed CV text only (path={}). "
+                            + "Set SUPABASE_URL and SUPABASE_SERVICE_KEY for file downloads.",
+                    path);
+        }
 
         UserCv cv = UserCv.builder()
                 .userId(userId)
@@ -94,6 +104,7 @@ public class CvService {
                 .fileType(file.getContentType())
                 .parsedText(parsed)
                 .isActive(true)
+                .fileData(storage.isConfigured() ? null : fileBytes)
                 .build();
         return repo.save(cv);
     }
@@ -123,7 +134,7 @@ public class CvService {
         }
 
         // 3.028 — Saga pattern: Delete from storage ONLY after DB transaction commits
-        if (storagePath != null && !storagePath.isBlank()) {
+        if (storagePath != null && !storagePath.isBlank() && !isLocalDevPath(storagePath) && storage.isConfigured()) {
             org.springframework.transaction.support.TransactionSynchronizationManager.registerSynchronization(
                     new org.springframework.transaction.support.TransactionSynchronization() {
                         @Override
@@ -143,17 +154,57 @@ public class CvService {
         UserCv cv = repo.findById(cvId)
                 .filter(c -> c.getUserId().equals(userId))
                 .orElseThrow(() -> new ApiException(HttpStatus.NOT_FOUND, "CV not found"));
+        if (isLocalDevPath(cv.getStoragePath()) || !storage.isConfigured()) {
+            return "/api/v1/profile/cv/download/" + cvId.toString() + "/content";
+        }
         return storage.signedUrl(bucket, cv.getStoragePath(), 600, userId);
+    }
+
+    public UserCv requireCv(UUID userId, UUID cvId) {
+        return repo.findById(cvId)
+                .filter(c -> c.getUserId().equals(userId))
+                .orElseThrow(() -> new ApiException(HttpStatus.NOT_FOUND, "CV not found"));
+    }
+
+    public byte[] downloadContent(UUID userId, UUID cvId) {
+        UserCv cv = requireCv(userId, cvId);
+        if (cv.getFileData() != null) {
+            return cv.getFileData();
+        }
+        throw new ApiException(HttpStatus.NOT_FOUND, "No local file data available.");
     }
 
     public String activeCvText(UUID userId) {
         return repo.findFirstByUserIdAndIsActiveTrueOrderByUploadedAtDesc(userId)
-                .map(UserCv::getParsedText).orElse("");
+                .map(this::cvTextForAi)
+                .orElse("");
+    }
+
+    public boolean hasActiveCv(UUID userId) {
+        return repo.findFirstByUserIdAndIsActiveTrueOrderByUploadedAtDesc(userId).isPresent();
+    }
+
+    /** Prefer structured markdown; fall back to parsed plain text. */
+    public String cvTextForAi(UserCv cv) {
+        if (cv.getCvMarkdown() != null && !cv.getCvMarkdown().isBlank()) {
+            return cv.getCvMarkdown();
+        }
+        return cv.getParsedText() != null ? cv.getParsedText() : "";
     }
 
     public @Nullable String activeCvDownloadUrl(UUID userId) {
         return repo.findFirstByUserIdAndIsActiveTrueOrderByUploadedAtDesc(userId)
-                .map(c -> storage.signedUrl(bucket, c.getStoragePath(), 600, userId)).orElse(null);
+                .map(c -> {
+                    if (isLocalDevPath(c.getStoragePath()) || !storage.isConfigured()) {
+                        return "/api/v1/profile/cv/download/" + c.getId().toString() + "/content";
+                    }
+                    return storage.signedUrl(bucket, c.getStoragePath(), 600, userId);
+                })
+                .orElse(null);
+    }
+
+    private static boolean isLocalDevPath(@Nullable String path) {
+        return path != null && path.startsWith(LOCAL_DEV_PREFIX);
     }
 
     @Transactional(timeout = 10)
@@ -177,7 +228,9 @@ public class CvService {
                 .id(cv.getId())
                 .userId(cv.getUserId())
                 .fileName(cv.getFileName())
-                .fileUrl(storage.signedUrl(bucket, cv.getStoragePath(), 600, cv.getUserId()))
+                .fileUrl(isLocalDevPath(cv.getStoragePath()) || !storage.isConfigured()
+                        ? null
+                        : storage.signedUrl(bucket, cv.getStoragePath(), 600, cv.getUserId()))
                 .contentType(cv.getFileType())
                 .active(cv.getIsActive())
                 .createdAt(cv.getUploadedAt())
@@ -210,11 +263,11 @@ public class CvService {
             boolean ctPdf = "application/pdf".equals(contentType);
             boolean ctDocx = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
                     .equals(contentType);
+            boolean looseContentType = "application/octet-stream".equals(contentType);
 
-            // 3.027 — Hardened AND gate: Magic Bytes + Extension + Content-Type must all
-            // align
-            boolean validPdf = magicPdf && extPdf && ctPdf;
-            boolean validDocx = magicZip && extDocx && ctDocx;
+            // 3.027 — Magic bytes + extension; browsers often send application/octet-stream
+            boolean validPdf = magicPdf && extPdf && (ctPdf || looseContentType);
+            boolean validDocx = magicZip && extDocx && (ctDocx || looseContentType);
 
             if (!validPdf && !validDocx) {
                 log.error(

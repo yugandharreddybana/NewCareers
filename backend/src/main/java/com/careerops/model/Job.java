@@ -6,7 +6,7 @@ import java.time.Instant;
 import java.util.UUID;
 
 @Entity
-@Table(name = "jobs", schema = "career_operations",
+@Table(name = "jobs", schema = "careerops",
        indexes = {
             @Index(name = "idx_jobs_posted", columnList = "posted_at DESC"),
             @Index(name = "idx_jobs_sector", columnList = "sector"),
@@ -42,3 +42,4 @@ public class Job {
         if (currency == null) currency = "EUR";
     }
 }
+

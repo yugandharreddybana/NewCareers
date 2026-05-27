@@ -13,7 +13,7 @@ import { cn } from '@/lib/utils';
 
 const NAV = [
   { to: '/dashboard', label: 'Dashboard', icon: LayoutDashboard },
-  { to: '/kanban',    label: 'Board',      icon: Kanban           },
+  { to: '/jobs',      label: 'Board',      icon: Kanban           },
   { to: '/analytics', label: 'Analytics', icon: TrendingUp       },
   { to: '/interview', label: 'Interview',  icon: GraduationCap    },
   { to: '/profile',   label: 'Profile',    icon: User             },

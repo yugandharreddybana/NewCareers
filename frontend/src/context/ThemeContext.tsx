@@ -1,7 +1,7 @@
-import React, { createContext, useContext, useEffect, useMemo, useState } from 'react';
+import React, { createContext, useContext, useEffect, useMemo } from 'react';
 
-export type ThemePreference = 'light' | 'dark' | 'system';
-type ResolvedTheme = 'light' | 'dark';
+export type ThemePreference = 'light';
+type ResolvedTheme = 'light';
 
 const THEME_STORAGE_KEY = 'careerops-theme';
 
@@ -14,76 +14,34 @@ interface ThemeContextValue {
 
 const ThemeContext = createContext<ThemeContextValue | null>(null);
 
-function isThemePreference(value: string | null): value is ThemePreference {
-  return value === 'light' || value === 'dark' || value === 'system';
-}
-
-function getSystemTheme(): ResolvedTheme {
-  if (typeof window === 'undefined') return 'light';
-  return window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
-}
-
-function resolveTheme(theme: ThemePreference): ResolvedTheme {
-  return theme === 'system' ? getSystemTheme() : theme;
-}
-
-function readStoredTheme(): ThemePreference {
-  if (typeof window === 'undefined') return 'system';
-  const storedTheme = window.localStorage.getItem(THEME_STORAGE_KEY);
-  return isThemePreference(storedTheme) ? storedTheme : 'system';
-}
-
-function applyResolvedTheme(theme: ResolvedTheme): void {
+function applyLightTheme(): void {
   if (typeof document === 'undefined') return;
   const root = document.documentElement;
-  root.classList.toggle('dark', theme === 'dark');
-  root.dataset.theme = theme;
+  root.classList.remove('dark');
+  root.dataset.theme = 'light';
 }
 
 export function ThemeProvider({ children }: { children: React.ReactNode }) {
-  const [theme, setTheme] = useState<ThemePreference>(() => readStoredTheme());
-  const [resolvedTheme, setResolvedTheme] = useState<ResolvedTheme>(() => resolveTheme(readStoredTheme()));
-
   useEffect(() => {
-    const mediaQuery = typeof window !== 'undefined'
-      ? window.matchMedia('(prefers-color-scheme: dark)')
-      : null;
-
-    const syncTheme = () => {
-      const nextResolvedTheme = resolveTheme(theme);
-      setResolvedTheme(nextResolvedTheme);
-      applyResolvedTheme(nextResolvedTheme);
-      if (typeof window !== 'undefined') {
-        window.localStorage.setItem(THEME_STORAGE_KEY, theme);
-      }
-    };
-
-    syncTheme();
-
-    if (!mediaQuery) return undefined;
-
-    const handleSystemThemeChange = () => {
-      if (theme !== 'system') return;
-      const nextResolvedTheme = resolveTheme('system');
-      setResolvedTheme(nextResolvedTheme);
-      applyResolvedTheme(nextResolvedTheme);
-    };
-
-    if (typeof mediaQuery.addEventListener === 'function') {
-      mediaQuery.addEventListener('change', handleSystemThemeChange);
-      return () => mediaQuery.removeEventListener('change', handleSystemThemeChange);
+    applyLightTheme();
+    if (typeof window !== 'undefined') {
+      window.localStorage.setItem(THEME_STORAGE_KEY, 'light');
     }
+  }, []);
 
-    mediaQuery.addListener(handleSystemThemeChange);
-    return () => mediaQuery.removeListener(handleSystemThemeChange);
-  }, [theme]);
-
-  const value = useMemo<ThemeContextValue>(() => ({
-    theme,
-    resolvedTheme,
-    setTheme,
-    toggleTheme: () => setTheme(resolvedTheme === 'dark' ? 'light' : 'dark'),
-  }), [resolvedTheme, theme]);
+  const value = useMemo<ThemeContextValue>(
+    () => ({
+      theme: 'light',
+      resolvedTheme: 'light',
+      setTheme: () => {
+        applyLightTheme();
+      },
+      toggleTheme: () => {
+        applyLightTheme();
+      },
+    }),
+    [],
+  );
 
   return <ThemeContext.Provider value={value}>{children}</ThemeContext.Provider>;
 }

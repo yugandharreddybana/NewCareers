@@ -8,7 +8,7 @@ import java.util.UUID;
 @Entity
 @Table(
     name = "career_memories",
-    schema = "career_operations",
+    schema = "careerops",
     uniqueConstraints = @UniqueConstraint(columnNames = {"user_id", "category", "key"})
 )
 @Getter @Setter @NoArgsConstructor @AllArgsConstructor @Builder
@@ -59,3 +59,4 @@ public class CareerMemory {
         updatedAt = Instant.now();
     }
 }
+

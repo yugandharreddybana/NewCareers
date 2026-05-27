@@ -6,7 +6,7 @@ import java.time.Instant;
 import java.util.UUID;
 
 @Entity
-@Table(name = "password_resets", schema = "career_operations")
+@Table(name = "password_resets", schema = "careerops")
 @Getter @Setter @NoArgsConstructor @AllArgsConstructor @Builder
 public class PasswordReset {
     @Id @GeneratedValue(strategy = GenerationType.UUID) private UUID id;
@@ -26,3 +26,4 @@ public class PasswordReset {
 
     @PrePersist void onCreate() { if (createdAt == null) createdAt = Instant.now(); }
 }
+

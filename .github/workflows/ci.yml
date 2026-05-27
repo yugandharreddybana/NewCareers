@@ -39,7 +39,6 @@ jobs:
         env:
           VITE_API_URL: http://localhost:4000
           VITE_DEV_BYPASS_GUARDS: 'false'
-          VITE_USE_MOCKS: 'false'
 
   # ── Middleware: lint + type-check + build ───────────────────────────────
   middleware:

@@ -8,7 +8,7 @@ import java.time.Instant;
 import java.util.UUID;
 
 @Entity
-@Table(name = "resume_versions", schema = "career_operations")
+@Table(name = "resume_versions", schema = "careerops")
 @Getter @Setter @NoArgsConstructor @AllArgsConstructor @Builder
 public class ResumeVersion {
 
@@ -30,7 +30,7 @@ public class ResumeVersion {
     private String source = "manual";
 
     @JdbcTypeCode(SqlTypes.ARRAY)
-    @Column(name = "role_tags", columnDefinition = "text[]")
+    @Column(name = "role_tags", columnDefinition = "text array")
     private String[] roleTags;
 
     // Field named `active` → Lombok generates isActive() getter + setActive() setter
@@ -86,3 +86,4 @@ public class ResumeVersion {
         updatedAt = Instant.now();
     }
 }
+

@@ -17,7 +17,7 @@ import java.util.UUID;
  * with flexible JSONB metadata for per-event context.
  */
 @Entity
-@Table(name = "analytics_events", schema = "career_operations", indexes = {
+@Table(name = "analytics_events", schema = "careerops", indexes = {
     @Index(name = "idx_analytics_user_type_created",
            columnList = "user_id, event_type, created_at DESC")
 })
@@ -55,3 +55,4 @@ public class AnalyticsEvent {
         if (metadata  == null) metadata  = new HashMap<>();
     }
 }
+

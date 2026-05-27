@@ -8,7 +8,7 @@ import java.time.LocalDate;
 import java.util.UUID;
 
 @Entity
-@Table(name = "user_streaks", schema = "career_operations")
+@Table(name = "user_streaks", schema = "careerops")
 @Getter @Setter @NoArgsConstructor @AllArgsConstructor @Builder
 public class UserStreak {
 
@@ -45,3 +45,4 @@ public class UserStreak {
     @PrePersist @PreUpdate
     protected void onUpdate() { this.updatedAt = Instant.now(); }
 }
+

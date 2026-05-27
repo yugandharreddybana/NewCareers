@@ -14,7 +14,8 @@ const javaProxy = proxyMiddleware();
 // POST /api/skills/start — start or continue a skill run
 router.post('/start',
   authGuard, skillLimiter,
-  body('userJobId').exists().withMessage('userJobId is required'),
+  body('userJobId').optional({ values: 'null' }),
+  body('skillName').notEmpty().withMessage('skillName is required'),
   checkValidation,
   javaProxy
 );
@@ -46,7 +47,15 @@ router.post('/cv-human-score',
 
 // GET endpoints are read-only — no rate limit needed beyond the global 200/min
 router.get('/pdf/:userJobId/:type',     authGuard, javaProxy);
+router.post('/pdf/evaluation-report',   authGuard, javaProxy);
 router.get('/result/:userJobId/:skill', authGuard, javaProxy);
+
+// Align with Java SkillsController paths used by the frontend
+router.post('/conversation/reply',      authGuard, skillLimiter, javaProxy);
+router.get('/last-run/:userJobId/:skillName', authGuard, javaProxy);
+router.post('/run-all/:userJobId',      authGuard, skillLimiter, javaProxy);
+router.post('/run-all-async/:userJobId', authGuard, skillLimiter, javaProxy);
+router.get('/run-all/:batchId/status',  authGuard, javaProxy);
 
 // ── Phase 1 skill aliases ────────────────────────────────────────────────────────
 const phase1Skills = [

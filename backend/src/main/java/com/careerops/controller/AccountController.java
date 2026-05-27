@@ -68,6 +68,10 @@ public class AccountController {
         User user = userRepository.findById(userId)
                 .orElseThrow(() -> new IllegalStateException("User not found"));
 
+        if (user.getPasswordHash() == null || user.getPasswordHash().isBlank()) {
+            throw com.careerops.exception.ApiException.badRequest(
+                    "This account uses Google Sign-In and has no password to change");
+        }
         if (!passwordEncoder.matches(req.currentPassword(), user.getPasswordHash())) {
             throw com.careerops.exception.ApiException.badRequest("Incorrect current password");
         }
@@ -101,6 +105,10 @@ public class AccountController {
         User user = userRepository.findById(userId)
                 .orElseThrow(() -> new IllegalStateException("User not found"));
 
+        if (user.getPasswordHash() == null || user.getPasswordHash().isBlank()) {
+            throw com.careerops.exception.ApiException.badRequest(
+                    "Google accounts must be deleted via support or link a password first");
+        }
         if (!passwordEncoder.matches(req.password(), user.getPasswordHash())) {
             log.warn("Failed delete-account attempt for userId={} at {}", userId, java.time.Instant.now());
             int attempts = deleteAttempts.compute(userId, (k, v) -> v == null ? 1 : v + 1);

@@ -1,4 +1,4 @@
-SET search_path TO career_operations;
+SET search_path TO careerops;
 
 -- 10.061 — Security Hardening: Enable pgcrypto for sym_encrypt support
 CREATE EXTENSION IF NOT EXISTS pgcrypto;
@@ -17,3 +17,4 @@ COMMENT ON TABLE contact_interactions IS 'CRM logged interactions and follow-up 
 
 COMMENT ON COLUMN cv_documents.parsed_text IS 'Parsed text content of the CV document (should be encrypted-at-rest using pgp_sym_encrypt)';
 COMMENT ON COLUMN password_resets.otp_hash IS 'Secure cryptographically hashed OTP value (using SHA-256 or bcrypt)';
+

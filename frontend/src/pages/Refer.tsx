@@ -1,19 +1,10 @@
 import React, { useEffect, useState } from 'react';
 import { PageMeta } from '@/components/PageMeta';
+import { PageLoader } from '@/components/LoadingSpinner';
+import { useAuth } from '@/context/AuthContext';
 import { referralsApi, type ReferralDto, type ReferralStats } from '@/services/referralsApi';
 import toast from 'react-hot-toast';
 import { Gift, Copy, Check, Mail, Users, Award, CheckCircle, Clock } from 'lucide-react';
-
-const USE_MOCKS = import.meta.env.VITE_USE_MOCKS === 'true';
-
-const MOCK_STATS: ReferralStats = { sent: 5, signedUp: 3, rewarded: 1 };
-const MOCK_REFERRALS: ReferralDto[] = [
-  { id: 'r-1', refereeEmail: 'alice@example.com', status: 'rewarded',  createdAt: new Date(Date.now() - 86400000 * 10).toISOString(), rewardedAt: new Date(Date.now() - 86400000 * 5).toISOString() },
-  { id: 'r-2', refereeEmail: 'bob@example.com',   status: 'signed_up', createdAt: new Date(Date.now() - 86400000 * 7).toISOString(),  rewardedAt: null },
-  { id: 'r-3', refereeEmail: 'carol@example.com', status: 'pending',   createdAt: new Date(Date.now() - 86400000 * 2).toISOString(),  rewardedAt: null },
-];
-
-const MOCK_REFERRAL_CODE = 'CAREEROPS-YUGA7';
 
 const STATUS_META = {
   pending:   { label: 'Pending',   color: 'bg-gray-100 text-gray-500',   icon: <Clock size={11} /> },
@@ -22,30 +13,36 @@ const STATUS_META = {
 };
 
 const ReferPage: React.FC = () => {
+  const { user } = useAuth();
   const [stats, setStats]         = useState<ReferralStats | null>(null);
   const [referrals, setReferrals] = useState<ReferralDto[]>([]);
-  const [referralCode]            = useState(MOCK_REFERRAL_CODE);
   const [loading, setLoading]     = useState(true);
   const [email, setEmail]         = useState('');
   const [sending, setSending]     = useState(false);
   const [copied, setCopied]       = useState(false);
 
+  const referralCode = user?.id ?? '';
+
   useEffect(() => {
     const load = async () => {
       try {
-        if (USE_MOCKS) {
-          await new Promise(r => setTimeout(r, 400));
-          setStats(MOCK_STATS); setReferrals(MOCK_REFERRALS);
-        } else {
-          const { referrals: refs, stats: s } = await referralsApi.getMyReferrals().catch(() => ({ referrals: MOCK_REFERRALS, stats: MOCK_STATS }));
-          setStats(s); setReferrals(refs);
-        }
-      } finally { setLoading(false); }
+        const { referrals: refs, stats: s } = await referralsApi.getMyReferrals();
+        setStats(s);
+        setReferrals(refs);
+      } catch {
+        toast.error('Failed to load referrals.');
+      } finally {
+        setLoading(false);
+      }
     };
-    load();
+    void load();
   }, []);
 
   const handleCopy = () => {
+    if (!referralCode) {
+      toast.error('Sign in to get your referral link.');
+      return;
+    }
     const link = `${window.location.origin}/signup?ref=${referralCode}`;
     navigator.clipboard.writeText(link).then(() => { setCopied(true); setTimeout(() => setCopied(false), 2500); toast.success('Link copied!'); });
   };
@@ -54,9 +51,7 @@ const ReferPage: React.FC = () => {
     if (!email.trim() || !/^[^@]+@[^@]+\.[^@]+$/.test(email)) { toast.error('Enter a valid email address.'); return; }
     setSending(true);
     try {
-      const ref = USE_MOCKS
-        ? { id: `r-${Date.now()}`, refereeEmail: email, status: 'pending' as const, createdAt: new Date().toISOString(), rewardedAt: null }
-        : await referralsApi.createReferral(email);
+      const ref = await referralsApi.createReferral(email);
       setReferrals(prev => [ref, ...prev]);
       setStats(s => s ? { ...s, sent: s.sent + 1 } : s);
       setEmail('');
@@ -65,23 +60,23 @@ const ReferPage: React.FC = () => {
     finally { setSending(false); }
   };
 
-  if (loading) return <div className="flex items-center justify-center min-h-[50vh] text-gray-400 text-sm">Loading referrals…</div>;
+  if (loading) return <PageLoader />;
 
-  const referralLink = `${window.location.origin}/signup?ref=${referralCode}`;
+  const referralLink = referralCode
+    ? `${window.location.origin}/signup?ref=${referralCode}`
+    : '';
 
   return (
     <>
       <PageMeta title="Refer a Friend — CareerOps" />
       <div className="max-w-2xl mx-auto px-4 sm:px-6 py-8 space-y-6">
 
-        {/* Hero */}
         <div className="bg-gradient-to-br from-indigo-500 to-purple-600 rounded-2xl p-6 text-white text-center">
           <Gift size={32} className="mx-auto mb-3 opacity-90" />
           <h1 className="text-2xl font-bold">Refer a Friend</h1>
           <p className="text-sm opacity-80 mt-2">Invite friends to CareerOps and earn <strong>1 free month of Pro</strong> for every friend who signs up and stays 7 days.</p>
         </div>
 
-        {/* Stats */}
         {stats && (
           <div className="grid grid-cols-3 gap-4">
             {[
@@ -97,41 +92,40 @@ const ReferPage: React.FC = () => {
           </div>
         )}
 
-        {/* Referral link */}
         <div className="bg-white border border-gray-200 rounded-xl p-5 space-y-3">
           <h2 className="text-sm font-semibold text-gray-900">Your Referral Link</h2>
           <div className="flex gap-2">
-            <div className="flex-1 px-3 py-2.5 bg-gray-50 border border-gray-300 rounded-lg text-xs text-gray-600 font-mono truncate">{referralLink}</div>
-            <button onClick={handleCopy}
-              className={`flex items-center gap-1.5 px-4 py-2.5 rounded-lg text-sm font-semibold transition-colors ${ copied ? 'bg-emerald-500 text-white' : 'bg-indigo-500 hover:bg-indigo-600 text-white'}`}>
+            <div className="flex-1 px-3 py-2.5 bg-gray-50 border border-gray-300 rounded-lg text-xs text-gray-600 font-mono truncate">
+              {referralLink || 'Sign in to generate your referral link.'}
+            </div>
+            <button onClick={handleCopy} disabled={!referralCode}
+              className={`flex items-center gap-1.5 px-4 py-2.5 rounded-lg text-sm font-semibold transition-colors disabled:opacity-50 ${ copied ? 'bg-emerald-500 text-white' : 'bg-indigo-500 hover:bg-indigo-600 text-white'}`}>
               {copied ? <><Check size={14} /> Copied!</> : <><Copy size={14} /> Copy</>}
             </button>
           </div>
           <div className="flex gap-2">
-            <a href={`https://twitter.com/intent/tweet?text=${encodeURIComponent(`I'm using CareerOps to supercharge my job search with AI — join me! ${referralLink}`)}`}
+            <a href={referralLink ? `https://twitter.com/intent/tweet?text=${encodeURIComponent(`I'm using CareerOps to supercharge my job search with AI — join me! ${referralLink}`)}` : '#'}
               target="_blank" rel="noopener noreferrer"
               className="flex-1 py-2 border border-gray-300 rounded-lg text-xs text-gray-600 text-center hover:bg-gray-50 transition-colors">Share on X</a>
-            <a href={`https://www.linkedin.com/sharing/share-offsite/?url=${encodeURIComponent(referralLink)}`}
+            <a href={referralLink ? `https://www.linkedin.com/sharing/share-offsite/?url=${encodeURIComponent(referralLink)}` : '#'}
               target="_blank" rel="noopener noreferrer"
               className="flex-1 py-2 border border-gray-300 rounded-lg text-xs text-gray-600 text-center hover:bg-gray-50 transition-colors">Share on LinkedIn</a>
           </div>
         </div>
 
-        {/* Email invite */}
         <div className="bg-white border border-gray-200 rounded-xl p-5 space-y-3">
           <h2 className="text-sm font-semibold text-gray-900">Invite by Email</h2>
           <div className="flex gap-2">
             <input type="email" value={email} onChange={e => setEmail(e.target.value)}
-              placeholder="friend@example.com" onKeyDown={e => e.key === 'Enter' && handleInvite()}
+              placeholder="friend@example.com" onKeyDown={e => e.key === 'Enter' && void handleInvite()}
               className="flex-1 px-3 py-2.5 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400" />
-            <button onClick={handleInvite} disabled={sending}
+            <button onClick={() => void handleInvite()} disabled={sending}
               className="px-4 py-2.5 bg-indigo-500 hover:bg-indigo-600 disabled:opacity-60 text-white text-sm font-semibold rounded-lg transition-colors">
               {sending ? 'Sending…' : 'Send Invite'}
             </button>
           </div>
         </div>
 
-        {/* Referral list */}
         {referrals.length > 0 && (
           <div className="bg-white border border-gray-200 rounded-xl p-5">
             <h2 className="text-sm font-semibold text-gray-900 mb-4">Your Referrals</h2>
@@ -154,7 +148,6 @@ const ReferPage: React.FC = () => {
           </div>
         )}
 
-        {/* How it works */}
         <div className="bg-indigo-50 border border-indigo-200 rounded-xl p-5">
           <h3 className="text-sm font-semibold text-indigo-800 mb-3">🎉 How it works</h3>
           <ol className="space-y-2">

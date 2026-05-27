@@ -1,4 +1,4 @@
-SET search_path TO career_operations;
+SET search_path TO careerops;
 
 -- V62 — Standardize high-traffic VARCHAR columns to TEXT for future-proof and truncating-safe storage.
 -- In PostgreSQL, there is no performance difference between VARCHAR(N) and TEXT.
@@ -20,3 +20,4 @@ ALTER TABLE user_jobs ALTER COLUMN verdict TYPE TEXT;
 ALTER TABLE user_jobs ALTER COLUMN status TYPE TEXT;
 ALTER TABLE user_jobs ALTER COLUMN kanban_column TYPE TEXT;
 ALTER TABLE user_jobs ALTER COLUMN notes TYPE TEXT;
+

@@ -12,7 +12,7 @@ import java.util.UUID;
  */
 @Entity
 @EntityListeners(AuditEntityListener.class)
-@Table(name = "feature_flags", schema = "career_operations")
+@Table(name = "feature_flags", schema = "careerops")
 @Getter @Setter @NoArgsConstructor @AllArgsConstructor @Builder
 public class FeatureFlag {
 
@@ -37,3 +37,4 @@ public class FeatureFlag {
     @PrePersist @PreUpdate
     void touch() { updatedAt = Instant.now(); }
 }
+

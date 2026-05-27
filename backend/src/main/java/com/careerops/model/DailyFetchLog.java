@@ -8,7 +8,7 @@ import java.util.Objects;
 import java.util.UUID;
 
 @Entity
-@Table(name = "daily_fetch_log", schema = "career_operations")
+@Table(name = "daily_fetch_log", schema = "careerops")
 @IdClass(DailyFetchLog.PK.class)
 @Getter @Setter @NoArgsConstructor @AllArgsConstructor @Builder
 public class DailyFetchLog {
@@ -35,3 +35,4 @@ public class DailyFetchLog {
         @Override public int hashCode(){return Objects.hash(userId,fetchDate);}
     }
 }
+

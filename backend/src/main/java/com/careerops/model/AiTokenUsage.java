@@ -8,7 +8,7 @@ import java.time.Instant;
 import java.util.UUID;
 
 @Entity
-@Table(name = "ai_token_usage", schema = "career_operations")
+@Table(name = "ai_token_usage", schema = "careerops")
 @Getter @Setter @NoArgsConstructor @AllArgsConstructor @Builder
 public class AiTokenUsage {
 
@@ -47,3 +47,4 @@ public class AiTokenUsage {
         if (createdAt == null) createdAt = Instant.now();
     }
 }
+

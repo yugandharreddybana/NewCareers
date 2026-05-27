@@ -1,33 +1,9 @@
 import { useEffect, useState } from 'react';
 import { PageMeta } from '@/components/PageMeta';
+import { PageLoader } from '@/components/LoadingSpinner';
 import { experimentsApi, type Experiment, type ExperimentResults } from '@/services/experimentsApi';
 import toast from 'react-hot-toast';
 import { FlaskConical, Play, Pause, CheckCircle, BarChart2, Users, RefreshCw } from 'lucide-react';
-
-const USE_MOCKS = import.meta.env.VITE_USE_MOCKS === 'true';
-
-const MOCK_RESULTS: ExperimentResults[] = [
-  {
-    id: 'exp-1', key: 'dashboard_cta_variant',
-    variants: [
-      { name: 'control',     participants: 820,  conversions: 98,  conversionRate: 0.1195, isWinner: false },
-      { name: 'treatment_a', participants: 790,  conversions: 138, conversionRate: 0.1747, isWinner: true  },
-    ],
-  },
-  {
-    id: 'exp-2', key: 'skills_panel_position',
-    variants: [
-      { name: 'control',     participants: 1200, conversions: 240, conversionRate: 0.2,    isWinner: false },
-      { name: 'treatment_a', participants: 1180, conversions: 225, conversionRate: 0.1907, isWinner: false },
-    ],
-  },
-];
-
-const MOCK_EXPERIMENTS: Experiment[] = [
-  { id: 'exp-1', key: 'dashboard_cta_variant',   name: 'Dashboard CTA Variant',   status: 'active',    variants: ['control','treatment_a'], trafficPercent: 100, createdAt: new Date(Date.now() - 86400000 * 14).toISOString() },
-  { id: 'exp-2', key: 'skills_panel_position',   name: 'Skills Panel Position',   status: 'completed', variants: ['control','treatment_a'], trafficPercent: 100, createdAt: new Date(Date.now() - 86400000 * 30).toISOString() },
-  { id: 'exp-3', key: 'onboarding_step_order',   name: 'Onboarding Step Order',   status: 'paused',    variants: ['control','treatment_a'], trafficPercent: 50,  createdAt: new Date(Date.now() - 86400000 * 5).toISOString() },
-];
 
 const STATUS_STYLES: Record<Experiment['status'], { badge: string; icon: React.ReactNode }> = {
   active:    { badge: 'bg-emerald-100 text-emerald-700', icon: <Play size={11} /> },
@@ -78,15 +54,19 @@ const ExperimentDashboardPage: React.FC = () => {
   useEffect(() => {
     const load = async () => {
       try {
-        if (USE_MOCKS) {
-          await new Promise(r => setTimeout(r, 400));
-          setExperiments(MOCK_EXPERIMENTS);
-          setResults(MOCK_RESULTS);
-        } else {
-          const res = await experimentsApi.getAdminResults().catch(() => MOCK_RESULTS);
-          setExperiments(MOCK_EXPERIMENTS); // fallback — variants endpoint is user-facing
-          setResults(res as ExperimentResults[]);
-        }
+        const res = await experimentsApi.getAdminResults();
+        setResults(res);
+        setExperiments(
+          res.map(r => ({
+            id: r.id,
+            key: r.key,
+            name: r.key.replace(/_/g, ' '),
+            status: 'active' as const,
+            variants: r.variants.map(v => v.name),
+            trafficPercent: 100,
+            createdAt: new Date().toISOString(),
+          })),
+        );
       } finally { setLoading(false); }
     };
     load();
@@ -95,18 +75,14 @@ const ExperimentDashboardPage: React.FC = () => {
   const handleToggle = async (id: string) => {
     setToggling(id);
     try {
-      if (!USE_MOCKS) {
-        const updated = await experimentsApi.toggleStatus(id);
-        setExperiments(prev => prev.map(e => e.id === id ? updated : e));
-      } else {
-        setExperiments(prev => prev.map(e => e.id === id ? { ...e, status: e.status === 'active' ? 'paused' : 'active' as Experiment['status'] } : e));
-      }
+      const updated = await experimentsApi.toggleStatus(id);
+      setExperiments(prev => prev.map(e => e.id === id ? updated : e));
       toast.success('Experiment status updated.');
     } catch { toast.error('Failed to toggle experiment.'); }
     finally { setToggling(null); }
   };
 
-  if (loading) return <div className="flex items-center justify-center min-h-[50vh] text-gray-400 text-sm">Loading experiments…</div>;
+  if (loading) return <PageLoader />;
 
   const activeCount = experiments.filter(e => e.status === 'active').length;
 

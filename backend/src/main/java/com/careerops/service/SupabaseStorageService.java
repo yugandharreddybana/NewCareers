@@ -61,7 +61,30 @@ public class SupabaseStorageService {
         this.anonKey = anonKey;
         this.jwtSecret = jwtSecret;
         this.meterRegistry = meterRegistry;
-        this.client = builder.baseUrl(url).build();
+        String base = url != null ? url.trim() : "";
+        this.client = isAbsoluteHttpUrl(base)
+                ? builder.baseUrl(base).build()
+                : builder.build();
+    }
+
+    /** True when {@code supabase.url} is a valid absolute HTTP(S) base URL. */
+    public boolean isConfigured() {
+        return isAbsoluteHttpUrl(url);
+    }
+
+    private static boolean isAbsoluteHttpUrl(@Nullable String raw) {
+        if (raw == null || raw.isBlank()) {
+            return false;
+        }
+        try {
+            java.net.URI uri = java.net.URI.create(raw.trim());
+            String scheme = uri.getScheme();
+            return uri.isAbsolute()
+                    && scheme != null
+                    && ("http".equalsIgnoreCase(scheme) || "https".equalsIgnoreCase(scheme));
+        } catch (Exception e) {
+            return false;
+        }
     }
  
     /** 
@@ -69,6 +92,9 @@ public class SupabaseStorageService {
      * Attempts to list buckets to verify API key and network.
      */
     public void ping() {
+        if (!isConfigured()) {
+            throw new IllegalStateException("Supabase URL is not configured");
+        }
         executeWithTimer("ping", () -> {
             try {
                 client.get().uri("/storage/v1/bucket")
@@ -116,6 +142,9 @@ public class SupabaseStorageService {
 
     // Upload (new object — 409 if already exists)
     public void upload(String bucket, String path, byte[] bytes, @Nullable String contentType, @Nullable UUID userId) {
+        if (!isConfigured()) {
+            throw new IllegalStateException("Supabase Storage is not configured (set SUPABASE_URL)");
+        }
         executeWithTimer("upload", () -> {
             try {
                 client.post()
@@ -188,6 +217,9 @@ public class SupabaseStorageService {
 
     // Signed URL (time-limited private access)
     public @Nullable String signedUrl(String bucket, String path, int expiresInSeconds, @Nullable UUID userId) {
+        if (!isConfigured()) {
+            return null;
+        }
         return executeWithTimer("signedUrl", () -> {
             try {
                 Map<?, ?> resp = client.post()

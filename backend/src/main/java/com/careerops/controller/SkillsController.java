@@ -1,6 +1,7 @@
 package com.careerops.controller;
 
 import com.careerops.dto.ConversationReplyRequest;
+import com.careerops.dto.JobEvaluationPdfRequest;
 import com.careerops.dto.BatchRunStatusResponse;
 import com.careerops.dto.RunAllSkillsResponse;
 import com.careerops.dto.SkillRunResponse;
@@ -14,6 +15,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
+import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.UUID;
@@ -152,12 +154,14 @@ public class SkillsController {
      * GET /api/skills/last-run/{userJobId}/{skillName}
      */
     @GetMapping("/last-run/{userJobId}/{skillName}")
-    public SkillRunResponse getLastRun(
+    public ResponseEntity<SkillRunResponse> getLastRun(
             @PathVariable UUID userJobId,
             @PathVariable String skillName) {
 
         UUID userId = AuthUtil.currentUserId();
-        return skillService.getLastRun(userId, userJobId, skillName);
+        return skillService.findLastRun(userId, userJobId, skillName)
+                .map(ResponseEntity::ok)
+                .orElseGet(() -> ResponseEntity.noContent().build());
     }
 
     // ================================================================
@@ -168,6 +172,21 @@ public class SkillsController {
      * Download a single skill as PDF.
      * GET /api/skills/pdf/{userJobId}/{skillName}
      */
+    /**
+     * Render a job evaluation PDF from the modal payload (works for preview and live jobs).
+     * POST /api/skills/pdf/evaluation-report
+     */
+    @PostMapping(value = "/pdf/evaluation-report", produces = MediaType.APPLICATION_PDF_VALUE)
+    public ResponseEntity<byte[]> downloadEvaluationReportPdf(
+            @Valid @RequestBody JobEvaluationPdfRequest request) {
+        byte[] pdf = pdfService.generateEvaluationReportPdf(request);
+        return ResponseEntity.ok()
+            .header(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=\"job-evaluation-report.pdf\"")
+            .contentType(MediaType.APPLICATION_PDF)
+            .header("X-Content-Type-Options", "nosniff")
+            .body(pdf);
+    }
+
     @GetMapping("/pdf/{userJobId}/{skillName}")
     public byte[] downloadSkillPdf(
             @PathVariable UUID userJobId,

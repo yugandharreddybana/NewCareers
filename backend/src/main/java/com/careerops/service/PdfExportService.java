@@ -1,23 +1,28 @@
 package com.careerops.service;
 
+import com.careerops.dto.JobEvaluationPdfRequest;
+import com.careerops.exception.ApiException;
 import com.careerops.model.InterviewQuestionBank;
 import com.careerops.model.InterviewSession;
+import com.careerops.model.Job;
+import com.careerops.model.SkillRun;
+import com.careerops.model.UserJob;
 import com.careerops.repository.InterviewSessionRepository;
+import com.careerops.repository.JobRepository;
+import com.careerops.repository.SkillRunRepository;
+import com.careerops.repository.UserJobRepository;
+import com.openhtmltopdf.pdfboxout.PdfRendererBuilder;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 
-import java.nio.charset.StandardCharsets;
+import java.io.ByteArrayOutputStream;
 import java.util.List;
 import java.util.UUID;
 
 /**
- * Task 17 — PDF export for interview kits and mock interview reports.
- *
- * Uses a simple HTML-to-text PDF approach via Flying Saucer / OpenPDF.
- * The actual PDF rendering is handled by generateHtmlPdf().
- * If the PDF library is not on the classpath, falls back to UTF-8 HTML bytes
- * so the controller still responds — swap for a full PDF library in production.
+ * PDF export via OpenHTMLtoPDF (HTML → real PDF bytes).
  */
 @Service
 @RequiredArgsConstructor
@@ -25,18 +30,18 @@ import java.util.UUID;
 public class PdfExportService {
 
     private final InterviewSessionRepository sessionRepo;
+    private final UserJobRepository userJobRepo;
+    private final JobRepository jobRepo;
+    private final SkillRunRepository skillRunRepo;
 
-    /** Generates a PDF byte array for an interview question kit */
     public byte[] generateInterviewKitPdf(List<InterviewQuestionBank> questions, String userJobId) {
         StringBuilder html = new StringBuilder();
-        html.append("<!DOCTYPE html><html><head><meta charset='UTF-8'>");
+        html.append("<!DOCTYPE html><html xmlns=\"http://www.w3.org/1999/xhtml\"><head><meta charset=\"UTF-8\"/>");
         html.append("<style>body{font-family:Arial,sans-serif;margin:40px;color:#1a1a1a;}");
         html.append("h1{color:#01696f;}h2{color:#333;border-bottom:1px solid #ccc;padding-bottom:4px;}");
-        html.append(".q{margin-bottom:24px;}.badge{display:inline-block;padding:2px 8px;border-radius:999px;font-size:12px;}");
-        html.append(".easy{background:#d4dfcc;color:#437a22;}.medium{background:#e9e0c6;color:#d19900;}.hard{background:#e0ced7;color:#a12c7b;}");
-        html.append("</style></head><body>");
+        html.append(".q{margin-bottom:24px;}</style></head><body>");
         html.append("<h1>Interview Preparation Kit</h1>");
-        html.append("<p>Job Reference: ").append(userJobId).append("</p>");
+        html.append("<p>Job Reference: ").append(esc(userJobId)).append("</p>");
 
         if (questions.isEmpty()) {
             html.append("<p>No questions generated yet. Run the kit generator first.</p>");
@@ -47,16 +52,15 @@ public class PdfExportService {
             }
         }
         html.append("</body></html>");
-        return html.toString().getBytes(StandardCharsets.UTF_8);
+        return renderPdfFromHtml(html.toString());
     }
 
-    /** Generates a PDF byte array for a completed mock interview session report */
     public byte[] generateMockInterviewReportPdf(String sessionId) {
         InterviewSession session = sessionRepo.findById(UUID.fromString(sessionId))
                 .orElseThrow(() -> new IllegalArgumentException("Session not found: " + sessionId));
 
         StringBuilder html = new StringBuilder();
-        html.append("<!DOCTYPE html><html><head><meta charset='UTF-8'>");
+        html.append("<!DOCTYPE html><html xmlns=\"http://www.w3.org/1999/xhtml\"><head><meta charset=\"UTF-8\"/>");
         html.append("<style>body{font-family:Arial,sans-serif;margin:40px;color:#1a1a1a;}");
         html.append("h1{color:#01696f;}h2{color:#333;}.score{font-size:48px;font-weight:700;color:#01696f;}");
         html.append(".label{font-size:12px;color:#7a7974;text-transform:uppercase;letter-spacing:1px;}");
@@ -66,26 +70,75 @@ public class PdfExportService {
         html.append("<p class='label'>Status</p><p>").append(esc(session.getStatus())).append("</p>");
         html.append("<p class='label'>Overall Score</p><p class='score'>").append(session.getOverallScore()).append("<span style='font-size:24px'>/10</span></p>");
         html.append("<p class='label'>Mode</p><p>").append(esc(session.getMode())).append("</p>");
-        html.append("<h2>Strengths</h2>");
-        html.append("<p>").append(esc(session.getStrengths())).append("</p>");
-        html.append("<h2>Weaknesses</h2>");
-        html.append("<p>").append(esc(session.getWeaknesses())).append("</p>");
+        html.append("<h2>Strengths</h2><p>").append(esc(session.getStrengths())).append("</p>");
+        html.append("<h2>Weaknesses</h2><p>").append(esc(session.getWeaknesses())).append("</p>");
         html.append("</body></html>");
-        return html.toString().getBytes(StandardCharsets.UTF_8);
+        return renderPdfFromHtml(html.toString());
     }
 
     public byte[] generateSkillPdf(UUID userId, UUID userJobId, String skillName) {
-        String html = "<!DOCTYPE html><html><body><h1>" + esc(skillName) + "</h1><p>User Job: " + userJobId + "</p></body></html>";
-        return html.getBytes(StandardCharsets.UTF_8);
+        if ("evaluate".equals(skillName)) {
+            return generateEvaluatePdf(userId, userJobId);
+        }
+        String html = "<!DOCTYPE html><html xmlns=\"http://www.w3.org/1999/xhtml\"><body><h1>"
+            + esc(skillName) + "</h1><p>User Job: " + userJobId + "</p></body></html>";
+        return renderPdfFromHtml(html);
+    }
+
+    public byte[] generateEvaluationReportPdf(JobEvaluationPdfRequest request) {
+        return renderPdfFromHtml(JobEvaluationPdfHtml.fromRequest(request));
     }
 
     public byte[] generateAllSkillsPdf(UUID userId, UUID userJobId) {
-        String html = "<!DOCTYPE html><html><body><h1>All Skills Report</h1><p>User Job: " + userJobId + "</p></body></html>";
-        return html.getBytes(StandardCharsets.UTF_8);
+        String html = "<!DOCTYPE html><html xmlns=\"http://www.w3.org/1999/xhtml\"><body><h1>All Skills Report</h1><p>User Job: "
+            + userJobId + "</p></body></html>";
+        return renderPdfFromHtml(html);
     }
 
     public byte[] generateResumePdf(UUID userId, UUID userJobId) {
-        return "Not implemented".getBytes(StandardCharsets.UTF_8);
+        SkillRun run = skillRunRepo
+                .findFirstByUserIdAndUserJobIdAndSkillOrderByCreatedAtDesc(userId, userJobId, "tailor-resume")
+                .orElseThrow(() -> new ApiException(
+                        HttpStatus.NOT_FOUND,
+                        "No tailored resume found. Run Tailor my CV for this job first."));
+        String html = run.getResumeHtml();
+        if (html == null || html.isBlank()) {
+            throw new ApiException(
+                    HttpStatus.BAD_REQUEST,
+                    "Tailored resume HTML was not saved. Re-run Tailor my CV and wait for completion.");
+        }
+        String document = html.trim().toLowerCase().startsWith("<!doctype")
+                || html.trim().toLowerCase().startsWith("<html")
+                ? html
+                : "<!DOCTYPE html><html xmlns=\"http://www.w3.org/1999/xhtml\"><head><meta charset=\"UTF-8\"/></head><body>"
+                    + html + "</body></html>";
+        return renderPdfFromHtml(document);
+    }
+
+    private byte[] generateEvaluatePdf(UUID userId, UUID userJobId) {
+        UserJob uj = userJobRepo.findByIdAndUserId(userJobId, userId)
+            .orElseThrow(() -> new ApiException(HttpStatus.NOT_FOUND, "Job not found"));
+        Job job = jobRepo.findById(uj.getJobId())
+            .orElseThrow(() -> new ApiException(HttpStatus.NOT_FOUND, "Job posting missing"));
+        return renderPdfFromHtml(JobEvaluationPdfHtml.fromUserJob(uj, job));
+    }
+
+    private byte[] renderPdfFromHtml(String html) {
+        try (ByteArrayOutputStream os = new ByteArrayOutputStream()) {
+            PdfRendererBuilder builder = new PdfRendererBuilder();
+            builder.useFastMode();
+            builder.withHtmlContent(html, null);
+            builder.toStream(os);
+            builder.run();
+            byte[] pdf = os.toByteArray();
+            if (pdf.length < 5 || pdf[0] != '%' || pdf[1] != 'P' || pdf[2] != 'D' || pdf[3] != 'F') {
+                throw new IllegalStateException("PDF renderer did not produce a valid PDF stream");
+            }
+            return pdf;
+        } catch (Exception e) {
+            log.error("Failed to render PDF from HTML", e);
+            throw new ApiException(HttpStatus.INTERNAL_SERVER_ERROR, "Could not generate PDF report");
+        }
     }
 
     private String esc(String s) {

@@ -25,7 +25,7 @@ import java.util.UUID;
 @Entity
 @Table(
     name = "skill_conversations",
-    schema = "career_operations",
+    schema = "careerops",
     indexes = {
         @Index(name = "idx_skill_conv_user_status", columnList = "user_id, status"),
         @Index(name = "idx_skill_conv_expires",     columnList = "expires_at"),
@@ -93,3 +93,4 @@ public class SkillConversation {
     @Column(name = "updated_at", nullable = false)
     private Instant updatedAt;
 }
+

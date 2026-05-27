@@ -1,5 +1,5 @@
 -- V36: Link workspaces to organizations for quota enforcement
-SET search_path TO career_operations;
+SET search_path TO careerops;
 
 ALTER TABLE shared_workspaces 
 ADD COLUMN org_id UUID REFERENCES organizations(id) ON DELETE SET NULL;
@@ -14,3 +14,4 @@ SET org_id = (
     LIMIT 1
 )
 WHERE org_id IS NULL;
+

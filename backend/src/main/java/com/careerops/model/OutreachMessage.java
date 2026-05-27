@@ -6,7 +6,7 @@ import java.time.Instant;
 import java.util.UUID;
 
 @Entity
-@Table(name = "outreach_messages", schema = "career_operations")
+@Table(name = "outreach_messages", schema = "careerops")
 @Getter @Setter @NoArgsConstructor @AllArgsConstructor @Builder
 public class OutreachMessage {
 
@@ -72,3 +72,4 @@ public class OutreachMessage {
     @PreUpdate
     void preUpdate() { updatedAt = Instant.now(); }
 }
+

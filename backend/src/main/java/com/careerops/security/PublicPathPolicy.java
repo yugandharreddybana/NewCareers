@@ -22,6 +22,7 @@ public final class PublicPathPolicy {
         "/auth/forgot-password",
         "/auth/reset-password",
         "/auth/refresh",
+        "/auth/google",
         "/health",
         "/public/stats",
         "/swagger-ui.html"
@@ -39,6 +40,7 @@ public final class PublicPathPolicy {
         "/auth/forgot-password",
         "/auth/reset-password",
         "/auth/refresh",
+        "/auth/google",
         "/health",
         "/public/stats",
         "/referrals/validate/**",

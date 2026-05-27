@@ -7,7 +7,7 @@ import java.time.Instant;
 import java.util.UUID;
 
 @Entity
-@Table(name = "user_sessions", schema = "career_operations")
+@Table(name = "user_sessions", schema = "careerops")
 @Getter @Setter @NoArgsConstructor @AllArgsConstructor @Builder
 public class UserSession {
 
@@ -50,3 +50,4 @@ public class UserSession {
         createdAt = lastActiveAt = Instant.now();
     }
 }
+

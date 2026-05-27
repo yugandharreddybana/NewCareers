@@ -65,6 +65,7 @@ public class SkillToolDispatcher {
     private final SkillRunRepository skillRuns;
     private final CvService cvService;
     private final SupabaseStorageService supabase;
+    private final TailorResumePendingStore tailorResumePending;
     private final ObjectMapper mapper;
     private final WebClient webClient;
 
@@ -75,6 +76,7 @@ public class SkillToolDispatcher {
             SkillRunRepository skillRuns,
             CvService cvService,
             SupabaseStorageService supabase,
+            TailorResumePendingStore tailorResumePending,
             ObjectMapper mapper) {
         this.profiles = profiles;
         this.userJobs = userJobs;
@@ -82,6 +84,7 @@ public class SkillToolDispatcher {
         this.skillRuns = skillRuns;
         this.cvService = cvService;
         this.supabase = supabase;
+        this.tailorResumePending = tailorResumePending;
         this.mapper = mapper;
 
         // 3.021 — Disable redirects to prevent SSRF bypasses
@@ -297,10 +300,11 @@ public class SkillToolDispatcher {
             supabase.upload("application-cvs", storagePath,
                     cleanHtml.getBytes(StandardCharsets.UTF_8), "text/html; charset=utf-8", userId);
             if (userJobId != null) {
+                tailorResumePending.put(userId, userJobId, cleanHtml, storagePath);
                 skillRuns.findFirstByUserIdAndUserJobIdAndSkillOrderByCreatedAtDesc(
                         userId, userJobId, "tailor-resume")
                         .ifPresent(sr -> {
-                            sr.setResumeHtml(html);
+                            sr.setResumeHtml(cleanHtml);
                             sr.setResumeFilename(storagePath);
                             skillRuns.save(sr);
                         });

@@ -1,6 +1,8 @@
 package com.careerops.dto;
 
+import com.careerops.model.UserProfile.EducationEntry;
 import com.careerops.model.UserProfile.PortfolioItem;
+import com.careerops.model.UserProfile.WorkExperienceEntry;
 
 import java.util.List;
 
@@ -14,6 +16,9 @@ public class ProfileDtos {
     // ── Core profile request ─────────────────────────────────────────────
 
     public record ProfileRequest(
+        @jakarta.validation.constraints.Size(max = 100, message = "Name too long")
+        String    name,
+
         @jakarta.validation.constraints.Size(max = 10, message = "Maximum 10 target roles allowed")
         String[]  targetRoles,
 
@@ -28,6 +33,9 @@ public class ProfileDtos {
 
         @jakarta.validation.constraints.Min(value = 0, message = "Salary cannot be negative")
         Integer   salaryMax,
+
+        @jakarta.validation.constraints.Size(max = 8, message = "Currency code too long")
+        String    salaryCurrency,
 
         String[]  sectors,
 
@@ -55,7 +63,24 @@ public class ProfileDtos {
         @jakarta.validation.constraints.Size(max = 100, message = "Goal location too long")
         String    goalLocation,
 
-        Boolean   openToRemote
+        Boolean   openToRemote,
+
+        String    experienceLevel,
+
+        @jakarta.validation.constraints.Size(max = 20, message = "Maximum 20 work entries allowed")
+        List<WorkExperienceEntry> workExperience,
+
+        @jakarta.validation.constraints.Size(max = 20, message = "Maximum 20 education entries allowed")
+        List<EducationEntry> education,
+
+        @jakarta.validation.constraints.Size(max = 32, message = "Remote policy too long")
+        String    remotePolicy,
+
+        @jakarta.validation.constraints.Size(max = 64, message = "Hybrid days value too long")
+        String    hybridOnsiteDays,
+
+        @jakarta.validation.constraints.Size(max = 64, message = "Availability value too long")
+        String    availability
     ) {}
 
     // ── Core profile response ────────────────────────────────────────────
@@ -66,12 +91,14 @@ public class ProfileDtos {
         String              location,
         Integer             salaryMin,
         Integer             salaryMax,
+        String              salaryCurrency,
         String[]            sectors,
         Integer             freshnessHours,
         Integer             minMatchPercent,
         Boolean             sponsorshipRequired,
         Boolean             onboarded,
         String              activeCvFileName,
+        String              activeCvId,
         // Section 10
         List<PortfolioItem> portfolioItems,
         String              goalTitle,
@@ -79,6 +106,12 @@ public class ProfileDtos {
         Integer             goalSalaryMax,
         String              goalLocation,
         Boolean             openToRemote,
+        String              experienceLevel,
+        List<WorkExperienceEntry> workExperience,
+        List<EducationEntry>      education,
+        String              remotePolicy,
+        String              hybridOnsiteDays,
+        String              availability,
         Integer             completenessScore,
         Long                version
     ) {}

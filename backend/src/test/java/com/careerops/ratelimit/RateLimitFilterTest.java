@@ -37,13 +37,7 @@ class RateLimitFilterTest {
     @Test
     @DisplayName("configured trust header is rate limited without legacy X-User-Id")
     void configuredTrustHeaderIsRateLimitedWithoutLegacyHeader() throws Exception {
-        Bandwidth oneRequestPerMinute = Bandwidth.builder()
-            .capacity(1)
-            .refillGreedy(1, Duration.ofMinutes(1))
-            .initialTokens(1)
-            .build();
-
-        RateLimitFilter filter = new RateLimitFilter(oneRequestPerMinute, new ObjectMapper(), publicPathPolicy);
+        RateLimitFilter filter = new RateLimitFilter(defaultBandwidth(), objectMapper(), publicPathPolicy);
         ReflectionTestUtils.setField(filter, "trustHeader", "X-Internal-User-Id");
 
         when(publicPathPolicy.isPublic("/skills/start")).thenReturn(false);
@@ -77,7 +71,7 @@ class RateLimitFilterTest {
     @Test
     @DisplayName("shared-store mode fails startup when Redis is missing")
     void sharedStoreModeFailsStartupWhenRedisIsMissing() {
-        RateLimitFilter filter = new RateLimitFilter(defaultBandwidth(), new ObjectMapper(), publicPathPolicy);
+        RateLimitFilter filter = new RateLimitFilter(defaultBandwidth(), objectMapper(), publicPathPolicy);
         ReflectionTestUtils.setField(filter, "requireSharedStore", true);
 
         assertThatThrownBy(filter::validateSharedStoreConfiguration)
@@ -88,9 +82,10 @@ class RateLimitFilterTest {
     @Test
     @DisplayName("shared-store mode rejects requests when Redis is unavailable")
     void sharedStoreModeRejectsRequestsWhenRedisIsUnavailable() throws Exception {
-        RateLimitFilter filter = new RateLimitFilter(defaultBandwidth(), new ObjectMapper(), publicPathPolicy);
+        RateLimitFilter filter = new RateLimitFilter(defaultBandwidth(), objectMapper(), publicPathPolicy);
         ReflectionTestUtils.setField(filter, "trustHeader", "X-Internal-User-Id");
         ReflectionTestUtils.setField(filter, "requireSharedStore", true);
+        ReflectionTestUtils.setField(filter, "redisHost", "localhost");
         ReflectionTestUtils.setField(filter, "redisTemplate", redisTemplate);
 
         when(publicPathPolicy.isPublic("/skills/start")).thenReturn(false);
@@ -116,5 +111,9 @@ class RateLimitFilterTest {
             .refillGreedy(1, Duration.ofMinutes(1))
             .initialTokens(1)
             .build();
+    }
+
+    private ObjectMapper objectMapper() {
+        return new ObjectMapper().findAndRegisterModules();
     }
 }

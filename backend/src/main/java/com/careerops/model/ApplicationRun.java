@@ -6,7 +6,7 @@ import java.time.Instant;
 import java.util.UUID;
 
 @Entity
-@Table(name = "application_runs", schema = "career_operations")
+@Table(name = "application_runs", schema = "careerops")
 @Getter @Setter @NoArgsConstructor @AllArgsConstructor @Builder
 public class ApplicationRun {
 
@@ -56,3 +56,4 @@ public class ApplicationRun {
     @PreUpdate
     void preUpdate() { updatedAt = Instant.now(); }
 }
+

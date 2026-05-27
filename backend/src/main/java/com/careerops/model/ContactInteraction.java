@@ -10,10 +10,10 @@ import java.util.UUID;
 
 /**
  * Section 3.3 — Task 34
- * Maps to career_operations.contact_interactions
+ * Maps to careerops.contact_interactions
  */
 @Entity
-@Table(name = "contact_interactions", schema = "career_operations")
+@Table(name = "contact_interactions", schema = "careerops")
 @Getter @Setter @NoArgsConstructor @AllArgsConstructor @Builder
 public class ContactInteraction {
 
@@ -59,3 +59,4 @@ public class ContactInteraction {
         no_response, positive, negative, meeting_booked
     }
 }
+

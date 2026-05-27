@@ -10,7 +10,7 @@ import java.util.Map;
 import java.util.UUID;
 
 @Entity
-@Table(name = "dead_letter_queue", schema = "career_operations")
+@Table(name = "dead_letter_queue", schema = "careerops")
 @Getter @Setter @NoArgsConstructor @AllArgsConstructor @Builder
 public class DeadLetterQueue {
 
@@ -58,3 +58,4 @@ public class DeadLetterQueue {
         updatedAt = Instant.now();
     }
 }
+

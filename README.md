@@ -22,16 +22,25 @@ PostgreSQL / Redis
 - PostgreSQL 15+
 - Redis (optional — for distributed rate limiting)
 
-### 1. Frontend
+### 1. Frontend + middleware (recommended for local UI work)
+
+See [docs/LOCAL_ENV.md](docs/LOCAL_ENV.md) for the full port/secret matrix.
+
 ```bash
+# Java first (default test profile → H2 + sample jobs on :8100)
+cd backend && mvn spring-boot:run
+
+cd middleware
+cp .env.example .env   # JAVA_BACKEND_URL=http://localhost:8100
+npm install && npm run dev
+
 cd frontend
-cp .env.example .env.local
-# Edit .env.local: set VITE_API_URL=http://localhost:4000
-npm install
-npm run dev
+# Leave VITE_API_URL unset — Vite proxies /api to middleware :4000
+npm install && npm run dev
+# Or: npm run dev:stack from frontend/ (Vite + middleware)
 ```
 
-### 2. Middleware
+### 2. Middleware only
 ```bash
 cd middleware
 cp .env.example .env
@@ -54,7 +63,7 @@ mvn spring-boot:run
 
 | Variable | Where | Required | Description |
 |---|---|---|---|
-| `VITE_API_URL` | frontend | ✅ | Node middleware base URL |
+| `VITE_API_URL` | frontend | prod only | Absolute middleware URL; omit in `vite dev` (uses `/api` proxy) |
 | `JWT_PUBLIC_KEY` | middleware | ✅ | Base64 SPKI public key used to verify Java RS256 session tokens |
 | `JWT_PRIVATE_KEY` | backend | ✅ | Base64 PKCS#8 private key used by Java to issue RS256 session tokens |
 | `JAVA_BACKEND_URL` | middleware | ✅ | Java backend internal URL |

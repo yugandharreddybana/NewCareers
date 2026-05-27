@@ -10,7 +10,6 @@
 
 // Core
 export * from './api';
-export * from './mockApi';
 export * from './skillsApi';
 
 // Domain clients (alphabetical)

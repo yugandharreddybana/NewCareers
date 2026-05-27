@@ -12,7 +12,8 @@ const cvUpload = multer({
   limits: { fileSize: 5 * 1024 * 1024 },
   fileFilter: (_req, f, cb) => {
     const ok = /\.(pdf|docx)$/i.test(f.originalname);
-    cb(ok ? null : new Error('Only PDF or DOCX'), ok);
+    if (ok) cb(null, true);
+    else cb(new Error('Only PDF or DOCX'));
   },
 });
 
@@ -22,7 +23,8 @@ const zipUpload = multer({
   limits: { fileSize: 20 * 1024 * 1024 },
   fileFilter: (_req, f, cb) => {
     const ok = /\.zip$/i.test(f.originalname);
-    cb(ok ? null : new Error('Only ZIP files are accepted'), ok);
+    if (ok) cb(null, true);
+    else cb(new Error('Only ZIP files are accepted'));
   },
 });
 
@@ -68,6 +70,17 @@ router.post('/cv', cvUpload.single('file'), async (req, res, next) => {
 router.get('/cv/download', async (req, res, next) => {
   try {
     const r = await forward({ path: '/profile/cv/download', userId: req.userId });
+    bubble(r, res);
+  } catch (e) { next(e); }
+});
+
+router.get('/cv/download/:cvId/content', async (req, res, next) => {
+  try {
+    const r = await forward({
+      path: `/profile/cv/download/${req.params.cvId}/content`,
+      userId: req.userId,
+      responseType: 'arraybuffer'
+    });
     bubble(r, res);
   } catch (e) { next(e); }
 });

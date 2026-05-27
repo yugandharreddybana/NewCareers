@@ -1,10 +1,5 @@
 /**
  * progressApi.ts — typed client for /progress.
- *
- * Pass 6 #6.011 — consolidated from src/api/progressApi.ts. The shape
- * preserved here is what ProgressCharts/StreakBadges use (BadgeDTO,
- * StreakResponse, WeeklySummaryResponse, HistoryResponse). Earlier
- * services/ duplicate (WeeklySummary etc.) was a scaffolded stub.
  */
 import { api } from './api';
 
@@ -49,18 +44,18 @@ export interface HistoryResponse {
 }
 
 export const progressApi = {
-  getWeeklySummary: () =>
+  getWeeklySummary: (): Promise<WeeklySummaryResponse> =>
     api.get<WeeklySummaryResponse>('/progress/weekly-summary').then(r => r.data),
 
-  getStreaks: () =>
+  getStreaks: (): Promise<StreakResponse> =>
     api.get<StreakResponse>('/progress/streaks').then(r => r.data),
 
-  recordActivity: () =>
+  recordActivity: (): Promise<StreakResponse> =>
     api.post<StreakResponse>('/progress/activity').then(r => r.data),
 
-  getHistory: (weeks = 8) =>
+  getHistory: (weeks = 8): Promise<WeeklySummaryResponse[]> =>
     api.get<WeeklySummaryResponse[]>(`/progress/history?weeks=${weeks}`).then(r => r.data),
 
-  getFull: () =>
+  getFull: (): Promise<HistoryResponse> =>
     api.get<HistoryResponse>('/progress/full').then(r => r.data),
 };

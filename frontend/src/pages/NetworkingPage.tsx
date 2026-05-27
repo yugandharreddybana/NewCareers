@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { PageMeta } from '@/components/PageMeta';
+import { PageLoader } from '@/components/LoadingSpinner';
 import { api } from '@/services/api';
 import toast from 'react-hot-toast';
 import { Users, Plus, Search, Mail, ExternalLink, Trash2, X } from 'lucide-react';
@@ -16,14 +17,6 @@ interface Contact {
   pipelineStage: 'identified' | 'outreached' | 'replied' | 'meeting' | 'closed';
   notes: string | null;
 }
-
-const USE_MOCKS = import.meta.env.VITE_USE_MOCKS === 'true';
-
-const MOCK_CONTACTS: Contact[] = [
-  { id: 'c-1', name: 'Jane Recruiter',    company: 'TechWave Ireland', roleTitle: 'Talent Acquisition', email: 'jane@techwave.ie',  linkedinUrl: null, contactType: 'recruiter',       relationshipTemperature: 'warm', pipelineStage: 'outreached', notes: 'Met at Web Summit' },
-  { id: 'c-2', name: 'Mark Hiring',       company: 'EcoGrowth',       roleTitle: 'Engineering Manager', email: null,               linkedinUrl: 'https://linkedin.com/in/markhiring', contactType: 'hiring_manager', relationshipTemperature: 'cold', pipelineStage: 'identified', notes: null },
-  { id: 'c-3', name: 'Sarah Tech',        company: 'DesignScale',     roleTitle: 'Senior Engineer',     email: 'sarah@ds.ie',      linkedinUrl: null, contactType: 'peer',           relationshipTemperature: 'hot',  pipelineStage: 'replied',    notes: 'Referred me internally' },
-];
 
 const TEMP_STYLES = {
   cold: 'bg-blue-100 text-blue-600',
@@ -62,9 +55,7 @@ const AddContactModal: React.FC<{ onClose: () => void; onAdd: (c: Contact) => vo
     setSaving(true);
     try {
       const body = { ...form, company: form.company || null, roleTitle: form.roleTitle || null, email: form.email || null, linkedinUrl: form.linkedinUrl || null, notes: form.notes || null };
-      const c: Contact = USE_MOCKS
-        ? { id: `c-${Date.now()}`, ...body }
-        : await api.post('/networking/contacts', body).then(r => r.data);
+      const c: Contact = await api.post('/networking/contacts', body).then(r => r.data);
       onAdd(c); toast.success('Contact added!'); onClose();
     } catch { toast.error('Failed to add contact.'); }
     finally { setSaving(false); }
@@ -110,8 +101,8 @@ const NetworkingPage: React.FC = () => {
   useEffect(() => {
     const load = async () => {
       try {
-        if (USE_MOCKS) { await new Promise(r => setTimeout(r, 400)); setContacts(MOCK_CONTACTS); }
-        else { const data = await api.get('/networking/contacts').then(r => r.data).catch(() => MOCK_CONTACTS); setContacts(data as Contact[]); }
+        const data = await api.get('/networking/contacts').then(r => r.data);
+        setContacts(data as Contact[]);
       } finally { setLoading(false); }
     };
     load();
@@ -121,7 +112,7 @@ const NetworkingPage: React.FC = () => {
     if (!window.confirm('Remove this contact?')) return;
     setDeleting(id);
     try {
-      if (!USE_MOCKS) await api.delete(`/networking/contacts/${id}`);
+      await api.delete(`/networking/contacts/${id}`);
       setContacts(prev => prev.filter(c => c.id !== id));
       toast.success('Contact removed.');
     } catch { toast.error('Failed to remove contact.'); }
@@ -132,7 +123,7 @@ const NetworkingPage: React.FC = () => {
     !search || [c.name, c.company, c.roleTitle].some(v => v?.toLowerCase().includes(search.toLowerCase()))
   );
 
-  if (loading) return <div className="flex items-center justify-center min-h-[50vh] text-gray-400 text-sm">Loading contacts…</div>;
+  if (loading) return <PageLoader />;
 
   return (
     <>

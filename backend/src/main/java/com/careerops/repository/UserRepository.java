@@ -17,6 +17,8 @@ public interface UserRepository extends JpaRepository<User, UUID> {
     boolean existsByEmail(String email);
     boolean existsByUsername(String username);
     Optional<User> findByEmail(String email);
+    Optional<User> findByGoogleSub(String googleSub);
+    boolean existsByGoogleSub(String googleSub);
 
     /** 3.002 — Atomic increment of failed attempts. Returns new count. */
     @Modifying

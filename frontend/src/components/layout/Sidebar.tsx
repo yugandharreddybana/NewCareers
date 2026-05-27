@@ -1,14 +1,12 @@
-import { NavLink, Link, useNavigate } from 'react-router-dom';
+import { Link, NavLink } from 'react-router-dom';
 import { useAuth } from '@/context/AuthContext';
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect } from 'react';
 import {
   LayoutDashboard, KanbanSquare, TrendingUp,
   Brain, FileText, GraduationCap,
   BarChart2, Users, Share2,
   Zap, MessageSquare, Bell, MemoryStick, Layers,
   ChevronLeft, ChevronRight, Sparkles,
-  User, Settings, Gift, HelpCircle, LogOut,
-  ChevronUp,
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { cn } from '@/lib/utils';
@@ -27,7 +25,7 @@ const NAV_GROUPS: { label: string; items: NavItem[] }[] = [
     label: 'Overview',
     items: [
       { to: '/dashboard', icon: <LayoutDashboard size={17} />, label: 'Dashboard' },
-      { to: '/kanban', icon: <KanbanSquare size={17} />, label: 'Tracker' },
+      { to: '/jobs', icon: <KanbanSquare size={17} />, label: 'Tracker' },
       { to: '/analytics', icon: <TrendingUp size={17} />, label: 'Analytics' },
     ],
   },
@@ -59,40 +57,15 @@ const NAV_GROUPS: { label: string; items: NavItem[] }[] = [
   },
 ];
 
-const PROFILE_MENU = [
-  { to: '/profile', icon: <User size={15} />, label: 'My Profile' },
-  { to: '/account', icon: <Settings size={15} />, label: 'Account Settings' },
-  { to: '/refer', icon: <Gift size={15} />, label: 'Refer & Earn' },
-  { to: '/profile', icon: <HelpCircle size={15} />, label: 'Help & Support' },
-];
-
 export default function Sidebar() {
-  const { user, signOut } = useAuth();
-  const nav = useNavigate();
+  const { user } = useAuth();
   const [collapsed, setCollapsed] = useState(false);
-  const [profileOpen, setProfileOpen] = useState(false);
-  const profileRef = useRef<HTMLDivElement>(null);
 
   const width = collapsed ? 64 : 240;
 
   useEffect(() => {
     document.documentElement.style.setProperty('--sidebar-width', `${width}px`);
   }, [width]);
-
-  useEffect(() => {
-    function handleClick(e: MouseEvent) {
-      if (profileRef.current && !profileRef.current.contains(e.target as Node)) {
-        setProfileOpen(false);
-      }
-    }
-    document.addEventListener('mousedown', handleClick);
-    return () => document.removeEventListener('mousedown', handleClick);
-  }, []);
-
-  async function handleSignOut() {
-    try { await signOut(); } catch { }
-    nav('/login');
-  }
 
   return (
     <motion.aside
@@ -167,98 +140,35 @@ export default function Sidebar() {
         ))}
       </nav>
 
-      {/* ── Profile Section ── */}
-      <div ref={profileRef} className="relative px-2 pb-3 pt-2 border-t border-white/[0.06]">
-        {/* Dropdown menu (opens upward) */}
-        <AnimatePresence>
-          {profileOpen && (
-            <motion.div
-              initial={{ opacity: 0, y: 8, scale: 0.97 }}
-              animate={{ opacity: 1, y: 0, scale: 1 }}
-              exit={{ opacity: 0, y: 8, scale: 0.97 }}
-              transition={{ duration: 0.15, ease: [0.16, 1, 0.3, 1] }}
-              className={cn(
-                'absolute bottom-full mb-2 z-50',
-                collapsed ? 'left-14 w-52' : 'left-2 right-2',
-              )}
-            >
-              <div className="bg-[#1a1d27] border border-white/[0.08] rounded-xl shadow-2xl overflow-hidden">
-                <div className="px-3.5 py-3 border-b border-white/[0.06]">
-                  <p className="text-xs font-semibold text-white/90 truncate">{user?.name ?? 'User'}</p>
-                  <p className="text-[10px] text-white/35 truncate mt-0.5">{user?.email ?? ''}</p>
-                </div>
-                <div className="py-1.5 px-1.5">
-                  {PROFILE_MENU.map((item, i) => (
-                    <Link
-                      key={i}
-                      to={item.to}
-                      onClick={() => setProfileOpen(false)}
-                      className="flex items-center gap-2.5 px-2.5 py-2 rounded-lg text-[13px]
-                                 text-white/55 hover:bg-white/[0.06] hover:text-white/85
-                                 transition-colors"
-                    >
-                      <span className="text-white/35 shrink-0">{item.icon}</span>
-                      {item.label}
-                    </Link>
-                  ))}
-                </div>
-                <div className="px-1.5 pb-1.5 border-t border-white/[0.06] pt-1.5">
-                  <button
-                    onClick={handleSignOut}
-                    className="w-full flex items-center gap-2.5 px-2.5 py-2 rounded-lg text-[13px]
-                               text-red-400/70 hover:bg-red-500/10 hover:text-red-400 transition-colors"
-                  >
-                    <LogOut size={14} className="shrink-0" />
-                    Sign out
-                  </button>
-                </div>
-              </div>
-            </motion.div>
+      {/* ── Profile display only — not clickable ── */}
+      <div className="px-2 pb-3 pt-2 border-t border-white/[0.06]">
+        <div
+          className={cn(
+            'w-full flex items-center gap-2.5 px-2.5 py-2.5 rounded-xl cursor-default select-none',
+            collapsed && 'justify-center px-2',
           )}
-        </AnimatePresence>
-
-        {/* Profile trigger */}
-        <Tooltip content={user?.name ?? 'Profile'} placement="right" disabled={true}>
-          <button
-            onClick={() => setProfileOpen(o => !o)}
-            className={cn(
-              'w-full flex items-center gap-2.5 px-2.5 py-2.5 rounded-xl transition-all',
-              profileOpen
-                ? 'bg-white/[0.08]'
-                : 'hover:bg-white/[0.05]',
-              collapsed && 'justify-center px-2',
-            )}
-          >
-            <Avatar name={user?.name || ''} size="sm" className="shrink-0 ring-1 ring-white/10" />
-            <AnimatePresence>
-              {!collapsed && (
-                <motion.div
-                  initial={{ opacity: 0 }}
-                  animate={{ opacity: 1 }}
-                  exit={{ opacity: 0 }}
-                  transition={{ duration: 0.1 }}
-                  className="flex-1 text-left overflow-hidden min-w-0"
-                >
-                  <p className="text-xs font-semibold text-white/85 truncate leading-tight">
-                    {user?.name ?? 'Dev Tester'}
-                  </p>
-                  <p className="text-[10px] text-white/35 truncate leading-tight mt-0.5">
-                    {user?.email ?? ''}
-                  </p>
-                </motion.div>
-              )}
-            </AnimatePresence>
+          aria-hidden
+        >
+          <Avatar name={user?.name || ''} size="sm" className="shrink-0 ring-1 ring-white/10" />
+          <AnimatePresence>
             {!collapsed && (
-              <ChevronUp
-                size={12}
-                className={cn(
-                  'shrink-0 text-white/25 transition-transform duration-200',
-                  profileOpen ? 'rotate-0' : 'rotate-180',
-                )}
-              />
+              <motion.div
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                exit={{ opacity: 0 }}
+                transition={{ duration: 0.1 }}
+                className="flex-1 text-left overflow-hidden min-w-0"
+              >
+                <p className="text-xs font-semibold text-white/85 truncate leading-tight">
+                  {user?.name ?? 'Dev Tester'}
+                </p>
+                <p className="text-[10px] text-white/35 truncate leading-tight mt-0.5">
+                  {user?.email ?? ''}
+                </p>
+              </motion.div>
             )}
-          </button>
-        </Tooltip>
+          </AnimatePresence>
+        </div>
       </div>
     </motion.aside>
   );

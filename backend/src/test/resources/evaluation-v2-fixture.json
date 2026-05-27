@@ -1,0 +1,38 @@
+{
+  "schemaVersion": 2,
+  "archetype": "Full Stack Product Engineer",
+  "applyScore": 4.3,
+  "overallScore": 86,
+  "matchPercent": 86,
+  "verdict": "Worth applying",
+  "humanSummary": "Strong alignment on React and backend ownership; minor gap on Kubernetes depth.",
+  "matchedSkills": ["React", "TypeScript", "PostgreSQL"],
+  "unmatchedSkills": ["Kubernetes"],
+  "sponsorshipMatch": true,
+  "salaryMatch": true,
+  "cvImprovementTips": ["Add a quantified bullet on API latency improvements."],
+  "dimensions": [
+    { "key": "role_fit", "label": "Role fit", "score": 4.5, "weight": 0.1, "reason": "Title and seniority match target roles." },
+    { "key": "skills_match", "label": "Skills match", "score": 4.2, "weight": 0.1, "reason": "Core stack overlap is high." },
+    { "key": "experience_depth", "label": "Experience depth", "score": 4.0, "weight": 0.1, "reason": "Years and domain fit JD." },
+    { "key": "cv_evidence", "label": "CV evidence", "score": 4.1, "weight": 0.1, "reason": "CAR bullets support claims." },
+    { "key": "location_work_model", "label": "Location & work model", "score": 4.5, "weight": 0.1, "reason": "Hybrid Dublin matches preference." },
+    { "key": "compensation", "label": "Compensation", "score": 4.0, "weight": 0.1, "reason": "Band within target range." },
+    { "key": "sponsorship_visa", "label": "Sponsorship / visa", "score": 5.0, "weight": 0.1, "reason": "Not required." },
+    { "key": "company_stage", "label": "Company stage", "score": 4.0, "weight": 0.1, "reason": "Scale-up stage fits goals." },
+    { "key": "growth_learning", "label": "Growth & learning", "score": 4.2, "weight": 0.1, "reason": "Learning scope in JD." },
+    { "key": "culture_signals", "label": "Culture signals", "score": 3.8, "weight": 0.1, "reason": "Pace signals are reasonable." }
+  ],
+  "sections": {
+    "executiveSummary": "A — Strong fit for a product-minded full-stack role.",
+    "backgroundMatch": "B — CV maps well to JD requirements.",
+    "positioningStrategy": "C — Lead with platform delivery wins.",
+    "compensationAndMarket": "D — Salary band is competitive for Dublin.",
+    "tailoringPlan": "E — Emphasize React + API ownership bullets.",
+    "interviewPrep": "F — Prepare system design on services you owned."
+  },
+  "storyBankCandidates": [],
+  "evaluationStatus": "complete",
+  "generatedAt": "2026-05-20T12:00:00Z",
+  "source": "test_fixture"
+}

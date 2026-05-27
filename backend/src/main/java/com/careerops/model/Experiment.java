@@ -11,7 +11,7 @@ import java.util.UUID;
 
 @Entity
 @EntityListeners(AuditEntityListener.class)
-@Table(name = "experiments", schema = "career_operations")
+@Table(name = "experiments", schema = "careerops")
 @Getter @Setter @NoArgsConstructor @AllArgsConstructor @Builder
 public class Experiment {
 
@@ -55,3 +55,4 @@ public class Experiment {
     @PreUpdate
     protected void onUpdate() { updatedAt = Instant.now(); }
 }
+

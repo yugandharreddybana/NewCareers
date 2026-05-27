@@ -8,6 +8,7 @@ import { SalaryNegotiationPanel } from './SalaryNegotiationPanel';
 import { CultureFitPanel } from './CultureFitPanel';
 import { LinkedInOptimizePanel } from './LinkedInOptimizePanel';
 import { SkillsGapPlanPanel } from './SkillsGapPlanPanel';
+import TailorCvPanel from './TailorCvPanel';
 import type { SkillState } from '../../types/skills';
 
 interface Props {
@@ -215,9 +216,11 @@ export function SkillPanel({
 
     setDownloading(true);
     try {
-      await toast.promise(
-        skillsApi.downloadSkillPdf(userJobId, skillName),
-        {
+      const download =
+        skillName === 'tailor-resume'
+          ? () => skillsApi.downloadResumePdf(userJobId)
+          : () => skillsApi.downloadSkillPdf(userJobId, skillName);
+      await toast.promise(download(), {
           loading: 'Generating PDF...',
           success: 'Your PDF download has started.',
           error: 'Could not generate the PDF. Please try again.',
@@ -289,7 +292,14 @@ export function SkillPanel({
 
       {/* Result output — Phase 2 skills get dedicated rich panels */}
       {state === 'done' && data && (
-        <SkillOutput data={data} skillName={skillName} />
+        <SkillOutput
+          data={data}
+          skillName={skillName}
+          userJobId={userJobId}
+          {...(skillName === 'tailor-resume'
+            ? { onDownloadTailorPdf: () => { void handleDownload(); } }
+            : {})}
+        />
       )}
     </div>
   );
@@ -298,15 +308,40 @@ export function SkillPanel({
 export default SkillPanel;
 
 /** Dispatches to a dedicated rich panel for Phase 2 skills; generic renderer otherwise. */
+function isTailorCvOutput(data: unknown): data is React.ComponentProps<typeof TailorCvPanel>['result'] {
+  return isObject(data)
+    && (data.summary === undefined || typeof data.summary === 'string')
+    && (data.sections === undefined
+      || (Array.isArray(data.sections)
+        && data.sections.every(
+          s => isObject(s) && typeof s.name === 'string',
+        )));
+}
+
 function SkillOutput({
   data,
   skillName,
+  userJobId,
+  onDownloadTailorPdf,
 }: {
   data: SkillData;
   skillName: string;
+  userJobId?: string;
+  onDownloadTailorPdf?: () => void;
 }) {
   // Phase 2 rich panels
   switch (skillName) {
+    case 'tailor-resume':
+      if (isTailorCvOutput(data) || isObject(data)) {
+        const tailorProps: React.ComponentProps<typeof TailorCvPanel> = { result: data };
+        if (userJobId && onDownloadTailorPdf) {
+          tailorProps.onDownloadPdf = () => {
+            void onDownloadTailorPdf();
+          };
+        }
+        return <TailorCvPanel {...tailorProps} />;
+      }
+      return <StructuredSkillOutput data={data} warning="Tailor results could not be rendered — showing raw output." />;
     case 'cover-letter':
       if (isCoverLetterOutput(data)) {
         return <CoverLetterPanel data={data} />;

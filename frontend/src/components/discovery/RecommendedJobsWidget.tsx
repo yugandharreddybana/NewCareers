@@ -13,11 +13,11 @@
  * Clicking a card navigates to the job detail page.
  */
 
-import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import { Sparkles, MapPin, Building2, ChevronRight } from 'lucide-react';
-import { discoveryApi, RecommendedJob } from '@/services/discoveryApi';
+import { useRecommendedJobs } from '@/hooks/queries';
+import type { RecommendedJob } from '@/services/discoveryApi';
 
 // ── Chip colour by recommendation reason ─────────────────────────────────
 
@@ -96,15 +96,9 @@ function RecommendedCard({ job, index }: { job: RecommendedJob; index: number })
 
 export default function RecommendedJobsWidget() {
   const nav = useNavigate();
-  const [jobs,    setJobs]    = useState<RecommendedJob[]>([]);
-  const [loading, setLoading] = useState(true);
+  const { data: jobs = [], isLoading: loading, isError } = useRecommendedJobs();
 
-  useEffect(() => {
-    discoveryApi.getRecommended()
-      .then(setJobs)
-      .catch(() => { /* silently hide widget on error */ })
-      .finally(() => setLoading(false));
-  }, []);
+  if (isError) return null;
 
   // Hide entirely if no data and not loading
   if (!loading && jobs.length === 0) return null;

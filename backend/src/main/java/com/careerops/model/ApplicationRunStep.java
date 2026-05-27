@@ -9,7 +9,7 @@ import java.time.Instant;
 import java.util.UUID;
 
 @Entity
-@Table(name = "application_run_steps", schema = "career_operations")
+@Table(name = "application_run_steps", schema = "careerops")
 @Getter @Setter @NoArgsConstructor @AllArgsConstructor @Builder
 public class ApplicationRunStep {
 
@@ -55,3 +55,4 @@ public class ApplicationRunStep {
     @PrePersist
     void prePersist() { if (createdAt == null) createdAt = Instant.now(); }
 }
+

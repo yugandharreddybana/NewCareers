@@ -1,13 +1,6 @@
 /**
- * Section 8 — Task 83
- * Notification routes.
- *
- * GET    /api/notifications            — paginated list + unread count
- * PATCH  /api/notifications/read-all  — mark ALL read  (must be before /:id/read)
- * PATCH  /api/notifications/:id/read  — mark one read
- * DELETE /api/notifications            — clear all
+ * Notification routes — proxy to Java NotificationController.
  */
-
 import express from 'express';
 import { authGuard } from '../authGuard.js';
 import { forward, bubble } from '../services/backendProxy.js';
@@ -15,7 +8,6 @@ import { forward, bubble } from '../services/backendProxy.js';
 const router = express.Router();
 router.use(authGuard);
 
-// GET /api/notifications?page=0&size=20
 router.get('/', async (req, res, next) => {
   try {
     const page = Math.max(0, Number(req.query.page) || 0);
@@ -26,24 +18,36 @@ router.get('/', async (req, res, next) => {
       params: { page, size },
     });
     bubble(r, res);
-  } catch (e) { next(e); }
+  } catch (e) {
+    next(e);
+  }
 });
 
-// PATCH /api/notifications/read-all
-// MUST be declared before /:id/read so the literal string
-// "read-all" is not parsed as a UUID.
-router.patch('/read-all', async (req, res, next) => {
+router.get('/unread-count', async (req, res, next) => {
   try {
     const r = await forward({
-      method: 'PATCH',
-      path: '/notifications/read-all',
+      path: '/notifications/unread-count',
       userId: req.userId,
     });
     bubble(r, res);
-  } catch (e) { next(e); }
+  } catch (e) {
+    next(e);
+  }
 });
 
-// PATCH /api/notifications/:id/read
+router.patch('/mark-all-read', async (req, res, next) => {
+  try {
+    const r = await forward({
+      method: 'PATCH',
+      path: '/notifications/mark-all-read',
+      userId: req.userId,
+    });
+    bubble(r, res);
+  } catch (e) {
+    next(e);
+  }
+});
+
 router.patch('/:id/read', async (req, res, next) => {
   try {
     const r = await forward({
@@ -52,10 +56,11 @@ router.patch('/:id/read', async (req, res, next) => {
       userId: req.userId,
     });
     bubble(r, res);
-  } catch (e) { next(e); }
+  } catch (e) {
+    next(e);
+  }
 });
 
-// DELETE /api/notifications
 router.delete('/', async (req, res, next) => {
   try {
     const r = await forward({
@@ -64,7 +69,9 @@ router.delete('/', async (req, res, next) => {
       userId: req.userId,
     });
     bubble(r, res);
-  } catch (e) { next(e); }
+  } catch (e) {
+    next(e);
+  }
 });
 
 export default router;

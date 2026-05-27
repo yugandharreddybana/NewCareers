@@ -1,0 +1,352 @@
+<!DOCTYPE html>
+
+<html class="light" lang="en"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>Job Details | NewCareers AI</title>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<style>
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: #f7f9fb;
+        }
+        .material-symbols-outlined {
+            font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24;
+            vertical-align: middle;
+        }
+        .glass-card {
+            background: rgba(255, 255, 255, 0.8);
+            backdrop-filter: blur(8px);
+            border: 1px solid #e2e8f0;
+        }
+    </style>
+<script id="tailwind-config">
+        tailwind.config = {
+          darkMode: "class",
+          theme: {
+            extend: {
+              "colors": {
+                      "on-primary": "#ffffff",
+                      "background": "#f7f9fb",
+                      "on-background": "#191c1e",
+                      "error": "#ba1a1a",
+                      "secondary": "#525f77",
+                      "on-tertiary-container": "#fdfcff",
+                      "tertiary-container": "#66768d",
+                      "on-secondary-fixed": "#0e1c31",
+                      "surface-variant": "#e0e3e5",
+                      "on-primary-container": "#fefcff",
+                      "outline-variant": "#c2c6d6",
+                      "inverse-primary": "#adc6ff",
+                      "surface-container-high": "#e6e8ea",
+                      "outline": "#727785",
+                      "primary": "#0058be",
+                      "surface": "#f7f9fb",
+                      "inverse-surface": "#2d3133",
+                      "on-surface": "#191c1e",
+                      "surface-bright": "#f7f9fb",
+                      "primary-fixed-dim": "#adc6ff",
+                      "on-tertiary-fixed": "#0b1c30",
+                      "on-error-container": "#93000a",
+                      "tertiary-fixed": "#d3e4fe",
+                      "surface-dim": "#d8dadc",
+                      "surface-container-lowest": "#ffffff",
+                      "tertiary": "#4d5d73",
+                      "surface-container-highest": "#e0e3e5",
+                      "secondary-container": "#d3e0fd",
+                      "inverse-on-surface": "#eff1f3",
+                      "surface-container": "#eceef0",
+                      "surface-tint": "#005ac2",
+                      "on-tertiary-fixed-variant": "#38485d",
+                      "on-secondary-fixed-variant": "#3a475e",
+                      "on-secondary-container": "#56637b",
+                      "surface-container-low": "#f2f4f6",
+                      "secondary-fixed-dim": "#bac7e3",
+                      "on-primary-fixed": "#001a42",
+                      "primary-fixed": "#d8e2ff",
+                      "on-error": "#ffffff",
+                      "on-tertiary": "#ffffff",
+                      "tertiary-fixed-dim": "#b7c8e1",
+                      "primary-container": "#2170e4",
+                      "on-primary-fixed-variant": "#004395",
+                      "on-secondary": "#ffffff",
+                      "secondary-fixed": "#d6e3ff",
+                      "on-surface-variant": "#424754",
+                      "error-container": "#ffdad6"
+              },
+              "borderRadius": {
+                      "DEFAULT": "0.25rem",
+                      "lg": "0.5rem",
+                      "xl": "0.75rem",
+                      "full": "9999px"
+              },
+              "spacing": {
+                      "container-max": "1280px",
+                      "gutter": "24px",
+                      "base": "8px",
+                      "margin-mobile": "16px",
+                      "margin-desktop": "32px"
+              },
+              "fontFamily": {
+                      "display-lg": ["Inter"],
+                      "headline-sm": ["Inter"],
+                      "body-sm": ["Inter"],
+                      "label-md": ["Inter"],
+                      "headline-md": ["Inter"],
+                      "headline-lg": ["Inter"],
+                      "label-sm": ["Inter"],
+                      "body-md": ["Inter"],
+                      "body-lg": ["Inter"]
+              },
+              "fontSize": {
+                      "display-lg": ["48px", {"lineHeight": "56px", "letterSpacing": "-0.02em", "fontWeight": "700"}],
+                      "headline-sm": ["20px", {"lineHeight": "28px", "fontWeight": "600"}],
+                      "body-sm": ["14px", {"lineHeight": "20px", "fontWeight": "400"}],
+                      "label-md": ["14px", {"lineHeight": "16px", "letterSpacing": "0.05em", "fontWeight": "500"}],
+                      "headline-md": ["24px", {"lineHeight": "32px", "fontWeight": "600"}],
+                      "headline-lg": ["32px", {"lineHeight": "40px", "letterSpacing": "-0.01em", "fontWeight": "600"}],
+                      "label-sm": ["12px", {"lineHeight": "14px", "fontWeight": "500"}],
+                      "body-md": ["16px", {"lineHeight": "24px", "fontWeight": "400"}],
+                      "body-lg": ["18px", {"lineHeight": "28px", "fontWeight": "400"}]
+              }
+            },
+          },
+        }
+    </script>
+</head>
+<body class="text-on-surface bg-background">
+<!-- Top Navigation Bar -->
+<header class="bg-surface-container-lowest dark:bg-inverse-surface border-b border-outline-variant dark:border-outline shadow-sm dark:shadow-none sticky top-0 z-50">
+<div class="flex justify-between items-center w-full px-margin-desktop max-w-container-max mx-auto h-16">
+<div class="flex items-center gap-8">
+<span class="font-headline-md text-headline-md font-bold text-primary dark:text-inverse-primary">NewCareers</span>
+<nav class="hidden md:flex items-center gap-6">
+<a class="text-secondary dark:text-secondary-fixed-dim hover:text-primary dark:hover:text-inverse-primary transition-colors font-body-md text-body-md" href="#">Dashboard</a>
+<a class="text-primary dark:text-inverse-primary border-b-2 border-primary dark:border-inverse-primary font-bold pb-1 font-body-md text-body-md" href="#">Jobs</a>
+<a class="text-secondary dark:text-secondary-fixed-dim hover:text-primary dark:hover:text-inverse-primary transition-colors font-body-md text-body-md" href="#">Skills Matrix</a>
+</nav>
+</div>
+<div class="flex items-center gap-4">
+<button class="bg-primary hover:bg-primary-container text-on-primary px-6 py-2 rounded-lg font-label-md text-label-md transition-all active:scale-95 duration-150">Post a Job</button>
+<div class="flex items-center gap-2">
+<button class="p-2 hover:bg-surface-container dark:hover:bg-surface-variant rounded-lg transition-all active:scale-95 duration-150">
+<span class="material-symbols-outlined text-secondary">notifications</span>
+</button>
+<button class="p-2 hover:bg-surface-container dark:hover:bg-surface-variant rounded-lg transition-all active:scale-95 duration-150">
+<span class="material-symbols-outlined text-secondary" data-icon="account_circle">account_circle</span>
+</button>
+</div>
+</div>
+</div>
+</header>
+<main class="max-w-container-max mx-auto px-margin-desktop py-base">
+<!-- Breadcrumbs -->
+<nav class="flex items-center gap-2 py-6">
+<a class="flex items-center text-primary font-label-md text-label-md hover:underline" href="#">
+<span class="material-symbols-outlined mr-1">arrow_back</span>
+                Back to Jobs
+            </a>
+<span class="text-outline text-label-md">/</span>
+<span class="text-secondary text-label-md">Engineering</span>
+<span class="text-outline text-label-md">/</span>
+<span class="text-secondary text-label-md">Senior Product Designer</span>
+</nav>
+<div class="grid grid-cols-12 gap-gutter items-start">
+<!-- Left Column: Detailed Information -->
+<section class="col-span-12 lg:col-span-8 flex flex-col gap-6">
+<!-- Job Header Card -->
+<div class="bg-surface-container-lowest p-margin-desktop rounded-xl border border-outline-variant shadow-sm">
+<div class="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 mb-6">
+<div class="flex items-center gap-4">
+<div class="w-16 h-16 rounded-xl bg-secondary-container flex items-center justify-center overflow-hidden">
+<img alt="Company Logo" class="w-full h-full object-cover" data-alt="A clean, minimalist logo for a high-tech company featuring geometric abstract shapes in deep navy and electric blue. The logo is displayed on a textured white background with subtle studio lighting and a professional corporate aesthetic." src="https://lh3.googleusercontent.com/aida-public/AB6AXuDrbpamCJb-akjU3VQSg_FJ2I2dtf2NZAlntTB16hr7__pOs7YYs5d1rPor9e5cX8KJzzgNzMPlh1uMOoGi5MkdMCkkfj2yGfJ8jQ0C_j5yHm8_UOa8NyCEHrj6lHz6RhXQaz3ggQ3nleuZozWSV3ERB6lKkvWcTZgf99uTlqw0BZvGjxUspL6FWSz3i4nIzgNp67F5knGC9UV1FkShbr0DHG3Ztjq7uQTfDE1foyJhQUGJ7-yHBgLQVnAM0rtEnMZF73FowAYs_o8S"/>
+</div>
+<div>
+<h1 class="font-headline-lg text-headline-lg text-on-surface">Senior Product Designer</h1>
+<p class="font-body-lg text-body-lg text-secondary">Momentum AI Systems • Dublin, Ireland</p>
+</div>
+</div>
+<div class="flex gap-2">
+<span class="px-3 py-1 bg-secondary-container text-on-secondary-container rounded-full font-label-sm text-label-sm">Full-time</span>
+<span class="px-3 py-1 bg-tertiary-container text-on-tertiary-container rounded-full font-label-sm text-label-sm">Hybrid</span>
+</div>
+</div>
+<div class="border-t border-outline-variant pt-6">
+<h2 class="font-headline-sm text-headline-sm mb-4">Job Description</h2>
+<p class="font-body-md text-body-md text-on-surface-variant mb-6 leading-relaxed">
+                            As a Senior Product Designer at Momentum AI, you will be the primary architect of our user experiences. We are looking for a visionary designer who can bridge the gap between complex AI logic and intuitive human interfaces. You'll join a high-growth team in the heart of Dublin's Silicon Docks, working alongside industry-leading engineers and product managers to define the future of career intelligence.
+                        </p>
+<h3 class="font-label-md text-label-md text-primary mb-3 uppercase tracking-wider">Key Responsibilities</h3>
+<ul class="list-disc list-outside ml-5 mb-8 space-y-2 text-on-surface-variant font-body-md text-body-md">
+<li>Lead the end-to-end design process for our core candidate-matching engine.</li>
+<li>Develop high-fidelity prototypes and conduct rigorous user testing sessions.</li>
+<li>Maintain and expand our global Design System across web and mobile platforms.</li>
+<li>Collaborate with AI engineers to visualize complex data structures and predictive analytics.</li>
+</ul>
+<h3 class="font-label-md text-label-md text-primary mb-3 uppercase tracking-wider">Requirements</h3>
+<ul class="list-disc list-outside ml-5 mb-8 space-y-2 text-on-surface-variant font-body-md text-body-md">
+<li>5+ years of experience in product design, specifically within SaaS or Fintech environments.</li>
+<li>Expert proficiency in Figma, Framer, and modern prototyping tools.</li>
+<li>Strong portfolio demonstrating complex problem-solving and clean visual aesthetics.</li>
+<li>Deep understanding of accessibility standards (WCAG 2.1) and user-centric design principles.</li>
+</ul>
+<h3 class="font-label-md text-label-md text-primary mb-3 uppercase tracking-wider">Benefits</h3>
+<div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+<div class="flex items-center gap-3 p-3 rounded-lg border border-outline-variant bg-surface-container-low">
+<span class="material-symbols-outlined text-primary">payments</span>
+<span class="font-body-sm text-body-sm">Competitive Salary &amp; Equity</span>
+</div>
+<div class="flex items-center gap-3 p-3 rounded-lg border border-outline-variant bg-surface-container-low">
+<span class="material-symbols-outlined text-primary">health_and_safety</span>
+<span class="font-body-sm text-body-sm">Premium Private Health Insurance</span>
+</div>
+<div class="flex items-center gap-3 p-3 rounded-lg border border-outline-variant bg-surface-container-low">
+<span class="material-symbols-outlined text-primary">laptop_mac</span>
+<span class="font-body-sm text-body-sm">Latest Apple Hardware Stays</span>
+</div>
+<div class="flex items-center gap-3 p-3 rounded-lg border border-outline-variant bg-surface-container-low">
+<span class="material-symbols-outlined text-primary">fitness_center</span>
+<span class="font-body-sm text-body-sm">Gym Membership &amp; Wellness Subsidy</span>
+</div>
+</div>
+</div>
+</div>
+<!-- About the Company Card -->
+<div class="bg-surface-container-lowest p-margin-desktop rounded-xl border border-outline-variant shadow-sm overflow-hidden relative">
+<div class="absolute top-0 left-0 w-full h-2 bg-primary"></div>
+<h2 class="font-headline-sm text-headline-sm mb-4">About Momentum AI Systems</h2>
+<div class="flex flex-col md:flex-row gap-6">
+<div class="flex-1">
+<p class="font-body-md text-body-md text-on-surface-variant mb-4">
+                                Founded in 2021, Momentum AI Systems is revolutionizing how talent is discovered. By leveraging proprietary machine learning models, we remove bias from the hiring process and ensure every professional finds their perfect momentum. We're a team of 150+ innovators across Dublin, London, and Berlin.
+                            </p>
+<button class="text-primary font-label-md text-label-md flex items-center hover:underline">
+                                View Company Profile
+                                <span class="material-symbols-outlined text-sm ml-1">open_in_new</span>
+</button>
+</div>
+<div class="md:w-1/3 h-32 rounded-lg overflow-hidden bg-surface-variant">
+<img alt="Office Space" class="w-full h-full object-cover" data-alt="A modern, high-end corporate office lobby in Dublin, featuring sleek glass walls, warm wooden accents, and lush indoor greenery. The lighting is bright and natural, streaming through floor-to-ceiling windows, creating a clean and professional atmosphere that reflects a high-trust career environment." src="https://lh3.googleusercontent.com/aida-public/AB6AXuAQekFQc24h0jqxNbAusHtDd_aWacv23O0sjhHnGVz5HHw-9f6DLjueoUimp84eSdBTQatIP8yY6HwwwydWQMSIi9DyA9XKuxmMJRmScunl46lQzhqGLAuACqBBneexrIAhsMND3-3B-XWBI6kpaxAP0MQud2woOVJvlu1bO-iIcZkvKRjhqZlRryJWTxZo7T_zlPfEqguUH7Y0owL0filekHcn3F8ThwVaSSkAB0jAZkA2398FSf23eQ9j5KlLinUE1s2cSxBnKt9l"/>
+</div>
+</div>
+</div>
+</section>
+<!-- Right Column: Sidebar -->
+<aside class="col-span-12 lg:col-span-4 flex flex-col gap-6 sticky top-24">
+<!-- Apply Widget -->
+<div class="bg-surface-container-lowest p-margin-desktop rounded-xl border border-outline-variant shadow-md">
+<div class="mb-6">
+<div class="flex justify-between items-baseline mb-2">
+<span class="font-label-sm text-label-sm text-secondary uppercase">Salary Range</span>
+<span class="font-headline-sm text-headline-sm text-on-surface">€85k – €110k</span>
+</div>
+<div class="flex justify-between items-baseline">
+<span class="font-label-sm text-label-sm text-secondary uppercase">Location</span>
+<span class="font-body-md text-body-md text-on-surface">Dublin, IE (Hybrid)</span>
+</div>
+</div>
+<div class="flex flex-col gap-3">
+<button class="w-full bg-primary hover:bg-primary-container text-on-primary py-4 rounded-lg font-label-md text-label-md font-bold shadow-lg shadow-primary/20 transition-all active:scale-95">
+                            Apply Now
+                        </button>
+<button class="w-full bg-surface-container-lowest border border-outline text-on-surface py-4 rounded-lg font-label-md text-label-md font-medium hover:bg-surface-container transition-all active:scale-95 flex items-center justify-center gap-2">
+<span class="material-symbols-outlined text-xl">bookmark</span>
+                            Save for Later
+                        </button>
+</div>
+<div class="mt-6 pt-6 border-t border-outline-variant flex items-center gap-3 text-secondary">
+<span class="material-symbols-outlined">schedule</span>
+<span class="font-body-sm text-body-sm">Posted 2 days ago • 48 applicants</span>
+</div>
+</div>
+<!-- AI Match Analysis Widget -->
+<div class="bg-surface-container-lowest p-margin-desktop rounded-xl border border-primary/30 shadow-sm relative overflow-hidden">
+<div class="absolute top-0 right-0 p-2">
+<span class="bg-primary/10 text-primary px-2 py-0.5 rounded text-[10px] font-bold uppercase">AI Insights</span>
+</div>
+<h3 class="font-headline-sm text-headline-sm mb-6 flex items-center gap-2">
+<span class="material-symbols-outlined text-primary" data-weight="fill">auto_awesome</span>
+                        AI Match Analysis
+                    </h3>
+<!-- Progress Circle Representation -->
+<div class="flex flex-col items-center mb-8">
+<div class="relative w-32 h-32 flex items-center justify-center">
+<svg class="w-full h-full transform -rotate-90">
+<circle class="text-surface-container-high" cx="64" cy="64" fill="transparent" r="58" stroke="currentColor" stroke-width="8"></circle>
+<circle class="text-primary transition-all duration-1000 ease-out" cx="64" cy="64" fill="transparent" r="58" stroke="currentColor" stroke-dasharray="364.4" stroke-dashoffset="36.4" stroke-width="8"></circle>
+</svg>
+<div class="absolute flex flex-col items-center">
+<span class="text-3xl font-bold text-on-surface">90%</span>
+<span class="text-[10px] text-secondary uppercase font-bold tracking-tighter">Match Score</span>
+</div>
+</div>
+</div>
+<div class="space-y-6">
+<div>
+<p class="font-label-sm text-label-sm text-secondary uppercase mb-3">Key Skills Found</p>
+<div class="flex flex-wrap gap-2">
+<span class="px-2 py-1 bg-green-50 text-green-700 border border-green-200 rounded text-xs font-medium">Figma Expert</span>
+<span class="px-2 py-1 bg-green-50 text-green-700 border border-green-200 rounded text-xs font-medium">Design Systems</span>
+<span class="px-2 py-1 bg-green-50 text-green-700 border border-green-200 rounded text-xs font-medium">SaaS Experience</span>
+<span class="px-2 py-1 bg-green-50 text-green-700 border border-green-200 rounded text-xs font-medium">Prototyping</span>
+</div>
+</div>
+<div>
+<p class="font-label-sm text-label-sm text-secondary uppercase mb-3">Missing Skills / Gaps</p>
+<div class="flex flex-wrap gap-2">
+<span class="px-2 py-1 bg-error-container text-on-error-container border border-error/20 rounded text-xs font-medium">Framer Motion</span>
+<span class="px-2 py-1 bg-surface-container-high text-on-surface-variant border border-outline-variant rounded text-xs font-medium">Mentorship Exp.</span>
+</div>
+</div>
+<div class="bg-primary/5 p-4 rounded-lg border border-primary/10">
+<p class="font-body-sm text-body-sm text-on-surface-variant italic">
+                                "Your recent project 'Fintech Dashboard' matches 85% of this job's core technical requirements."
+                            </p>
+</div>
+</div>
+</div>
+<!-- Location Preview -->
+<div class="bg-surface-container-lowest rounded-xl border border-outline-variant shadow-sm overflow-hidden h-48 relative">
+<div class="absolute inset-0 bg-surface-variant flex items-center justify-center">
+<img alt="Map Location" class="w-full h-full object-cover grayscale opacity-60" data-location="Dublin, Ireland" src="https://lh3.googleusercontent.com/aida-public/AB6AXuCAGad5kkz9GaW7d7oG0kcWRfxqw9Ps16IDd5UV69y1EDPLc0uaCyuZl4hFgzpgGUcieB2cEJ9Lm0B-rra-WLWH3VFVKITx0zpjeIIglODy5D_jZ1z7X0KGtsi3eRSs8kiif6Cv6SBIk2g8vH87yUoTnXibWPXG7Uuwg0z8Od_x8_Z9GqOhgUr3iwpRy-x0wUxCW8zZeH69aWMrf_Bah-NNyieUKFEGhOrqBlV4nrt7NqUHYF53rq1ItIdC48uTjBT0yLbQrz0T98-0"/>
+<div class="absolute inset-0 flex items-center justify-center pointer-events-none">
+<div class="w-4 h-4 bg-primary rounded-full border-2 border-white shadow-lg animate-pulse"></div>
+</div>
+</div>
+<div class="absolute bottom-0 left-0 w-full p-4 bg-gradient-to-t from-black/60 to-transparent">
+<p class="text-white font-label-md text-label-md">Silicon Docks, Dublin 2</p>
+</div>
+</div>
+</aside>
+</div>
+</main>
+<!-- Footer -->
+<footer class="mt-margin-desktop bg-surface-container-low dark:bg-surface-dim border-t border-outline-variant dark:border-outline py-12">
+<div class="w-full px-margin-desktop max-w-container-max mx-auto flex flex-col md:flex-row justify-between items-center gap-base">
+<div class="flex flex-col items-center md:items-start gap-2">
+<span class="font-headline-sm text-headline-sm font-bold text-on-surface dark:text-inverse-on-surface">NewCareers AI</span>
+<p class="font-body-sm text-body-sm text-secondary dark:text-secondary-fixed-dim">© 2024 NewCareers AI. Empowering momentum.</p>
+</div>
+<div class="flex gap-6">
+<a class="font-body-sm text-body-sm text-secondary dark:text-secondary-fixed-dim hover:text-primary dark:hover:text-inverse-primary underline transition-all opacity-100 hover:opacity-80" href="#">Privacy Policy</a>
+<a class="font-body-sm text-body-sm text-secondary dark:text-secondary-fixed-dim hover:text-primary dark:hover:text-inverse-primary underline transition-all opacity-100 hover:opacity-80" href="#">Terms of Service</a>
+<a class="font-body-sm text-body-sm text-secondary dark:text-secondary-fixed-dim hover:text-primary dark:hover:text-inverse-primary underline transition-all opacity-100 hover:opacity-80" href="#">Contact Support</a>
+<a class="font-body-sm text-body-sm text-secondary dark:text-secondary-fixed-dim hover:text-primary dark:hover:text-inverse-primary underline transition-all opacity-100 hover:opacity-80" href="#">Career Advice</a>
+</div>
+</div>
+</footer>
+<script>
+        // Simple micro-interaction for the radial AI progress bar
+        window.addEventListener('DOMContentLoaded', () => {
+            const circle = document.querySelector('circle.text-primary');
+            if (circle) {
+                // The dashoffset logic is handled in CSS/SVG above, 
+                // we could animate other elements here for atmospheric effect.
+                console.log('AI Match Analysis component initialized.');
+            }
+        });
+    </script>
+</body></html>

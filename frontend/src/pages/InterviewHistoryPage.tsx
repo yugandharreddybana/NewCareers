@@ -7,6 +7,7 @@
 import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { interviewApi } from '../services/interviewApi';
+import { LoadingSpinner } from '@/components/LoadingSpinner';
 
 const STAGE_COLOURS: Record<string, string> = {
   applied:          'bg-gray-100 text-gray-600',
@@ -73,7 +74,7 @@ export default function InterviewHistoryPage() {
       {/* Sessions tab */}
       {tab === 'sessions' && (
         <div className="space-y-4">
-          {sessionsLoading && <p className="text-sm text-gray-500">Loading sessions…</p>}
+          {sessionsLoading && <LoadingSpinner size="sm" />}
           {!sessionsLoading && sessions.length === 0 && (
             <div className="rounded-xl border-2 border-dashed border-gray-200 p-10 text-center">
               <p className="text-gray-400 text-sm">No mock sessions yet. Generate an interview kit on a job and start a mock.</p>
@@ -124,7 +125,7 @@ export default function InterviewHistoryPage() {
       {/* Tracks tab */}
       {tab === 'tracks' && (
         <div className="space-y-3">
-          {tracksLoading && <p className="text-sm text-gray-500">Loading tracks…</p>}
+          {tracksLoading && <LoadingSpinner size="sm" />}
           {!tracksLoading && tracks.length === 0 && (
             <div className="rounded-xl border-2 border-dashed border-gray-200 p-10 text-center">
               <p className="text-gray-400 text-sm">No interview tracks yet. Generate a kit on any job to create one.</p>

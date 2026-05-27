@@ -53,4 +53,6 @@ public interface UserJobRepository extends JpaRepository<UserJob, UUID>, JpaSpec
     long countByUserIdAndKanbanColumnAndDeliveredAtAfter(UUID userId, String column, Instant since);
 
     List<UserJob> findTop3ByUserIdAndDeliveredAtAfterAndMatchPercentIsNotNullOrderByMatchPercentDesc(UUID userId, Instant since);
+
+    long countByUserIdAndScoreBreakdownIsNotNull(UUID userId);
 }

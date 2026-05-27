@@ -1,0 +1,204 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>{{NAME}} - Resume</title>
+  <style>
+    /* Reset */
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    /* Page setup */
+    @page {
+      size: {{PAGE_SIZE}}; /* "letter" for US, "A4" for international */
+      margin: 0.75in;
+    }
+
+    body {
+      font-family: -apple-system, "Segoe UI", Arial, Helvetica, sans-serif;
+      font-size: 11pt;
+      line-height: 1.45;
+      color: #1a1a1a;
+      max-width: 7in;
+      margin: 0 auto;
+      padding: 0.75in;
+    }
+
+    /* Print styles */
+    @media print {
+      body { padding: 0; max-width: none; }
+      .page-break { page-break-before: always; }
+      a { color: #1a1a1a; text-decoration: none; }
+    }
+
+    /* Header / Name */
+    .header {
+      text-align: center;
+      margin-bottom: 16pt;
+      padding-bottom: 8pt;
+      border-bottom: 1.5pt solid #2a2a2a;
+    }
+
+    .header h1 {
+      font-size: 16pt;
+      font-weight: 700;
+      letter-spacing: 0.5pt;
+      margin-bottom: 4pt;
+    }
+
+    .header .contact {
+      font-size: 10pt;
+      color: #444;
+    }
+
+    .header .contact a {
+      color: #444;
+      text-decoration: none;
+    }
+
+    /* Section headers */
+    h2 {
+      font-size: 12pt;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.5pt;
+      border-bottom: 0.75pt solid #ccc;
+      padding-bottom: 3pt;
+      margin-top: 14pt;
+      margin-bottom: 8pt;
+    }
+
+    /* Experience entries */
+    .entry {
+      margin-bottom: 10pt;
+    }
+
+    .entry-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: baseline;
+      margin-bottom: 2pt;
+    }
+
+    .entry-header .title {
+      font-weight: 700;
+      font-size: 11pt;
+    }
+
+    .entry-header .dates {
+      font-size: 10pt;
+      color: #555;
+      white-space: nowrap;
+    }
+
+    .entry .company {
+      font-size: 10.5pt;
+      color: #333;
+      margin-bottom: 4pt;
+    }
+
+    .entry ul {
+      padding-left: 18pt;
+      margin: 0;
+    }
+
+    .entry li {
+      font-size: 10.5pt;
+      margin-bottom: 2pt;
+      line-height: 1.4;
+    }
+
+    /* Skills */
+    .skills-grid {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 4pt 16pt;
+      font-size: 10.5pt;
+    }
+
+    .skills-grid .category {
+      margin-bottom: 4pt;
+    }
+
+    .skills-grid .category-name {
+      font-weight: 600;
+    }
+
+    /* Education & Certifications */
+    .edu-entry {
+      margin-bottom: 4pt;
+      font-size: 10.5pt;
+    }
+
+    .edu-entry .degree {
+      font-weight: 600;
+    }
+
+    /* Summary */
+    .summary {
+      font-size: 10.5pt;
+      margin-bottom: 4pt;
+      line-height: 1.5;
+    }
+  </style>
+</head>
+<body>
+
+  <div class="header">
+    <h1>{{NAME}}</h1>
+    <div class="contact">{{CONTACT_LINE}}</div>
+  </div>
+
+  <!-- Professional Summary -->
+  <h2>Summary</h2>
+  <div class="summary">
+    {{SUMMARY}}
+  </div>
+
+  <!-- Experience -->
+  <h2>Experience</h2>
+  {{EXPERIENCE}}
+  <!--
+  Each entry should follow this structure:
+  <div class="entry">
+    <div class="entry-header">
+      <span class="title">Job Title</span>
+      <span class="dates">Jan 2022 - Present</span>
+    </div>
+    <div class="company">Company Name | Location</div>
+    <ul>
+      <li>Achievement with quantified result</li>
+      <li>Achievement with quantified result</li>
+    </ul>
+  </div>
+  -->
+
+  <!-- Education -->
+  <h2>Education</h2>
+  {{EDUCATION}}
+  <!--
+  <div class="edu-entry">
+    <span class="degree">BS Computer Science</span> | State University, 2018
+  </div>
+  -->
+
+  <!-- Skills -->
+  <h2>Skills</h2>
+  <div class="skills-grid">
+    {{SKILLS}}
+  </div>
+
+  <!-- Certifications (if applicable) -->
+  {{CERTIFICATIONS}}
+  <!--
+  <h2>Certifications</h2>
+  <div class="edu-entry">
+    <span class="degree">PMP</span> | Project Management Institute, Active
+  </div>
+  -->
+
+  <!-- Projects / Portfolio (if applicable) -->
+  {{PROJECTS}}
+
+</body>
+</html>

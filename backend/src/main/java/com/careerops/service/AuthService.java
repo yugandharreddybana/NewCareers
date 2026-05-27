@@ -58,6 +58,7 @@ public class AuthService {
     private final RefreshTokenRepository refreshTokens;
     private final CaptchaService captcha;
     private final com.careerops.repository.ReferralOutboxRepository referralOutbox;
+    private final GoogleOAuthService googleOAuth;
 
     public AuthService(UserRepository users,
             UserProfileRepository profiles,
@@ -68,7 +69,8 @@ public class AuthService {
             AuditLogService audit,
             RefreshTokenRepository refreshTokens,
             CaptchaService captcha,
-            com.careerops.repository.ReferralOutboxRepository referralOutbox) {
+            com.careerops.repository.ReferralOutboxRepository referralOutbox,
+            GoogleOAuthService googleOAuth) {
         this.users = users;
         this.profiles = profiles;
         this.resets = resets;
@@ -79,6 +81,7 @@ public class AuthService {
         this.refreshTokens = refreshTokens;
         this.captcha = captcha;
         this.referralOutbox = referralOutbox;
+        this.googleOAuth = googleOAuth;
     }
 
     // ─── Signup ────────────────────────────────────────────────────────────────
@@ -120,6 +123,97 @@ public class AuthService {
         }
     }
 
+    // ─── Google Sign-In ────────────────────────────────────────────────────────
+
+    @Transactional(timeout = 10)
+    public AuthResponse authenticateWithGoogle(GoogleAuthRequest req, @Nullable HttpServletRequest httpRequest) {
+        GoogleOAuthService.GoogleIdentity identity = googleOAuth.verifyIdToken(req.idToken());
+
+        Optional<User> byGoogle = users.findByGoogleSub(identity.sub());
+        User u;
+        if (byGoogle.isPresent()) {
+            u = byGoogle.get();
+        } else {
+            Optional<User> byEmail = users.findByEmail(identity.email());
+            if (byEmail.isPresent()) {
+                u = byEmail.get();
+                if (u.getGoogleSub() != null && !u.getGoogleSub().equals(identity.sub())) {
+                    throw new ApiException(HttpStatus.CONFLICT,
+                            "This email is linked to a different Google account");
+                }
+                u.setGoogleSub(identity.sub());
+                u.setAuthProvider(User.AuthProvider.GOOGLE);
+                if (u.getEmailVerifiedAt() == null) {
+                    u.setEmailVerifiedAt(Instant.now());
+                }
+                users.save(u);
+            } else {
+                u = createGoogleUser(identity);
+            }
+        }
+
+        users.resetFailedAttempts(u.getEmail());
+        u.setLastLoginAt(Instant.now());
+        users.save(u);
+
+        audit.log(u.getId(), "GOOGLE_LOGIN", httpRequest, Map.of("email", u.getEmail()));
+        return createAuthResponse(u, httpRequest);
+    }
+
+    private User createGoogleUser(GoogleOAuthService.GoogleIdentity identity) {
+        try {
+            User u = users.save(User.builder()
+                    .name(identity.name())
+                    .username(allocateUsername(identity.email()))
+                    .email(identity.email())
+                    .passwordHash(null)
+                    .authProvider(User.AuthProvider.GOOGLE)
+                    .googleSub(identity.sub())
+                    .emailVerifiedAt(Instant.now())
+                    .build());
+
+            profiles.save(UserProfile.builder()
+                    .userId(u.getId())
+                    .location("Ireland")
+                    .freshnessHours(96)
+                    .minMatchPercent(UserProfile.DEFAULT_MIN_MATCH_PERCENT)
+                    .sponsorshipRequired(false)
+                    .onboarded(false)
+                    .build());
+
+            referralOutbox.save(com.careerops.model.ReferralOutbox.builder()
+                    .refereeEmail(u.getEmail())
+                    .refereeName(u.getName())
+                    .build());
+
+            audit.log(u.getId(), "GOOGLE_SIGNUP", Map.of("email", u.getEmail()));
+            return u;
+        } catch (org.springframework.dao.DataIntegrityViolationException e) {
+            return users.findByGoogleSub(identity.sub())
+                    .or(() -> users.findByEmail(identity.email()))
+                    .orElseThrow(() -> new ApiException(HttpStatus.CONFLICT,
+                            "Could not create account. Please try again."));
+        }
+    }
+
+    private String allocateUsername(String email) {
+        String local = email.split("@")[0].toLowerCase().replaceAll("[^a-z0-9._-]", "");
+        if (local.length() < 3) {
+            local = "user" + local;
+        }
+        local = local.substring(0, Math.min(local.length(), 26));
+        if (!users.existsByUsername(local)) {
+            return local;
+        }
+        for (int i = 0; i < 8; i++) {
+            String candidate = local + (1000 + new SecureRandom().nextInt(9000));
+            if (!users.existsByUsername(candidate)) {
+                return candidate.substring(0, Math.min(candidate.length(), 32));
+            }
+        }
+        return local + UUID.randomUUID().toString().substring(0, 6);
+    }
+
     // ─── Login ─────────────────────────────────────────────────────────────────
 
     // 3.001 — Pre-computed dummy hash for timing protection
@@ -145,6 +239,12 @@ public class AuthService {
             if (!captcha.verify(req.captchaToken())) {
                 throw new ApiException(HttpStatus.UNAUTHORIZED, "Invalid captcha token", true);
             }
+        }
+
+        if (u != null && (u.getPasswordHash() == null || u.getPasswordHash().isBlank())) {
+            encoder.matches(req.password(), DUMMY_HASH);
+            throw new ApiException(HttpStatus.UNAUTHORIZED,
+                    "This account uses Google Sign-In. Please continue with Google.");
         }
 
         // 3.001 — Security: Always run BCrypt verify
@@ -291,7 +391,7 @@ public class AuthService {
                     "Please wait 60 seconds before requesting another OTP");
         }
 
-        String otp = generateAlphanumericOtp(); // 3.005 — Use 8-char alphanumeric OTP
+        String otp = generateSixDigitOtp();
         PasswordReset pr = PasswordReset.builder()
                 .userId(u.getId())
                 .email(req.email())
@@ -303,14 +403,10 @@ public class AuthService {
         email.sendOtp(req.email(), otp);
     }
 
-    private String generateAlphanumericOtp() {
-        String chars = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"; // 3.005 — 2.8 trillion combinations
+    private String generateSixDigitOtp() {
         java.security.SecureRandom rnd = new java.security.SecureRandom();
-        StringBuilder sb = new StringBuilder(8);
-        for (int i = 0; i < 8; i++) {
-            sb.append(chars.charAt(rnd.nextInt(chars.length())));
-        }
-        return sb.toString();
+        int code = 100_000 + rnd.nextInt(900_000);
+        return String.format("%06d", code);
     }
 
     @Transactional(timeout = 10)
@@ -341,7 +437,8 @@ public class AuthService {
             throw new ApiException(HttpStatus.BAD_REQUEST, "Invalid OTP");
         }
 
-        if (encoder.matches(req.newPassword(), u.getPasswordHash())) {
+        if (u.getPasswordHash() != null
+                && encoder.matches(req.newPassword(), u.getPasswordHash())) {
             throw new ApiException(HttpStatus.BAD_REQUEST, "New password cannot be the same as your current password");
         }
 

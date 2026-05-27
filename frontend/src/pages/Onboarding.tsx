@@ -1,418 +1,1216 @@
-import { useEffect, useId, useRef, useState } from 'react';
+import { Fragment, useEffect, useState } from 'react';
+import { createPortal } from 'react-dom';
+
 import { useNavigate } from 'react-router-dom';
+
 import { useAuth } from '@/context/AuthContext';
-import { profileApi } from '@/services/api';
-import { motion, AnimatePresence } from 'framer-motion';
+
 import {
-  CloudUpload, Briefcase, MapPin,
-  ArrowLeft, ChevronDown, ChevronRight, FileText, Check,
-} from 'lucide-react';
+  authApi,
+  onboardingApi,
+  profileApi,
+  type OnboardingDeliveryStatus,
+} from '@/services/api';
+import { tokenStore } from '@/lib/tokenStore';
+
+import { PageMeta } from '@/components/PageMeta';
+
+import {
+  PreferencesStep,
+  type PreferencesStepValues,
+} from '@/components/onboarding/PreferencesStep';
+import { FieldLabel } from '@/components/onboarding/RequiredLabel';
+import { MonthYearField } from '@/components/onboarding/MonthYearField';
+import { buildOnboardingProfilePayload } from '@/lib/buildOnboardingProfilePayload';
+import { JobSearchRadarLoader } from '@/components/onboarding/JobSearchRadarLoader';
+import {
+  readWelcomePendingFlag,
+  setWelcomePendingFlag,
+} from '@/components/dashboard/CareersHomeDashboard';
+
+const DELIVERY_POLL_MS = 1500;
+const DELIVERY_TIMEOUT_MS = 5 * 60 * 1000;
+
+function sleep(ms: number): Promise<void> {
+  return new Promise(resolve => window.setTimeout(resolve, ms));
+}
+
 import toast from 'react-hot-toast';
 
-// ─── Constants ─────────────────────────────────────────────────────────────
-const SENIORITY_OPTIONS = ['Junior', 'Mid-Level', 'Senior', 'Lead / Principal'];
-const REMOTE_OPTIONS    = ['On-site', 'Hybrid', 'Remote'];
-const ONSITE_DAY_OPTIONS = [
-  '1 Day per week',
-  '2 Days per week',
-  '3 Days per week',
-  '4 Days per week',
-  '5 Days per week (Full on-site)',
-];
+import '@/styles/onboarding.css';
 
-const TOTAL_STEPS = 3;
 
-// ─── Small reusable components ───────────────────────────────────────────────────
-// Step progress pills at the top
-function StepPills({ current, total }: { current: number; total: number }) {
-  return (
-    <div className="flex items-center justify-center gap-1.5 mb-8">
-      {Array.from({ length: total }).map((_, i) => (
-        <div
-          key={i}
-          className={[
-            'h-2 rounded-full transition-all duration-300',
-            i < current  ? 'w-12 bg-emerald-500' :
-            i === current ? 'w-10 bg-emerald-500' :
-                            'w-8 bg-slate-200',
-          ].join(' ')}
-        />
-      ))}
-    </div>
-  );
+
+const STEPS = ['Basic Info', 'Experience', 'Preferences'] as const;
+
+function defaultPreferences(): PreferencesStepValues {
+  return {
+    selectedRoles: [],
+    selectedTech: [],
+    workTypes: ['Full-time'],
+    workSettings: { remote: true, onsite: false, hybrid: false },
+    salaryMinK: 60,
+    salaryMaxK: 120,
+    salaryCurrency: 'EUR',
+    availability: '2 weeks notice',
+    cvFile: null,
+    sponsorship: false,
+    minMatchPercent: 60,
+  };
 }
 
-// Back button
-function BackBtn({ onClick }: { onClick: () => void }) {
-  return (
-    <button
-      onClick={onClick}
-      className="flex items-center gap-1.5 text-sm text-slate-400 hover:text-slate-600 font-medium mb-6 transition-colors"
-    >
-      <ArrowLeft size={15} />
-      Back
-    </button>
-  );
-}
+type WorkEntry = {
 
-// Form label
-function Label({ children }: { children: React.ReactNode }) {
-  return (
-    <p className="text-sm font-semibold text-slate-700 mb-2">{children}</p>
-  );
-}
+  jobTitle: string;
 
-// Native select styled
-function StyledSelect({
-  value, onChange, options, label,
-}: { value: string; onChange: (v: string) => void; options: string[]; label: string }) {
-  const selectId = useId();
+  companyName: string;
 
-  return (
-    <div className="relative">
-      <label htmlFor={selectId} className="sr-only">{label}</label>
-      <select
-        id={selectId}
-        aria-label={label}
-        value={value}
-        onChange={e => onChange(e.target.value)}
-        className="w-full px-4 pr-10 h-12 rounded-xl border border-slate-200 bg-white text-slate-700 text-sm font-medium focus:outline-none focus:ring-2 focus:ring-emerald-500/30 focus:border-emerald-400 transition-all appearance-none cursor-pointer"
-      >
-        {options.map(o => <option key={o}>{o}</option>)}
-      </select>
-      <ChevronDown
-        aria-hidden="true"
-        className="pointer-events-none absolute right-4 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400"
-      />
-    </div>
-  );
-}
+  startDate: string;
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Main onboarding flow
-// ─────────────────────────────────────────────────────────────────────────────
-export default function Onboarding() {
-  const { updateProfile, user } = useAuth();
-  const nav     = useNavigate();
-  const cvRef   = useRef<HTMLInputElement>(null);
+  endDate: string;
 
-  useEffect(() => {
-    if (user?.onboarded) {
-      nav('/dashboard', { replace: true });
-    }
-  }, [user, nav]);
+  current: boolean;
 
-  const [step,   setStep]   = useState(0);
-  const [saving, setSaving] = useState(false);
+  description: string;
 
-  // Step 0 — CV
-  const [cvFile, setCvFile] = useState<File | null>(null);
+};
 
-  // Step 1 — Target Blueprint
-  const [targetRoles, setTargetRoles] = useState('');
-  const [techStack,   setTechStack]   = useState('');
 
-  // Step 2 — Work Context
-  const [seniority,    setSeniority]    = useState('Mid-Level');
-  const [remotePolicy, setRemotePolicy] = useState('Hybrid');
-  const [onsiteDays,   setOnsiteDays]   = useState('2 Days per week');
-  const [sponsorship,  setSponsorship]  = useState(false);
 
-  // Validation per step
-  const canAdvance = (): boolean => {
-    if (step === 0) return true;                  // CV optional
-    if (step === 1) return targetRoles.trim().length > 0; // need at least one role
-    return true;
+type EducationEntry = {
+
+  schoolName: string;
+
+  degree: string;
+
+  fieldOfStudy: string;
+
+  graduationYear: string;
+
+};
+
+
+
+function emptyWork(): WorkEntry {
+
+  return {
+
+    jobTitle: '',
+
+    companyName: '',
+
+    startDate: '',
+
+    endDate: '',
+
+    current: false,
+
+    description: '',
+
   };
 
-  // Final submit
-  async function handleFinish() {
-    setSaving(true);
+}
+
+
+
+function emptyEducation(): EducationEntry {
+
+  return {
+
+    schoolName: '',
+
+    degree: '',
+
+    fieldOfStudy: '',
+
+    graduationYear: '',
+
+  };
+
+}
+
+
+
+function OnboardingStepper({ activeStep }: { activeStep: number }) {
+
+  return (
+
+    <nav className="onboarding-stepper" aria-label="Onboarding progress">
+
+      <div className="onboarding-stepper__row">
+
+        {STEPS.map((label, index) => (
+
+          <Fragment key={label}>
+
+            {index > 0 && (
+
+              <div
+
+                className={`onboarding-stepper__connector ${activeStep >= index ? 'onboarding-stepper__connector--done' : ''}`}
+
+                aria-hidden="true"
+
+              />
+
+            )}
+
+            <div className="onboarding-stepper__col">
+
+              <div
+
+                className={`onboarding-stepper__dot ${
+
+                  index < activeStep
+
+                    ? 'onboarding-stepper__dot--completed'
+
+                    : index === activeStep
+
+                      ? 'onboarding-stepper__dot--active'
+
+                      : 'onboarding-stepper__dot--upcoming'
+
+                }`}
+
+              >
+
+                {index < activeStep ? (
+
+                  <span className="material-symbols-outlined" aria-hidden="true">
+
+                    check
+
+                  </span>
+
+                ) : (
+
+                  index + 1
+
+                )}
+
+              </div>
+
+              <span
+
+                className={`onboarding-stepper__label ${
+
+                  index < activeStep
+
+                    ? 'onboarding-stepper__label--completed'
+
+                    : index === activeStep
+
+                      ? 'onboarding-stepper__label--active'
+
+                      : 'onboarding-stepper__label--upcoming'
+
+                }`}
+
+              >
+
+                {label}
+
+              </span>
+
+            </div>
+
+          </Fragment>
+
+        ))}
+
+      </div>
+
+    </nav>
+
+  );
+
+}
+
+
+
+function WorkPanel({
+
+  entry,
+
+  index,
+
+  onChange,
+
+  onRemove,
+
+}: {
+
+  entry: WorkEntry;
+
+  index: number;
+
+  onChange: (index: number, patch: Partial<WorkEntry>) => void;
+
+  onRemove?: () => void;
+
+}) {
+
+  const id = (field: string) => `work-${index}-${field}`;
+
+  return (
+
+    <div className="onboarding-panel">
+
+      <div className="onboarding-grid-2">
+
+        <div className="onboarding-field onboarding-field--muted">
+
+          <label htmlFor={id('jobTitle')}>Job Title</label>
+
+          <input
+
+            className="onboarding-input-sm"
+
+            id={id('jobTitle')}
+
+            placeholder="e.g. Software Engineer"
+
+            type="text"
+
+            value={entry.jobTitle}
+
+            onChange={e => onChange(index, { jobTitle: e.target.value })}
+
+          />
+
+        </div>
+
+        <div className="onboarding-field onboarding-field--muted">
+
+          <label htmlFor={id('companyName')}>Company Name</label>
+
+          <input
+
+            className="onboarding-input-sm"
+
+            id={id('companyName')}
+
+            placeholder="e.g. Acme Corp"
+
+            type="text"
+
+            value={entry.companyName}
+
+            onChange={e => onChange(index, { companyName: e.target.value })}
+
+          />
+
+        </div>
+
+      </div>
+
+      <div className="onboarding-grid-2" style={{ marginTop: '1.5rem' }}>
+
+        <MonthYearField
+          label="Start Date"
+          idPrefix={id('start')}
+          value={entry.startDate}
+          onChange={next => onChange(index, { startDate: next })}
+        />
+
+        <MonthYearField
+          label="End Date"
+          idPrefix={id('end')}
+          value={entry.endDate}
+          disabled={entry.current}
+          onChange={next => onChange(index, { endDate: next })}
+          {...(entry.current ? { hint: 'Leave blank while you still work here' } : {})}
+        />
+
+      </div>
+
+      <div className="onboarding-checkbox-row" style={{ marginTop: '1rem' }}>
+
+        <input
+
+          id={id('current')}
+
+          type="checkbox"
+
+          checked={entry.current}
+
+          onChange={e =>
+
+            onChange(index, { current: e.target.checked, endDate: e.target.checked ? '' : entry.endDate })
+
+          }
+
+        />
+
+        <label htmlFor={id('current')}>I currently work here</label>
+
+      </div>
+
+      <div className="onboarding-field onboarding-field--muted">
+
+        <label htmlFor={id('description')}>Description</label>
+
+        <textarea
+
+          className="onboarding-input-sm"
+
+          id={id('description')}
+
+          rows={3}
+
+          placeholder="Describe your responsibilities and achievements..."
+
+          value={entry.description}
+
+          onChange={e => onChange(index, { description: e.target.value })}
+
+          style={{ resize: 'none' }}
+
+        />
+
+      </div>
+
+      {onRemove && (
+        <div className="onboarding-panel__delete-row">
+          <button
+            type="button"
+            className="onboarding-panel__delete"
+            onClick={onRemove}
+            aria-label="Remove position"
+          >
+            <span className="material-symbols-outlined" aria-hidden="true">
+              delete
+            </span>
+          </button>
+        </div>
+      )}
+
+    </div>
+
+  );
+
+}
+
+
+
+function EducationPanel({
+
+  entry,
+
+  index,
+
+  onChange,
+
+  onRemove,
+
+}: {
+
+  entry: EducationEntry;
+
+  index: number;
+
+  onChange: (index: number, patch: Partial<EducationEntry>) => void;
+
+  onRemove?: () => void;
+
+}) {
+
+  const id = (field: string) => `edu-${index}-${field}`;
+
+  return (
+
+    <div className="onboarding-panel">
+
+      <div className="onboarding-field onboarding-field--muted" style={{ marginBottom: '1.5rem' }}>
+
+        <label htmlFor={id('schoolName')}>School / University</label>
+
+        <input
+
+          className="onboarding-input-sm"
+
+          id={id('schoolName')}
+
+          placeholder="e.g. State University"
+
+          type="text"
+
+          value={entry.schoolName}
+
+          onChange={e => onChange(index, { schoolName: e.target.value })}
+
+        />
+
+      </div>
+
+      <div className="onboarding-grid-3">
+
+        <div className="onboarding-field onboarding-field--muted">
+
+          <label htmlFor={id('degree')}>Degree</label>
+
+          <select
+
+            className="onboarding-select-sm"
+
+            id={id('degree')}
+
+            value={entry.degree}
+
+            onChange={e => onChange(index, { degree: e.target.value })}
+
+          >
+
+            <option value="">Select degree</option>
+
+            <option value="bachelors">Bachelor&apos;s</option>
+
+            <option value="masters">Master&apos;s</option>
+
+            <option value="phd">Ph.D.</option>
+
+            <option value="other">Other</option>
+
+          </select>
+
+        </div>
+
+        <div className="onboarding-field onboarding-field--muted">
+
+          <label htmlFor={id('fieldOfStudy')}>Field of Study</label>
+
+          <input
+
+            className="onboarding-input-sm"
+
+            id={id('fieldOfStudy')}
+
+            placeholder="e.g. Computer Science"
+
+            type="text"
+
+            value={entry.fieldOfStudy}
+
+            onChange={e => onChange(index, { fieldOfStudy: e.target.value })}
+
+          />
+
+        </div>
+
+        <div className="onboarding-field onboarding-field--muted">
+
+          <label htmlFor={id('graduationYear')}>Graduation Year</label>
+
+          <input
+
+            className="onboarding-input-sm"
+
+            id={id('graduationYear')}
+
+            type="number"
+
+            min={1950}
+
+            max={2030}
+
+            placeholder="YYYY"
+
+            value={entry.graduationYear}
+
+            onChange={e => onChange(index, { graduationYear: e.target.value })}
+
+          />
+
+        </div>
+
+      </div>
+
+      {onRemove && (
+        <div className="onboarding-panel__delete-row">
+          <button
+            type="button"
+            className="onboarding-panel__delete"
+            onClick={onRemove}
+            aria-label="Remove school"
+          >
+            <span className="material-symbols-outlined" aria-hidden="true">
+              delete
+            </span>
+          </button>
+        </div>
+      )}
+
+    </div>
+
+  );
+
+}
+
+
+
+export default function Onboarding() {
+
+  const { updateProfile, user } = useAuth();
+
+  const nav = useNavigate();
+
+
+
+  useEffect(() => {
+
+    document.documentElement.classList.add('light');
+
+    document.documentElement.classList.remove('dark');
+
+    const root = document.getElementById('root');
+
+    document.body.style.overflow = 'hidden';
+
+    if (root) root.style.overflow = 'hidden';
+
+    return () => {
+
+      document.documentElement.classList.remove('light');
+
+      document.body.style.overflow = '';
+
+      if (root) root.style.overflow = '';
+
+    };
+
+  }, []);
+
+
+
+  useEffect(() => {
+
+    if (user?.onboarded) {
+      const pending = readWelcomePendingFlag();
+      nav(pending ? '/dashboard?welcome=1' : '/dashboard', { replace: true });
+    }
+
+  }, [user, nav]);
+
+
+
+  const [step, setStep] = useState(0);
+
+  const [saving, setSaving] = useState(false);
+  const [deliveryStatus, setDeliveryStatus] = useState<OnboardingDeliveryStatus | null>(null);
+  const [deliveryFailed, setDeliveryFailed] = useState<string | null>(null);
+
+  const [fullName, setFullName] = useState(user?.name || '');
+
+  const [headline, setHeadline] = useState('');
+
+  const [experienceYears, setExperienceYears] = useState('');
+
+  const [location, setLocation] = useState('Dublin, Ireland');
+
+
+
+  const [workEntries, setWorkEntries] = useState<WorkEntry[]>([emptyWork()]);
+
+  const [educationEntries, setEducationEntries] = useState<EducationEntry[]>([emptyEducation()]);
+
+
+
+  const [preferences, setPreferences] = useState<PreferencesStepValues>(defaultPreferences);
+
+  function patchPreferences(patch: Partial<PreferencesStepValues>) {
+    setPreferences(prev => ({ ...prev, ...patch }));
+  }
+
+
+
+  function updateWork(index: number, patch: Partial<WorkEntry>) {
+
+    setWorkEntries(prev => prev.map((w, i) => (i === index ? { ...w, ...patch } : w)));
+
+  }
+
+
+
+  function updateEducation(index: number, patch: Partial<EducationEntry>) {
+
+    setEducationEntries(prev => prev.map((e, i) => (i === index ? { ...e, ...patch } : e)));
+
+  }
+
+
+
+  async function ensureFreshSession(): Promise<void> {
+    const refresh = tokenStore.getRefresh();
+    if (!refresh) return;
     try {
-      if (cvFile) {
-        await profileApi.uploadCv(cvFile);
-      }
-      const roles  = targetRoles.split(',').map(r => r.trim()).filter(Boolean);
-      const stack  = techStack.split(',').map(s => s.trim()).filter(Boolean);
-      const expMap: Record<string, string> = {
-        'Junior': 'junior', 'Mid-Level': 'mid',
-        'Senior': 'senior', 'Lead / Principal': 'lead',
-      };
-      await updateProfile({
-        targetRole:          roles[0] ?? '',
-        skills:              [...roles, ...stack],
-        experienceLevel:     expMap[seniority] ?? 'mid',
-        sponsorshipRequired: sponsorship,
-        location:            'Dublin',
-        onboardingCompleted: true,
-      });
-      nav('/dashboard');
+      await authApi.refresh(refresh);
     } catch {
-      toast.error('Could not save your profile — please try again.');
-    } finally {
-      setSaving(false);
+      // Interceptor handles redirect; save handler surfaces the error.
     }
   }
 
-  return (
-    <div className="min-h-screen bg-slate-100 flex flex-col">
+  async function pollDeliveryUntilReady(): Promise<void> {
+    const deadline = Date.now() + DELIVERY_TIMEOUT_MS;
+    while (Date.now() < deadline) {
+      const status = await onboardingApi.deliveryStatus();
+      setDeliveryStatus(status);
+      if (status.ready) return;
+      if (status.stage === 'failed') {
+        throw new Error(
+          status.error ??
+            status.message ??
+            'Matching could not complete. Your profile is saved — try again or open the dashboard to use any roles already found.',
+        );
+      }
+      await sleep(DELIVERY_POLL_MS);
+    }
+    throw new Error(
+      'Matching is taking longer than expected. You can open the dashboard — more roles will load in the background.',
+    );
+  }
 
-      {/* ── Minimal header ── */}
-      <header className="h-14 px-6 flex items-center justify-between bg-white border-b border-slate-200">
-        <span className="font-bold text-base text-slate-900">
-          Career<span className="text-emerald-500">Ops</span>
-        </span>
-        <span className="text-xs text-slate-400 font-medium">Step {step + 1} of {TOTAL_STEPS}</span>
+  function finishToDashboard() {
+    setWelcomePendingFlag();
+    setDeliveryFailed(null);
+    setDeliveryStatus(null);
+    setSaving(false);
+    nav('/dashboard?welcome=1', { replace: true });
+  }
+
+  async function handleFinish() {
+    setSaving(true);
+    setDeliveryFailed(null);
+    setDeliveryStatus(null);
+    let keepDeliveryOverlay = false;
+
+    try {
+      await ensureFreshSession();
+
+      const p = preferences;
+      if (!p.cvFile) {
+        toast.error('Upload your CV to finish onboarding.');
+        return;
+      }
+
+      const payload = buildOnboardingProfilePayload(
+        { fullName, headline, experienceYears, location },
+        workEntries,
+        educationEntries,
+        p,
+      );
+
+      await updateProfile(payload);
+      await profileApi.uploadCv(p.cvFile);
+
+      setDeliveryStatus({
+        stage: 'reading_cv',
+        message: 'Starting AI job matching…',
+        evaluatedCount: 0,
+        targetCount: 10,
+        minRequired: 3,
+        jobsDiscovered: 0,
+        readyPartial: false,
+        ready: false,
+      });
+
+      await onboardingApi.startDelivery();
+      try {
+        await pollDeliveryUntilReady();
+      } catch (pollErr: unknown) {
+        const pollMsg = pollErr instanceof Error ? pollErr.message : undefined;
+        if (pollMsg?.includes('longer than expected')) {
+          toast.error(pollMsg, { duration: 8000 });
+          finishToDashboard();
+          return;
+        }
+        setDeliveryFailed(
+          pollMsg ??
+            'Matching could not complete. Your profile is saved — try again or continue to the dashboard.',
+        );
+        keepDeliveryOverlay = true;
+        return;
+      }
+
+      finishToDashboard();
+      return;
+    } catch (err: unknown) {
+      const message =
+        err && typeof err === 'object' && 'response' in err
+          ? (err as { response?: { data?: { message?: string; error?: string } } }).response?.data
+              ?.message ??
+            (err as { response?: { data?: { error?: string } } }).response?.data?.error
+          : err instanceof Error
+            ? err.message
+            : undefined;
+
+      toast.error(message ?? 'Could not save your profile — please try again.');
+    } finally {
+      if (!keepDeliveryOverlay) {
+        setSaving(false);
+        setDeliveryStatus(null);
+      }
+    }
+  }
+
+
+
+  function handleBasicInfoSubmit(e: React.FormEvent) {
+
+    e.preventDefault();
+
+    if (fullName && location && experienceYears) {
+
+      setStep(1);
+
+    }
+
+  }
+
+
+
+  const cardClass = `onboarding-card${
+    step === 1 ? ' onboarding-card--wide' : step === 2 ? ' onboarding-card--preferences' : ''
+  }`;
+
+
+
+  return (
+    <>
+      {(saving || deliveryFailed) &&
+        createPortal(
+          <JobSearchRadarLoader
+            locationHint={location.trim() || 'Dublin, Ireland'}
+            status={deliveryStatus}
+            failedMessage={deliveryFailed}
+            onRetry={() => void handleFinish()}
+            onContinue={finishToDashboard}
+          />,
+          document.body,
+        )}
+
+    <div className="onboarding-page">
+
+      <PageMeta title="Candidate Onboarding - NewCareers" />
+
+
+
+      <header className="onboarding-header">
+
+        <div className="onboarding-header__inner">
+
+          <a
+
+            className="onboarding-logo"
+
+            href="/"
+
+            onClick={e => {
+
+              e.preventDefault();
+
+              nav('/');
+
+            }}
+
+          >
+
+            NewCareers
+
+          </a>
+
+        </div>
+
       </header>
 
-      {/* ── Body ── */}
-      <div className="flex-1 flex items-center justify-center px-4 py-12">
-        <div className="w-full max-w-[440px]">
 
-          {/* Step pills */}
-          <StepPills current={step} total={TOTAL_STEPS} />
 
-          {/* Animated card */}
-          <AnimatePresence mode="wait">
-            <motion.div
-              key={step}
-              initial={{ opacity: 0, x: 24 }}
-              animate={{ opacity: 1, x: 0 }}
-              exit={{ opacity: 0, x: -24 }}
-              transition={{ duration: 0.22, ease: 'easeOut' }}
-              className="bg-white rounded-2xl p-8 shadow-sm border border-slate-200"
-            >
+      <main className="onboarding-main">
 
-              {/* Back button (steps 1+) */}
-              {step > 0 && <BackBtn onClick={() => setStep(s => s - 1)} />}
+        <div className={cardClass}>
 
-              {/* ────────── STEP 0: CV UPLOAD ────────── */}
-              {step === 0 && (
-                <div className="space-y-6">
-                  {/* Header */}
-                  <div className="flex flex-col items-center text-center gap-3">
-                    <div className="w-16 h-16 rounded-full bg-emerald-100 flex items-center justify-center">
-                      <FileText size={28} className="text-emerald-500" />
-                    </div>
-                    <h2 className="text-2xl font-bold text-slate-900">Let's build your pipeline</h2>
-                    <p className="text-sm text-slate-500 leading-relaxed max-w-xs">
-                      Start by uploading your primary CV. The engine uses this to understand your entire history,
-                      mapping it against live job requirements.
-                    </p>
-                  </div>
+          <OnboardingStepper activeStep={step} />
 
-                  {/* Upload zone */}
-                  <input
-                    id="onboarding-cv-upload"
-                    ref={cvRef}
-                    type="file"
-                    accept=".pdf,.docx,.txt"
-                    aria-label="Upload your primary CV"
-                    className="hidden"
-                    onChange={e => setCvFile(e.target.files?.[0] ?? null)}
-                  />
-                  <button
-                    type="button"
-                    className={[
-                      'w-full border-2 border-dashed rounded-2xl p-8 flex flex-col items-center gap-3 transition-all',
-                      cvFile
-                        ? 'border-emerald-400 bg-emerald-50'
-                        : 'border-slate-200 bg-slate-50 hover:border-emerald-300 hover:bg-emerald-50/40',
-                    ].join(' ')}
-                    onClick={() => cvRef.current?.click()}
-                  >
-                    <div className="w-12 h-12 rounded-full bg-white border border-slate-200 flex items-center justify-center shadow-sm">
-                      <CloudUpload size={22} className={cvFile ? 'text-emerald-500' : 'text-slate-400'} />
-                    </div>
-                    {cvFile ? (
-                      <>
-                        <p className="font-semibold text-emerald-700 text-sm text-center">{cvFile.name}</p>
-                        <p className="text-xs text-emerald-500">{(cvFile.size / 1024 / 1024).toFixed(2)} MB</p>
-                      </>
-                    ) : (
-                      <>
-                        <p className="font-semibold text-slate-700 text-sm">Upload your CV</p>
-                        <p className="text-xs text-slate-400">Drag and drop, or click to browse</p>
-                        <button
-                          type="button"
-                          onClick={e => { e.stopPropagation(); cvRef.current?.click(); }}
-                          className="mt-1 px-5 py-2 bg-white border border-slate-200 rounded-xl text-sm font-semibold text-slate-700 hover:border-emerald-300 hover:text-emerald-700 transition-all shadow-sm"
-                        >
-                          Select File
-                        </button>
-                        <p className="text-[11px] text-slate-300 uppercase tracking-wider font-semibold">PDF, WORD, OR TXT (MAX 5MB)</p>
-                      </>
-                    )}
-                  </button>
 
-                  {/* Next */}
-                  <div className="flex justify-end">
-                    <button
-                      onClick={() => setStep(1)}
-                      className="flex items-center gap-2 px-6 h-11 bg-slate-900 text-white rounded-xl font-bold text-sm hover:bg-slate-800 transition-all"
-                    >
-                      Next Step <ChevronRight size={16} />
-                    </button>
-                  </div>
+
+          <div className="onboarding-card__scroll">
+
+            {step === 0 && (
+
+              <>
+
+                <div className="onboarding-card__title">
+
+                  <h1>Let&apos;s build your professional profile</h1>
+
+                  <p>Tell us a bit about yourself to help us find the perfect match.</p>
+
                 </div>
-              )}
 
-              {/* ────────── STEP 1: TARGET BLUEPRINT ────────── */}
-              {step === 1 && (
-                <div className="space-y-5">
-                  {/* Header */}
-                  <div className="flex items-start gap-3 mb-1">
-                    <div className="w-9 h-9 rounded-xl bg-emerald-100 flex items-center justify-center shrink-0 mt-0.5">
-                      <Briefcase size={18} className="text-emerald-600" />
-                    </div>
-                    <div>
-                      <h2 className="text-xl font-bold text-slate-900">Target Blueprint</h2>
-                      <p className="text-sm text-slate-500 mt-0.5">
-                        What exactly are we hunting for? The engine uses this strictly for semantic matching.
-                      </p>
-                    </div>
-                  </div>
 
-                  {/* Target roles */}
-                  <div>
-                    <Label>
-                      Target Roles <span className="text-slate-400 font-normal text-xs">(comma separated)</span>
-                    </Label>
+
+                <form className="onboarding-form" onSubmit={handleBasicInfoSubmit}>
+
+                  <div className="onboarding-field">
+
+                    <FieldLabel htmlFor="fullName" required>
+                      Full Name
+                    </FieldLabel>
+
                     <input
+
+                      className="onboarding-input"
+
+                      id="fullName"
+
+                      name="fullName"
+
+                      placeholder="Jane Doe"
+
                       type="text"
-                      autoFocus
-                      placeholder="e.g. Frontend Engineer, React Developer"
-                      value={targetRoles}
-                      onChange={e => setTargetRoles(e.target.value)}
+
+                      value={fullName}
+
                       required
-                      className="w-full px-4 h-12 rounded-xl border border-slate-200 bg-white text-slate-700 text-sm placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-emerald-500/30 focus:border-emerald-400 transition-all"
+
+                      onChange={e => setFullName(e.target.value)}
+
                     />
+
                   </div>
 
-                  {/* Tech stack */}
-                  <div>
-                    <Label>Core Tech Stack</Label>
-                    <textarea
-                      rows={4}
-                      placeholder="React, TypeScript, Node.js..."
-                      value={techStack}
-                      onChange={e => setTechStack(e.target.value)}
-                      className="w-full px-4 py-3 rounded-xl border border-slate-200 bg-white text-slate-700 text-sm placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-emerald-500/30 focus:border-emerald-400 transition-all resize-none"
+
+
+                  <div className="onboarding-field">
+
+                    <label htmlFor="headline">Professional Headline</label>
+
+                    <input
+
+                      className="onboarding-input"
+
+                      id="headline"
+
+                      name="headline"
+
+                      placeholder="e.g. Senior Product Designer"
+
+                      type="text"
+
+                      value={headline}
+
+                      onChange={e => setHeadline(e.target.value)}
+
                     />
-                    <p className="text-xs text-slate-400 mt-1.5">
-                      List the absolute non-negotiable tools. We'll penalize jobs heavily if they demand things outside this list.
-                    </p>
+
+                    <p className="hint">This will be the first thing employers see.</p>
+
                   </div>
 
-                  {/* Next */}
-                  <div className="flex justify-end pt-1">
-                    <button
-                      onClick={() => { if (canAdvance()) setStep(2); }}
-                      disabled={!canAdvance()}
-                      className="flex items-center gap-2 px-6 h-11 bg-slate-900 text-white rounded-xl font-bold text-sm hover:bg-slate-800 transition-all disabled:opacity-40 disabled:cursor-not-allowed"
-                    >
-                      Next Step <ChevronRight size={16} />
-                    </button>
-                  </div>
-                </div>
-              )}
 
-              {/* ────────── STEP 2: WORK CONTEXT ────────── */}
-              {step === 2 && (
-                <div className="space-y-5">
-                  {/* Header */}
-                  <div className="flex items-start gap-3 mb-1">
-                    <div className="w-9 h-9 rounded-xl bg-emerald-100 flex items-center justify-center shrink-0 mt-0.5">
-                      <MapPin size={18} className="text-emerald-600" />
-                    </div>
-                    <div>
-                      <h2 className="text-xl font-bold text-slate-900">Work Context</h2>
-                      <p className="text-sm text-slate-500 mt-0.5">
-                        Set your hard limitations. The engine will drop jobs that violate these constraints natively.
-                      </p>
-                    </div>
-                  </div>
 
-                  {/* Seniority */}
-                  <div>
-                    <Label>Seniority</Label>
-                    <StyledSelect value={seniority} onChange={setSeniority} options={SENIORITY_OPTIONS} label="Seniority" />
-                  </div>
+                  <div className="onboarding-grid-2">
 
-                  {/* Remote policy */}
-                  <div>
-                    <Label>Remote Policy</Label>
-                    <StyledSelect value={remotePolicy} onChange={setRemotePolicy} options={REMOTE_OPTIONS} label="Remote policy" />
-                  </div>
+                    <div className="onboarding-field">
 
-                  {/* Max on-site days — only when Hybrid */}
-                  <AnimatePresence>
-                    {remotePolicy === 'Hybrid' && (
-                      <motion.div
-                        initial={{ opacity: 0, height: 0 }}
-                        animate={{ opacity: 1, height: 'auto' }}
-                        exit={{ opacity: 0, height: 0 }}
-                        transition={{ duration: 0.2 }}
-                        className="overflow-hidden"
-                      >
-                        <Label>Max On-Site Days</Label>
-                        <StyledSelect value={onsiteDays} onChange={setOnsiteDays} options={ONSITE_DAY_OPTIONS} label="On-site days" />
-                      </motion.div>
-                    )}
-                  </AnimatePresence>
+                      <FieldLabel htmlFor="experience" required>
+                        Years of Experience
+                      </FieldLabel>
 
-                  {/* Visa sponsorship */}
-                  <label className="flex items-start gap-3 p-4 bg-slate-50 rounded-xl border border-slate-200 cursor-pointer hover:border-emerald-300 transition-all">
-                    <div className="relative mt-0.5">
-                      <input
-                        type="checkbox"
-                        checked={sponsorship}
-                        onChange={e => setSponsorship(e.target.checked)}
-                        className="peer sr-only"
-                      />
-                      <div className="w-5 h-5 rounded border-2 border-slate-300 peer-checked:bg-emerald-500 peer-checked:border-emerald-500 flex items-center justify-center transition-all">
-                        {sponsorship && <Check size={12} className="text-white" strokeWidth={3} />}
+                      <div className="onboarding-field__relative">
+
+                        <select
+
+                          className="onboarding-select"
+
+                          id="experience"
+
+                          name="experience"
+
+                          value={experienceYears}
+
+                          required
+
+                          onChange={e => setExperienceYears(e.target.value)}
+
+                        >
+
+                          <option disabled value="">
+
+                            Select years
+
+                          </option>
+
+                          <option value="0-2">0-2 years</option>
+
+                          <option value="3-5">3-5 years</option>
+
+                          <option value="6-10">6-10 years</option>
+
+                          <option value="10+">10+ years</option>
+
+                        </select>
+
+                        <span className="material-symbols-outlined onboarding-field__icon onboarding-field__icon--right">
+
+                          expand_more
+
+                        </span>
+
                       </div>
-                    </div>
-                    <div>
-                      <p className="font-semibold text-slate-800 text-sm">Requires Visa Sponsorship</p>
-                      <p className="text-xs text-slate-400 mt-0.5">Check this if you require a Critical Skills permit in Ireland</p>
-                    </div>
-                  </label>
 
-                  {/* Initialize pipeline CTA */}
-                  <button
-                    onClick={handleFinish}
-                    disabled={saving}
-                    className="w-full h-14 bg-slate-900 text-white rounded-xl font-bold text-base hover:bg-slate-800 transition-all disabled:opacity-50 flex items-center justify-center gap-2 mt-2"
-                  >
-                    {saving ? (
-                      <span className="flex items-center gap-2">
-                        <motion.span
-                          animate={{ rotate: 360 }}
-                          transition={{ duration: 0.8, repeat: Infinity, ease: 'linear' }}
-                          className="inline-block w-4 h-4 border-2 border-white/30 border-t-white rounded-full"
+                    </div>
+
+
+
+                    <div className="onboarding-field">
+
+                      <FieldLabel htmlFor="location" required>
+                        Current Location
+                      </FieldLabel>
+
+                      <div className="onboarding-field__relative">
+
+                        <span className="material-symbols-outlined onboarding-field__icon onboarding-field__icon--left">
+
+                          location_on
+
+                        </span>
+
+                        <input
+
+                          className="onboarding-input onboarding-input--with-icon-left"
+
+                          id="location"
+
+                          name="location"
+
+                          placeholder="City, Country"
+
+                          type="text"
+
+                          value={location}
+
+                          required
+
+                          onChange={e => setLocation(e.target.value)}
+
                         />
-                        Initializing…
+
+                      </div>
+
+                    </div>
+
+                  </div>
+
+
+
+                  <div className="onboarding-actions onboarding-actions--end">
+
+                    <button className="onboarding-btn-primary" type="submit">
+
+                      Continue
+
+                      <span className="material-symbols-outlined" aria-hidden="true">
+
+                        arrow_forward
+
                       </span>
-                    ) : (
-                      <>
-                        <span>Initialize Pipeline Profiles</span>
-                        <span className="text-emerald-400 font-mono text-lg leading-none">&lt;&gt;</span>
-                      </>
-                    )}
-                  </button>
 
-                  <p className="text-center text-xs text-slate-400">
-                    By initializing, you authorize the engine to aggressively scan matching positions across the job market.
-                  </p>
+                    </button>
+
+                  </div>
+
+                </form>
+
+              </>
+
+            )}
+
+
+
+            {step === 1 && (
+
+              <>
+
+                <div className="onboarding-card__title onboarding-card__title--experience">
+
+                  <h1>Tell us about your background</h1>
+
+                  <p>Add your work experience and education to help us find the best roles for you.</p>
+
                 </div>
-              )}
 
-            </motion.div>
-          </AnimatePresence>
+
+
+                <form
+
+                  className="onboarding-form"
+
+                  onSubmit={e => {
+
+                    e.preventDefault();
+
+                    setStep(2);
+
+                  }}
+
+                >
+
+                  <section className="onboarding-section">
+
+                    <div className="onboarding-section__heading">
+
+                      <span className="material-symbols-outlined" aria-hidden="true">
+
+                        work
+
+                      </span>
+
+                      <h2>Work Experience</h2>
+
+                    </div>
+
+                    {workEntries.map((entry, i) => (
+
+                      <WorkPanel
+                        key={i}
+                        entry={entry}
+                        index={i}
+                        onChange={updateWork}
+                        {...(i > 0 && {
+                          onRemove: () => setWorkEntries(prev => prev.filter((_, idx) => idx !== i)),
+                        })}
+                      />
+
+                    ))}
+
+                    <button
+
+                      type="button"
+
+                      className="onboarding-btn-text-add"
+
+                      onClick={() => setWorkEntries(prev => [...prev, emptyWork()])}
+
+                    >
+
+                      <span className="material-symbols-outlined" aria-hidden="true">
+
+                        add
+
+                      </span>
+
+                      Add another position
+
+                    </button>
+
+                  </section>
+
+
+
+                  <section className="onboarding-section">
+
+                    <div className="onboarding-section__heading">
+
+                      <span className="material-symbols-outlined" aria-hidden="true">
+
+                        school
+
+                      </span>
+
+                      <h2>Education</h2>
+
+                    </div>
+
+                    {educationEntries.map((entry, i) => (
+
+                      <EducationPanel
+                        key={i}
+                        entry={entry}
+                        index={i}
+                        onChange={updateEducation}
+                        {...(i > 0 && {
+                          onRemove: () => setEducationEntries(prev => prev.filter((_, idx) => idx !== i)),
+                        })}
+                      />
+
+                    ))}
+
+                    <button
+
+                      type="button"
+
+                      className="onboarding-btn-text-add"
+
+                      onClick={() => setEducationEntries(prev => [...prev, emptyEducation()])}
+
+                    >
+
+                      <span className="material-symbols-outlined" aria-hidden="true">
+
+                        add
+
+                      </span>
+
+                      Add another school
+
+                    </button>
+
+                  </section>
+
+
+
+                  <div className="onboarding-actions">
+
+                    <button className="onboarding-btn-outline" type="button" onClick={() => setStep(0)}>
+
+                      Back
+
+                    </button>
+
+                    <button className="onboarding-btn-primary" type="submit">
+
+                      Continue
+
+                      <span className="material-symbols-outlined" aria-hidden="true">
+
+                        arrow_forward
+
+                      </span>
+
+                    </button>
+
+                  </div>
+
+                </form>
+
+              </>
+
+            )}
+
+
+
+            {step === 2 && (
+              <PreferencesStep
+                values={preferences}
+                saving={saving}
+                onChange={patchPreferences}
+                onBack={() => setStep(1)}
+                onComplete={handleFinish}
+              />
+            )}
+
+
+          </div>
+
         </div>
-      </div>
+
+      </main>
+
     </div>
+    </>
   );
+
 }
+

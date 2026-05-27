@@ -11,7 +11,7 @@ import java.util.UUID;
 
 /**
  * Section 8 — Task 79
- * JPA entity for the career_operations.notifications table.
+ * JPA entity for the careerops.notifications table.
  *
  * Notification types (stored in {@code type} column):
  *   SKILL_COMPLETE      — a long-running AI skill finished
@@ -23,12 +23,12 @@ import java.util.UUID;
  *   OVERDUE_TASK        — an application planner task has passed its due date
  */
 @Entity
-@Table(name = "notifications", schema = "career_operations",
+@Table(name = "notifications", schema = "careerops",
        indexes = {
            @Index(name = "idx_notifications_user_created", columnList = "user_id, created_at DESC")
        })
 @org.hibernate.annotations.SQLRestriction("deleted_at IS NULL")
-@org.hibernate.annotations.SQLDelete(sql = "UPDATE career_operations.notifications SET deleted_at = CURRENT_TIMESTAMP WHERE id = ?")
+@org.hibernate.annotations.SQLDelete(sql = "UPDATE careerops.notifications SET deleted_at = CURRENT_TIMESTAMP WHERE id = ?")
 @Getter @Setter @NoArgsConstructor @AllArgsConstructor @Builder
 public class Notification {
 
@@ -112,3 +112,4 @@ public class Notification {
     public static final String TYPE_REFERRAL           = "REFERRAL";
     public static final String TYPE_OVERDUE_TASK       = "OVERDUE_TASK";
 }
+
