@@ -1,9 +1,10 @@
 package com.careerops.service;
 
 import com.careerops.model.JobListing;
-import com.careerops.service.sources.*;
+import com.careerops.service.sources.JobSource;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.stereotype.Service;
 
 import java.util.*;
@@ -11,77 +12,88 @@ import java.util.concurrent.*;
 import java.util.stream.Collectors;
 
 /**
- * Orchestrates ALL job sources in parallel.
- * Every source that implements JobSource is injected automatically via the
- * Spring-managed list. Sources are fired concurrently; results are merged,
- * de-duplicated and returned.
+ * Orchestrates all enabled JobSource implementations in parallel.
+ *
+ * Performance features:
+ * - Uses the dedicated 'scraperExecutor' pool (sized per AsyncConfig).
+ * - Each source has an individual 30-second timeout; failures are isolated.
+ * - Results are deduplicated before return.
+ * - Source names exposed for progress modal.
  */
 @Service
 public class JobScrapeService {
 
     private static final Logger log = LoggerFactory.getLogger(JobScrapeService.class);
-    private static final int THREAD_POOL = 16;
-    private static final int TIMEOUT_SECONDS = 30;
+    private static final int SOURCE_TIMEOUT_SECONDS = 30;
 
     private final List<JobSource> sources;
     private final DeduplicationService deduplicationService;
-    private final ExecutorService executor;
+    private final Executor scraperExecutor;
 
     public JobScrapeService(List<JobSource> sources,
-                            DeduplicationService deduplicationService) {
+                            DeduplicationService deduplicationService,
+                            @Qualifier("scraperExecutor") Executor scraperExecutor) {
         this.sources = sources;
         this.deduplicationService = deduplicationService;
-        this.executor = Executors.newFixedThreadPool(THREAD_POOL,
-                r -> { Thread t = new Thread(r, "job-scraper"); t.setDaemon(true); return t; });
+        this.scraperExecutor = scraperExecutor;
     }
 
     /**
      * Scrape all enabled sources in parallel.
      *
-     * @param keyword    job search keyword
-     * @param location   location string (e.g. "Dublin", "Ireland")
+     * @param keyword    job search keyword(s)
+     * @param location   location (e.g. "Dublin", "Ireland")
      * @param maxAgeDays only include jobs posted within this many days (0 = no filter)
-     * @return merged, de-duplicated list of job listings
      */
     public List<JobListing> scrapeAll(String keyword, String location, int maxAgeDays) {
         List<JobSource> enabled = sources.stream()
                 .filter(JobSource::isEnabled)
                 .collect(Collectors.toList());
 
-        log.info("Scraping {} sources in parallel for '{}' / '{}' (maxAgeDays={})",
+        log.info("Scraping {} sources in parallel: keyword='{}' location='{}' maxAgeDays={}",
                 enabled.size(), keyword, location, maxAgeDays);
 
-        List<Future<List<JobListing>>> futures = new ArrayList<>();
+        long globalStart = System.currentTimeMillis();
+
+        // Submit all sources concurrently
+        Map<String, Future<List<JobListing>>> futures = new LinkedHashMap<>();
         for (JobSource source : enabled) {
-            futures.add(executor.submit(() -> {
+            futures.put(source.sourceName(), CompletableFuture.supplyAsync(() -> {
+                long t = System.currentTimeMillis();
                 try {
                     List<JobListing> results = source.fetch(keyword, location, maxAgeDays);
-                    log.info("[{}] fetched {} jobs", source.sourceName(), results.size());
+                    log.info("[{}] 🟢 {} jobs in {}ms", source.sourceName(), results.size(),
+                            System.currentTimeMillis() - t);
                     return results;
                 } catch (Exception e) {
-                    log.error("[{}] unexpected error during fetch: {}", source.sourceName(), e.getMessage());
+                    log.error("[{}] 🔴 failed after {}ms: {}", source.sourceName(),
+                            System.currentTimeMillis() - t, e.getMessage());
                     return Collections.<JobListing>emptyList();
                 }
-            }));
+            }, scraperExecutor));
         }
 
+        // Collect results with per-source timeout
         List<JobListing> all = new ArrayList<>();
-        for (Future<List<JobListing>> future : futures) {
+        for (Map.Entry<String, Future<List<JobListing>>> entry : futures.entrySet()) {
             try {
-                all.addAll(future.get(TIMEOUT_SECONDS, TimeUnit.SECONDS));
+                all.addAll(entry.getValue().get(SOURCE_TIMEOUT_SECONDS, TimeUnit.SECONDS));
             } catch (TimeoutException te) {
-                log.warn("A scraper timed out after {}s", TIMEOUT_SECONDS);
+                log.warn("[{}] ⏰ timed out after {}s", entry.getKey(), SOURCE_TIMEOUT_SECONDS);
             } catch (Exception e) {
-                log.error("Error collecting scraper result", e);
+                log.error("[{}] collection error: {}", entry.getKey(), e.getMessage());
             }
         }
 
+        log.info("Scrape complete: {} raw jobs from {} sources in {}ms",
+                all.size(), enabled.size(), System.currentTimeMillis() - globalStart);
+
         List<JobListing> deduped = deduplicationService.deduplicate(all);
-        log.info("Total after dedup: {}", deduped.size());
+        log.info("After dedup: {} unique jobs", deduped.size());
         return deduped;
     }
 
-    /** Returns the names of all enabled sources – used by the progress modal. */
+    /** Returns the names of all enabled sources — used by the progress modal. */
     public List<String> getEnabledSourceNames() {
         return sources.stream()
                 .filter(JobSource::isEnabled)

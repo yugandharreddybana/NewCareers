@@ -1,59 +1,101 @@
 package com.careerops.config;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
-import org.springframework.scheduling.annotation.AsyncConfigurer;
+import org.springframework.scheduling.annotation.EnableAsync;
 import org.springframework.scheduling.concurrent.ThreadPoolTaskExecutor;
-import org.springframework.web.servlet.config.annotation.AsyncSupportConfigurer;
-import org.springframework.web.servlet.config.annotation.WebMvcConfigurer;
 
 import java.util.concurrent.Executor;
+import java.util.concurrent.RejectedExecutionHandler;
+import java.util.concurrent.ThreadPoolExecutor;
 
 /**
- * Bounded thread pool for all @Async calls (primarily NvidiaService / GeminiService).
- * Without this Spring falls back to SimpleAsyncTaskExecutor which spawns
- * an unbounded new thread per task — dangerous during the daily cron.
+ * Dedicated thread pools for different async workloads:
+ *  - scraperExecutor  : parallel job scraping (IO-bound, larger pool)
+ *  - aiExecutor       : AI scoring / evaluation (CPU+network bound)
+ *  - emailExecutor    : email dispatch (low-priority, small pool)
  *
- * Also configures MVC async timeout to 10 minutes to support long-lived SSE connections
- * opened during the onboarding job evaluation pipeline.
+ * Separating pools prevents a slow AI call from starving job scraping.
  */
+@EnableAsync
 @Configuration
-public class AsyncConfig implements AsyncConfigurer, WebMvcConfigurer {
+public class AsyncConfig {
 
-    @org.springframework.beans.factory.annotation.Value("${async.core.pool.size:10}")
-    private int corePoolSize;
+    private static final Logger log = LoggerFactory.getLogger(AsyncConfig.class);
 
-    @org.springframework.beans.factory.annotation.Value("${async.max.pool.size:50}")
-    private int maxPoolSize;
+    // ─── Scraping pool ──────────────────────────────────────
+    @Value("${async.scraping.core-pool-size:8}")
+    private int scrapingCorePool;
+    @Value("${async.scraping.max-pool-size:32}")
+    private int scrapingMaxPool;
+    @Value("${async.scraping.queue-capacity:500}")
+    private int scrapingQueueCapacity;
 
-    @org.springframework.beans.factory.annotation.Value("${async.queue.capacity:500}")
-    private int queueCapacity;
+    // ─── AI pool ────────────────────────────────────────────
+    @Value("${async.ai.core-pool-size:4}")
+    private int aiCorePool;
+    @Value("${async.ai.max-pool-size:16}")
+    private int aiMaxPool;
+    @Value("${async.ai.queue-capacity:200}")
+    private int aiQueueCapacity;
 
-    @Override
-    public Executor getAsyncExecutor() {
+    // ─── Email pool ─────────────────────────────────────────
+    @Value("${async.email.core-pool-size:2}")
+    private int emailCorePool;
+    @Value("${async.email.max-pool-size:8}")
+    private int emailMaxPool;
+    @Value("${async.email.queue-capacity:100}")
+    private int emailQueueCapacity;
+
+    @Bean(name = "scraperExecutor")
+    public Executor scraperExecutor() {
+        return buildExecutor("scraper", scrapingCorePool, scrapingMaxPool, scrapingQueueCapacity,
+                callerRunsPolicy("scraper"));
+    }
+
+    @Bean(name = "aiExecutor")
+    public Executor aiExecutor() {
+        return buildExecutor("ai", aiCorePool, aiMaxPool, aiQueueCapacity,
+                callerRunsPolicy("ai"));
+    }
+
+    @Bean(name = "emailExecutor")
+    public Executor emailExecutor() {
+        return buildExecutor("email", emailCorePool, emailMaxPool, emailQueueCapacity,
+                discardOldestPolicy("email"));
+    }
+
+    // ─── helpers ────────────────────────────────────────────
+
+    private Executor buildExecutor(String name, int core, int max, int queue,
+                                    RejectedExecutionHandler rejection) {
         ThreadPoolTaskExecutor exec = new ThreadPoolTaskExecutor();
-        exec.setCorePoolSize(corePoolSize);
-        exec.setMaxPoolSize(maxPoolSize);
-        exec.setQueueCapacity(queueCapacity);
-        exec.setThreadNamePrefix("gemini-async-");
-        exec.setRejectedExecutionHandler(new java.util.concurrent.ThreadPoolExecutor.CallerRunsPolicy());
+        exec.setCorePoolSize(core);
+        exec.setMaxPoolSize(max);
+        exec.setQueueCapacity(queue);
+        exec.setThreadNamePrefix(name + "-");
+        exec.setRejectedExecutionHandler(rejection);
         exec.setWaitForTasksToCompleteOnShutdown(true);
-        exec.setAwaitTerminationSeconds(60);
+        exec.setAwaitTerminationSeconds(30);
         exec.initialize();
+        log.info("AsyncConfig: {} pool core={} max={} queue={}", name, core, max, queue);
         return exec;
     }
 
-    /**
-     * Set MVC async timeout to 10 minutes.
-     * This prevents Spring from closing SSE connections opened during onboarding
-     * (which can take several minutes for 100+ job evaluations).
-     */
-    @Override
-    public void configureAsyncSupport(AsyncSupportConfigurer configurer) {
-        configurer.setDefaultTimeout(600_000L); // 10 minutes in ms
+    private RejectedExecutionHandler callerRunsPolicy(String name) {
+        return (r, executor) -> {
+            log.warn("[{}] thread pool saturated — running in caller thread", name);
+            new ThreadPoolExecutor.CallerRunsPolicy().rejectedExecution(r, executor);
+        };
     }
 
-    @Override
-    public org.springframework.aop.interceptor.AsyncUncaughtExceptionHandler getAsyncUncaughtExceptionHandler() {
-        return new org.springframework.aop.interceptor.SimpleAsyncUncaughtExceptionHandler();
+    private RejectedExecutionHandler discardOldestPolicy(String name) {
+        return (r, executor) -> {
+            log.warn("[{}] thread pool saturated — discarding oldest task", name);
+            new ThreadPoolExecutor.DiscardOldestPolicy().rejectedExecution(r, executor);
+        };
     }
 }

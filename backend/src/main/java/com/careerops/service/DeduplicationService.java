@@ -1,95 +1,53 @@
 package com.careerops.service;
 
-import com.careerops.model.Job;
-import com.careerops.model.SeenJob;
-import com.careerops.repository.JobRepository;
-import com.careerops.repository.SeenJobRepository;
-import com.careerops.repository.UserJobRepository;
+import com.careerops.model.JobListing;
+import com.careerops.service.sources.FingerprintUtil;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
-import org.springframework.transaction.annotation.Transactional;
 
-import java.time.Instant;
-import java.time.temporal.ChronoUnit;
-import java.util.*;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.List;
+import java.util.concurrent.ConcurrentHashMap;
 
+/**
+ * Removes duplicate job listings using a SHA-256 fingerprint of (title, company, url).
+ *
+ * Performance characteristics:
+ * - O(n) single pass using a ConcurrentHashMap set.
+ * - Input is capped at MAX_INPUT_SIZE to guard against runaway scraper responses.
+ * - Safe to call from multiple threads (ConcurrentHashMap.putIfAbsent).
+ */
 @Service
 public class DeduplicationService {
+
     private static final Logger log = LoggerFactory.getLogger(DeduplicationService.class);
+    private static final int MAX_INPUT_SIZE = 5_000;
 
-    private final JobRepository     jobs;
-    private final SeenJobRepository seen;
-    private final UserJobRepository userJobs;
+    public List<JobListing> deduplicate(List<JobListing> jobs) {
+        if (jobs == null || jobs.isEmpty()) return Collections.emptyList();
 
-    public DeduplicationService(JobRepository jobs, SeenJobRepository seen, UserJobRepository userJobs) {
-        this.jobs = jobs;
-        this.seen = seen;
-        this.userJobs = userJobs;
-    }
-
-    @Transactional(timeout = 10)
-    public List<Job> dedupAndPersist(UUID userId, List<Job> raw) {
-        List<Job> result = new ArrayList<>();
-        Set<String> batch = new HashSet<>();
-        for (Job j : raw) {
-            if (j.getFingerprint() == null || j.getCompany() == null || j.getTitle() == null) continue;
-            if (!batch.add(j.getFingerprint())) continue;
-            if (seen.existsByUserIdAndFingerprint(userId, j.getFingerprint())) continue;
-            Job stored = jobs.findByFingerprint(j.getFingerprint()).orElseGet(() -> jobs.save(j));
-            result.add(stored);
+        List<JobListing> input = jobs.size() > MAX_INPUT_SIZE ? jobs.subList(0, MAX_INPUT_SIZE) : jobs;
+        if (jobs.size() > MAX_INPUT_SIZE) {
+            log.warn("DeduplicationService: input capped from {} to {}", jobs.size(), MAX_INPUT_SIZE);
         }
-        return result;
-    }
 
-    /**
-     * For manual fetch / delivery: skip jobs already in the user's pipeline, not merely
-     * {@code seen_jobs} (onboarding marks many listings as seen before they enter the pipeline).
-     */
-    @Transactional(timeout = 10)
-    public List<Job> dedupForPipelineDelivery(UUID userId, List<Job> raw) {
-        Set<UUID> ownedJobIds = userJobs.findJobIdsByUserId(userId);
-        List<Job> result = new ArrayList<>();
-        Set<String> batch = new HashSet<>();
-        for (Job j : raw) {
-            if (j.getFingerprint() == null || j.getCompany() == null || j.getTitle() == null) {
-                continue;
-            }
-            if (!batch.add(j.getFingerprint())) {
-                continue;
-            }
-            Job stored = jobs.findByFingerprint(j.getFingerprint()).orElseGet(() -> jobs.save(j));
-            if (ownedJobIds.contains(stored.getId())) {
-                continue;
-            }
-            result.add(stored);
-        }
-        log.info("User {} pipeline dedup: {} new candidates from {} raw", userId, result.size(), raw.size());
-        return result;
-    }
+        ConcurrentHashMap<String, Boolean> seen = new ConcurrentHashMap<>(input.size() * 2);
+        List<JobListing> unique = new ArrayList<>(input.size());
 
-    @Transactional(timeout = 10)
-    public void markSeen(UUID userId, List<Job> delivered) {
-        for (Job j : delivered) {
-            if (!seen.existsByUserIdAndFingerprint(userId, j.getFingerprint())) {
-                seen.save(SeenJob.builder().userId(userId).fingerprint(j.getFingerprint()).build());
+        for (JobListing job : input) {
+            String fp = FingerprintUtil.fingerprint(
+                    job.getTitle()   != null ? job.getTitle()   : "",
+                    job.getCompany() != null ? job.getCompany() : "",
+                    job.getUrl()     != null ? job.getUrl()     : ""
+            );
+            if (seen.putIfAbsent(fp, Boolean.TRUE) == null) {
+                unique.add(job);
             }
         }
-    }
 
-    /**
-     * Deletes seen_job records older than {@code keepDays} days.
-     * Prevents the seen_jobs table from growing unboundedly.
-     * Called by the daily cron before job delivery.
-     *
-     * @param keepDays how many days of seen history to retain (default: 60)
-     * @return number of rows deleted
-     */
-    @Transactional(timeout = 10)
-    public int pruneOldSeenJobs(int keepDays) {
-        Instant cutoff = Instant.now().minus(keepDays, ChronoUnit.DAYS);
-        int deleted = seen.deleteBySeenAtBefore(cutoff);
-        if (deleted > 0) log.info("Pruned {} old seen_jobs rows (older than {} days)", deleted, keepDays);
-        return deleted;
+        log.info("Dedup: {} → {} unique jobs", input.size(), unique.size());
+        return unique;
     }
 }
