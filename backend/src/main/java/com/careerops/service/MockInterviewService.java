@@ -1,5 +1,8 @@
 package com.careerops.service;
 
+import com.careerops.dto.MockInterviewDtos.InterviewKitRequest;
+import com.careerops.dto.MockInterviewDtos.InterviewKitResponse;
+import com.careerops.dto.MockInterviewDtos.QuestionItem;
 import org.jspecify.annotations.Nullable;
 
 import com.careerops.exception.ApiException;
@@ -23,6 +26,8 @@ import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.stream.Collectors;
 
 /**
  * Phase 3.1 — Mock Interview Service
@@ -34,6 +39,10 @@ import java.util.concurrent.CompletableFuture;
  *    on the SSE notification stream.
  *  - start() and reply() remain synchronous (they are fast DB + light AI calls).
  *  - AiProviderMetricsService is used to record Gemini latency/failures.
+ *
+ * B2-G4 / B3 controller wiring fix:
+ *  - Added DTO-based overloads consumed by MockInterviewController.
+ *  - Added in-memory job result cache for async polling.
  */
 @Service
 @Slf4j
@@ -45,6 +54,17 @@ public class MockInterviewService {
     private final NotificationRepository notificationRepo;
     private final GeminiService gemini;
     private final AiProviderMetricsService aiMetrics;
+
+    /**
+     * In-memory cache for async interview kit results.
+     * Key: jobId, Value: completed InterviewKitResponse (null = still running).
+     */
+    private final ConcurrentHashMap<String, InterviewKitResponse> asyncResultCache = new ConcurrentHashMap<>();
+    /** Tracks jobs that failed so getKitResult can distinguish running from failed. */
+    private final ConcurrentHashMap<String, String> asyncStatusCache = new ConcurrentHashMap<>();
+    private static final String STATUS_PENDING   = "PENDING";
+    private static final String STATUS_COMPLETED = "COMPLETED";
+    private static final String STATUS_FAILED    = "FAILED";
 
     public MockInterviewService(InterviewSessionRepository sessionRepo,
                                  InterviewQuestionBankRepository questionRepo,
@@ -60,20 +80,84 @@ public class MockInterviewService {
         this.aiMetrics = aiMetrics;
     }
 
-    // ── Batch 3: Async interview kit generation ────────────────────────────────
+    // ════════════════════════════════════════════════════════════════════════
+    // DTO-based API (used by MockInterviewController)
+    // ════════════════════════════════════════════════════════════════════════
+
+    /**
+     * B2-G4 / B3: Synchronous kit generation via DTO (controller-facing).
+     */
+    public InterviewKitResponse generateInterviewKit(UUID userId, InterviewKitRequest request) {
+        List<InterviewQuestionBank> questions = generateInterviewKit(
+                userId,
+                request.getUserJobId(),
+                request.getJobTitle(),
+                request.getJobDesc(),
+                request.getCvSummary());
+        return toKitResponse(request.getUserJobId(), questions);
+    }
+
+    /**
+     * B2-G4 / B3: Async kit generation via DTO (controller-facing).
+     * Stores the result in asyncResultCache when complete.
+     * Returns immediately — the controller responds with 202 Accepted.
+     */
+    @Async("skillExecutor")
+    public CompletableFuture<InterviewKitResponse> generateInterviewKitAsync(
+            UUID userId, InterviewKitRequest request, String jobId) {
+
+        asyncStatusCache.put(jobId, STATUS_PENDING);
+        log.info("[MockInterviewAsync] Starting kit jobId={} userJobId={} userId={}",
+                jobId, request.getUserJobId(), userId);
+        try {
+            List<InterviewQuestionBank> questions = generateInterviewKit(
+                    userId,
+                    request.getUserJobId(),
+                    request.getJobTitle(),
+                    request.getJobDesc(),
+                    request.getCvSummary());
+            InterviewKitResponse response = toKitResponse(request.getUserJobId(), questions);
+            asyncResultCache.put(jobId, response);
+            asyncStatusCache.put(jobId, STATUS_COMPLETED);
+            pushNotification(userId, request.getUserJobId(), "MOCK_INTERVIEW_KIT_READY",
+                    "Your interview kit is ready!",
+                    "AI has generated " + questions.size() + " questions.");
+            log.info("[MockInterviewAsync] Kit complete jobId={} — {} questions", jobId, questions.size());
+            return CompletableFuture.completedFuture(response);
+        } catch (Exception e) {
+            asyncStatusCache.put(jobId, STATUS_FAILED);
+            log.error("[MockInterviewAsync] Failed jobId={}: {}", jobId, e.getMessage());
+            pushNotification(userId, request.getUserJobId(), "MOCK_INTERVIEW_KIT_FAILED",
+                    "Interview kit could not be generated",
+                    "Please try again. Error: " + e.getMessage());
+            return CompletableFuture.failedFuture(e);
+        }
+    }
+
+    /**
+     * B2-G4: Poll for an async interview kit result.
+     * Returns null if still running, the response if done.
+     * Throws ApiException.notFound if the jobId is unknown.
+     */
+    public InterviewKitResponse getKitResult(String jobId, UUID userId) {
+        if (!asyncStatusCache.containsKey(jobId)) {
+            throw ApiException.notFound("Interview kit job not found: " + jobId);
+        }
+        String status = asyncStatusCache.get(jobId);
+        if (STATUS_FAILED.equals(status)) {
+            throw ApiException.internalError("Interview kit generation failed for jobId=" + jobId
+                    + ". Please submit a new request.");
+        }
+        return asyncResultCache.get(jobId);
+    }
+
+    // ════════════════════════════════════════════════════════════════════════
+    // Legacy async entry point (kept for internal callers)
+    // ════════════════════════════════════════════════════════════════════════
 
     /**
      * Batch 3: Generate the interview question kit in the background.
-     * Returns a CompletableFuture immediately — the caller should return 202 Accepted.
-     *
-     * On success: saves questions and pushes a MOCK_INTERVIEW_KIT_READY notification.
-     * On failure: pushes a MOCK_INTERVIEW_KIT_FAILED notification.
-     *
-     * @param userId    user requesting the kit
-     * @param userJobId the job to generate questions for
-     * @param jobTitle  job title (passed in so we don't need a DB lookup in the async thread)
-     * @param jobDesc   job description snippet
-     * @param cvSummary user CV summary
+     * Legacy overload — takes raw parameters instead of a DTO.
      */
     @Async("skillExecutor")
     public CompletableFuture<List<InterviewQuestionBank>> generateInterviewKitAsync(
@@ -101,6 +185,10 @@ public class MockInterviewService {
             return CompletableFuture.failedFuture(e);
         }
     }
+
+    // ════════════════════════════════════════════════════════════════════════
+    // Core synchronous kit generation
+    // ════════════════════════════════════════════════════════════════════════
 
     /**
      * Synchronous kit generation — used internally and by tests.
@@ -274,6 +362,28 @@ public class MockInterviewService {
         return sessionRepo.findByUserIdOrderByStartedAtDesc(userId);
     }
 
+    // ════════════════════════════════════════════════════════════════════════
+    // DTO mapping helpers
+    // ════════════════════════════════════════════════════════════════════════
+
+    private InterviewKitResponse toKitResponse(UUID userJobId,
+                                                List<InterviewQuestionBank> questions) {
+        List<QuestionItem> items = questions.stream()
+                .map(q -> QuestionItem.builder()
+                        .id(q.getId())
+                        .question(q.getQuestion())
+                        .modelAnswer(q.getModelAnswer())
+                        .skillArea(q.getSkillArea())
+                        .build())
+                .collect(Collectors.toList());
+        return InterviewKitResponse.builder()
+                .userJobId(userJobId)
+                .questions(items)
+                .questionCount(items.size())
+                .generatedAt(Instant.now())
+                .build();
+    }
+
     // ── Parse kit response ─────────────────────────────────────────────────────
 
     private List<InterviewQuestionBank> parseAndSaveQuestions(
@@ -284,7 +394,6 @@ public class MockInterviewService {
                     .replaceAll("```[^\\n]*\\n?", "")
                     .replaceAll("```", "")
                     .trim();
-            // Split on }, { boundaries
             String[] blocks = clean.split("\\},\\s*\\{");
             for (String block : blocks) {
                 String question   = extractField(block, "question", null);
@@ -342,7 +451,7 @@ public class MockInterviewService {
         } catch (Exception e) { return fallback; }
     }
 
-    // ── Notification helper (Batch 3) ──────────────────────────────────────────
+    // ── Notification helper ────────────────────────────────────────────────────
 
     private void pushNotification(UUID userId, UUID userJobId, String type, String title, String body) {
         try {

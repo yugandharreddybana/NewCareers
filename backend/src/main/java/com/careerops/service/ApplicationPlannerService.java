@@ -1,5 +1,9 @@
 package com.careerops.service;
 
+import com.careerops.dto.ApplicationPlannerDtos.JobStatus;
+import com.careerops.dto.ApplicationPlannerDtos.PlanRequest;
+import com.careerops.dto.ApplicationPlannerDtos.PlanResponse;
+import com.careerops.dto.ApplicationPlannerDtos.TaskItem;
 import com.careerops.exception.ApiException;
 import com.careerops.model.ApplicationTask;
 import com.careerops.model.DeadlineEvent;
@@ -21,6 +25,8 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.stream.Collectors;
 
 /**
  * Task 21 — ApplicationPlannerService
@@ -33,6 +39,10 @@ import java.util.concurrent.CompletableFuture;
  *    (cron jobs, tests, etc.).
  *  - On completion, a PLANNER_READY notification is pushed to NotificationRepository
  *    (picked up by the SSE notification stream).
+ *
+ * B2-G3 / B3 controller wiring fix:
+ *  - Added DTO-based overloads consumed by ApplicationPlannerController.
+ *  - Added in-memory job result cache for async polling.
  */
 @Service
 @RequiredArgsConstructor
@@ -47,16 +57,86 @@ public class ApplicationPlannerService {
     private final GeminiService geminiService;
     private final AiProviderMetricsService aiMetrics;
 
-    // ── Async entry point (Batch 3) ────────────────────────────────────────────
+    /**
+     * In-memory store for async job results.
+     * Key: jobId (String UUID), Value: completed PlanResponse or null (still running).
+     * A missing key means the job was never started; null value means running.
+     * Eviction is handled opportunistically — entries are small and short-lived.
+     */
+    private final ConcurrentHashMap<String, PlanResponse> asyncResultCache = new ConcurrentHashMap<>();
+    /** Tracks jobs that failed so getPlanResult can distinguish "still running" from "failed". */
+    private final ConcurrentHashMap<String, JobStatus> asyncStatusCache = new ConcurrentHashMap<>();
+
+    // ════════════════════════════════════════════════════════════════════════
+    // DTO-based API (used by ApplicationPlannerController)
+    // ════════════════════════════════════════════════════════════════════════
 
     /**
-     * Batch 3: Async plan generation — returns a CompletableFuture immediately.
-     * The heavy Gemini call runs on the Spring @Async executor (defined in
-     * AsyncConfig or defaults to SimpleAsyncTaskExecutor).
-     *
-     * On success: saves tasks and pushes a PLANNER_READY notification.
-     * On failure: logs and pushes a PLANNER_FAILED notification so the UI
-     *             can show a "Try again" button rather than spinning forever.
+     * B2-G3 / B3: Synchronous plan generation via DTO (controller-facing).
+     * Delegates to the core generatePlan(UUID, UUID) method.
+     */
+    public PlanResponse generatePlan(UUID userId, PlanRequest request) {
+        List<ApplicationTask> tasks = generatePlan(request.getUserJobId(), userId);
+        return toPlanResponse(request.getUserJobId(), tasks);
+    }
+
+    /**
+     * B2-G3 / B3: Async plan generation via DTO (controller-facing).
+     * Stores the result in asyncResultCache when complete.
+     * Returns immediately — the controller should respond with 202 Accepted.
+     */
+    @Async("skillExecutor")
+    public CompletableFuture<PlanResponse> generatePlanAsync(
+            UUID userId, PlanRequest request, String jobId) {
+
+        asyncStatusCache.put(jobId, JobStatus.PENDING);
+        log.info("[PlannerAsync] Starting background plan jobId={} userJobId={} userId={}",
+                jobId, request.getUserJobId(), userId);
+        try {
+            List<ApplicationTask> tasks = generatePlan(request.getUserJobId(), userId);
+            PlanResponse response = toPlanResponse(request.getUserJobId(), tasks);
+            asyncResultCache.put(jobId, response);
+            asyncStatusCache.put(jobId, JobStatus.COMPLETED);
+            pushNotification(userId, request.getUserJobId(), "PLANNER_READY",
+                    "Your application plan is ready!",
+                    "AI has generated " + tasks.size() + " action items for your application.");
+            log.info("[PlannerAsync] Complete jobId={} — {} tasks", jobId, tasks.size());
+            return CompletableFuture.completedFuture(response);
+        } catch (Exception e) {
+            asyncStatusCache.put(jobId, JobStatus.FAILED);
+            log.error("[PlannerAsync] Failed jobId={}: {}", jobId, e.getMessage());
+            pushNotification(userId, request.getUserJobId(), "PLANNER_FAILED",
+                    "Application plan could not be generated",
+                    "Please try again. Error: " + e.getMessage());
+            return CompletableFuture.failedFuture(e);
+        }
+    }
+
+    /**
+     * B2-G3: Poll for an async plan result.
+     * Returns null if still running, the PlanResponse if done.
+     * Throws ApiException.notFound if the jobId is unknown.
+     */
+    public PlanResponse getPlanResult(String jobId, UUID userId) {
+        if (!asyncStatusCache.containsKey(jobId)) {
+            throw ApiException.notFound("Plan job not found: " + jobId);
+        }
+        JobStatus status = asyncStatusCache.get(jobId);
+        if (status == JobStatus.FAILED) {
+            throw ApiException.internalError("Plan generation failed for jobId=" + jobId
+                    + ". Please submit a new request.");
+        }
+        // PENDING or result not yet stored — return null → controller sends 202
+        return asyncResultCache.get(jobId);
+    }
+
+    // ════════════════════════════════════════════════════════════════════════
+    // Legacy async entry point (kept for backward compat — e.g. direct callers)
+    // ════════════════════════════════════════════════════════════════════════
+
+    /**
+     * Legacy async variant (userJobId + userId directly).
+     * Still used by any internal callers that haven't migrated to the DTO path.
      */
     @Async("skillExecutor")
     public CompletableFuture<List<ApplicationTask>> generatePlanAsync(UUID userJobId, UUID userId) {
@@ -78,7 +158,9 @@ public class ApplicationPlannerService {
         }
     }
 
-    // ── Synchronous plan generation ────────────────────────────────────────────
+    // ════════════════════════════════════════════════════════════════════════
+    // Core synchronous plan generation (primary business logic)
+    // ════════════════════════════════════════════════════════════════════════
 
     /**
      * Task 22 — Auto-generates a set of next-action tasks for the given job.
@@ -238,27 +320,31 @@ public class ApplicationPlannerService {
         taskRepo.save(task);
     }
 
-    // ── Notification helper (Batch 3) ──────────────────────────────────────────
+    // ════════════════════════════════════════════════════════════════════════
+    // DTO mapping helpers
+    // ════════════════════════════════════════════════════════════════════════
 
-    private void pushNotification(UUID userId, UUID userJobId, String type, String title, String body) {
-        try {
-            Notification n = new Notification();
-            n.setId(UUID.randomUUID());
-            n.setUserId(userId);
-            n.setType(type);
-            n.setTitle(title);
-            n.setBody(body);
-            n.setRead(false);
-            n.setCreatedAt(Instant.now());
-            n.setEntityType("user_job");
-            n.setEntityId(userJobId);
-            notificationRepo.save(n);
-        } catch (Exception e) {
-            log.warn("[Planner] Could not push notification type={}: {}", type, e.getMessage());
-        }
+    /** Convert a list of ApplicationTask entities to a PlanResponse DTO. */
+    private PlanResponse toPlanResponse(UUID userJobId, List<ApplicationTask> tasks) {
+        List<TaskItem> items = tasks.stream()
+                .map(t -> TaskItem.builder()
+                        .id(t.getId())
+                        .title(t.getTitle())
+                        .description(t.getDescription())
+                        .taskType(t.getTaskType())
+                        .priority(t.getPriority())
+                        .status(t.getStatus())
+                        .dueDate(t.getDueDate())
+                        .autoGenerated(t.isAutoGenerated())
+                        .build())
+                .collect(Collectors.toList());
+        return PlanResponse.builder()
+                .userJobId(userJobId)
+                .tasks(items)
+                .taskCount(items.size())
+                .generatedAt(Instant.now())
+                .build();
     }
-
-    // ---- Mappers for 2.056 ----
 
     public com.careerops.dto.PlannerDTO.TaskResponse toTaskResponse(ApplicationTask t) {
         return com.careerops.dto.PlannerDTO.TaskResponse.builder()
@@ -288,7 +374,31 @@ public class ApplicationPlannerService {
                 .build();
     }
 
-    // ---- helpers ----
+    // ════════════════════════════════════════════════════════════════════════
+    // Notification helper
+    // ════════════════════════════════════════════════════════════════════════
+
+    private void pushNotification(UUID userId, UUID userJobId, String type, String title, String body) {
+        try {
+            Notification n = new Notification();
+            n.setId(UUID.randomUUID());
+            n.setUserId(userId);
+            n.setType(type);
+            n.setTitle(title);
+            n.setBody(body);
+            n.setRead(false);
+            n.setCreatedAt(Instant.now());
+            n.setEntityType("user_job");
+            n.setEntityId(userJobId);
+            notificationRepo.save(n);
+        } catch (Exception e) {
+            log.warn("[Planner] Could not push notification type={}: {}", type, e.getMessage());
+        }
+    }
+
+    // ════════════════════════════════════════════════════════════════════════
+    // Private helpers
+    // ════════════════════════════════════════════════════════════════════════
 
     private List<ApplicationTask> createDefaultTasks(UUID userJobId, UUID userId,
                                                       String jobTitle, String company) {
