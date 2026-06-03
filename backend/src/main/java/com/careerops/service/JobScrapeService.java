@@ -12,37 +12,52 @@ import java.util.concurrent.*;
 import java.util.stream.Collectors;
 
 /**
- * Orchestrates all enabled JobSource implementations in parallel.
+ * Orchestrates all enabled (resilience-wrapped) JobSource implementations in parallel.
  *
- * Performance features:
- * - Uses the dedicated 'scraperExecutor' pool (sized per AsyncConfig).
- * - Each source has an individual 30-second timeout; failures are isolated.
- * - Results are deduplicated before return.
- * - Source names exposed for progress modal.
+ * Performance + resilience features:
+ *  - Injects the "resilientSources" list (each source wrapped with circuit breaker
+ *    + rate limiter + health tracking by ScraperResilienceConfig).
+ *  - Uses the dedicated 'scraperExecutor' pool (sized per AsyncConfig).
+ *  - Each source has an individual SOURCE_TIMEOUT_SECONDS hard deadline;
+ *    a single slow/hung source cannot block the whole scrape.
+ *  - Failures are isolated: one source exception never propagates to others.
+ *  - Results are deduplicated before return.
+ *  - Source names exposed for progress modal / health endpoint.
  */
 @Service
 public class JobScrapeService {
 
     private static final Logger log = LoggerFactory.getLogger(JobScrapeService.class);
-    private static final int SOURCE_TIMEOUT_SECONDS = 30;
+
+    /**
+     * Hard per-source deadline. Set to 35s so it is always wider than any
+     * internal HTTP read timeout (typically 20-30s), giving the source a
+     * chance to complete normally before we cancel it.
+     */
+    private static final int SOURCE_TIMEOUT_SECONDS = 35;
 
     private final List<JobSource> sources;
     private final DeduplicationService deduplicationService;
     private final Executor scraperExecutor;
 
-    public JobScrapeService(List<JobSource> sources,
-                            DeduplicationService deduplicationService,
-                            @Qualifier("scraperExecutor") Executor scraperExecutor) {
-        this.sources = sources;
+    public JobScrapeService(
+            @Qualifier("resilientSources") List<JobSource> sources,
+            DeduplicationService deduplicationService,
+            @Qualifier("scraperExecutor") Executor scraperExecutor) {
+        this.sources              = sources;
         this.deduplicationService = deduplicationService;
-        this.scraperExecutor = scraperExecutor;
+        this.scraperExecutor      = scraperExecutor;
     }
 
     /**
      * Scrape all enabled sources in parallel.
      *
+     * Each source is already wrapped in a ResilientJobSource (circuit breaker +
+     * rate limiter).  This method adds the outer async dispatch and per-source
+     * timeout so a hung source never blocks the entire scrape.
+     *
      * @param keyword    job search keyword(s)
-     * @param location   location (e.g. "Dublin", "Ireland")
+     * @param location   location filter (e.g. "Dublin", "Ireland"); empty = no filter
      * @param maxAgeDays only include jobs posted within this many days (0 = no filter)
      */
     public List<JobListing> scrapeAll(String keyword, String location, int maxAgeDays) {
@@ -50,36 +65,46 @@ public class JobScrapeService {
                 .filter(JobSource::isEnabled)
                 .collect(Collectors.toList());
 
+        if (enabled.isEmpty()) {
+            log.warn("scrapeAll called but no sources are enabled");
+            return Collections.emptyList();
+        }
+
         log.info("Scraping {} sources in parallel: keyword='{}' location='{}' maxAgeDays={}",
                 enabled.size(), keyword, location, maxAgeDays);
 
         long globalStart = System.currentTimeMillis();
 
-        // Submit all sources concurrently
+        // Submit all sources concurrently onto the scraperExecutor
         Map<String, Future<List<JobListing>>> futures = new LinkedHashMap<>();
         for (JobSource source : enabled) {
-            futures.put(source.sourceName(), CompletableFuture.supplyAsync(() -> {
-                long t = System.currentTimeMillis();
-                try {
-                    List<JobListing> results = source.fetch(keyword, location, maxAgeDays);
-                    log.info("[{}] 🟢 {} jobs in {}ms", source.sourceName(), results.size(),
-                            System.currentTimeMillis() - t);
-                    return results;
-                } catch (Exception e) {
-                    log.error("[{}] 🔴 failed after {}ms: {}", source.sourceName(),
-                            System.currentTimeMillis() - t, e.getMessage());
-                    return Collections.<JobListing>emptyList();
-                }
-            }, scraperExecutor));
+            futures.put(source.sourceName(),
+                    CompletableFuture.supplyAsync(() -> {
+                        long t = System.currentTimeMillis();
+                        try {
+                            List<JobListing> results = source.fetch(keyword, location, maxAgeDays);
+                            log.info("[{}] {} jobs in {}ms",
+                                    source.sourceName(), results.size(),
+                                    System.currentTimeMillis() - t);
+                            return results;
+                        } catch (Exception e) {
+                            log.error("[{}] failed after {}ms: {}",
+                                    source.sourceName(),
+                                    System.currentTimeMillis() - t, e.getMessage());
+                            return Collections.<JobListing>emptyList();
+                        }
+                    }, scraperExecutor));
         }
 
-        // Collect results with per-source timeout
+        // Collect results; each future has a hard per-source deadline
         List<JobListing> all = new ArrayList<>();
         for (Map.Entry<String, Future<List<JobListing>>> entry : futures.entrySet()) {
             try {
                 all.addAll(entry.getValue().get(SOURCE_TIMEOUT_SECONDS, TimeUnit.SECONDS));
             } catch (TimeoutException te) {
-                log.warn("[{}] ⏰ timed out after {}s", entry.getKey(), SOURCE_TIMEOUT_SECONDS);
+                log.warn("[{}] timed out after {}s — skipping",
+                        entry.getKey(), SOURCE_TIMEOUT_SECONDS);
+                entry.getValue().cancel(true);
             } catch (Exception e) {
                 log.error("[{}] collection error: {}", entry.getKey(), e.getMessage());
             }
@@ -93,7 +118,7 @@ public class JobScrapeService {
         return deduped;
     }
 
-    /** Returns the names of all enabled sources — used by the progress modal. */
+    /** Returns names of all enabled sources — used by the progress modal and health endpoint. */
     public List<String> getEnabledSourceNames() {
         return sources.stream()
                 .filter(JobSource::isEnabled)
