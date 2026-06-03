@@ -1,0 +1,33 @@
+# ─────────────────────────────────────────────────────────────
+# Batch 4 – Cache configuration
+# Include this profile in application.yml:
+#   spring.profiles.active: ...,cache
+# ─────────────────────────────────────────────────────────────
+spring:
+  cache:
+    # Cache names – must match constants in CacheConfig.java
+    cache-names:
+      - userStats
+      - sourceMetadata
+      - companyInfo
+
+  # ── Local (Caffeine) ─────────────────────────────────────────
+  # Caffeine specs are wired programmatically in CacheConfig.java
+  # so no extra properties are needed here.
+
+  # ── Redis (optional, production) ─────────────────────────────
+  # Uncomment and set the host to switch from Caffeine to Redis.
+  # data:
+  #   redis:
+  #     host: ${REDIS_HOST:localhost}
+  #     port: ${REDIS_PORT:6379}
+  #     password: ${REDIS_PASSWORD:}
+  #     ssl:
+  #       enabled: ${REDIS_SSL:false}
+
+# ── Actuator cache metrics ────────────────────────────────────
+management:
+  endpoints:
+    web:
+      exposure:
+        include: caches,health,info
