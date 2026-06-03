@@ -42,7 +42,10 @@ public record SkillStartRequest(
     // ── Scan-specific ─────────────────────────────────────────────────────
     /** Company name or careers URL to scan  (scan skill only) */
     @Size(max = 200)
-    String scanTarget
+    String scanTarget,
+
+    /** When true, bypass TTL cache and persist a fresh run */
+    Boolean forceRefresh
 ) {
     public SkillStartRequest {
         compareJobIds = compareJobIds == null ? List.of() : List.copyOf(compareJobIds);

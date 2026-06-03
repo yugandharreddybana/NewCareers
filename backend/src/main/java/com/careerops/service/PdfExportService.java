@@ -6,14 +6,20 @@ import com.careerops.model.InterviewQuestionBank;
 import com.careerops.model.InterviewSession;
 import com.careerops.model.Job;
 import com.careerops.model.SkillRun;
+import com.careerops.model.User;
 import com.careerops.model.UserJob;
+import com.careerops.model.UserProfile;
 import com.careerops.repository.InterviewSessionRepository;
 import com.careerops.repository.JobRepository;
 import com.careerops.repository.SkillRunRepository;
 import com.careerops.repository.UserJobRepository;
+import com.careerops.repository.UserProfileRepository;
+import com.careerops.repository.UserRepository;
+import com.fasterxml.jackson.databind.JsonNode;
 import com.openhtmltopdf.pdfboxout.PdfRendererBuilder;
-import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.jsoup.Jsoup;
+import org.jsoup.nodes.Document;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 
@@ -25,7 +31,6 @@ import java.util.UUID;
  * PDF export via OpenHTMLtoPDF (HTML → real PDF bytes).
  */
 @Service
-@RequiredArgsConstructor
 @Slf4j
 public class PdfExportService {
 
@@ -33,6 +38,26 @@ public class PdfExportService {
     private final UserJobRepository userJobRepo;
     private final JobRepository jobRepo;
     private final SkillRunRepository skillRunRepo;
+    private final TailorResumeDocxExporter docxExporter;
+    private final UserProfileRepository profiles;
+    private final UserRepository users;
+
+    public PdfExportService(
+            InterviewSessionRepository sessionRepo,
+            UserJobRepository userJobRepo,
+            JobRepository jobRepo,
+            SkillRunRepository skillRunRepo,
+            TailorResumeDocxExporter docxExporter,
+            UserProfileRepository profiles,
+            UserRepository users) {
+        this.sessionRepo = sessionRepo;
+        this.userJobRepo = userJobRepo;
+        this.jobRepo = jobRepo;
+        this.skillRunRepo = skillRunRepo;
+        this.docxExporter = docxExporter;
+        this.profiles = profiles;
+        this.users = users;
+    }
 
     public byte[] generateInterviewKitPdf(List<InterviewQuestionBank> questions, String userJobId) {
         StringBuilder html = new StringBuilder();
@@ -115,6 +140,32 @@ public class PdfExportService {
         return renderPdfFromHtml(document);
     }
 
+    public byte[] generateResumeDocx(UUID userId, UUID userJobId) {
+        SkillRun run = skillRunRepo
+                .findFirstByUserIdAndUserJobIdAndSkillOrderByCreatedAtDesc(userId, userJobId, "tailor-resume")
+                .orElseThrow(() -> new ApiException(
+                        HttpStatus.NOT_FOUND,
+                        "No tailored resume found. Run Tailor my CV for this job first."));
+        JsonNode output = run.getOutput();
+        if (output == null) {
+            throw new ApiException(HttpStatus.BAD_REQUEST, "Tailored resume data is missing.");
+        }
+        UserProfile profile = profiles.findByUserId(userId).orElse(null);
+        User user = users.findById(userId).orElse(null);
+        Job job = userJobRepo.findByIdAndUserId(userJobId, userId)
+                .flatMap(uj -> jobRepo.findById(uj.getJobId()))
+                .orElse(null);
+        String summary = output.path("summary").asText("");
+        JsonNode sections = output.path("sections");
+        try {
+            return docxExporter.export(
+                user, profile, job, output.path("jobTitle").asText(""), summary, sections);
+        } catch (Exception e) {
+            log.error("DOCX export failed for userJobId={}", userJobId, e);
+            throw new ApiException(HttpStatus.INTERNAL_SERVER_ERROR, "Could not generate DOCX resume");
+        }
+    }
+
     private byte[] generateEvaluatePdf(UUID userId, UUID userJobId) {
         UserJob uj = userJobRepo.findByIdAndUserId(userJobId, userId)
             .orElseThrow(() -> new ApiException(HttpStatus.NOT_FOUND, "Job not found"));
@@ -125,9 +176,10 @@ public class PdfExportService {
 
     private byte[] renderPdfFromHtml(String html) {
         try (ByteArrayOutputStream os = new ByteArrayOutputStream()) {
+            String xhtml = toWellFormedXhtml(html);
             PdfRendererBuilder builder = new PdfRendererBuilder();
             builder.useFastMode();
-            builder.withHtmlContent(html, null);
+            builder.withHtmlContent(xhtml, null);
             builder.toStream(os);
             builder.run();
             byte[] pdf = os.toByteArray();
@@ -139,6 +191,16 @@ public class PdfExportService {
             log.error("Failed to render PDF from HTML", e);
             throw new ApiException(HttpStatus.INTERNAL_SERVER_ERROR, "Could not generate PDF report");
         }
+    }
+
+    /** Normalize HTML for OpenHTMLtoPDF (strict XML; fixes stray tags in user/AI text). */
+    static String toWellFormedXhtml(String html) {
+        Document doc = Jsoup.parse(html);
+        doc.outputSettings()
+            .syntax(Document.OutputSettings.Syntax.xml)
+            .escapeMode(org.jsoup.nodes.Entities.EscapeMode.xhtml)
+            .charset("UTF-8");
+        return doc.html();
     }
 
     private String esc(String s) {

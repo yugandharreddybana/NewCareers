@@ -11,8 +11,21 @@ import type {
   SkillRunResponse,
 } from '../types/skills';
 
-/** Skills that always run fresh (no TTL cache on the backend). */
-const ALWAYS_FRESH_SKILLS = new Set<SkillName>(['tailor-resume']);
+/** Skills that must never pause for ask_user — auto-run only. */
+const AUTO_RUN_SKILLS = new Set<SkillName>([
+  'research',
+  'evaluate',
+  'tailor-resume',
+  'cover-letter',
+  'prep-interview',
+  'culture-fit',
+  'salary-negotiation',
+  'skills-gap-plan',
+  'linkedin-optimize',
+  'compare',
+  'triage',
+  'scan',
+]);
 
 /**
  * useSkill — state machine hook for running CareerOps skills.
@@ -50,6 +63,19 @@ export function useSkill() {
         break;
 
       case 'QUESTION':
+        if (activeSkillName && AUTO_RUN_SKILLS.has(activeSkillName)) {
+          setSkillState(prev => ({
+            ...prev,
+            state: 'error',
+            data: null,
+            question: null,
+            conversationId: null,
+            missingFields: [],
+            error: 'This skill runs automatically. Click Re-run to try again.',
+            skillName: activeSkillName,
+          }));
+          break;
+        }
         setSkillState(prev => ({
           ...prev,
           state:          'waiting_answer',
@@ -175,16 +201,12 @@ export function useSkill() {
   }, []);
 
   const loadLastRun = useCallback(async (userJobId: string, skill: SkillName) => {
-    if (ALWAYS_FRESH_SKILLS.has(skill)) {
-      return false;
-    }
-
     try {
       const res = await skillsApi.getLastRun(userJobId, skill);
       if (!res) {
         return false;
       }
-      if (res.type === 'RESULT' && res.data) {
+      if (res.type === 'RESULT' && res.data != null) {
         applyResponse(res, skill);
         return true;
       }

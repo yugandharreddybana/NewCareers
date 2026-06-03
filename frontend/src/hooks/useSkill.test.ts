@@ -97,7 +97,13 @@ describe('useSkill', () => {
     expect(result.current.error).toContain('API down');
   });
 
-  it('loadLastRun skips tailor-resume and does not call API', async () => {
+  it('loadLastRun restores cached tailor-resume run', async () => {
+    mockGetLastRun.mockResolvedValueOnce({
+      type: 'RESULT',
+      skillName: 'tailor-resume',
+      data: { summary: 'Tailored', sections: [] },
+    });
+
     const { result } = renderHook(() => useSkill());
 
     let restored = false;
@@ -105,9 +111,10 @@ describe('useSkill', () => {
       restored = await result.current.loadLastRun('job-1', 'tailor-resume');
     });
 
-    expect(restored).toBe(false);
-    expect(mockGetLastRun).not.toHaveBeenCalled();
-    expect(result.current.state).toBe('idle');
+    expect(restored).toBe(true);
+    expect(mockGetLastRun).toHaveBeenCalledWith('job-1', 'tailor-resume');
+    expect(result.current.state).toBe('done');
+    expect(result.current.data).toEqual({ summary: 'Tailored', sections: [] });
   });
 
   it('loadLastRun restores cached evaluate run', async () => {

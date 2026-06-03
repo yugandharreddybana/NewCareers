@@ -125,10 +125,12 @@ function SettingsSavedSnapshot({ form }: { form: SettingsFormState }) {
 function ChipToggle({
   label,
   selected,
+  tone = 'default',
   onToggle,
 }: {
   label: string;
   selected: boolean;
+  tone?: 'default' | 'gap';
   onToggle: () => void;
 }) {
   return (
@@ -136,7 +138,7 @@ function ChipToggle({
       type="button"
       onClick={onToggle}
       aria-pressed={selected}
-      className={`onboarding-chip${selected ? ' onboarding-chip--selected' : ''}`}
+      className={`onboarding-chip${selected ? ' onboarding-chip--selected' : ''}${tone === 'gap' ? ' onboarding-chip--gap' : ''}`}
     >
       {label}
       <span className="material-symbols-outlined" aria-hidden="true">
@@ -424,6 +426,7 @@ function SettingsPreferencesSection({
               key={tech}
               label={tech}
               selected={form.selectedTech.includes(tech)}
+              tone="gap"
               onToggle={() => patch({ selectedTech: toggleList(form.selectedTech, tech) })}
             />
           ))}

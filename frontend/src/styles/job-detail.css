@@ -30,3 +30,125 @@
 .job-detail-page .job-detail-skill-panel button.bg-indigo-600:hover {
   background-color: #004a9f;
 }
+
+/* Job description + ATS keyword highlights */
+.job-description-view {
+  display: flex;
+  flex-direction: column;
+  gap: 1.25rem;
+}
+
+.job-desc-ats-legend {
+  padding: 1rem 1.125rem;
+  border-radius: 0.75rem;
+  border: 1px solid var(--color-outline-variant, #e5e7eb);
+  background: var(--color-surface-container-low, #f8fafc);
+}
+
+.job-desc-ats-legend__chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.375rem;
+  margin-top: 0.5rem;
+}
+
+.ats-chip {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.2rem 0.55rem;
+  border-radius: 9999px;
+  font-size: 0.75rem;
+  font-weight: 600;
+  line-height: 1.25;
+}
+
+.ats-chip--match {
+  background: #d1fae5;
+  color: #065f46;
+  border: 1px solid #6ee7b7;
+}
+
+.ats-chip--gap {
+  background: #fee2e2;
+  color: #991b1b;
+  border: 1px solid #fca5a5;
+}
+
+.ats-keyword--match {
+  background: #d1fae5;
+  color: #065f46;
+  padding: 0 0.12em;
+  border-radius: 0.2em;
+  font-weight: 600;
+}
+
+.job-desc-body {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  max-width: 72ch;
+}
+
+.job-desc-body--collapsed {
+  max-height: 20rem;
+  overflow: hidden;
+  position: relative;
+  mask-image: linear-gradient(to bottom, #000 72%, transparent 100%);
+  -webkit-mask-image: linear-gradient(to bottom, #000 72%, transparent 100%);
+}
+
+.job-desc-heading {
+  font-size: 1.125rem;
+  font-weight: 700;
+  line-height: 1.35;
+  color: var(--color-on-surface, #111827);
+  margin: 0.5rem 0 0.25rem;
+  letter-spacing: -0.01em;
+}
+
+.job-desc-heading:first-child {
+  margin-top: 0;
+}
+
+.job-desc-subheading {
+  font-size: 0.9375rem;
+  font-weight: 600;
+  line-height: 1.4;
+  color: var(--color-on-surface, #1f2937);
+  margin: 0.35rem 0 0.15rem;
+  text-transform: none;
+}
+
+.job-desc-toggle {
+  background: none;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+}
+
+.job-desc-paragraph {
+  font-size: 1rem;
+  line-height: 1.65;
+  color: var(--color-on-surface-variant, #374151);
+  margin: 0;
+}
+
+.job-desc-list {
+  margin: 0.25rem 0 0.25rem 1.25rem;
+  padding: 0;
+  color: var(--color-on-surface-variant, #374151);
+  font-size: 1rem;
+  line-height: 1.6;
+}
+
+.job-desc-list li {
+  margin-bottom: 0.35rem;
+}
+
+.job-desc-list li::marker {
+  color: var(--color-primary, #0058be);
+}
+
+.job-desc-spacer {
+  height: 0.5rem;
+}

@@ -37,6 +37,7 @@ public class CvService {
     private final CvParserService parser;
     private final VirusScannerService virusScanner;
     private final com.careerops.util.FileUtil fileUtil;
+    private final CvNormalizationService cvNormalization;
     private final String bucket;
 
     private static final long MAX = 5L * 1024 * 1024;
@@ -48,12 +49,14 @@ public class CvService {
             CvParserService parser,
             VirusScannerService virusScanner,
             com.careerops.util.FileUtil fileUtil,
+            CvNormalizationService cvNormalization,
             @Value("${supabase.bucket.cv}") String bucket) {
         this.repo = repo;
         this.storage = storage;
         this.parser = parser;
         this.virusScanner = virusScanner;
         this.fileUtil = fileUtil;
+        this.cvNormalization = cvNormalization;
         this.bucket = bucket;
     }
 
@@ -106,7 +109,24 @@ public class CvService {
                 .isActive(true)
                 .fileData(storage.isConfigured() ? null : fileBytes)
                 .build();
-        return repo.save(cv);
+        UserCv saved = repo.save(cv);
+        try {
+            cvNormalization.normalizeAndStore(userId);
+            log.info("CV markdown normalized for userId={} after upload", userId);
+        } catch (Exception e) {
+            log.warn("CV markdown normalization failed for userId={} (parsed text still available): {}",
+                userId, e.getMessage());
+        }
+        return saved;
+    }
+
+    /** Plugin-equivalent baseline CV markdown (data/resume.md). */
+    public String activeCvMarkdown(UUID userId) {
+        return repo.findFirstByUserIdAndIsActiveTrueOrderByUploadedAtDesc(userId)
+            .map(c -> c.getCvMarkdown() != null && !c.getCvMarkdown().isBlank()
+                ? c.getCvMarkdown()
+                : c.getParsedText())
+            .orElse("");
     }
 
     public List<UserCv> history(UUID userId) {

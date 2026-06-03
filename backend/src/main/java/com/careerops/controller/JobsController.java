@@ -4,15 +4,19 @@ import com.careerops.dto.JobDtos.*;
 import com.careerops.exception.ApiException;
 import com.careerops.model.Job;
 import com.careerops.model.UserJob;
-import com.careerops.model.UserProfile;
 import com.careerops.repository.JobRepository;
 import com.careerops.repository.UserJobRepository;
-import com.careerops.repository.UserProfileRepository;
+import com.careerops.service.CvService;
 import com.careerops.service.DailyLimitService;
+import com.careerops.service.EvaluationReportEnrichmentService;
 import com.careerops.service.JobDeliveryService;
 import com.careerops.service.JobDescriptionEnrichmentService;
 import com.careerops.service.JobRecommendationService;
 import com.careerops.service.KanbanService;
+import com.careerops.service.UserJobSkillMatchService;
+import com.careerops.model.UserProfile;
+import com.careerops.repository.UserProfileRepository;
+import com.fasterxml.jackson.databind.JsonNode;
 import com.careerops.util.AuthUtil;
 import jakarta.persistence.criteria.*;
 import org.springframework.data.domain.*;
@@ -42,12 +46,18 @@ public class JobsController {
     private final JobRecommendationService recommendations;
     private final KanbanService                    kanban;
     private final JobDescriptionEnrichmentService  descriptionEnrichment;
-    private final UserProfileRepository            profiles;
+    private final UserJobSkillMatchService       skillMatchService;
+    private final EvaluationReportEnrichmentService evaluationEnrichment;
+    private final UserProfileRepository          profiles;
+    private final CvService                      cvService;
 
     public JobsController(UserJobRepository u, JobRepository j, JobDeliveryService d,
                           DailyLimitService l, JobRecommendationService r, KanbanService k,
                           JobDescriptionEnrichmentService descriptionEnrichment,
-                          UserProfileRepository profiles) {
+                          UserJobSkillMatchService skillMatchService,
+                          EvaluationReportEnrichmentService evaluationEnrichment,
+                          UserProfileRepository profiles,
+                          CvService cvService) {
         this.userJobs               = u;
         this.jobs                   = j;
         this.delivery               = d;
@@ -55,19 +65,21 @@ public class JobsController {
         this.recommendations        = r;
         this.kanban                 = k;
         this.descriptionEnrichment  = descriptionEnrichment;
+        this.skillMatchService      = skillMatchService;
+        this.evaluationEnrichment   = evaluationEnrichment;
         this.profiles               = profiles;
+        this.cvService              = cvService;
     }
 
     @GetMapping
-    @Transactional(readOnly = true)
+    @Transactional
     public JobListResponse list(
             @RequestParam(defaultValue = "0") int page,
             @RequestParam(defaultValue = "20") int size) {
         UUID uid = AuthUtil.currentUserId();
-        int minMatch = profiles.findByUserId(uid)
-                .map(p -> p.getMinMatchPercent() != null ? p.getMinMatchPercent() : UserProfile.DEFAULT_MIN_MATCH_PERCENT)
-                .orElse(UserProfile.DEFAULT_MIN_MATCH_PERCENT);
-        int safeSize = Math.max(1, Math.min(size, 50));
+        // List every job in the user's pipeline — min-match is enforced when delivering new jobs,
+        // not when viewing jobs already saved to their tracker.
+        int safeSize = Math.max(1, Math.min(size, 500));
         Pageable pageable = PageRequest.of(page, safeSize);
         Page<UserJob> userJobPage = userJobs.findByUserIdOrderByDeliveredAtDesc(uid, pageable);
         List<UserJob> userJobList = userJobPage.getContent();
@@ -78,16 +90,25 @@ public class JobsController {
                 jobMap.put(j.getId(), j);
             }
         }
+        for (UserJob uj : userJobList) {
+            Job j = jobMap.get(uj.getJobId());
+            if (j != null) {
+                skillMatchService.refreshAndPersist(uj, j);
+            }
+        }
         List<JobCardResponse> cards = userJobList.stream()
                 .map(uj -> JobCardResponse.from(uj, jobMap.get(uj.getJobId())))
                 .filter(java.util.Objects::nonNull)
-                .filter(card -> card.matchPercent() != null && card.matchPercent() >= minMatch)
                 .toList();
         return new JobListResponse(
             cards,
             limits.getCount(uid),
             limits.max(),
-            limits.remaining(uid)
+            limits.remaining(uid),
+            userJobPage.getTotalElements(),
+            page,
+            safeSize,
+            userJobPage.hasNext()
         );
     }
 
@@ -100,13 +121,100 @@ public class JobsController {
         Job j = jobs.findById(uj.getJobId())
                 .orElseThrow(() -> new ApiException(HttpStatus.NOT_FOUND, "Job missing"));
         j = descriptionEnrichment.enrichIfMissing(j);
+        skillMatchService.refreshAndPersist(uj, j);
+        UserProfile profile = profiles.findByUserId(uid)
+            .orElseThrow(() -> new ApiException(HttpStatus.BAD_REQUEST, "Complete your profile first"));
+        String cvText = cvService.activeCvText(uid);
+        JsonNode report = evaluationEnrichment.ensureComplete(
+            uid, j, profile, cvText, uj.getScoreBreakdown(), "job_detail");
+        persistEvaluationReport(uj, report);
+        return JobDetailResponse.from(uj, j);
+    }
+
+    private void persistEvaluationReport(UserJob uj, JsonNode report) {
+        if (report == null || !report.isObject()) return;
+        uj.setMatchPercent(report.path("matchPercent").asInt(
+            uj.getMatchPercent() != null ? uj.getMatchPercent() : 0));
+        uj.setAiScore(report.path("overallScore").asInt(
+            uj.getAiScore() != null ? uj.getAiScore() : 0));
+        if (report.hasNonNull("humanSummary")) {
+            uj.setHumanSummary(report.path("humanSummary").asText(uj.getHumanSummary()));
+        }
+        if (report.hasNonNull("verdict")) {
+            uj.setVerdict(report.path("verdict").asText(uj.getVerdict()));
+        }
+        if (report.has("matchedSkills") && report.get("matchedSkills").isArray()) {
+            uj.setMatchedSkills(jsonStringArray(report.get("matchedSkills")));
+        }
+        if (report.has("unmatchedSkills") && report.get("unmatchedSkills").isArray()) {
+            uj.setUnmatchedSkills(jsonStringArray(report.get("unmatchedSkills")));
+        }
+        if (report.has("cvImprovementTips") && report.get("cvImprovementTips").isArray()) {
+            uj.setCvImprovementTips(jsonStringArray(report.get("cvImprovementTips")));
+        }
+        uj.setScoreBreakdown(report);
+        userJobs.save(uj);
+    }
+
+    private static String[] jsonStringArray(JsonNode array) {
+        java.util.List<String> out = new java.util.ArrayList<>();
+        array.forEach(n -> {
+            String s = n.asText(null);
+            if (s != null && !s.isBlank()) out.add(s);
+        });
+        return out.toArray(new String[0]);
+    }
+
+    /**
+     * Soft-delete a job from the user's pipeline.
+     * DELETE /api/jobs/{userJobId}
+     */
+    @DeleteMapping("/{userJobId}")
+    @ResponseStatus(HttpStatus.NO_CONTENT)
+    @Transactional
+    public void delete(@PathVariable UUID userJobId) {
+        UUID uid = AuthUtil.currentUserId();
+        UserJob uj = userJobs.findByIdAndUserId(userJobId, uid)
+                .orElseThrow(() -> new ApiException(HttpStatus.NOT_FOUND, "Not found"));
+        // Soft-delete via entity state — avoids @SQLDelete + @Version parameter binding issues on H2.
+        uj.setDeletedAt(java.time.Instant.now());
+        userJobs.save(uj);
+    }
+
+    /**
+     * Recompute matched/unmatched skills for every job in the user's pipeline (e.g. after CV upload or matcher fixes).
+     * POST /api/jobs/refresh-skills
+     */
+    @PostMapping("/refresh-skills")
+    @Transactional
+    public JobListResponse refreshAllSkills(
+            @RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "500") int size) {
+        UUID uid = AuthUtil.currentUserId();
+        skillMatchService.refreshAllForUser(uid);
+        return list(page, size);
+    }
+
+    /**
+     * Re-fetch posting text from the source URL (use when the overview description is empty).
+     */
+    @PostMapping("/{userJobId}/description")
+    @Transactional
+    public JobDetailResponse enrichDescription(@PathVariable UUID userJobId) {
+        UUID uid = AuthUtil.currentUserId();
+        UserJob uj = userJobs.findByIdAndUserId(userJobId, uid)
+                .orElseThrow(() -> new ApiException(HttpStatus.NOT_FOUND, "Not found"));
+        Job j = jobs.findById(uj.getJobId())
+                .orElseThrow(() -> new ApiException(HttpStatus.NOT_FOUND, "Job missing"));
+        j = descriptionEnrichment.enrich(j, true);
+        skillMatchService.refreshAndPersist(uj, j);
         return JobDetailResponse.from(uj, j);
     }
 
     @PostMapping("/fetch")
-    public FetchSummary fetchMore(@RequestParam(defaultValue = "5") int count) {
-        if (count < 1 || count > 10) {
-            throw new ApiException(HttpStatus.BAD_REQUEST, "Count must be between 1 and 10");
+    public FetchSummary fetchMore(@RequestParam(defaultValue = "10") int count) {
+        if (count < 1 || count > 25) {
+            throw new ApiException(HttpStatus.BAD_REQUEST, "Count must be between 1 and 25");
         }
         return delivery.deliver(AuthUtil.currentUserId(), count);
     }

@@ -97,7 +97,24 @@ export interface EvaluationData {
   matchedSkills?: string[];
   unmatchedSkills?: string[];
   cvImprovementTips?: string[];
+  nextSteps?: string[];
   sections?: EvaluationSections;
+}
+
+export interface OutreachFormats {
+  linkedInConnection?: string;
+  linkedInMessage?: string;
+  coldEmailSubject?: string;
+  coldEmailBody?: string;
+  followUp?: string;
+}
+
+export interface OutreachContactDraft {
+  name: string;
+  title?: string;
+  whyThisPerson?: string;
+  priority?: number;
+  formats?: OutreachFormats;
 }
 
 export interface OutreachData {
@@ -108,6 +125,9 @@ export interface OutreachData {
   tone?: string;
   wordCount?: number;
   alternatives?: string[];
+  company?: string;
+  roleTitle?: string;
+  contacts?: OutreachContactDraft[];
 }
 
 export interface ResearchData {

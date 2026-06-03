@@ -23,12 +23,7 @@ public class InterviewReminderScheduler {
     private final NotificationRepository notificationRepo;
 
     @Scheduled(cron = "0 0 * * * *", zone = "Europe/Dublin") // every hour
-    @org.springframework.transaction.annotation.Transactional
     public void sendInterviewReminders() {
-        // 3.090 — Add jitter
-        try { Thread.sleep(new java.util.Random().nextInt(30000)); } 
-        catch (InterruptedException e) { Thread.currentThread().interrupt(); }
-
         Instant cutoff = Instant.now().plus(java.time.Duration.ofHours(24));
         List<InterviewTrack> upcoming = trackRepo.findByReminderSentFalseAndInterviewDateBefore(cutoff);
 

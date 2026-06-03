@@ -118,7 +118,7 @@ export function JobSearchRadarLoader({
 
     <div
 
-      className="fixed inset-0 z-[200] bg-[#f7f9fb] flex flex-col items-center justify-center min-h-screen overflow-hidden font-sans"
+      className="fixed inset-0 z-[10050] bg-[#f7f9fb] flex flex-col items-center justify-center min-h-screen overflow-hidden font-sans"
 
       role="status"
 

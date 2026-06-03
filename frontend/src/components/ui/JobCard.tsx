@@ -4,29 +4,7 @@ import {
   MapPin, Banknote, Calendar, ShieldCheck,
   ExternalLink, Building2, ArrowUpRight, Zap
 } from 'lucide-react';
-
-// ── Source badge styles ────────────────────────────────────────────────────
-const SOURCE_STYLES: Record<string, string> = {
-  'LinkedIn (Twin AI)': 'bg-blue-50 text-blue-700 border-blue-200',
-  'IrishJobs':          'bg-emerald-50 text-emerald-700 border-emerald-200',
-  'Jobs.ie':            'bg-teal-50 text-teal-700 border-teal-200',
-  'Reed':               'bg-red-50 text-red-700 border-red-200',
-  'Adzuna':             'bg-orange-50 text-orange-700 border-orange-200',
-  'Remotive':           'bg-purple-50 text-purple-700 border-purple-200',
-  'TheMuse':            'bg-pink-50 text-pink-700 border-pink-200',
-  'Jobicy':             'bg-yellow-50 text-yellow-700 border-yellow-200',
-};
-
-function getSourceStyle(name?: string): string {
-  if (!name) return 'bg-slate-50 text-slate-500 border-slate-200';
-  const key = Object.keys(SOURCE_STYLES).find(k => name.toLowerCase().includes(k.toLowerCase()));
-  return key ? (SOURCE_STYLES[key] ?? 'bg-slate-50 text-slate-500 border-slate-200') : 'bg-slate-50 text-slate-500 border-slate-200';
-}
-
-function sourceLabel(name?: string): string {
-  if (!name) return 'Job Board';
-  return name.replace(/ Careers$/i, '').trim();
-}
+import { JobSourceBadge } from '@/components/ui/JobSourceBadge';
 
 // ── Company initials avatar ─────────────────────────────────────────────────
 const AVATAR_COLORS = [
@@ -162,12 +140,7 @@ export default function JobCardUI({ job }: { job: JC }) {
 
       {/* ── Source + pre-match badges ── */}
       <div className="flex items-center gap-2 flex-wrap">
-        {job.sourceName && (
-          <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold border ${getSourceStyle(job.sourceName)}`}>
-            <ExternalLink size={8} />
-            {sourceLabel(job.sourceName)}
-          </span>
-        )}
+        {job.sourceName ? <JobSourceBadge name={job.sourceName} /> : null}
         {job.preMatchScore != null && job.preMatchScore > 0 && (
           <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-slate-100 text-slate-600 border border-slate-200">
             <Zap size={8} />

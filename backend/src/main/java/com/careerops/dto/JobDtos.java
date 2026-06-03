@@ -74,8 +74,21 @@ public class JobDtos {
         java.util.List<JobCardResponse> items,
         int dailyCount,
         int dailyLimit,
-        int remaining
-    ) {}
+        int remaining,
+        long totalCount,
+        int page,
+        int size,
+        boolean hasMore
+    ) {
+        /** Backward-compatible constructor for tests and call sites that omit pagination fields. */
+        public JobListResponse(
+            java.util.List<JobCardResponse> items,
+            int dailyCount,
+            int dailyLimit,
+            int remaining) {
+            this(items, dailyCount, dailyLimit, remaining, items.size(), 0, items.size(), false);
+        }
+    }
 
     public record JobSearchResponse(
         java.util.List<JobCardResponse> items,

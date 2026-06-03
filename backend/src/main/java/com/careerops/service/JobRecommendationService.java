@@ -7,6 +7,8 @@ import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import com.careerops.util.NativeSqlUtil;
+
 import java.util.*;
 import java.util.stream.Collectors;
 
@@ -98,7 +100,7 @@ public class JobRecommendationService {
                 }
 
                 // Already-evaluated skills bonus
-                String matchedRaw = row[5] instanceof String s ? s : "";
+                String matchedRaw = matchedSkillsToDelimitedString(row[5]);
                 if (!evaluatedSkills.isEmpty() && !matchedRaw.isBlank()) {
                     String matchedL = matchedRaw.toLowerCase();
                     boolean hasEvalSkill = evaluatedSkills.stream()
@@ -119,7 +121,7 @@ public class JobRecommendationService {
         for (Scored s : scored) {
             Object[] row  = s.row();
             results.add(new com.careerops.dto.JobDtos.RecommendationResponse(
-                (UUID) row[0],
+                NativeSqlUtil.coerceUuid(row[0]),
                 (String) row[1],
                 (String) row[2],
                 (String) row[3],
@@ -129,7 +131,7 @@ public class JobRecommendationService {
                 (String) row[8],
                 (String) row[9],
                 (String) row[10],
-                row[11] != null ? ((java.sql.Timestamp) row[11]).toInstant() : null,
+                NativeSqlUtil.coerceInstant(row[11]),
                 (Boolean) row[12],
                 s.reason()
             ));
@@ -193,7 +195,7 @@ public class JobRecommendationService {
      */
     @SuppressWarnings("unchecked")
     private Set<String> getEvaluatedSkills(UUID userId) {
-        List<String> rows = em.createNativeQuery("""
+        List<Object> rows = em.createNativeQuery("""
                 SELECT uj.matched_skills
                 FROM careerops.user_jobs uj
                 WHERE uj.user_id       = :userId
@@ -203,14 +205,12 @@ public class JobRecommendationService {
                 .setParameter("userId", userId)
                 .getResultList();
         Set<String> skills = new HashSet<>();
-        for (String raw : rows) {
-            if (raw != null && !raw.isBlank()) {
-                // matched_skills is stored as comma/bracket-delimited text e.g. "[React, Node.js]"
-                String cleaned = raw.replaceAll("[\\[\\]]", "");
-                for (String sk : cleaned.split(",")) {
-                    String trimmed = sk.trim();
-                    if (!trimmed.isBlank()) skills.add(trimmed);
-                }
+        for (Object raw : rows) {
+            String delimited = matchedSkillsToDelimitedString(raw);
+            if (delimited.isBlank()) continue;
+            for (String sk : delimited.split(",")) {
+                String trimmed = sk.trim();
+                if (!trimmed.isBlank()) skills.add(trimmed);
             }
         }
         return skills;
@@ -252,7 +252,7 @@ public class JobRecommendationService {
                                ProfileData profile, boolean jobSponsors,
                                Set<String> evaluatedSkills) {
         int    basePct     = row[4] != null ? ((Number) row[4]).intValue() : 0;
-        String matchedRaw  = row[5] instanceof String s ? s : "";
+        String matchedRaw  = matchedSkillsToDelimitedString(row[5]);
         String title       = row[1] instanceof String t ? t : "";
 
         // Highest priority: sponsorship match (most specific signal)
@@ -309,6 +309,27 @@ public class JobRecommendationService {
         String spaced = s.trim().replace("-", " ");
         return spaced.isEmpty() ? s :
                Character.toUpperCase(spaced.charAt(0)) + spaced.substring(1);
+    }
+
+    /** H2/PostgreSQL native queries may return text[] as String, String[], or Object[]. */
+    static String matchedSkillsToDelimitedString(Object raw) {
+        if (raw == null) return "";
+        if (raw instanceof String s) {
+            return s.replaceAll("[\\[\\]\"]", "").trim();
+        }
+        if (raw instanceof String[] arr) {
+            return String.join(", ", arr);
+        }
+        if (raw instanceof Object[] arr) {
+            StringBuilder sb = new StringBuilder();
+            for (Object item : arr) {
+                if (item == null) continue;
+                if (sb.length() > 0) sb.append(", ");
+                sb.append(item.toString().trim());
+            }
+            return sb.toString();
+        }
+        return raw.toString().replaceAll("[\\[\\]\"]", "").trim();
     }
 
     // ── Profile data record ─────────────────────────────────────────────────────

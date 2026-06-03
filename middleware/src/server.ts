@@ -50,6 +50,7 @@ import agentMemory from './routes/agent-memory.routes.js';
 import resumeVersions from './routes/resume-versions.routes.js';
 import cv from './routes/cv.routes.js';
 import billing from './routes/billing.routes.js';
+import usage from './routes/usage.routes.js';
 import publicRoutes from './routes/public.routes.js';
 
 const app = express();
@@ -132,10 +133,15 @@ app.use((req, res, next) => {
   next();
 });
 
-// Specific larger body parser for skills endpoints
-app.use('/api/v1/skills', express.json({ limit: '5mb' }));
+// Capture raw JSON bytes so proxy can forward exact payloads when needed.
+const captureRawBody: Parameters<typeof express.json>[0]['verify'] = (req, _res, buf) => {
+  (req as express.Request & { rawBody?: Buffer }).rawBody = Buffer.from(buf);
+};
 
-app.use(express.json({ limit: '2mb' }));
+// Specific larger body parser for skills endpoints
+app.use('/api/v1/skills', express.json({ limit: '5mb', verify: captureRawBody }));
+
+app.use(express.json({ limit: '2mb', verify: captureRawBody }));
 app.use(hpp());
 app.use(stripXss);
 app.use(cookieParser());
@@ -166,6 +172,8 @@ declare global {
     interface Request {
       /** Token minted on this request when the browser had no CSRF cookie yet. */
       issuedCsrfToken?: string;
+      /** Raw request body captured before JSON parsing (for exact proxy forwarding). */
+      rawBody?: Buffer;
     }
   }
 }
@@ -290,6 +298,7 @@ app.use('/api/v1/agent-memory', agentMemory);
 app.use('/api/v1/resume-versions', resumeVersions);
 app.use('/api/v1/cv', cv);
 app.use('/api/v1/billing', billing);
+app.use('/api/v1/usage', usage);
 app.use('/api/v1/public', publicRoutes); // Pass 6 #6.016 — unauthenticated stats
 
 // ── Global error handler ─────────────────────────────────────────────────────────

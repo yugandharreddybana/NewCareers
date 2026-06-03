@@ -9,6 +9,7 @@ import org.springframework.data.repository.query.Param;
 import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
+import java.util.Set;
 import java.util.UUID;
 
 import org.springframework.data.domain.Page;
@@ -19,6 +20,9 @@ public interface UserJobRepository extends JpaRepository<UserJob, UUID>, JpaSpec
     List<UserJob> findByUserIdOrderByDeliveredAtDesc(UUID userId);
     Page<UserJob> findByUserIdOrderByDeliveredAtDesc(UUID userId, Pageable pageable);
     Optional<UserJob> findByUserIdAndJobId(UUID userId, UUID jobId);
+
+    @Query("SELECT uj.jobId FROM UserJob uj WHERE uj.userId = :userId")
+    Set<UUID> findJobIdsByUserId(@Param("userId") UUID userId);
     Optional<UserJob> findByIdAndUserId(UUID id, UUID userId);
 
     @Query("select uj from UserJob uj where uj.userId = :uid and uj.kanbanColumn <> 'Discovered'")

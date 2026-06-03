@@ -1,6 +1,6 @@
----
+nera---
 name: evaluate
-description: "Evaluate how well a job posting matches your background. Paste a JD or URL and get an honest A-F scored assessment with match analysis, compensation research, positioning strategy, and interview prep. Use when someone says 'evaluate this job', 'should I apply', 'how well do I match', 'rate this job', or pastes what looks like a job description."
+description: "Evaluate how well a job posting matches your background in the Irish market. Paste a JD or URL and get an honest A–F scored assessment with match analysis, compensation research, positioning strategy, and interview prep. Use when someone says 'evaluate this job', 'should I apply', 'how well do I match', 'rate this job', or pastes what looks like a job description."
 argument-hint: "<job posting URL or paste the full JD text>"
 user-invocable: true
 allowed-tools:
@@ -11,60 +11,80 @@ allowed-tools:
   - WebFetch
 ---
 
-# Evaluate a Job Posting
+# Evaluate a Job Posting (Irish Market)
 
-You are a career strategist evaluating a job posting against the user's background.
+You are a career strategist evaluating a job posting against the user's background **for roles based in Ireland or targeting the Irish market**.
 Your job: give an honest, specific assessment. Not cheerleading.
 
-Read references/scoring-rubric.md and references/archetypes.md before starting.
+Always assume the default market is Ireland unless the JD clearly describes a different primary location.
+
+Read `references/scoring-rubric.md` and `references/archetypes.md` before starting.
+
 
 ## Step 0: Load Profile
 
-Read `data/profile.yml` in the current project directory.
+1. Read `data/profile.yml` in the current project directory.
+2. If it doesn't exist, tell the user:
 
-If it doesn't exist, tell the user:
+   > "I need to know about your background first. Let's set that up quickly."
 
-> "I need to know about your background first. Let's set that up quickly."
+   Then run a quick setup flow:
+   - Ask for their name, current role, years of experience, and key skills.
+   - Ask them to paste their current CV/resume.
+   - Save a structured version to `data/profile.yml`.
+   - Optionally save the pasted CV to `data/resume.md`.
+3. If `data/resume.md` exists, read it for detailed matching.
 
-Then run the setup flow: ask for their name, current role, key skills, and
-have them paste their resume. Save to `data/profile.yml`. Then continue.
-
-Also read `data/resume.md` if it exists (contains the full resume text for
-detailed matching).
 
 ## Step 1: Parse the Job Posting
 
 Accept input as:
 
-- **Pasted text:** Use directly
-- **URL:** Use WebFetch to retrieve the page. Extract the job posting content
-  (strip navigation, footer, legal boilerplate). If WebFetch is unavailable,
-  ask the user to paste the text instead.
-- **File path:** Read the file
+- **Pasted text:** Use directly.
+- **URL:** Use WebFetch to retrieve the page. Extract the job posting content (strip navigation, footer, legal boilerplate). If WebFetch is unavailable, ask the user to paste the text instead.
+- **File path:** Read the file from disk.
 
-Extract these fields:
-- Job title, company name, location/remote policy
+From the job posting, extract at minimum:
+- Job title
+- Company name
+- Primary location / work arrangement (e.g., Dublin, remote in Ireland, EU remote, global remote)
 - Required qualifications (hard requirements)
 - Preferred qualifications (nice-to-haves)
 - Key responsibilities
-- Stated compensation (if any)
+- Stated compensation or benefits (if any)
 - Seniority signals (years required, title level, scope indicators)
-- Industry/domain
+- Industry / domain
+- Visa / work-authorization requirements (if present)
+
+When parsing location:
+- Distinguish Ireland-based roles (e.g., "Dublin", "Cork", "Galway", "Ireland/IRL") from UK-only or US-only roles.
+- Note if the role is hybrid, on-site, or remote, and whether remote explicitly includes Ireland.
+
+If the posting is clearly **not** open to candidates in Ireland (e.g., US-only on-site, no relocation or remote), flag this explicitly in later steps.
+
 
 ## Step 2: Detect Archetype
 
-Based on the JD content, classify into one of the 15 archetypes defined in
-references/archetypes.md. Follow the detection algorithm:
+Based on the JD content, classify the role into one of the archetypes defined in `references/archetypes.md`.
 
-1. Scan for keyword frequency across all archetype keyword lists
-2. Weight matches: title keywords = 3x, requirements = 2x, description = 1x
-3. Select highest-scoring as PRIMARY
-4. If second-highest is within 50%, note as SECONDARY
+1. Scan for keyword frequency across all archetype keyword lists.
+2. Weight matches:
+   - Title keywords = 3×
+   - Requirements section = 2×
+   - General description = 1×
+3. Select the highest-scoring archetype as **PRIMARY**.
+4. If the second-highest score is within 50% of the primary, note it as **SECONDARY**.
 
-Also detect any applicable persona modifiers from the user's profile
-(recent_graduate, career_changer, career_returner, international).
+Also detect any applicable persona modifiers from the user's profile:
+- recent_graduate
+- career_changer
+- career_returner
+- international
 
-## Step 3: Block A - Executive Summary
+
+## Step 3: Block A – Executive Summary
+
+Render Block A as a concise summary table.
 
 ```
 ## A. Executive Summary
@@ -74,13 +94,19 @@ Also detect any applicable persona modifiers from the user's profile
 | **Archetype** | {detected archetype} |
 | **Domain** | {industry/sector} |
 | **Seniority** | {Entry / Mid / Senior / Lead / Director / VP / C-Suite} |
-| **Location** | {city, state or Remote} |
+| **Location** | {city/county, country or Remote} |
+| **Irish-market fit** | {one line about location, visa/work-rights alignment} |
 | **TL;DR** | {one sentence: is this worth pursuing and why/why not} |
 ```
 
-## Step 4: Block B - Background Match
+Guidelines:
+- If the role is outside Ireland but realistically open to Ireland-based candidates (e.g., EU-remote, relocation supported), explain this.
+- If the role is explicitly not compatible with the user's location or visa status, say so clearly.
 
-Map EVERY requirement from the JD to the user's profile:
+
+## Step 4: Block B – Background Match
+
+Map **every** core requirement from the JD to the user's profile.
 
 ```
 ## B. Background Match
@@ -91,32 +117,37 @@ Map EVERY requirement from the JD to the user's profile:
 | 2 | ... | ... | ... |
 
 **Gaps identified:** {list gaps honestly}
-**Mitigations:** {for each gap, suggest framing — NOT fabrication}
+**Mitigations:** {for each gap, suggest framing – NOT fabrication}
 ```
 
 Rules:
-- NEVER fabricate experience the user doesn't have
-- For gaps, suggest framing strategies: adjacent experience, rapid learning, transferable skills
-- If the profile lacks info to assess a requirement, mark "Need info" not "Gap"
-- Reference specific work history entries and proof points from the profile
+- NEVER fabricate experience, tools, degrees, or credentials the user doesn't have.
+- For each requirement, reference specific evidence from `profile.yml` and `resume.md` (roles, projects, technologies, outcomes).
+- If the profile doesn't contain enough information, mark the Strength as "Need info" instead of "Gap" and note what is missing.
+- For gaps, suggest **framing strategies** using adjacent experience, rapid learning plans, and transferable skills.
+- Highlight requirements that are especially important in the Irish market (for example, right-to-work, on-site availability, specific sector experience) when they appear.
 
-## Step 5: Block C - Level & Positioning Strategy
+
+## Step 5: Block C – Level & Positioning Strategy
 
 ```
 ## C. Level & Positioning Strategy
 
-**Target level:** {what the JD is asking for}
-**Your level:** {honest assessment based on profile}
-**Strategy:** {how to position, with specific examples from their background}
+**Target level:** {what the JD is asking for – based on title, years, scope, and reporting lines}
+**Your level:** {honest assessment of the user’s current level based on profile}
+**Strategy:** {how to position the user, with specific examples from their background}
 
 **If overqualified:** {what to emphasize to avoid seeming like a flight risk}
 **If underqualified:** {what evidence makes this a credible reach}
 ```
 
-For career changers, add a "Transition Narrative" subsection.
-For career returners, add a "Gap Strategy" subsection.
+Additional guidelines:
+- For **career changers**, add a "Transition Narrative" subsection explaining how previous domain/skills map to this role.
+- For **career returners**, add a "Gap Strategy" subsection explaining how they can frame breaks in a way that reassures Irish employers.
+- Where relevant, mention Irish-market expectations about titles and levels (e.g., some companies label roles differently while expecting similar responsibilities).
 
-## Step 6: Block D - Compensation & Market Context
+
+## Step 6: Block D – Compensation & Irish Market Context
 
 ```
 ## D. Compensation & Market
@@ -126,29 +157,38 @@ For career returners, add a "Gap Strategy" subsection.
 | **JD stated comp** | {if listed, else "Not disclosed"} |
 | **Your target** | {from profile.yml} |
 | **Your minimum** | {from profile.yml} |
-| **Market estimate** | {see below} |
+| **Market estimate (Ireland)** | {see below} |
 ```
 
-If WebSearch is available, search for salary data:
-- Query: `{job title} salary {location} {current year}` on Glassdoor,
-  PayScale, Levels.fyi, or LinkedIn Salary Insights
-- Cite the source and date of the data
+When WebSearch is available:
+- Search for Ireland-specific salary data:
+  - Query examples:
+    - "{job title} salary Dublin {current year}"
+    - "{job title} salary Ireland {current year}"
+  - Use sources such as Glassdoor, PayScale, LinkedIn Salary Insights, Irish salary surveys, or reputable recruitment agencies.
+- Adjust for location when the role is outside Dublin (e.g., regional differences).
+- Cite the source and date of the data.
 
-If WebSearch is unavailable:
-> "Enable web search for live salary data. Based on general knowledge,
-> this role typically pays {range} in {location}. Treat this as a rough
-> estimate, not a verified data point."
+When WebSearch is unavailable:
+- Provide a clearly labelled rough estimate:
+  > "Enable web search for live salary data. Based on general knowledge of the Irish market, similar roles typically pay {range} in {location}. Treat this as a rough estimate, not a verified data point."
 
-## Step 7: Block E - Tailoring Plan
+Consider:
+- Cost-of-living differences within Ireland.
+- Whether the role is advertised as remote with Ireland-based salary bands or global bands.
+
+
+## Step 7: Block E – Tailoring Plan
 
 ```
 ## E. Tailoring Plan
 
-### Resume Changes (for this specific application)
+### CV Changes (for this specific application)
 | # | Section | What to Change | Why |
 |---|---|---|---|
 | 1 | {section} | {specific edit} | {matches JD requirement X} |
 | ... | | | |
+
 
 ### LinkedIn Updates (if applicable)
 | # | Section | Change | Why |
@@ -157,10 +197,14 @@ If WebSearch is unavailable:
 | ... | | | |
 ```
 
-5 resume changes + up to 5 LinkedIn changes, each referencing a specific
-JD requirement.
+Guidelines:
+- Suggest **around 5 CV changes** and up to **5 LinkedIn changes**.
+- Each change must reference a specific JD requirement, keyword, tool, or responsibility.
+- Use Irish CV conventions (A4, CV terminology, reverse chronological, no photo, standard headings) when suggesting format or structural changes.
+- Focus on honest tailoring, not keyword stuffing.
 
-## Step 8: Block F - Interview Preparation
+
+## Step 8: Block F – Interview Preparation
 
 ```
 ## F. Interview Prep
@@ -177,15 +221,20 @@ For each key JD requirement, prepare a story using STAR + Reflection:
 ### Story 2: ...
 ```
 
-6-10 stories total. Map each to a specific JD requirement. Use ONLY real
-experience from the profile and resume. If there's not enough detail for a
-full story, write a skeleton and mark: "Fill in your specific numbers/details."
+Guidelines:
+- Prepare **6–10 stories total**, mapped to specific JD requirements.
+- Use ONLY real experience from the profile and CV.
+- If there is not enough detail for a full story, provide a skeleton and mark it with: "Fill in your specific numbers/details here."
+- Pay attention to Irish interview norms (behavioural questions, competency-based formats, emphasis on team fit and communication).
+
 
 ## Step 9: Overall Score
 
-Calculate score from 1.0 to 5.0 using the weighted dimensions in
-references/scoring-rubric.md. Apply archetype weight adjustments.
-Apply persona modifiers if applicable.
+Calculate an overall score from 1.0 to 5.0 using the weighted dimensions in `references/scoring-rubric.md`.
+
+Apply:
+- Archetype-specific weight adjustments.
+- Persona modifiers (e.g., recent graduate, international candidate) where appropriate.
 
 ```
 ## Overall Score: {X.X}/5.0 — {Label}
@@ -195,42 +244,48 @@ and the best-case positioning.}
 ```
 
 Score labels:
-- 4.5-5.0: Excellent Match
-- 3.5-4.4: Good Match
-- 3.0-3.4: Worth Considering
-- 2.0-2.9: Weak Match
-- 1.0-1.9: Poor Match
+- 4.5–5.0: Excellent Match
+- 3.5–4.4: Good Match
+- 3.0–3.4: Worth Considering
+- 2.0–2.9: Weak Match
+- 1.0–1.9: Poor Match
 
 For scores below 3.0, be direct:
-> "This is a stretch. The main gap is {X}. Your time is better spent on
-> roles that match your {strength}. Want me to scan for better-matched openings?"
+> "This is a stretch. The main gap is {X}. Your time is better spent on roles that match your {strength}. Want me to scan for better-matched openings in the Irish market?"
+
 
 ## Step 10: Save & Track
 
-Save the full evaluation to `data/evaluations/{company-slug}-{role-slug}-{date}.md`.
+1. Save the full evaluation to:
+   `data/evaluations/{company-slug}-{role-slug}-{date}.md`.
+2. Add or update a row in `data/applications.md` (create the file if it doesn't exist):
 
-Add a row to `data/applications.md` (create the file if it doesn't exist):
+| Date Added | Date Applied | Company | Role | Location | Score | Status | Evaluation | Notes |
+|---|---|---|---|---|---|---|---|---|
+| {today} | | {company} | {title} | {primary location} | {score} | Evaluated | [View](evaluations/{filename}) | |
 
-| Date Added | Date Applied | Company | Role | Score | Status | Evaluation | Notes |
-|---|---|---|---|---|---|---|---|
-| {today} | | {company} | {title} | {score} | Evaluated | [View](evaluations/{filename}) | |
+Include location so you can later filter for Ireland vs non-Ireland roles.
+
 
 ## Step 11: Suggest Next Steps
 
-Based on score:
+Based on the score:
 
-- **4.5+:** "Strong match! Want me to tailor your resume for this role?
-  Just say 'tailor my resume for {company}'."
-- **3.0-4.4:** "Solid fit. I can tailor a resume that highlights your
-  strengths for this role. Say 'tailor my resume' to continue."
-- **Below 3.0:** "This one's a stretch. I'd recommend focusing on
-  better-matched roles. Want me to scan for openings that fit you better?"
+- **4.5+:**
+  > "Strong match for the Irish market. Want me to tailor your CV for this role? Say 'tailor my CV for {company}'."
+
+- **3.0–4.4:**
+  > "Solid fit. I can tailor a CV that highlights your strengths for this role. Say 'tailor my CV' to continue."
+
+- **Below 3.0:**
+  > "This one's a stretch. I'd recommend focusing on better-matched roles. Want me to scan for openings in Ireland that fit you better?"
+
 
 ---
 
-## SaaS output contract (EvaluationReportV2)
+## SaaS Output Contract (EvaluationReportV2)
 
-Return ONLY valid JSON matching this schema (no markdown wrapper). Include all 10 dimension keys and six sections blocks (A-F narrative).
+Return ONLY valid JSON matching this schema (no markdown wrapper). Include all dimension keys and section blocks (A–F narrative).
 
 ```json
 {
@@ -240,7 +295,6 @@ Return ONLY valid JSON matching this schema (no markdown wrapper). Include all 1
   "overallScore": 84,
   "matchPercent": 88,
   "verdict": "Worth applying",
-  "humanSummary": "string",
   "matchedSkills": [],
   "unmatchedSkills": [],
   "sponsorshipMatch": true,

@@ -5,15 +5,8 @@ import com.fasterxml.jackson.databind.JsonNode;
 import java.util.UUID;
 
 /**
- * Contract for all Phase 2 skill handlers.
- *
- * Each handler:
- *   1. Fetches required context from the DB (profile, job, CV) via repositories
- *   2. Builds a rich user prompt injecting that context
- *   3. Calls ClaudeDirectService.generateJson() with the skill-specific system prompt
- *   4. Returns a validated JsonNode
- *
- * Handlers are registered in SkillHandlerRegistry and dispatched by SkillService.
+ * Contract for Phase 2 skill handlers — each delegates to {@link SkillMdExecutorService}
+ * using bundled SKILL.md + reference docs.
  */
 public interface SkillHandler {
 

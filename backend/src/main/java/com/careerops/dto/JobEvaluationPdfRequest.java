@@ -25,6 +25,11 @@ public record JobEvaluationPdfRequest(
     Boolean isPreview,
     String disclaimer,
     String previewWatermark,
+    String applyGateMessage,
+    List<String> nextSteps,
+    List<String> storyBankCandidates,
+    Boolean sponsorshipMatch,
+    Boolean salaryMatch,
     EvaluationSectionsDto sections
 ) {
     public record DimensionDto(

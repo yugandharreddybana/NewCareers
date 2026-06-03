@@ -34,9 +34,9 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
           <App />
           <Toaster
             position="top-right"
+            containerStyle={{ zIndex: 20000 }}
             toastOptions={{
-              // Subtle defaults that match the Tailwind / Slate palette used app-wide.
-              style: { borderRadius: '12px', fontSize: '0.875rem' },
+              style: { borderRadius: '12px', fontSize: '0.875rem', zIndex: 20000 },
             }}
           />
         </MotionConfig>

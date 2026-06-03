@@ -1,20 +1,28 @@
 import React, { useCallback, useEffect, useState } from 'react';
-import { Link, useParams, useSearchParams } from 'react-router-dom';
+import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { useQueryClient } from '@tanstack/react-query';
 import toast from 'react-hot-toast';
 import { PageMeta } from '@/components/PageMeta';
 import { LoadingSpinner } from '@/components/LoadingSpinner';
 import { DashboardTopNav } from '@/components/dashboard/DashboardTopNav';
-import { kanbanApi } from '@/services/api';
+import { sourceLabel } from '@/lib/jobSource';
+import { kanbanApi, profileApi } from '@/services/api';
+import { useQuery } from '@tanstack/react-query';
+import { JobDescriptionSection } from '@/components/job-detail/JobDescriptionSection';
 import { useJobDetail } from '@/hooks/queries';
+import { hasUsableJobDescription } from '@/lib/plainJobDescription';
+import { jobsApi } from '@/services/api';
 import { queryKeys } from '@/lib/queryKeys';
 import type { JobDetail } from '@/types';
 type JobDetailTab = 'overview' | 'skills';
 import { JobDetailSkillsTab } from '@/components/job-detail/JobDetailSkillsTab';
+import { ConfirmModal } from '@/components/ui/ConfirmModal';
+import { MatchSkillsLegend } from '@/components/job-detail/MatchSkillsLegend';
 import { SKILL_COUNT } from '@/lib/skillCatalog';
 import {
   hasActionableCvTips,
   isHeuristicPlaceholderEvaluation,
+  resolveJobSkillListsForDisplay,
 } from '@/lib/jobEvaluation';
 import '@/styles/job-detail.css';
 
@@ -34,13 +42,19 @@ function matchRingOffset(percent: number): number {
 
 const JobDetail: React.FC = () => {
   const { id } = useParams<{ id: string }>();
+  const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const queryClient = useQueryClient();
   const { data: jobData, isLoading: loading, refetch } = useJobDetail(id);
+  const { data: profile } = useQuery({
+    queryKey: queryKeys.profile.current(),
+    queryFn: () => profileApi.get(),
+  });
   const [saving, setSaving] = useState(false);
   const [activeTab, setActiveTab] = useState<JobDetailTab>('overview');
   const [openEvaluationSignal, setOpenEvaluationSignal] = useState(0);
   const [savedColumn, setSavedColumn] = useState<JobDetail['kanbanColumn'] | null>(null);
+  const [deleteModalOpen, setDeleteModalOpen] = useState(false);
 
   const displayJob = jobData && savedColumn
     ? { ...jobData, kanbanColumn: savedColumn }
@@ -56,18 +70,25 @@ const JobDetail: React.FC = () => {
     setSavedColumn(null);
   }, [id]);
 
-  useEffect(() => {
-    if (!id || loading || !jobData || jobData.description?.trim()) return;
-    const timer = window.setTimeout(() => {
-      void refetch();
-    }, 300);
-    return () => window.clearTimeout(timer);
-  }, [id, loading, jobData, refetch]);
-
   const refreshJob = useCallback(async () => {
     if (!id) return;
     await queryClient.invalidateQueries({ queryKey: queryKeys.jobs.detail(id) });
   }, [id, queryClient]);
+
+  useEffect(() => {
+    if (!id || loading || !jobData || hasUsableJobDescription(jobData.description)) return;
+    const delays = [1500, 5000, 12_000];
+    const timers = delays.map((ms, index) =>
+      window.setTimeout(() => {
+        if (index === delays.length - 1) {
+          void jobsApi.enrichDescription(id).then(() => refreshJob());
+        } else {
+          void refetch();
+        }
+      }, ms),
+    );
+    return () => timers.forEach(t => window.clearTimeout(t));
+  }, [id, loading, jobData, refetch, refreshJob]);
 
   const openJobEvaluation = useCallback(() => {
     setActiveTab('skills');
@@ -93,6 +114,22 @@ const JobDetail: React.FC = () => {
       toast.success('Saved for later.');
     } catch {
       toast.error('Could not save this job.');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const confirmDelete = async () => {
+    if (!displayJob) return;
+    setSaving(true);
+    try {
+      await jobsApi.delete(displayJob.userJobId);
+      await queryClient.invalidateQueries({ queryKey: queryKeys.jobs.all });
+      setDeleteModalOpen(false);
+      toast.success('Job deleted.');
+      navigate('/jobs');
+    } catch {
+      toast.error('Could not delete this job.');
     } finally {
       setSaving(false);
     }
@@ -130,6 +167,7 @@ const JobDetail: React.FC = () => {
   const matchPercent = job.matchPercent ?? 0;
   const heuristicEval = isHeuristicPlaceholderEvaluation(job);
   const showCvTips = hasActionableCvTips(job);
+  const { matchedSkills, unmatchedSkills } = resolveJobSkillListsForDisplay(job);
   const sectorLabel = job.sector ?? '';
   const postedLabel = job.postedAt
     ? `${Math.max(0, Math.floor((Date.now() - new Date(job.postedAt).getTime()) / 86_400_000))} days ago`
@@ -179,6 +217,21 @@ const JobDetail: React.FC = () => {
                     </span>
                   </div>
                   <div>
+                    {job.sourceUrl ? (
+                      <a
+                        href={job.sourceUrl}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="inline-flex items-center gap-1 mb-1.5 font-label-md text-label-md text-primary hover:underline"
+                      >
+                        {job.sourceName ? sourceLabel(job.sourceName) : 'View original posting'}
+                        <span className="material-symbols-outlined text-[16px]">open_in_new</span>
+                      </a>
+                    ) : job.sourceName ? (
+                      <p className="mb-1.5 font-label-md text-label-md text-secondary">
+                        {sourceLabel(job.sourceName)}
+                      </p>
+                    ) : null}
                     <h1 className="font-headline-lg text-headline-lg text-on-surface">{job.title}</h1>
                     <p className="font-body-lg text-body-lg text-secondary">
                       {job.company} • {job.location}
@@ -186,11 +239,6 @@ const JobDetail: React.FC = () => {
                   </div>
                 </div>
                 <div className="flex gap-2 flex-wrap">
-                  {job.sourceName && (
-                    <span className="px-3 py-1 bg-secondary-container text-on-secondary-container rounded-full font-label-sm text-label-sm">
-                      {job.sourceName}
-                    </span>
-                  )}
                   {job.sponsorship ? (
                     <span className="px-3 py-1 bg-tertiary-container text-on-tertiary-container rounded-full font-label-sm text-label-sm">
                       Sponsorship
@@ -253,48 +301,7 @@ const JobDetail: React.FC = () => {
             </div>
             {activeTab !== 'skills' ? (
               <>
-            <div className="bg-surface-container-lowest p-margin-mobile md:p-margin-desktop rounded-xl border border-outline-variant shadow-sm">
-                <h2 className="font-headline-sm text-headline-sm mb-4 text-on-surface">Job Description</h2>
-                {job.description ? (
-                  <p className="font-body-md text-body-md text-on-surface-variant mb-6 leading-relaxed whitespace-pre-wrap">
-                    {job.description}
-                  </p>
-                ) : (
-                  <div className="space-y-4 mb-6">
-                    <p className="font-body-md text-body-md text-on-surface-variant">
-                      We could not load the full posting text yet. Try refreshing this page in a moment, or open
-                      the original listing if it still does not appear.
-                    </p>
-                    <div className="flex flex-wrap gap-3">
-                      <button
-                        type="button"
-                        onClick={() => void refetch()}
-                        className="inline-flex items-center gap-2 px-4 py-2.5 rounded-lg border border-outline-variant text-primary font-label-md hover:bg-surface-container-high transition-colors"
-                      >
-                        <span className="material-symbols-outlined text-[20px]">refresh</span>
-                        Retry loading description
-                      </button>
-                      {job.sourceUrl && (
-                        <a
-                          href={job.sourceUrl}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="inline-flex items-center gap-2 px-4 py-2.5 rounded-lg border border-outline-variant text-on-surface font-label-md hover:bg-surface-container-high transition-colors"
-                        >
-                          <span className="material-symbols-outlined text-[20px]">open_in_new</span>
-                          Open on {job.sourceName ?? 'source site'}
-                        </a>
-                      )}
-                    </div>
-                  </div>
-                )}
-                {job.sector && (
-                  <div className="flex items-center gap-2 text-secondary">
-                    <span className="material-symbols-outlined text-[18px]">category</span>
-                    <span className="font-label-sm text-label-sm">{job.sector}</span>
-                  </div>
-                )}
-            </div>
+            <JobDescriptionSection job={job} profile={profile} onDescriptionLoaded={refreshJob} />
 
             {(job.humanSummary || heuristicEval) && (
               <div className="bg-surface-container-lowest p-margin-mobile md:p-margin-desktop rounded-xl border border-primary/20 shadow-sm">
@@ -319,11 +326,16 @@ const JobDetail: React.FC = () => {
                     </button>
                   </div>
                 )}
-                {!heuristicEval && job.matchedSkills && job.matchedSkills.length > 0 && (
-                  <div className="mt-4">
-                    <p className="font-label-sm text-label-sm text-secondary uppercase mb-2">Matched skills</p>
+                {!heuristicEval && (matchedSkills.length || unmatchedSkills.length) ? (
+                  <div className="mt-4 space-y-3">
+                    <MatchSkillsLegend />
+                  </div>
+                ) : null}
+                {!heuristicEval && matchedSkills.length > 0 && (
+                  <div className="mt-2">
+                    <p className="font-label-sm text-label-sm text-secondary uppercase mb-2">Matched skills (in your CV + posting)</p>
                     <div className="flex flex-wrap gap-2">
-                      {job.matchedSkills.map(skill => (
+                      {matchedSkills.map(skill => (
                         <span
                           key={skill}
                           className="px-2 py-1 bg-green-50 text-green-700 border border-green-200 rounded text-xs font-medium"
@@ -347,28 +359,6 @@ const JobDetail: React.FC = () => {
                 </ul>
               </div>
             )}
-
-            <div className="bg-surface-container-lowest p-margin-mobile md:p-margin-desktop rounded-xl border border-outline-variant shadow-sm">
-              <h2 className="font-headline-sm text-headline-sm mb-4 text-on-surface">Source</h2>
-              <p className="font-body-md text-body-md text-on-surface-variant">
-                This job was sourced from{' '}
-                <strong className="text-on-surface">{job.sourceName || 'a job board'}</strong>.
-                {job.sourceUrl && (
-                  <>
-                    {' '}
-                    <a
-                      href={job.sourceUrl}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="text-primary hover:underline"
-                    >
-                      View original posting
-                      <span className="material-symbols-outlined text-sm ml-1 align-middle">open_in_new</span>
-                    </a>
-                  </>
-                )}
-              </p>
-            </div>
               </>
             ) : null}
           </section>
@@ -403,6 +393,15 @@ const JobDetail: React.FC = () => {
                 >
                   <span className="material-symbols-outlined text-xl">bookmark</span>
                   Save for Later
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setDeleteModalOpen(true)}
+                  disabled={saving}
+                  className="w-full bg-error-container border border-error/20 text-on-error-container py-4 rounded-lg font-label-md text-label-md font-medium hover:opacity-90 transition-all active:scale-95 flex items-center justify-center gap-2 disabled:opacity-60"
+                >
+                  <span className="material-symbols-outlined text-xl">delete</span>
+                  Delete Job
                 </button>
               </div>
               <div className="mt-6 pt-6 border-t border-outline-variant flex items-center gap-3 text-secondary">
@@ -461,11 +460,16 @@ const JobDetail: React.FC = () => {
               </div>
 
               <div className="space-y-6">
-                {job.matchedSkills && job.matchedSkills.length > 0 && (
+                {(matchedSkills.length || unmatchedSkills.length) ? (
+                  <MatchSkillsLegend />
+                ) : null}
+                {matchedSkills.length > 0 && (
                   <div>
-                    <p className="font-label-sm text-label-sm text-secondary uppercase mb-3">Key Skills Found</p>
+                    <p className="font-label-sm text-label-sm text-secondary uppercase mb-3">
+                      Matched (your CV + posting)
+                    </p>
                     <div className="flex flex-wrap gap-2">
-                      {job.matchedSkills.map(skill => (
+                      {matchedSkills.map(skill => (
                         <span
                           key={skill}
                           className="px-2 py-1 bg-green-50 text-green-700 border border-green-200 rounded text-xs font-medium"
@@ -476,20 +480,16 @@ const JobDetail: React.FC = () => {
                     </div>
                   </div>
                 )}
-                {job.unmatchedSkills && job.unmatchedSkills.length > 0 && (
+                {unmatchedSkills.length > 0 && (
                   <div>
                     <p className="font-label-sm text-label-sm text-secondary uppercase mb-3">
-                      Missing Skills / Gaps
+                      Gaps (posting asks; not in your CV yet)
                     </p>
                     <div className="flex flex-wrap gap-2">
-                      {job.unmatchedSkills.map((skill, i) => (
+                      {unmatchedSkills.map(skill => (
                         <span
                           key={skill}
-                          className={
-                            i === 0
-                              ? 'px-2 py-1 bg-error-container text-on-error-container border border-error/20 rounded text-xs font-medium'
-                              : 'px-2 py-1 bg-surface-container-high text-on-surface-variant border border-outline-variant rounded text-xs font-medium'
-                          }
+                          className="px-2 py-1 bg-error-container text-on-error-container border border-error/20 rounded text-xs font-medium"
                         >
                           {skill}
                         </span>
@@ -547,6 +547,23 @@ const JobDetail: React.FC = () => {
           </div>
         </div>
       </footer>
+
+      <ConfirmModal
+        open={deleteModalOpen}
+        onClose={() => setDeleteModalOpen(false)}
+        onConfirm={confirmDelete}
+        loading={saving}
+        destructive
+        title="Delete from pipeline?"
+        description={
+          <>
+            Remove <strong className="text-on-surface">{job.title}</strong>
+            {job.company ? <> at {job.company}</> : null} from your tracker? This cannot be undone.
+          </>
+        }
+        confirmLabel="Delete job"
+        cancelLabel="Keep job"
+      />
     </div>
   );
 };

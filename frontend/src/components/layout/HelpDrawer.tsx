@@ -9,7 +9,7 @@ const SKILLS: Array<{ name: string; what: string; where: string }> = [
   { name: 'Prep Interview', what: 'Likely questions, talking points, study plan, questions to ask the interviewer.', where: 'Job Detail' },
   { name: 'Compare All', what: 'Side-by-side comparison across saved jobs (salary, fit, growth, culture, sponsorship).', where: 'Dashboard' },
   { name: 'Triage All', what: 'Re-rank everything in your pipeline with one-line verdicts.', where: 'Dashboard' },
-  { name: 'Track', what: 'The Kanban board itself — Discovered → Saved → Applied → Interview → Offer/Rejected.', where: 'Kanban' },
+  { name: 'Track', what: 'The Kanban board — Discovered (bookmark saves stay here) → Applied → Interview → Offer → Archived.', where: 'Kanban' },
 ];
 
 export default function HelpDrawer({ open, onClose }: Props) {

@@ -16,19 +16,19 @@ import {
 
 import type { JobDetail } from '@/types';
 
-import { applyGate } from '@/lib/evaluationApplyGate';import { EVALUATION_ADVISORY_FOOTER } from '@/lib/evaluationDisclaimers';
-
+import { applyGate } from '@/lib/evaluationApplyGate';
+import { EVALUATION_ADVISORY_FOOTER } from '@/lib/evaluationDisclaimers';
 import {
-
   evaluationDimensionsForDisplay,
-
   hasStoredJobEvaluation,
-
+  isPreviewEvaluation,
+  resolveNextStepsForDisplay,
   type JobEvaluationView,
-
 } from '@/lib/jobEvaluation';
 
 import { EvaluationDimensionGrid } from '@/components/job-detail/EvaluationDimensionGrid';
+import { MatchSkillsLegend } from '@/components/job-detail/MatchSkillsLegend';
+import { SkillLoadingState } from '@/components/skills/SkillLoadingState';
 
 import '@/styles/job-evaluation-modal.css';
 
@@ -68,6 +68,15 @@ const SECTION_LABELS: Array<{ key: keyof NonNullable<JobEvaluationView['sections
 
 ];
 
+const SECTION_LETTERS: Record<keyof NonNullable<JobEvaluationView['sections']>, string> = {
+  executiveSummary: 'A',
+  backgroundMatch: 'B',
+  positioningStrategy: 'C',
+  compensationAndMarket: 'D',
+  tailoringPlan: 'E',
+  interviewPrep: 'F',
+};
+
 
 
 function verdictTone(verdict?: string): string {
@@ -88,8 +97,6 @@ function verdictTone(verdict?: string): string {
 
 }
 
-
-
 export function JobEvaluationModal({
 
   open,
@@ -105,8 +112,12 @@ export function JobEvaluationModal({
   runningDeepEvaluation = false,
 
 }: Props) {
+  const [downloading, setDownloading] = useState(false);
+  const preview = isPreviewEvaluation(job, evaluation);
+  const deepEvalBusy =
+    runningDeepEvaluation || evaluation.evaluationStatus === 'running';
 
-  const [downloading, setDownloading] = useState(false);  useEffect(() => {
+  useEffect(() => {
 
     if (!open) return;
 
@@ -145,13 +156,9 @@ export function JobEvaluationModal({
       const filename = jobEvaluationPdfFilename(job);
 
       await toast.promise(skillsApi.downloadEvaluationReportPdf(payload, filename), {
-
         loading: 'Generating evaluation PDF…',
-
         success: 'PDF download started.',
-
         error: err => (err instanceof Error ? err.message : 'Could not generate the PDF. Try again.'),
-
       });
 
     } finally {
@@ -208,12 +215,6 @@ export function JobEvaluationModal({
 
         : 'bg-rose-50 text-rose-900 border-rose-200';
 
-  const deepEvalBusy =
-
-    runningDeepEvaluation || evaluation.evaluationStatus === 'running';
-
-
-
   return createPortal(
 
     <div
@@ -268,13 +269,35 @@ export function JobEvaluationModal({
 
             </div>
 
+            <div className="flex items-center gap-2 shrink-0">
+              {stored && onRunDeepEvaluation && (
+                <button
+                  type="button"
+                  onClick={() => void onRunDeepEvaluation()}
+                  disabled={deepEvalBusy}
+                  className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg border border-outline-variant font-label-md text-label-md text-on-surface hover:bg-surface-container-high disabled:opacity-60 transition-colors"
+                >
+                  {deepEvalBusy ? (
+                    <>
+                      <span className="material-symbols-outlined animate-spin text-[18px]">sync</span>
+                      Re-running…
+                    </>
+                  ) : (
+                    <>
+                      <span className="material-symbols-outlined text-[18px]">refresh</span>
+                      Re-run evaluation
+                    </>
+                  )}
+                </button>
+              )}
+
             <button
 
               type="button"
 
               onClick={onClose}
 
-              className="inline-flex h-9 w-9 items-center justify-center rounded-lg text-secondary hover:bg-surface-container-high hover:text-on-surface transition-colors"
+              className="inline-flex h-9 w-9 items-center justify-center rounded-lg border border-outline-variant bg-surface-container-low text-secondary hover:bg-surface-container-high hover:text-on-surface transition-colors"
 
               aria-label="Close evaluation"
 
@@ -284,7 +307,11 @@ export function JobEvaluationModal({
 
             </button>
 
-          </div>          {evaluation.applyScore != null && (
+            </div>
+
+          </div>
+
+          {evaluation.applyScore != null && (
 
             <>
 
@@ -437,15 +464,14 @@ export function JobEvaluationModal({
 
 
         <div className="job-eval-modal__body space-y-6">
-
+          {deepEvalBusy ? (
+            <SkillLoadingState label="Running full AI evaluation against your CV and this posting…" />
+          ) : (
+            <>
           {evaluation.humanSummary && (
-
             <p className="font-body-md text-body-md text-on-surface leading-relaxed border-l-4 border-primary pl-4">
-
               {evaluation.humanSummary}
-
             </p>
-
           )}
 
 
@@ -461,6 +487,8 @@ export function JobEvaluationModal({
 
 
 
+          <MatchSkillsLegend className="mb-4" />
+
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
 
             <div className="job-eval-pillar job-eval-pillar--strong">
@@ -469,7 +497,7 @@ export function JobEvaluationModal({
 
                 <span className="material-symbols-outlined text-[20px]">thumb_up</span>
 
-                What&apos;s strong
+                What&apos;s strong (your CV ↔ posting)
 
               </h3>
 
@@ -517,7 +545,7 @@ export function JobEvaluationModal({
 
                 <span className="material-symbols-outlined text-[20px]">warning</span>
 
-                Needs improvement
+                Gaps &amp; CV coaching
 
               </h3>
 
@@ -585,6 +613,13 @@ export function JobEvaluationModal({
 
               <ul className="space-y-3 text-body-sm text-blue-950 leading-relaxed">
 
+                {resolveNextStepsForDisplay(evaluation).map(step => (
+                    <li key={step} className="flex gap-2">
+                      <span className="text-blue-600 shrink-0">→</span>
+                      <span>{step}</span>
+                    </li>
+                  ))}
+
                 {sections.positioningStrategy && (
 
                   <li>
@@ -621,16 +656,6 @@ export function JobEvaluationModal({
 
                 )}
 
-                {!sections.positioningStrategy &&
-
-                  !sections.tailoringPlan &&
-
-                  !sections.interviewPrep && (
-
-                    <li>Run a full evaluation or wait for the next daily job match to populate action steps.</li>
-
-                  )}
-
               </ul>
 
             </div>
@@ -662,8 +687,7 @@ export function JobEvaluationModal({
                   >
 
                     <h4 className="font-label-md text-label-md text-primary uppercase tracking-wider mb-2">
-
-                      {title}
+                      {SECTION_LETTERS[key]}. {title}
 
                     </h4>
 
@@ -683,9 +707,23 @@ export function JobEvaluationModal({
 
           )}
 
+          {(evaluation.storyBankCandidates?.length ?? 0) > 0 && (
+            <section className="rounded-xl border border-outline-variant bg-surface-container-low p-4">
+              <h3 className="font-headline-sm text-headline-sm text-on-surface mb-2">Story bank candidates</h3>
+              <ul className="space-y-2 text-body-sm text-on-surface-variant">
+                {evaluation.storyBankCandidates!.map(item => (
+                  <li key={item} className="flex gap-2">
+                    <span className="text-primary shrink-0">•</span>
+                    <span>{item}</span>
+                  </li>
+                ))}
+              </ul>
+            </section>
+          )}
 
 
-          {!stored && !hasFullSections && (
+
+          {!preview && !stored && !hasFullSections && (
 
             <div className="rounded-xl border border-dashed border-outline-variant bg-surface-container-low p-6 text-center">
 
@@ -748,7 +786,8 @@ export function JobEvaluationModal({
 
 
           <p className="job-eval-modal__disclaimer">{EVALUATION_ADVISORY_FOOTER}</p>
-
+            </>
+          )}
         </div>
 
 
@@ -776,8 +815,11 @@ export function JobEvaluationModal({
             onClick={() => void handleDownloadPdf()}
 
             disabled={downloading || !canDownloadPdf}
-
-            title={!canDownloadPdf ? 'Run an evaluation first to download a report' : undefined}
+            title={
+              !canDownloadPdf
+                ? 'Run an evaluation first to download a report'
+                : undefined
+            }
 
             className="inline-flex items-center gap-2 px-5 py-2.5 rounded-lg bg-primary text-on-primary font-label-md text-label-md font-semibold hover:bg-primary-container disabled:opacity-50 transition-colors"
 

@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { Link } from 'react-router-dom';
 import type { JobCard } from '@/types';
+import { JobSourceBadge } from '@/components/ui/JobSourceBadge';
 import { kanbanApi } from '@/services/api';
 import toast from 'react-hot-toast';
 
@@ -64,7 +65,7 @@ export function TopMatchCard({ job, animationDelay = '0.1s', onSaved }: Props) {
   };
 
   const className =
-    'welcome-stagger-in block bg-surface-container-lowest border border-outline-variant p-6 rounded-xl shadow-sm hover:border-primary transition-all group';
+    'welcome-stagger-in block h-full min-w-0 w-full overflow-hidden bg-surface-container-lowest border border-outline-variant p-6 rounded-xl shadow-sm hover:border-primary transition-all group';
 
   const body = (
     <>
@@ -78,13 +79,18 @@ export function TopMatchCard({ job, animationDelay = '0.1s', onSaved }: Props) {
           {match}% Match
         </span>
       </div>
-      <h3 className="font-headline-sm text-headline-sm mb-1 group-hover:text-primary transition-colors text-on-surface">
+      <h3 className="font-headline-sm text-headline-sm mb-1 group-hover:text-primary transition-colors text-on-surface line-clamp-2 leading-snug">
         {job.title}
       </h3>
-      <p className="text-secondary font-body-sm text-body-sm mb-4">
+      <p className="text-secondary font-body-sm text-body-sm mb-2 truncate">
         {job.company}
         {job.location ? ` • ${job.location}` : ''}
       </p>
+      {job.sourceName ? (
+        <div className="mb-4">
+          <JobSourceBadge name={job.sourceName} />
+        </div>
+      ) : null}
       <div className="flex items-center justify-between pt-4 border-t border-outline-variant">
         <span className="font-bold text-on-surface">{formatSalary(job)}</span>
         <button

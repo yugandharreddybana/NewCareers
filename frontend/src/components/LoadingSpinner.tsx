@@ -77,7 +77,7 @@ type LoadingOverlayProps = {
 export function LoadingOverlay({ active, message = 'Processing your request...' }: LoadingOverlayProps) {
   if (!active) return null;
   return (
-    <div className="fixed inset-0 bg-slate-900/20 backdrop-blur-[6px] z-[9999] flex items-center justify-center pointer-events-auto">
+    <div className="fixed inset-0 bg-slate-900/20 backdrop-blur-[6px] z-[10500] flex items-center justify-center pointer-events-auto">
       <div className="bg-white/90 backdrop-blur-xl border border-slate-200/60 shadow-[0_20px_50px_rgba(0,0,0,0.15)] rounded-3xl p-8 max-w-sm w-full mx-4 flex flex-col items-center text-center space-y-4">
         <LoadingSpinner size="md" />
         <p className="text-xs font-bold text-indigo-600 uppercase tracking-widest animate-pulse">

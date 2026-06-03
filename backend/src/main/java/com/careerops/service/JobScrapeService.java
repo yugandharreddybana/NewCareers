@@ -4,6 +4,7 @@ import com.careerops.dto.SearchParams;
 import com.careerops.model.Job;
 import com.careerops.model.UserProfile;
 import com.careerops.service.sources.*;
+import com.careerops.service.sources.company.CompanyCareerSource;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
@@ -49,7 +50,7 @@ public class JobScrapeService {
     public JobScrapeService(
             IrishJobsSource irish, JobsIeSource jobsIe,
             JobsIrelandSource jobsIreland, LinkedInPublicSource linkedIn,
-            JsoupCompanySource companies,
+            CompanyCareerSource companies,
             RemotiveSource rm, TheMuseSource tm,
             JobicySource jb, RssSource rs,
             ReedSource r, AdzunaSource a,
@@ -77,17 +78,20 @@ public class JobScrapeService {
 
         List<CompletableFuture<List<Job>>> futures = sources.stream()
             .filter(JobSource::hasBudget)
-            .map(s -> CompletableFuture.supplyAsync(() -> {
-                try {
-                    return s.fetch(profile);
-                } catch (Exception e) {
-                    log.warn("Source '{}' failed: {}", s.name(), e.getMessage());
-                    return Collections.<Job>emptyList();
-                }
-            }, executor).orTimeout(15, TimeUnit.SECONDS).exceptionally(ex -> {
-                log.warn("Source '{}' timed out or failed: {}", s.name(), ex.getMessage());
-                return Collections.emptyList();
-            }))
+            .map(s -> {
+                long timeoutSec = s instanceof CompanyCareerSource ? 120 : 25;
+                return CompletableFuture.supplyAsync(() -> {
+                    try {
+                        return s.fetch(profile);
+                    } catch (Exception e) {
+                        log.warn("Source '{}' failed: {}", s.name(), e.getMessage());
+                        return Collections.<Job>emptyList();
+                    }
+                }, executor).orTimeout(timeoutSec, TimeUnit.SECONDS).exceptionally(ex -> {
+                    log.warn("Source '{}' timed out or failed: {}", s.name(), ex.getMessage());
+                    return Collections.emptyList();
+                });
+            })
             .toList();
 
         List<Job> allJobs = futures.stream()
@@ -118,7 +122,7 @@ public class JobScrapeService {
                     log.warn("Search source '{}' failed: {}", s.name(), e.getMessage());
                     return Collections.<Job>emptyList();
                 }
-            }, executor).orTimeout(15, TimeUnit.SECONDS).exceptionally(ex -> {
+            }, executor).orTimeout(25, TimeUnit.SECONDS).exceptionally(ex -> {
                 log.warn("Search source '{}' timed out or failed: {}", s.name(), ex.getMessage());
                 return Collections.emptyList();
             }))
@@ -137,6 +141,11 @@ public class JobScrapeService {
     public void shutdown() {
         log.info("Shutting down JobScrapeService executor...");
         executor.shutdown();
+    }
+
+    /** All registered scrape/search sources (order preserved). */
+    public List<JobSource> getSources() {
+        return List.copyOf(sources);
     }
 
     // ── Helpers ────────────────────────────────────────────────────────────

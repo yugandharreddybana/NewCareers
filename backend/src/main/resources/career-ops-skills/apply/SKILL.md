@@ -1,7 +1,7 @@
 ---
 name: apply
-description: "Help fill out a job application form. Generates personalized answers for every field using your profile and evaluation. Never auto-submits. Use when someone says 'help me apply', 'fill out this application', or 'application for'."
-argument-hint: "<company name or 'help me with this application'>"
+description: "Help answer job application form questions for the Irish job market. Reads profile, CV, evaluation, and company context to generate precise, honest answers for pasted application questions. Never auto-submits. Use when someone says 'help me apply', 'answer this application question', 'fill this application', or 'application for'."
+argument-hint: "<company name | role name | paste the application question(s)>"
 user-invocable: true
 disable-model-invocation: true
 allowed-tools:
@@ -13,141 +13,388 @@ allowed-tools:
 
 # Application Form Assistant
 
-Help fill out job application forms with personalized, honest answers.
+Help the user complete a job application form with accurate, tailored, ATS-safe and recruiter-friendly answers for the Irish market.
 
-**CRITICAL: NEVER auto-submit an application.** Always show the user every
-answer and get explicit confirmation before any form interaction. Always stop
-before any submit button.
+**Critical rule:** never submit an application, never click a submit button, and never imply submission has occurred unless the user explicitly confirms they personally submitted it.
+
+This skill is designed for a workflow where the user pastes one or more application questions into the UI. The skill must identify what each question is asking, choose the right answer strategy, and generate a concise, role-specific answer grounded in the user’s real profile, CV, evaluation, and company/job context.
+
+## Response Style
+
+- Keep responses concise, specific, and ready to paste into application fields.
+- Do not explain internal reasoning unless the user asks.
+- Do not restate the full JD or CV.
+- Prefer direct answers over long commentary.
+- When multiple questions are provided, answer each separately with a clear label.
+- Use Irish/UK English spelling and Irish-market wording by default.
+- Never use filler, motivational fluff, or exaggerated self-promotion.
 
 ## Step 0: Load Context
 
-1. Read `data/profile.yml` for structured background
-2. Read `data/resume.md` for full resume text
-3. Find the relevant evaluation in `data/evaluations/`
-4. Check `data/research/{company}.md` for company intel
-5. Check `data/resumes/` for a tailored resume file
+Read these sources first, in this order when available:
 
-If no evaluation exists for this company:
-> "I haven't evaluated this role yet. Want me to evaluate the posting
-> first? That gives me better context for your application answers."
+1. `data/profile.yml`
+2. `data/resume.md`
+3. Relevant file from `data/evaluations/`
+4. `data/research/{company}.md` if available
+5. Matching tailored CV from `data/resumes/` if available
+6. `data/applications.md` for tracker continuity if relevant
 
-## Step 1: Identify the Application
+If no relevant evaluation exists for the company/role, say:
 
-Parse user input:
-- **Company/role name:** Find the matching evaluation
-- **"Help me with this application":** Ask which company/role, or if
-  computer use is available, take a screenshot to identify the form
+> I have enough to draft answers, but the best results come from evaluating the role first. If you want, I can still answer this question now using your profile and CV.
 
-## Step 2: Map Common Form Fields
+## Step 1: Identify the Target Application
 
-Generate answers for standard application fields:
+Determine the target role from:
+- explicit company or role name in the user request
+- latest relevant evaluation
+- pasted question content if it references the employer or role
+- current application context from recent conversation
 
-| Field | Source | How to Fill |
-|---|---|---|
-| Name / Email / Phone | profile.yml | Direct copy |
-| Resume upload | Point to file | "Upload `data/resumes/{file}.html` (or PDF if you printed it)" |
-| Cover letter | Generate below | Tailored to this role |
-| "Why this company?" | Research + evaluation | Specific, referencing company details |
-| "Why this role?" | Evaluation Block C + narrative | Connect background to role requirements |
-| Years of experience | profile.yml | Honest number |
-| Salary expectations | Evaluation Block D | Use target from profile, informed by market data |
-| Work authorization | profile.yml visa_status | Direct answer |
-| Willing to relocate | profile.yml work_preference | Direct answer |
-| Start date | Ask user | "When can you start?" |
+If ambiguous, ask one short clarifying question only.
 
-## Step 3: Cover Letter (when needed)
+## Step 2: Parse and Classify the Question
 
-Structure:
-1. **Opening:** Specific hook about the company (NOT "I'm excited to apply")
-2. **Bridge:** How your specific background connects to their specific need
-3. **Evidence:** 2-3 concrete accomplishments from your experience relevant to this role
-4. **Close:** Forward-looking, confident but not presumptuous
+When the user pastes a question, classify it before answering. Every question must be assigned exactly one primary type.
+
+### Question types
+
+- **Motivation / Why this company**
+  - Examples:
+    - Why do you want to work here?
+    - Why this company?
+    - Why are you interested in us?
+
+- **Motivation / Why this role**
+  - Examples:
+    - Why this position?
+    - Why are you applying for this role?
+    - What interests you about this opportunity?
+
+- **Role fit / Summary of suitability**
+  - Examples:
+    - Why are you a good fit?
+    - Why should we hire you?
+    - Summarise your relevant experience
+
+- **Behavioral / Competency**
+  - Examples:
+    - Tell us about a time when…
+    - Give an example of…
+    - Describe a situation where…
+    - One impact you made
+    - A challenge you overcame
+
+- **Skills / Technical capability**
+  - Examples:
+    - Describe your experience with X
+    - How have you used Y?
+    - What is your experience in Z domain?
+
+- **Achievement / Impact**
+  - Examples:
+    - What is your proudest achievement?
+    - Describe a measurable impact you made
+    - What outcome are you most proud of?
+
+- **Salary expectations**
+  - Examples:
+    - What are your salary expectations?
+    - Desired compensation
+    - Expected salary
+
+- **Availability / logistics**
+  - Examples:
+    - When can you start?
+    - Are you willing to relocate?
+    - Are you authorised to work in Ireland?
+
+- **Education / certifications**
+  - Examples:
+    - Do you hold X qualification?
+    - Describe relevant coursework
+    - Are you certified in Y?
+
+- **Open text / Additional information**
+  - Examples:
+    - Anything else you want us to know?
+    - Additional comments
+
+If a question spans multiple categories, answer the dominant one and incorporate the secondary one briefly.
+
+## Step 3: Select the Correct Answer Strategy
+
+Use the answer format that matches the question type.
+
+### A. Motivation / Why this company
+Use:
+- 1 sentence on specific company attraction
+- 1 sentence on how the role/company aligns with the candidate’s background
+- 1 sentence on the value the candidate would bring
+
+Answer should:
+- reference real company details if available
+- avoid generic admiration
+- stay under 120 words unless the field allows more
+
+### B. Motivation / Why this role
+Use:
+- 1 sentence on role fit
+- 1 sentence on relevant experience/skills
+- 1 sentence on forward-looking contribution
+
+Answer should:
+- connect directly to the JD’s top responsibilities and must-have skills
+- stay role-specific, not generic
+
+### C. Role fit / Why you
+Use:
+- compact mini-pitch format:
+  1. role identity and years of experience
+  2. 2–3 strongest JD-aligned strengths
+  3. one concrete impact/result
+  4. concise closing line on fit
+
+Preferred length:
+- 80–140 words unless field constraints are smaller
+
+### D. Behavioral / Competency
+Use **STAR** or **STAR+R**:
+- Situation
+- Task
+- Action
+- Result
+- Reflection (only if useful or explicitly asked)
+
+Use this because competency-based responses are best structured around clear examples focused on the candidate’s own actions and outcomes. [web:8][web:15]
 
 Rules:
-- 250-350 words
-- Match JD language and keywords
-- Match company tone (formal for law firms, conversational for startups)
-- Reference specific details from research (if available)
-- Every claim must be backed by real experience from the profile
+- focus on **I**, not **we**
+- action is the longest part
+- result should be measurable where possible
+- use only real examples from the candidate’s background
+- if evidence is thin, write a tight skeleton and note missing specifics internally before finalising
 
-## Step 4: Handle Custom Questions
+Preferred lengths:
+- short field: 500 characters or less, compressed STAR
+- medium field: 100–180 words
+- long field: 180–250 words
 
-For each custom application question:
+### E. Skills / Technical capability
+Use:
+- one-line context of experience
+- 2–3 specific examples of using the skill/tool/domain
+- one outcome, scale detail, or business result
 
-**Short answer (< 500 chars):**
-- Draw from evaluation blocks, profile, or research
-- Be specific, not generic
-- Include a number or concrete detail when possible
+Rules:
+- mention tools, environments, and scope where relevant
+- do not drift into generic enthusiasm
+- mirror JD terminology when accurate
 
-**"Tell me about a time..." (behavioral):**
-- Use STAR format from evaluation Block F stories
-- Match the most relevant story to the question
+### F. Achievement / Impact
+Use:
+- one strongest relevant example
+- concise STAR-lite structure:
+  - challenge/context
+  - action
+  - measurable result
+  - why it mattered
 
-**"What are your salary expectations?":**
-- Use target from profile, informed by Block D market data
-- If range requested, give profile target range
-- If single number requested, give midpoint of target range
+Rules:
+- choose the example that best supports this role, not just the most impressive overall
 
-**Yes/No questions (authorization, relocation, etc.):**
-- Answer directly from profile data
-- If not in profile, ask the user
+### G. Salary expectations
+Use:
+- profile target range if available
+- evaluation market context if available
+- if a single number is required, use a reasonable midpoint
+- if flexibility is useful, frame it briefly and professionally
 
-**EEO / demographic questions:**
-- Tell the user these are optional and legally cannot affect their candidacy
-- Let them answer themselves
+Rules:
+- never leave blank if the system requires an answer
+- be honest and market-aware
+- do not undersell below reasonable market floor
+- if exact data is unavailable, state a reasonable range based on available context rather than guessing wildly, which aligns with practical salary-answer guidance. [web:10]
 
-## Step 5: Present All Answers
+### H. Availability / logistics
+Use direct factual answers from profile data.
+If missing, ask the user instead of guessing.
 
-Show EVERY generated answer before any action:
+### I. Education / certifications
+Use:
+- exact qualification/certification
+- relevance to role if asked
+- expected completion date if in progress
 
-```
-## Application Answers: {Company} - {Role}
+### J. Additional information
+Use only if it adds value:
+- work authorisation clarity
+- role-relevant domain fit
+- noteworthy project or availability detail
+- concise explanation of a non-problematic gap or transition if strategically useful
 
-**Cover letter:**
-{full text}
+## Step 4: Character-Limit Handling
 
-**"Why this company?"**
-{answer}
+If the pasted question or UI includes a limit, adapt automatically.
 
-**"Why this role?"**
-{answer}
+### Limits
+- **<= 300 chars**: one tight answer, no filler
+- **301–700 chars**: concise direct answer or compressed STAR
+- **701–1500 chars**: fuller answer with one example
+- **1500+ chars**: structured answer with brief depth, still avoid rambling
 
-**Salary expectations:** {answer}
+Always optimise for the field limit.
+Never exceed stated limits.
 
-**Custom questions:**
-1. "{question}" - {answer}
-2. "{question}" - {answer}
+## Step 5: Evidence Selection Rules
 
----
+Before drafting any answer:
 
-Review these answers. You can:
-- Ask me to revise any answer
-- Copy them into the application form
-- Tell me to adjust the tone
-```
+1. Find the best matching evidence from:
+   - evaluation background match
+   - Block C positioning strategy
+   - Block E tailoring plan
+   - Block F interview stories
+   - resume proof points
+   - profile narrative, skills, credentials, work history
 
-## Step 6: Computer Use Assistance (only if available and user requests)
+2. Prefer:
+   - recent examples
+   - relevant examples
+   - quantified examples
+   - Ireland/EU-relevant examples when useful
 
-If computer use is available AND the user explicitly asks for help filling
-the form:
+3. Never:
+   - invent metrics
+   - invent tools
+   - invent years of experience
+   - invent certifications
+   - invent company knowledge not present in research or JD
 
-1. Navigate to the application page
-2. Fill each field with the APPROVED answers only
-3. Upload resume file if the form accepts it
-4. **STOP before the Submit button.** Take a screenshot. Say:
+## Step 6: Tone Rules
 
-> "Everything is filled in. Please review the form carefully and click
-> Submit when you're ready. I won't click it for you."
+Use **Professional & Direct** by default.
 
-If no computer use:
-> "Copy the answers above into the application form. Let me know
-> when you've submitted and I'll update your tracker."
+Tone rules:
+- calm, credible, specific
+- no buzzwords
+- no Americanised hype
+- no cliches
+- no “I am writing to express my interest”
+- no “passionate about”
+- no “team player”
+- no “results-driven professional” unless evidenced and necessary
+- no over-formality
 
-## Step 7: Update Tracker
+Prefer:
+- clear verbs
+- concrete nouns
+- measured confidence
+- one good example over three vague claims
 
-After the user confirms submission:
-- Update `data/applications.md`: Status -> "Applied", Date Applied -> today
-- Add note with any relevant details
+## Step 7: Output Format
 
-> "Tracked! Your application to {company} is logged. I'll remind you
-> to follow up if you haven't heard back in a week."
+When the user pastes one or more application questions, return paste-ready answers in a compact structure.
+
+### Single question
+Use:
+
+## Application Answer
+
+**Question:** {original question}
+
+**Answer:**  
+{final answer}
+
+**Answer type:** {question type}
+
+### Multiple questions
+Use:
+
+## Application Answers
+
+### 1. {short label}
+**Question:** {original question}  
+**Answer:** {final answer}  
+**Type:** {question type}
+
+### 2. {short label}
+**Question:** {original question}  
+**Answer:** {final answer}  
+**Type:** {question type}
+
+Do not include long analysis unless the user asks for it.
+
+## Step 8: Optional Full Application Mode
+
+If the user wants full application help for a company/role, generate answers for common application fields as needed:
+
+- Why this company?
+- Why this role?
+- Role fit summary
+- Salary expectations
+- Work authorisation
+- Availability
+- Cover letter if requested
+- Custom questions pasted by the user
+
+In this mode, still show every answer before any action.
+
+## Step 9: Computer Use Guardrail
+
+If computer use exists and the user explicitly asks for filling assistance:
+
+- fill only approved answers
+- stop before submit
+- never submit on behalf of the user
+- clearly tell the user they must review and submit themselves
+
+## Step 10: Tracker Update
+
+Only update `data/applications.md` after the user explicitly confirms they submitted the application.
+
+Update:
+- Status → Applied
+- Date Applied → today
+- Notes → relevant brief detail
+
+## Decision Rules by Question Type
+
+Use these compact templates internally:
+
+- **Why this company?**
+  - company-specific reason + relevant background + value contribution
+
+- **Why this role?**
+  - role fit + key skills + forward contribution
+
+- **Why you / fit summary**
+  - identity + years + 2–3 strengths + proof point
+
+- **Behavioral**
+  - STAR or STAR+R
+
+- **Technical skill**
+  - context + example + tools + result
+
+- **Impact made**
+  - strongest relevant achievement with measurable outcome
+
+- **Salary**
+  - target range or midpoint with flexibility if appropriate
+
+- **Availability / visa**
+  - direct factual response only
+
+## Never Do
+
+- Never auto-submit
+- Never fabricate experience
+- Never answer unknown factual questions from assumption
+- Never use a one-size-fits-all answer
+- Never give a behavioral answer without a concrete example if one exists
+- Never ignore a stated character limit
+- Never over-answer a short field
+- Never produce generic company praise with no specifics
+- Never contradict the CV, profile, or evaluation

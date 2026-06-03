@@ -50,17 +50,23 @@ public class ProfileService {
     private final UserJobRepository     userJobs;
     private final UserRepository        users;
     private final AuditLogService       audit; // Task 125
+    private final CvService             cvService;
+    private final CvSkillExtractionService skillExtraction;
 
     public ProfileService(UserProfileRepository profiles,
                           UserCvRepository cvs,
                           UserJobRepository userJobs,
                           UserRepository users,
-                          AuditLogService audit) {
+                          AuditLogService audit,
+                          CvService cvService,
+                          CvSkillExtractionService skillExtraction) {
         this.profiles = profiles;
         this.cvs      = cvs;
         this.userJobs = userJobs;
         this.users    = users;
         this.audit    = audit;
+        this.cvService = cvService;
+        this.skillExtraction = skillExtraction;
     }
 
     // ─── Get profile ───────────────────────────────────────────────────────────
@@ -314,6 +320,15 @@ public class ProfileService {
         String activeCvId = activeCv != null && activeCv.getId() != null
             ? activeCv.getId().toString()
             : null;
+        String cvText = "";
+        if (p.getUserId() != null) {
+            try {
+                cvText = cvService.activeCvText(p.getUserId());
+            } catch (Exception ignored) {
+                // no active CV
+            }
+        }
+        List<String> atsKeywords = skillExtraction.extractForUser(p.getUserId(), p, cvText);
         return new ProfileResponse(
             p.getTargetRoles(), p.getTechStack(), p.getLocation(),
             p.getSalaryMin(), p.getSalaryMax(), p.getSalaryCurrency(), p.getSectors(),
@@ -328,6 +343,7 @@ public class ProfileService {
             p.getWorkExperience() != null ? p.getWorkExperience() : List.of(),
             p.getEducation() != null ? p.getEducation() : List.of(),
             p.getRemotePolicy(), p.getHybridOnsiteDays(), p.getAvailability(),
+            atsKeywords.toArray(new String[0]),
             score,
             p.getVersion()
         );

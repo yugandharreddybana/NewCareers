@@ -74,6 +74,20 @@ router.post('/fetch-indeed-live', fetchLimiter, async (req, res, next) => {
   } catch (e) { next(e); }
 });
 
+router.post('/refresh-skills', async (req, res, next) => {
+  try {
+    const page = req.query.page ?? '0';
+    const size = req.query.size ?? '500';
+    const r = await forward({
+      method: 'POST',
+      path: '/jobs/refresh-skills',
+      userId: req.userId,
+      params: { page, size },
+    });
+    bubble(r, res);
+  } catch (e) { next(e); }
+});
+
 // ── Section 7 — Task 73: GET /api/jobs/recommended ─────────────────────────
 // Must be declared BEFORE /:userJobId so the literal string
 // "recommended" is not swallowed by the param wildcard.
@@ -104,6 +118,28 @@ router.get('/search', async (req, res, next) => {
       path: '/jobs/search',
       userId: req.userId,
       params,
+    });
+    bubble(r, res);
+  } catch (e) { next(e); }
+});
+
+router.delete('/:userJobId', async (req, res, next) => {
+  try {
+    const r = await forward({
+      method: 'DELETE',
+      path: `/jobs/${req.params.userJobId}`,
+      userId: req.userId,
+    });
+    bubble(r, res);
+  } catch (e) { next(e); }
+});
+
+router.post('/:userJobId/description', async (req, res, next) => {
+  try {
+    const r = await forward({
+      method: 'POST',
+      path: `/jobs/${req.params.userJobId}/description`,
+      userId: req.userId,
     });
     bubble(r, res);
   } catch (e) { next(e); }

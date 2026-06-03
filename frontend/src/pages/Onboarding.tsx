@@ -4,6 +4,8 @@ import { createPortal } from 'react-dom';
 import { useNavigate } from 'react-router-dom';
 
 import { useAuth } from '@/context/AuthContext';
+import { useQueryClient } from '@tanstack/react-query';
+import { queryKeys } from '@/lib/queryKeys';
 
 import {
   authApi,
@@ -49,8 +51,8 @@ function defaultPreferences(): PreferencesStepValues {
     selectedTech: [],
     workTypes: ['Full-time'],
     workSettings: { remote: true, onsite: false, hybrid: false },
-    salaryMinK: 60,
-    salaryMaxK: 120,
+    salaryMinK: 0,
+    salaryMaxK: 80,
     salaryCurrency: 'EUR',
     availability: '2 weeks notice',
     cvFile: null,
@@ -552,6 +554,7 @@ function EducationPanel({
 export default function Onboarding() {
 
   const { updateProfile, user } = useAuth();
+  const queryClient = useQueryClient();
 
   const nav = useNavigate();
 
@@ -597,6 +600,7 @@ export default function Onboarding() {
   const [step, setStep] = useState(0);
 
   const [saving, setSaving] = useState(false);
+  const [matchingOverlay, setMatchingOverlay] = useState(false);
   const [deliveryStatus, setDeliveryStatus] = useState<OnboardingDeliveryStatus | null>(null);
   const [deliveryFailed, setDeliveryFailed] = useState<string | null>(null);
 
@@ -655,7 +659,7 @@ export default function Onboarding() {
     while (Date.now() < deadline) {
       const status = await onboardingApi.deliveryStatus();
       setDeliveryStatus(status);
-      if (status.ready) return;
+      if (status.ready || status.readyPartial) return;
       if (status.stage === 'failed') {
         throw new Error(
           status.error ??
@@ -674,14 +678,27 @@ export default function Onboarding() {
     setWelcomePendingFlag();
     setDeliveryFailed(null);
     setDeliveryStatus(null);
+    setMatchingOverlay(false);
     setSaving(false);
+    void queryClient.invalidateQueries({ queryKey: queryKeys.jobs.all });
+    void queryClient.invalidateQueries({ queryKey: queryKeys.discovery.all });
     nav('/dashboard?welcome=1', { replace: true });
   }
 
   async function handleFinish() {
     setSaving(true);
+    setMatchingOverlay(true);
     setDeliveryFailed(null);
-    setDeliveryStatus(null);
+    setDeliveryStatus({
+      stage: 'reading_cv',
+      message: 'Saving your profile…',
+      evaluatedCount: 0,
+      targetCount: 10,
+      minRequired: 3,
+      jobsDiscovered: 0,
+      readyPartial: false,
+      ready: false,
+    });
     let keepDeliveryOverlay = false;
 
     try {
@@ -690,6 +707,7 @@ export default function Onboarding() {
       const p = preferences;
       if (!p.cvFile) {
         toast.error('Upload your CV to finish onboarding.');
+        setMatchingOverlay(false);
         return;
       }
 
@@ -721,7 +739,19 @@ export default function Onboarding() {
         const pollMsg = pollErr instanceof Error ? pollErr.message : undefined;
         if (pollMsg?.includes('longer than expected')) {
           toast.error(pollMsg, { duration: 8000 });
-          finishToDashboard();
+          setDeliveryStatus(prev => ({
+            stage: 'evaluating_jobs',
+            message:
+              prev?.message ??
+              'Matching is still running in the background. Continue to the dashboard or wait here.',
+            evaluatedCount: prev?.evaluatedCount ?? 0,
+            targetCount: prev?.targetCount ?? 10,
+            minRequired: prev?.minRequired ?? 3,
+            jobsDiscovered: prev?.jobsDiscovered ?? 0,
+            readyPartial: prev?.readyPartial ?? false,
+            ready: prev?.ready ?? false,
+          }));
+          keepDeliveryOverlay = true;
           return;
         }
         setDeliveryFailed(
@@ -748,6 +778,7 @@ export default function Onboarding() {
     } finally {
       if (!keepDeliveryOverlay) {
         setSaving(false);
+        setMatchingOverlay(false);
         setDeliveryStatus(null);
       }
     }
@@ -777,7 +808,7 @@ export default function Onboarding() {
 
   return (
     <>
-      {(saving || deliveryFailed) &&
+      {(matchingOverlay || deliveryFailed) &&
         createPortal(
           <JobSearchRadarLoader
             locationHint={location.trim() || 'Dublin, Ireland'}

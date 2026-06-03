@@ -57,6 +57,8 @@ export interface SkillStartRequest {
   step?: string;
   compareJobIds?: string[];
   scanTarget?: string;
+  /** Bypass server cache and return a fresh AI run */
+  forceRefresh?: boolean;
 }
 
 export interface ConversationReplyRequest {

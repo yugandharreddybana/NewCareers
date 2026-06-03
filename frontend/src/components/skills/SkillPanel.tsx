@@ -8,7 +8,9 @@ import { SalaryNegotiationPanel } from './SalaryNegotiationPanel';
 import { CultureFitPanel } from './CultureFitPanel';
 import { LinkedInOptimizePanel } from './LinkedInOptimizePanel';
 import { SkillsGapPlanPanel } from './SkillsGapPlanPanel';
+import { ResearchCompanyOutput } from './ResearchCompanyOutput';
 import TailorCvPanel from './TailorCvPanel';
+import SkillRunHistoryBar, { type SkillRunHistoryEntry } from './SkillRunHistoryBar';
 import type { SkillState } from '../../types/skills';
 
 interface Props {
@@ -28,6 +30,9 @@ interface Props {
   skillId?: string;
   icon?: string;
   onClose?: () => void;
+  runHistory?: SkillRunHistoryEntry[];
+  historyIndex?: number;
+  onHistoryIndexChange?: (index: number) => void;
 }
 
 type SkillData = Record<string, unknown>;
@@ -183,6 +188,9 @@ export function SkillPanel({
   onRun = () => {},
   onDismissAlert = () => {},
   onClose,
+  runHistory = [],
+  historyIndex = 0,
+  onHistoryIndexChange,
 }: Props) {
   const [downloading, setDownloading] = React.useState(false);
 
@@ -275,8 +283,8 @@ export function SkillPanel({
         />
       )}
 
-      {/* Waiting for answer */}
-      {isActive && state === 'waiting_answer' && (
+      {/* Waiting for answer — legacy agent loop only; auto skills never pause */}
+      {isActive && state === 'waiting_answer' && skillName !== 'research' && (
         <div className="flex items-center gap-2 text-sm text-indigo-600 dark:text-indigo-400">
           <CircleAlert className="h-4 w-4 animate-pulse" />
           Waiting for your answer in the popup above...
@@ -291,9 +299,26 @@ export function SkillPanel({
       )}
 
       {/* Result output — Phase 2 skills get dedicated rich panels */}
+      {runHistory.length >= 2 && onHistoryIndexChange && (
+        <SkillRunHistoryBar
+          runs={runHistory}
+          selectedIndex={historyIndex}
+          onSelect={onHistoryIndexChange}
+        />
+      )}
+
       {state === 'done' && data && (
         <SkillOutput
-          data={data}
+          data={
+            historyIndex > 0 && runHistory[historyIndex]?.output
+              ? (runHistory[historyIndex].output as Record<string, unknown>)
+              : data
+          }
+          compareFrom={
+            skillName === 'tailor-resume' && historyIndex > 0 && runHistory[0]?.output
+              ? runHistory[0].output
+              : undefined
+          }
           skillName={skillName}
           userJobId={userJobId}
           {...(skillName === 'tailor-resume'
@@ -320,11 +345,13 @@ function isTailorCvOutput(data: unknown): data is React.ComponentProps<typeof Ta
 
 function SkillOutput({
   data,
+  compareFrom,
   skillName,
   userJobId,
   onDownloadTailorPdf,
 }: {
   data: SkillData;
+  compareFrom?: Record<string, unknown>;
   skillName: string;
   userJobId?: string;
   onDownloadTailorPdf?: () => void;
@@ -333,10 +360,17 @@ function SkillOutput({
   switch (skillName) {
     case 'tailor-resume':
       if (isTailorCvOutput(data) || isObject(data)) {
-        const tailorProps: React.ComponentProps<typeof TailorCvPanel> = { result: data };
+        const tailorProps: React.ComponentProps<typeof TailorCvPanel> = {
+          result: data,
+          ...(compareFrom ? { compareFrom } : {}),
+          ...(userJobId ? { userJobId } : {}),
+        };
         if (userJobId && onDownloadTailorPdf) {
           tailorProps.onDownloadPdf = () => {
             void onDownloadTailorPdf();
+          };
+          tailorProps.onDownloadDocx = () => {
+            void skillsApi.downloadResumeDocx(userJobId);
           };
         }
         return <TailorCvPanel {...tailorProps} />;
@@ -367,6 +401,8 @@ function SkillOutput({
         return <SkillsGapPlanPanel data={data} />;
       }
       return <StructuredSkillOutput data={data} warning={`We couldn't render the enhanced ${humanizeSkillName(skillName)} view, so the structured result is shown instead.`} />;
+    case 'research':
+      return <ResearchCompanyOutput data={data} />;
     default:
       break;
   }

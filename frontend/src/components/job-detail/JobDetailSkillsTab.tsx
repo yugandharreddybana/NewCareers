@@ -1,18 +1,30 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { Link } from 'react-router-dom';
+import { useQuery } from '@tanstack/react-query';
 import toast from 'react-hot-toast';
 import { useSkill } from '@/hooks/useSkill';
 import { useJobsList } from '@/hooks/queries';
+import { profileApi } from '@/services/api';
+import { queryKeys } from '@/lib/queryKeys';
 import type { JobCard } from '@/types';
-import { SKILL_CATALOG, SKILL_COUNT, getSkillCatalogItem, type SkillCatalogItem } from '@/lib/skillCatalog';
+import {
+  SKILL_COUNT,
+  getSkillCatalogItem,
+  jobDetailSkills,
+  type SkillCatalogItem,
+} from '@/lib/skillCatalog';
+import { pipelineStageForSkills } from '@/lib/skillVisibility';
+import { ApplyAssistModal } from '@/components/skills/ApplyAssistModal';
+import { OutreachDraftModal } from '@/components/skills/OutreachDraftModal';
+import { SkillResultModal } from '@/components/ui/SkillResultModal';
 import type { JobDetail } from '@/types';
 import type { SkillName, SkillState } from '@/types/skills';
 import { JobEvaluationModal } from '@/components/job-detail/JobEvaluationModal';
+import { CompareJobsModal } from '@/components/kanban/CompareJobsModal';
 import { SkillHelpTooltip } from '@/components/job-detail/SkillHelpTooltip';
 import {
+  buildJobEvaluationView,
   evaluationFromSkillPayload,
   hasStoredJobEvaluation,
-  resolveJobEvaluation,
   type JobEvaluationView,
 } from '@/lib/jobEvaluation';
 import {
@@ -20,6 +32,9 @@ import {
   SkillPanel,
   SkillQuestionModal,
 } from '@/components/skills';
+import { SkillLoadingState } from '@/components/skills/SkillLoadingState';
+import type { SkillRunHistoryEntry } from '@/components/skills/SkillRunHistoryBar';
+import { skillsApi } from '@/services/skillsApi';
 
 type Props = {
   job: JobDetail;
@@ -43,10 +58,11 @@ function mapHookStateToButtonState(
   return 'idle';
 }
 
-function buildCompareJobIds(currentUserJobId: string, pipelineJobs: JobCard[]): string[] {
-  const ids = pipelineJobs.map(j => j.userJobId).filter(Boolean);
-  const unique = [...new Set([currentUserJobId, ...ids])];
-  return unique.slice(0, 5);
+function stageLabel(column: JobCard['kanbanColumn']): string {
+  if (column === 'Rejected') return 'Archived';
+  if (column === 'Saved') return 'Discovered';
+  if (column === 'Interview') return 'Interviewing';
+  return column;
 }
 
 export function JobDetailSkillsTab({
@@ -56,6 +72,10 @@ export function JobDetailSkillsTab({
 }: Props) {
   const userJobId = job.userJobId;
   const { data: jobsList } = useJobsList();
+  const { data: profile } = useQuery({
+    queryKey: queryKeys.profile.current(),
+    queryFn: () => profileApi.get(),
+  });
 
   const [activeSkill, setActiveSkill] = useState<SkillName | null>(null);
   const [completedSkills, setCompletedSkills] = useState<Set<SkillName>>(() => {
@@ -66,9 +86,15 @@ export function JobDetailSkillsTab({
   const [panelOpen, setPanelOpen] = useState(true);
   const [evaluationOpen, setEvaluationOpen] = useState(false);
   const [evaluationView, setEvaluationView] = useState<JobEvaluationView>(() =>
-    resolveJobEvaluation(job),
+    buildJobEvaluationView(job, profile),
   );
   const [deepEvalRunning, setDeepEvalRunning] = useState(false);
+  const [applyAssistOpen, setApplyAssistOpen] = useState(false);
+  const [outreachOpen, setOutreachOpen] = useState(false);
+  const [skillModalOpen, setSkillModalOpen] = useState(false);
+  const [comparePickerOpen, setComparePickerOpen] = useState(false);
+  const [runHistory, setRunHistory] = useState<SkillRunHistoryEntry[]>([]);
+  const [historyIndex, setHistoryIndex] = useState(0);
 
   const {
     state,
@@ -86,15 +112,26 @@ export function JobDetailSkillsTab({
     reset,
   } = useSkill();
 
+  const visibleSkills = useMemo(
+    () => jobDetailSkills(pipelineStageForSkills(job.kanbanColumn)),
+    [job.kanbanColumn],
+  );
+
   const openJobEvaluation = useCallback(() => {
-    setEvaluationView(resolveJobEvaluation(job));
     setEvaluationOpen(true);
     setCompletedSkills(prev => new Set(prev).add('evaluate'));
-  }, [job]);
+    void onJobRefresh?.();
+  }, [onJobRefresh]);
 
   useEffect(() => {
-    setEvaluationView(resolveJobEvaluation(job));
-  }, [job]);
+    setEvaluationView(buildJobEvaluationView(job, profile));
+  }, [job, profile]);
+
+  useEffect(() => {
+    if (evaluationOpen) {
+      setEvaluationView(buildJobEvaluationView(job, profile));
+    }
+  }, [evaluationOpen, job, profile]);
 
   useEffect(() => {
     if (openEvaluationSignal > 0) {
@@ -102,8 +139,58 @@ export function JobDetailSkillsTab({
     }
   }, [openEvaluationSignal, openJobEvaluation]);
 
+  /** Restore green checkmarks from saved skill runs (survives logout / page reload). */
+  useEffect(() => {
+    if (!userJobId) return;
+    let cancelled = false;
+    void (async () => {
+      try {
+        const saved = await skillsApi.getCompletedSkills(userJobId);
+        if (cancelled || saved.length === 0) return;
+        setCompletedSkills(prev => {
+          const next = new Set(prev);
+          for (const name of saved) {
+            next.add(name as SkillName);
+          }
+          return next;
+        });
+      } catch {
+        // Non-fatal — ticks appear again after the user opens a skill.
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [userJobId]);
+
+  const refreshRunHistory = useCallback(
+    async (skill: SkillName) => {
+      if (!userJobId || skill === 'compare' || skill === 'triage' || skill === 'scan') {
+        setRunHistory([]);
+        return;
+      }
+      try {
+        const runs = await skillsApi.getRunHistory(userJobId, skill);
+        setRunHistory(runs);
+        setHistoryIndex(0);
+      } catch {
+        setRunHistory([]);
+      }
+    },
+    [userJobId],
+  );
+
+  useEffect(() => {
+    if (panelOpen && activeSkill) {
+      void refreshRunHistory(activeSkill);
+    }
+  }, [panelOpen, activeSkill, state, refreshRunHistory]);
+
   useEffect(() => {
     if (state === 'done' && skillName) {
+      if (skillName !== 'evaluate') {
+        setSkillModalOpen(true);
+      }
       setCompletedSkills(prev => {
         const next = new Set(prev);
         next.add(skillName);
@@ -117,20 +204,23 @@ export function JobDetailSkillsTab({
           toast.success('Evaluation updated from your CV');
         }
         void onJobRefresh?.();
+        void refreshRunHistory(skillName);
       }
     }
-  }, [state, skillName, data, job, onJobRefresh]);
+  }, [state, skillName, data, job, onJobRefresh, refreshRunHistory]);
 
   const handleDeepEvaluation = useCallback(async () => {
     setDeepEvalRunning(true);
     setEvaluationOpen(true);
     reset();
-    try {
-      await startSkill({ skillName: 'evaluate', userJobId });
-    } finally {
+    await startSkill({ skillName: 'evaluate', userJobId, forceRefresh: true });
+  }, [reset, startSkill, userJobId]);
+
+  useEffect(() => {
+    if (skillName === 'evaluate' && (state === 'done' || state === 'error')) {
       setDeepEvalRunning(false);
     }
-  }, [reset, startSkill, userJobId]);
+  }, [state, skillName]);
 
   const activeEntry = useMemo(
     () => (activeSkill ? getSkillCatalogItem(activeSkill) : undefined),
@@ -142,19 +232,21 @@ export function JobDetailSkillsTab({
     (skillName ? skillName.replace(/-/g, ' ') : 'Career Coach');
 
   const runSkill = useCallback(
-    async (entry: SkillCatalogItem) => {
+    async (entry: SkillCatalogItem, options?: { forceRefresh?: boolean }) => {
+      const forceRefresh = options?.forceRefresh ?? false;
+
       if (entry.id === 'compare') {
-        const compareJobIds = buildCompareJobIds(userJobId, jobsList?.items ?? []);
-        if (compareJobIds.length < 2) {
+        const pipeline = jobsList?.items ?? [];
+        if (pipeline.filter(j => j.userJobId && j.kanbanColumn !== 'Rejected').length < 2) {
           toast.error('Save at least two jobs to your pipeline to run Compare.');
           return;
         }
-        await startSkill({ skillName: 'compare', compareJobIds });
+        setComparePickerOpen(true);
         return;
       }
 
       if (entry.id === 'triage') {
-        await startSkill({ skillName: 'triage' });
+        await startSkill({ skillName: 'triage', forceRefresh });
         return;
       }
 
@@ -163,19 +255,61 @@ export function JobDetailSkillsTab({
           skillName: 'scan',
           userJobId,
           scanTarget: `${job.title} at ${job.company}`,
+          forceRefresh,
         });
         return;
       }
 
-      await startSkill({ skillName: entry.id, userJobId });
+      if (forceRefresh) {
+        setHistoryIndex(0);
+        setRunHistory([]);
+      }
+
+      await startSkill({ skillName: entry.id, userJobId, forceRefresh });
     },
-    [job.company, job.title, startSkill, userJobId],
+    [job.company, job.title, jobsList?.items, startSkill, userJobId],
+  );
+
+  const handleCompareConfirm = useCallback(
+    async (compareJobIds: string[]) => {
+      setComparePickerOpen(false);
+      setActiveSkill('compare');
+      setPanelOpen(true);
+      setSkillModalOpen(true);
+      reset();
+      prepareSkill('compare');
+      setHistoryIndex(0);
+      setRunHistory([]);
+      await startSkill({ skillName: 'compare', compareJobIds, forceRefresh: true });
+    },
+    [prepareSkill, reset, startSkill],
   );
 
   const handleSelectSkill = useCallback(
     async (entry: SkillCatalogItem) => {
       if (entry.id === 'evaluate') {
         openJobEvaluation();
+        return;
+      }
+
+      if (entry.id === 'apply') {
+        setApplyAssistOpen(true);
+        return;
+      }
+
+      if (entry.id === 'outreach') {
+        setOutreachOpen(true);
+        setCompletedSkills(prev => new Set(prev).add('outreach'));
+        return;
+      }
+
+      if (entry.id === 'compare') {
+        const pipeline = jobsList?.items ?? [];
+        if (pipeline.filter(j => j.userJobId && j.kanbanColumn !== 'Rejected').length < 2) {
+          toast.error('Save at least two jobs to your pipeline to run Compare.');
+          return;
+        }
+        setComparePickerOpen(true);
         return;
       }
 
@@ -192,35 +326,53 @@ export function JobDetailSkillsTab({
 
       setActiveSkill(entry.id);
       setPanelOpen(true);
+      setSkillModalOpen(true);
       reset();
       prepareSkill(entry.id);
 
+      const wasCompleted = completedSkills.has(entry.id);
       const restored = await loadLastRun(userJobId, entry.id);
-      if (restored) return;
+      if (restored) {
+        setCompletedSkills(prev => new Set(prev).add(entry.id));
+        return;
+      }
+
+      if (wasCompleted) {
+        toast.error(
+          'Could not load your saved result. Try again in a moment, or use Re-run if it still fails.',
+        );
+        reset();
+        setActiveSkill(entry.id);
+        return;
+      }
 
       await runSkill(entry);
     },
     [
       activeSkill,
+      completedSkills,
       data,
       isLoading,
       loadLastRun,
       prepareSkill,
       needsAnswer,
+      handleDeepEvaluation,
       openJobEvaluation,
       reset,
       runSkill,
       state,
       userJobId,
+      job,
+      jobsList?.items,
     ],
   );
 
   const handlePanelRerun = useCallback(() => {
     if (!activeEntry) return;
-    void runSkill(activeEntry);
+    void runSkill(activeEntry, { forceRefresh: true });
   }, [activeEntry, runSkill]);
 
-  const jobScopedCount = SKILL_CATALOG.filter(s => s.scope === 'job').length;
+  const jobScopedCount = visibleSkills.length;
 
   return (
     <div className="job-detail-skills flex flex-col gap-6">
@@ -251,7 +403,7 @@ export function JobDetailSkillsTab({
             <RunAllSkillsButton
                 userJobId={userJobId}
                 onComplete={() => {
-                  setCompletedSkills(new Set(SKILL_CATALOG.map(s => s.id)));
+                  setCompletedSkills(new Set(visibleSkills.map(s => s.id)));
                   toast.success('Background run finished. Open each skill to review results.');
                 }}
               />
@@ -260,7 +412,13 @@ export function JobDetailSkillsTab({
       </div>
 
       <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-3">
-        {SKILL_CATALOG.map(entry => {
+        {visibleSkills.length === 0 ? (
+          <p className="font-body-md text-body-md text-on-surface-variant col-span-full">
+            No AI skills are available in the <strong>{stageLabel(job.kanbanColumn)}</strong>{' '}
+            stage. Move this job to an earlier column to unlock coaching tools.
+          </p>
+        ) : null}
+        {visibleSkills.map(entry => {
           const buttonState =
             entry.id === 'evaluate' && hasStoredJobEvaluation(job)
               ? ('done' as SkillState)
@@ -335,55 +493,63 @@ export function JobDetailSkillsTab({
         })}
       </div>
 
-      <p className="font-body-sm text-body-sm text-secondary -mt-2">
-        {jobScopedCount} skills are scoped to this role · Compare and Triage use your wider pipeline
-      </p>
-
-      {activeEntry && panelOpen && (
-        <div className="job-detail-skill-panel">
-          <SkillPanel
-            skillName={activeEntry.id}
-            label={activeEntry.label}
-            userJobId={userJobId}
-            state={
-              activeSkill === (skillName ?? activeSkill) ? state : 'idle'
-            }
-            data={activeSkill === (skillName ?? activeSkill) ? data : null}
-            error={activeSkill === (skillName ?? activeSkill) ? error : null}
-            missingFields={
-              activeSkill === (skillName ?? activeSkill) ? missingFields : []
-            }
-            isActive
-            open
-            onRun={handlePanelRerun}
-            onDismissAlert={reset}
-            onClose={() => setPanelOpen(false)}
-          />
-        </div>
-      )}
-
-      {activeSkill && !panelOpen && state === 'done' && (
-        <button
-          type="button"
-          onClick={() => setPanelOpen(true)}
-          className="text-primary font-label-md text-label-md hover:underline self-start"
-        >
-          Show {activeEntry?.label ?? 'skill'} results
-        </button>
-      )}
-
-      <div className="rounded-xl border border-outline-variant bg-surface-container-low p-4 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
-        <p className="font-body-sm text-body-sm text-on-surface-variant">
-          Need the full skills library? Open Skills Coach for batch runs across all saved roles.
+      {jobScopedCount > 0 && (
+        <p className="font-body-sm text-body-sm text-secondary -mt-2">
+          {jobScopedCount} skill{jobScopedCount === 1 ? '' : 's'} available for the{' '}
+          <strong>{stageLabel(job.kanbanColumn)}</strong> stage
         </p>
-        <Link
-          to="/skills"
-          className="inline-flex items-center gap-1 text-primary font-label-md text-label-md hover:underline shrink-0"
+      )}
+
+      {activeEntry && skillModalOpen && (
+        <SkillResultModal
+          open={skillModalOpen}
+          onClose={() => {
+            setSkillModalOpen(false);
+            setPanelOpen(false);
+            setActiveSkill(null);
+            reset();
+          }}
+          title={activeEntry.label}
+          subtitle={`${job.title} · ${job.company}`}
+          testId="job-skill-modal"
         >
-          Skills Coach
-          <span className="material-symbols-outlined text-[18px]">arrow_forward</span>
-        </Link>
-      </div>
+          {state === 'loading' && (
+            <SkillLoadingState label={`Running ${activeEntry.label}…`} />
+          )}
+          {state !== 'loading' && (
+            <SkillPanel
+              skillName={activeEntry.id}
+              label={activeEntry.label}
+              userJobId={userJobId}
+              state={activeSkill === (skillName ?? activeSkill) ? state : 'idle'}
+              data={activeSkill === (skillName ?? activeSkill) ? data : null}
+              error={activeSkill === (skillName ?? activeSkill) ? error : null}
+              missingFields={activeSkill === (skillName ?? activeSkill) ? missingFields : []}
+              isActive
+              open
+              onRun={handlePanelRerun}
+              onDismissAlert={reset}
+              onClose={() => {
+                setSkillModalOpen(false);
+                setPanelOpen(false);
+              }}
+              runHistory={runHistory}
+              historyIndex={historyIndex}
+              onHistoryIndexChange={setHistoryIndex}
+            />
+          )}
+        </SkillResultModal>
+      )}
+
+      <CompareJobsModal
+        open={comparePickerOpen}
+        jobs={jobsList?.items ?? []}
+        onClose={() => setComparePickerOpen(false)}
+        onConfirm={ids => void handleCompareConfirm(ids)}
+      />
+
+      <ApplyAssistModal open={applyAssistOpen} onClose={() => setApplyAssistOpen(false)} job={job} />
+      <OutreachDraftModal open={outreachOpen} onClose={() => setOutreachOpen(false)} job={job} />
 
       <SkillQuestionModal
         open={needsAnswer}

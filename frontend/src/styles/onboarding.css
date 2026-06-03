@@ -755,6 +755,16 @@
   color: var(--nc-primary);
 }
 
+.onboarding-chip--gap {
+  border-color: #fca5a5;
+  background: #fef2f2;
+  color: #b91c1c;
+}
+
+.onboarding-chip--gap:hover {
+  border-color: #ef4444;
+}
+
 .onboarding-chip .material-symbols-outlined {
   font-size: 18px;
 }
@@ -918,6 +928,46 @@
 
 .onboarding-salary-currency:focus {
   outline: 2px solid rgba(0, 88, 190, 0.25);
+}
+
+.onboarding-salary-controls {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.onboarding-salary-manual {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+}
+
+.onboarding-salary-manual__field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.onboarding-salary-manual__label {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--nc-on-surface-variant);
+}
+
+.onboarding-salary-manual__input {
+  width: 100%;
+  padding: 10px 12px;
+  border: 1px solid var(--nc-outline-variant);
+  border-radius: 10px;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--nc-on-surface);
+  background: var(--nc-surface);
+}
+
+.onboarding-salary-manual__input:focus {
+  outline: 2px solid rgba(0, 88, 190, 0.25);
+  border-color: var(--nc-primary);
 }
 
 .onboarding-salary-slider {

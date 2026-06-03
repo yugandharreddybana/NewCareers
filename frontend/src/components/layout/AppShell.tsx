@@ -24,6 +24,7 @@ import Sidebar from '@/components/layout/Sidebar';
 import TopBar from '@/components/layout/TopBar';
 import BottomNav from '@/components/layout/BottomNav';
 import DevModeBanner from '@/components/ui/DevModeBanner';
+import { NavUsageLimits } from '@/components/dashboard/NavUsageLimits';
 import { Sparkles } from 'lucide-react';
 import ErrorBoundary from '@/components/ErrorBoundary';
 import { PageLoader } from '@/components/LoadingSpinner';
@@ -60,14 +61,15 @@ export default function AppShell({ children }: AppShellProps) {
 
       {/* ── Mobile top brand bar ── */}
       <header className="md:hidden fixed top-0 inset-x-0 z-40 h-14 flex items-center px-4 bg-white border-b border-[#e2e8f0] dark:bg-slate-950 dark:border-white/10">
-        <div className="flex items-center gap-2">
-          <div className="w-7 h-7 bg-[#6366f1] rounded-lg flex items-center justify-center">
+        <div className="flex items-center gap-2 min-w-0 flex-1">
+          <div className="w-7 h-7 bg-[#6366f1] rounded-lg flex items-center justify-center shrink-0">
             <Sparkles size={14} className="text-white" />
           </div>
-          <span className="font-bold text-[15px] text-[#0f172a] dark:text-white font-display">
+          <span className="font-bold text-[15px] text-[#0f172a] dark:text-white font-display shrink-0">
             Career<span className="text-[#6366f1]">Ops</span>
           </span>
         </div>
+        <NavUsageLimits />
       </header>
 
       {/* ── Desktop content area ── */}

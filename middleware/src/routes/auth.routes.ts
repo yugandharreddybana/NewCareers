@@ -21,6 +21,7 @@ import { forward } from '../services/backendProxy.js';
 import { checkValidation, trimStrings } from '../sanitize.js';
 import { authLimiter, loginLimiter, csrfGuard } from '../rateLimiter.js';
 import { authGuard } from '../authGuard.js';
+import { verifySessionToken } from '../jwtVerification.js';
 
 const router = express.Router();
 const COOKIE = process.env.COOKIE_NAME || 'co_session';
@@ -101,26 +102,54 @@ router.post('/refresh',
   });
 
 // ── Logout ─────────────────────────────────────────────────────────────────
-router.post('/logout',
-  authGuard,
-  async (req, res, next) => {
+// No authGuard — it used to inject a dev user when the JWT was already cleared.
+// Always clear co_session; revoke server-side only when a valid JWT is present.
+router.post('/logout', async (req, res, next) => {
+  const clearOpts = {
+    path: '/',
+    httpOnly: true,
+    secure: process.env.NODE_ENV === 'production',
+    sameSite: (process.env.COOKIE_SAMESITE || 'strict') as 'strict' | 'lax' | 'none',
+  };
+
+  let userId: string | undefined;
+  const bearer = req.headers.authorization?.startsWith('Bearer ')
+    ? req.headers.authorization.slice(7).trim()
+    : undefined;
+  const cookieToken = req.cookies?.[COOKIE] as string | undefined;
+  const token = bearer || cookieToken;
+
+  if (token && process.env.JWT_PUBLIC_KEY) {
     try {
+      const payload = verifySessionToken(token);
+      userId = payload.sub === 'dev-user-123'
+        ? '00000000-0000-0000-0000-000000000001'
+        : payload.sub;
+    } catch {
+      // Expired or invalid — still clear the cookie below.
+    }
+  }
+
+  try {
+    if (userId) {
       const r = await forward({
         method: 'POST',
         path: '/auth/logout',
-        userId: req.userId,
+        userId,
         data: {},
         headers: { 'Content-Type': 'application/json' },
       });
       if (r.status >= 400) {
-        throw new Error(`Backend logout failed with status: ${r.status}`);
+        console.warn(`Backend logout returned ${r.status}; clearing cookie anyway`);
       }
-      res.clearCookie(COOKIE, { path: '/' });
-      res.json({ ok: true });
-    } catch (e) {
-      next(e);
     }
-  });
+    res.clearCookie(COOKIE, clearOpts);
+    res.json({ ok: true });
+  } catch (e) {
+    res.clearCookie(COOKIE, clearOpts);
+    res.json({ ok: true });
+  }
+});
 
 // ── Forgot Password ────────────────────────────────────────────────────────
 router.post('/forgot-password',

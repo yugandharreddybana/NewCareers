@@ -11,6 +11,7 @@
  * instance used everywhere else, with the full interceptor chain.
  */
 import React, { createContext, useContext, useEffect, useState } from 'react';
+import { useAuth } from '@/context/AuthContext';
 import { experimentsApi } from '@/services/experimentsApi';
 
 type VariantMap = Record<string, string>;
@@ -28,21 +29,29 @@ const ExperimentContext = createContext<ExperimentContextValue>({
 });
 
 export const ExperimentProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
+  const { user, loading: authLoading } = useAuth();
   const [variants, setVariants] = useState<VariantMap>({});
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
+    if (authLoading) return;
+    if (!user) {
+      setVariants({});
+      setLoading(false);
+      return;
+    }
+
+    setLoading(true);
     experimentsApi
       .getAllVariants()
       .then(data => {
-        // getAllVariants returns ExperimentVariant[] — collapse to VariantMap
         const map: VariantMap = {};
         data.forEach(v => { map[v.key] = v.variant; });
         setVariants(map);
       })
       .catch(() => {}) // non-fatal — defaults to 'control' for all keys
       .finally(() => setLoading(false));
-  }, []);
+  }, [user, authLoading]);
 
   const getVariant = (key: string, fallback = 'control'): string =>
     variants[key] ?? fallback;

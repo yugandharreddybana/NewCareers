@@ -5,25 +5,29 @@ This service is consumed internally by the Node.js middleware and is **not** exp
 
 ## Quick Start (local)
 
+**Default:** `mvn spring-boot:run` in `backend/` auto-starts this service on port 5500 — no separate terminal.
+
+One-time Python setup:
+
 ```bash
 cd scraper
 python -m venv .venv
 source .venv/bin/activate      # Windows: .venv\Scripts\activate
 pip install -r requirements.txt
 playwright install chromium
+```
 
-cp .env.example .env
-# Edit .env — set SCRAPER_LLM_MODEL and SCRAPER_LLM_API_KEY
+Optional manual run (debugging):
 
+```bash
 uvicorn main:app --host 0.0.0.0 --port 5500 --reload
 ```
 
 ## Quick Start (Docker)
 
 ```bash
-cd scraper
-docker build -t newcareers-scraper .
-docker run -p 5500:5500 --env-file .env newcareers-scraper
+docker compose up -d scraper
+# Use SCRAPER_AUTO_START=false when backend runs outside Docker
 ```
 
 ## Endpoints
@@ -32,7 +36,8 @@ docker run -p 5500:5500 --env-file .env newcareers-scraper
 |--------|------|-------------|
 | `GET` | `/health` | Liveness probe |
 | `POST` | `/scrape` | Generic scraper — any URL + custom prompt |
-| `POST` | `/scrape/jobs` | Structured job-listing extractor |
+| `POST` | `/scrape/jobs/playwright` | Deterministic Playwright job extractor (no LLM; used by company career fetch) |
+| `POST` | `/scrape/jobs` | LLM-based job extractor (admin/legacy; not used by job pipeline) |
 
 ### POST `/scrape`
 

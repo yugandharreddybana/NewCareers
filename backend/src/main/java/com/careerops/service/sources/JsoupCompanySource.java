@@ -1,7 +1,6 @@
 package com.careerops.service.sources;
 
 import com.careerops.model.Job;
-import com.careerops.model.UserProfile;
 import org.jsoup.Jsoup;
 import org.jsoup.nodes.Document;
 import org.jsoup.nodes.Element;
@@ -11,23 +10,21 @@ import org.springframework.stereotype.Component;
 
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
 /**
- * Scrapes career pages for 100+ Irish & Ireland-based tech companies.
- * Organised by category. Fails closed per company.
+ * Jsoup-only fallback scraper for company career pages.
+ * Prefer {@link com.careerops.service.sources.company.CompanyCareerSource} for tiered ATS → Playwright → Jsoup fetch.
  */
 @Component
-public class JsoupCompanySource implements JobSource {
+public class JsoupCompanySource {
     private static final Logger log = LoggerFactory.getLogger(JsoupCompanySource.class);
+    private static final int MAX_LINKS_PER_COMPANY = 15;
 
-    /**
-     * Key = company name, Value = careers page URL.
-     * Covers: Big Tech Dublin, Irish Unicorns/Scale-ups, Fintech, IDA-backed,
-     *         IT Consultancies, Health Tech, E-Commerce, Cybersecurity, SaaS.
-     */
+    /** Key = company name, Value = careers page URL. */
     private static final Map<String, String> CAREER_PAGES = new LinkedHashMap<>() {{
         // ── Big Tech (Dublin offices) ─────────────────────────────────────────
         put("Google",        "https://careers.google.com/jobs/results/?location=Dublin%2C+Ireland");
@@ -98,7 +95,7 @@ public class JsoupCompanySource implements JobSource {
         put("Deloitte",      "https://apply.deloitte.com/careers/SearchJobs/");
         put("PwC Ireland",   "https://www.pwc.ie/careers/experienced-careers.html");
         put("KPMG Ireland",  "https://home.kpmg/ie/en/home/careers.html");
-        put("EY Ireland",    "https://careers.ey.com/ey/search/#?location=ireland");
+        put("EY",            "https://careers.ey.com/ey/search/#?location=ireland");
         put("TCS",           "https://ibegin.tcs.com/iBegin/faces/SearchJobServlet?location=Ireland");
 
         // ── Fintech / Financial Services ──────────────────────────────────────
@@ -151,47 +148,64 @@ public class JsoupCompanySource implements JobSource {
         put("Occupop",       "https://occupop.com/careers/");
     }};
 
-    @Override public String name() { return "jsoup-companies"; }
+    /** All configured company career pages (for admin/docs). */
+    public static List<String> companyNames() {
+        return List.copyOf(CAREER_PAGES.keySet());
+    }
 
-    @Override
-    public List<Job> fetch(UserProfile profile) {
-        List<Job> out = new ArrayList<>();
-        for (var entry : CAREER_PAGES.entrySet()) {
-            if (out.size() >= 200) break;
-            try {
-                Document doc = Jsoup.connect(entry.getValue())
-                    .userAgent("Mozilla/5.0 (compatible; CareerOpsBot/1.0)")
-                    .followRedirects(true)
-                    .timeout(9_000).get();
+    public static int companyCount() {
+        return CAREER_PAGES.size();
+    }
 
-                var links = doc.select(
-                    "a[href*=/job/], a[href*=/jobs/], a[href*=career], a[href*=position]");
-                int added = 0;
-                for (Element a : links) {
-                    String title = a.text().trim();
-                    if (title.isEmpty() || title.length() > 160) continue;
-                    String href = a.absUrl("href");
+    /** Exposed for {@link com.careerops.service.sources.company.CompanyCareerRegistry}. */
+    public static Map<String, String> careerPages() {
+        return Collections.unmodifiableMap(CAREER_PAGES);
+    }
 
-                    Job j = Job.builder()
-                        .title(title)
-                        .company(entry.getKey())
-                        .location("Dublin, Ireland")
-                        .sourceUrl(href.isEmpty() ? entry.getValue() : href)
-                        .sourceName(entry.getKey() + " Careers")
-                        .currency("EUR")
-                        .postedAt(Instant.now())
-                        .build();
-                    j.setFingerprint(FingerprintUtil.of(
-                        j.getCompany(), j.getTitle(), j.getLocation()));
-                    out.add(j);
-                    if (++added >= 10) break;
+    /** Jsoup-only scrape for a single company (fallback tier). */
+    public List<Job> scrapeCompanyPage(String company, String careersUrl) {
+        List<Job> jobs = new ArrayList<>();
+        try {
+            Document doc = Jsoup.connect(careersUrl)
+                .userAgent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+                    + "(KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36")
+                .followRedirects(true)
+                .timeout(9_000)
+                .get();
+
+            var links = doc.select(
+                "a[href*=/job/], a[href*=/jobs/], a[href*=career], a[href*=position], "
+                    + "a[href*=vacanc], a[href*=opening]");
+            int added = 0;
+            for (Element a : links) {
+                String title = a.text().trim();
+                if (title.length() < 4 || title.length() > 160) {
+                    continue;
                 }
-                log.debug("jsoup-companies: {} -> {} jobs", entry.getKey(), added);
-            } catch (Exception e) {
-                log.debug("jsoup-companies skipped {}: {}", entry.getKey(), e.getMessage());
+                String lower = title.toLowerCase();
+                if (lower.contains("cookie") || lower.contains("privacy") || lower.contains("sign in")) {
+                    continue;
+                }
+                String href = a.absUrl("href");
+
+                Job j = Job.builder()
+                    .title(title)
+                    .company(company)
+                    .location("Dublin, Ireland")
+                    .sourceUrl(href.isEmpty() ? careersUrl : href)
+                    .sourceName("jsoup-companies")
+                    .currency("EUR")
+                    .postedAt(Instant.now())
+                    .build();
+                j.setFingerprint(FingerprintUtil.of(j.getCompany(), j.getTitle(), j.getLocation()));
+                jobs.add(j);
+                if (++added >= MAX_LINKS_PER_COMPANY) {
+                    break;
+                }
             }
+        } catch (Exception e) {
+            log.debug("jsoup-companies scrape failed {}: {}", company, e.getMessage());
         }
-        log.info("jsoup-companies total collected: {}", out.size());
-        return out;
+        return jobs;
     }
 }

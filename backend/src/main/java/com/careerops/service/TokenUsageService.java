@@ -6,6 +6,9 @@ import com.careerops.repository.AiTokenUsageRepository;
 import org.springframework.stereotype.Service;
 
 import java.math.BigDecimal;
+import java.time.Instant;
+import java.time.LocalDate;
+import java.time.ZoneId;
 import java.util.List;
 import java.util.UUID;
 
@@ -75,8 +78,16 @@ public class TokenUsageService {
     }
 
     public boolean hasExceededBudget(UUID userId, long dailyBudget) {
-        java.time.Instant since = java.time.Instant.now().minus(java.time.Duration.ofDays(1));
-        long tokensUsedToday = repo.sumTokensByUserSince(userId, since);
-        return tokensUsedToday >= dailyBudget;
+        return tokensUsedSinceStartOfQuotaDay(userId) >= dailyBudget;
+    }
+
+    /** Tokens consumed since midnight in {@link UsageLimitService#QUOTA_ZONE}. */
+    public long tokensUsedSinceStartOfQuotaDay(UUID userId) {
+        return repo.sumTokensByUserSince(userId, startOfQuotaDayInstant());
+    }
+
+    static Instant startOfQuotaDayInstant() {
+        ZoneId zone = UsageLimitService.QUOTA_ZONE;
+        return LocalDate.now(zone).atStartOfDay(zone).toInstant();
     }
 }

@@ -131,10 +131,13 @@ function emit(eventName: string, detail?: unknown): void {
 }
 
 const PUBLIC_PATHS_FRONTEND = new Set([
+  '/',
   '/login',
   '/signup',
+  '/register',
   '/forgot-password',
   '/reset-password',
+  '/get-started',
 ]);
 
 async function readErrorMessage(err: AxiosError): Promise<string | undefined> {
@@ -167,7 +170,10 @@ async function refreshAccessToken(): Promise<string> {
     {
       withCredentials: true,
       timeout: 30_000,
-      headers: { 'X-Requested-With': 'XMLHttpRequest' },
+      headers: {
+        'X-Requested-With': 'XMLHttpRequest',
+        ...(getCsrfToken() ? { 'X-CSRF-Token': getCsrfToken()! } : {}),
+      },
     },
   );
 
@@ -227,7 +233,7 @@ export async function ensureFreshSession(): Promise<void> {
 function redirectToLoginIfNeeded(): void {
   if (typeof window === 'undefined') return;
   const here = window.location.pathname;
-  if (DEV_BYPASS || PUBLIC_PATHS_FRONTEND.has(here)) return;
+  if (PUBLIC_PATHS_FRONTEND.has(here)) return;
   const target = '/login?reason=session_expired';
   const current = `${window.location.pathname}${window.location.search}`;
   if (current === target) return;
@@ -251,12 +257,9 @@ api.interceptors.response.use(
       originalRequest.url !== '/auth/refresh' &&
       originalRequest.url !== '/auth/login';
 
-    if (!isRefreshableRequest) {
-      endApiLoading(originalRequest);
-    }
-
     // 429 → user-facing toast
     if (err.response?.status === 429) {
+      endApiLoading(originalRequest);
       const msg =
         err.response?.data?.error ||
         err.response?.data?.message ||
@@ -267,9 +270,17 @@ api.interceptors.response.use(
     }
 
   if (isRefreshableRequest) {
-      if (DEV_BYPASS) return Promise.reject(err);
-
       retriedConfigs.add(originalRequest);
+      // Release the original request's loader before retry — otherwise the retry
+      // opens a second track and the first id never clears (infinite overlay).
+      endApiLoading(originalRequest);
+
+      if (!tokenStore.hasRefresh()) {
+        tokenStore.clear();
+        emit(AUTH_LOGGED_OUT_EVENT);
+        redirectToLoginIfNeeded();
+        return Promise.reject(err);
+      }
 
       try {
         const access = await (async () => {
@@ -301,10 +312,11 @@ api.interceptors.response.use(
         }
         return api(originalRequest);
       } catch (refreshError) {
-        endApiLoading(originalRequest);
         return Promise.reject(refreshError);
       }
     }
+
+    endApiLoading(originalRequest);
 
     // For any other error, attach a normalised message + report 5xx to telemetry.
     const normalized = (await readErrorMessage(err))
@@ -446,21 +458,67 @@ export const onboardingApi = {
 };
 
 // ── Jobs API ──────────────────────────────────────────────────────────────
+const JOBS_PAGE_SIZE = 200;
+
 export const jobsApi = {
-  list: (page = 0, size = 100) =>
+  list: (page = 0, size = JOBS_PAGE_SIZE) =>
     api
       .get<JobsListResponse>('/jobs', { params: { page, size } })
       .then(r => ({
         ...r.data,
         items: (r.data.items ?? []).map((item: JobCard) => normalizeJobCard(item)),
       })),
+  /** Fetches every job in the user's pipeline (paginates until exhausted). */
+  listAll: async (): Promise<JobsListResponse> => {
+    const allItems: JobCard[] = [];
+    let page = 0;
+    let meta: JobsListResponse = {
+      items: [],
+      dailyCount: 0,
+      dailyLimit: 15,
+      remaining: 0,
+      totalCount: 0,
+      page: 0,
+      size: JOBS_PAGE_SIZE,
+      hasMore: false,
+    };
+    for (let guard = 0; guard < 20; guard++) {
+      const batch = await jobsApi.list(page, JOBS_PAGE_SIZE);
+      meta = batch;
+      allItems.push(...batch.items);
+      if (!batch.hasMore || batch.items.length < JOBS_PAGE_SIZE) break;
+      page += 1;
+    }
+    return {
+      ...meta,
+      items: allItems,
+      totalCount: meta.totalCount ?? allItems.length,
+      hasMore: false,
+    };
+  },
   detail: (userJobId: string) =>
-    api.get<JobDetail>(`/jobs/${userJobId}`).then(r => normalizeJobDetail(r.data)),
-  fetch: (count = 5) =>
+    api
+      .get<JobDetail>(`/jobs/${userJobId}`, { timeout: 45_000 })
+      .then(r => normalizeJobDetail(r.data)),
+  /** Recompute CV↔posting skill match for every pipeline job (persists to DB). */
+  refreshSkills: () =>
+    api.post<JobsListResponse>('/jobs/refresh-skills', null, {
+      timeout: 120_000,
+      skipGlobalLoader: true,
+    }),
+  enrichDescription: (userJobId: string) =>
+    api
+      .post<JobDetail>(`/jobs/${userJobId}/description`, null, {
+        timeout: 45_000,
+        loaderMessage: 'Loading job description…',
+      })
+      .then(r => normalizeJobDetail(r.data)),
+  fetch: (count = 10) =>
     api
       .post('/jobs/fetch', null, {
         params: { count },
-        loaderMessage: 'Scanning job boards for new roles…',
+        timeout: 180_000,
+        loaderMessage: 'Scanning IrishJobs, Jobs.ie, LinkedIn, Remotive, and more…',
       })
       .then(r => r.data),
   fetchIrishJobs: (count = 10) =>
@@ -485,9 +543,15 @@ export const jobsApi = {
   /** @deprecated use fetchLive instead */
   fetchIndeedLive: () =>
     api.post<import('@/types').JobCard>('/jobs/fetch-indeed-live', null, { timeout: 60_000 }).then(r => r.data),
+  delete: (userJobId: string) =>
+    api.delete(`/jobs/${userJobId}`).then(() => undefined),
   recommended: () => api.get('/jobs/recommended').then(r => r.data),
   limits: () => api.get('/jobs/limits').then(r => r.data),
   stats: () => api.get('/jobs/stats').then(r => r.data),
+};
+
+export const usageApi = {
+  limits: () => api.get<import('@/types').UsageLimits>('/usage/limits').then(r => r.data),
 };
 
 // ── Kanban API ────────────────────────────────────────────────────────────

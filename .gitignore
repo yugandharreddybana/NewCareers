@@ -92,7 +92,10 @@ frontend/*.tsbuildinfo
 frontend/tsconfig.tsbuildinfo
 
 # ── SECURITY: Never commit real credentials ────────────────────────────────
-# Use .env.example as the template.
+# Windows accidental redirect artifact (e.g. `> nul` run from backend/)
+backend/nul
+backend/tmp-*.json
+backend/tmp-*.html
 # backend/src/main/resources/application.properties
 middleware/.env
 frontend/.env

@@ -112,6 +112,8 @@ public class ProfileDtos {
         String              remotePolicy,
         String              hybridOnsiteDays,
         String              availability,
+        /** CV + profile skills used for ATS highlighting in job descriptions */
+        String[]            atsKeywords,
         Integer             completenessScore,
         Long                version
     ) {}

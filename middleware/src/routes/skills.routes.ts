@@ -49,9 +49,15 @@ router.post('/cv-human-score',
 router.get('/pdf/:userJobId/:type',     authGuard, javaProxy);
 router.post('/pdf/evaluation-report',   authGuard, javaProxy);
 router.get('/result/:userJobId/:skill', authGuard, javaProxy);
+router.get('/resume/:userJobId/preview', authGuard, javaProxy);
+router.get('/docx/:userJobId/resume', authGuard, javaProxy);
+router.get('/run-history/:userJobId/:skillName', authGuard, javaProxy);
+router.get('/completed/:userJobId', authGuard, javaProxy);
 
 // Align with Java SkillsController paths used by the frontend
 router.post('/conversation/reply',      authGuard, skillLimiter, javaProxy);
+router.post('/apply/answer',            authGuard, skillLimiter, javaProxy);
+router.post('/outreach/draft',          authGuard, skillLimiter, javaProxy);
 router.get('/last-run/:userJobId/:skillName', authGuard, javaProxy);
 router.post('/run-all/:userJobId',      authGuard, skillLimiter, javaProxy);
 router.post('/run-all-async/:userJobId', authGuard, skillLimiter, javaProxy);

@@ -47,8 +47,11 @@ public class NvidiaAgentService {
     @Value("${nvidia.api.key:}")
     private String apiKey;
 
-    @Value("${nvidia.agent.model:meta/llama-3.1-405b-instruct}")
+    @Value("${nvidia.agent.model:meta/llama-3.3-70b-instruct}")
     private String model;
+
+    @Value("${nvidia.model:meta/llama-3.3-70b-instruct}")
+    private String fallbackModel;
 
     @Value("${nvidia.max.tokens:8192}")
     private int maxTokens;
@@ -110,8 +113,15 @@ public class NvidiaAgentService {
 
     // ─── Public agentic loop ─────────────────────────────────────────────────
 
+    public boolean isConfigured() {
+        return apiKey != null && !apiKey.isBlank();
+    }
+
     public AgentResult run(String systemPrompt, ArrayNode messages, UUID userId, UUID userJobId) {
         consentService.validateAiConsent(userId);
+        if (!isConfigured()) {
+            return AgentResult.error("AI engine not configured. Set NVIDIA_API_KEY in your environment.");
+        }
         long deadline   = System.currentTimeMillis() + (120 * 1000);
         int  iterations = 0;
 
@@ -271,7 +281,12 @@ public class NvidiaAgentService {
                 if (status == 401) {
                     sample.stop(meterRegistry.timer("outbound.call.latency", "service", "nvidia_agent", "status", "failure"));
                     log.error("NVIDIA API key invalid (401)");
-                    return mapper.createObjectNode();
+                    throw com.careerops.exception.ApiException.internalError("Invalid NVIDIA API key");
+                }
+                if (status == 404 && attempt == 1 && !model.equals(fallbackModel)) {
+                    log.warn("NVIDIA model {} not found (404), retrying with {}", model, fallbackModel);
+                    body.put("model", fallbackModel);
+                    continue;
                 }
                 if ((status == 429) && attempt < maxAttempts) {
                     log.warn("NVIDIA rate limited, retrying (attempt {})", attempt);

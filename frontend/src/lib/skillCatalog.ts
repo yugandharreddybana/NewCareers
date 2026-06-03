@@ -1,3 +1,5 @@
+import { skillsForKanbanColumn } from '@/lib/skillVisibility';
+import type { JobCard } from '@/types';
 import type { SkillName } from '@/types/skills';
 
 export type SkillScope = 'job' | 'pipeline' | 'profile';
@@ -128,11 +130,11 @@ export const SKILL_CATALOG: SkillCatalogItem[] = [
     id: 'compare',
     label: 'Compare Jobs',
     icon: 'compare_arrows',
-    description: 'Compare this role with other saved jobs side by side.',
+    description: 'Compare saved roles side by side.',
     tooltip:
-      'Places this job next to up to four other roles already in your pipeline. Compares fit, compensation signals, growth potential, culture, sponsorship, and other factors in one view so you can choose where to spend applications and prep time.',
+      'Places up to five saved roles next to each other. Compares fit, compensation signals, growth potential, culture, and sponsorship in one view.',
     scope: 'pipeline',
-    scopeHint: 'Uses up to 5 saved roles including this one',
+    scopeHint: 'Kanban board · up to 5 saved roles',
   },
   {
     id: 'triage',
@@ -140,32 +142,22 @@ export const SKILL_CATALOG: SkillCatalogItem[] = [
     icon: 'sort',
     description: 'Re-rank all saved jobs with verdicts and next steps.',
     tooltip:
-      'Reviews every job in your pipeline and returns a prioritised list with a one-line verdict per role (e.g. apply now, nurture, or pass) plus suggested next actions. Best when you have many openings and need a clear order of attack—not just analysis of a single posting.',
+      'Reviews every job in your pipeline and returns a prioritised list with a one-line verdict per role plus suggested next actions.',
     scope: 'pipeline',
-    scopeHint: 'Runs across your full pipeline',
-  },
-  {
-    id: 'track',
-    label: 'Application Tracker',
-    icon: 'view_kanban',
-    description: 'Snapshot of saved applications and pipeline stats.',
-    tooltip:
-      'Returns a quick read of every role in your pipeline—status, match %, and aggregate counts (applied, interviews, offers). Use it before opening the Kanban board when you want numbers in one place.',
-    scope: 'pipeline',
-    scopeHint: 'All saved roles',
-  },
-  {
-    id: 'help',
-    label: 'Skill Directory',
-    icon: 'help',
-    description: 'Lists available skills and suggests your next step.',
-    tooltip:
-      'Shows the full CareerOps skill catalog with short descriptions and a personalized suggestion based on your CV and saved jobs—handy when you are not sure which skill to run next.',
-    scope: 'profile',
+    scopeHint: 'Kanban board · full pipeline',
   },
 ];
 
+/** Pipeline-only skills (shown on Kanban, not job detail). */
+export const PIPELINE_SKILL_IDS = ['compare', 'triage'] as const satisfies readonly SkillName[];
+
 export const SKILL_COUNT = SKILL_CATALOG.length;
+
+/** Job-detail skills enabled for the job's current kanban column. */
+export function jobDetailSkills(column: JobCard['kanbanColumn']) {
+  const allowed = skillsForKanbanColumn(column);
+  return SKILL_CATALOG.filter(s => s.scope === 'job' && allowed.includes(s.id));
+}
 
 export function getSkillCatalogItem(id: SkillName): SkillCatalogItem | undefined {
   return SKILL_CATALOG.find(s => s.id === id);

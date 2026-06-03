@@ -1,19 +1,26 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { useKanbanPatchMutation } from '@/hooks/queries';
 import type { JobCard, KanbanColumn } from '@/types';
+import { formatPulledAt } from '@/lib/utils';
+import { JobSourceBadge } from '@/components/ui/JobSourceBadge';
 import AppliedCvModal from './AppliedCvModal';
 import toast from 'react-hot-toast';
 
-const DISPLAY_COLUMNS: KanbanColumn[] = ['Discovered', 'Saved', 'Applied', 'Interview', 'Offer', 'Rejected'];
+/** Saved jobs appear in Discovered with a bookmark badge — not a separate column. */
+const DISPLAY_COLUMNS: KanbanColumn[] = ['Discovered', 'Applied', 'Interview', 'Offer', 'Rejected'];
 
 const COLUMN_META: Record<KanbanColumn, { label: string; dot: string }> = {
-  Saved: { label: 'Saved', dot: 'bg-tertiary' },
   Applied: { label: 'Applied', dot: 'bg-primary' },
   Interview: { label: 'Interviewing', dot: 'bg-secondary' },
   Offer: { label: 'Offer', dot: 'bg-primary-container' },
   Discovered: { label: 'Discovered', dot: 'bg-outline' },
+  Saved: { label: 'Discovered', dot: 'bg-outline' },
   Rejected: { label: 'Archived', dot: 'bg-outline' },
 };
+
+function isDiscoveryColumn(col: KanbanColumn): boolean {
+  return col === 'Discovered' || col === 'Saved';
+}
 
 interface Props {
   jobs: JobCard[];
@@ -38,13 +45,7 @@ function getCardInitial(company: string): string {
 }
 
 function timeAgoLabel(iso?: string): string {
-  if (!iso) return 'Recently';
-  const diffMs = Date.now() - new Date(iso).getTime();
-  if (Number.isNaN(diffMs)) return 'Recently';
-  const days = Math.max(0, Math.floor(diffMs / 86_400_000));
-  if (days <= 0) return 'Today';
-  if (days === 1) return '1 day ago';
-  return `${days} days ago`;
+  return formatPulledAt(iso);
 }
 
 export const KanbanBoard: React.FC<Props> = ({ jobs: initialJobs, onJobClick, onColumnChange }) => {
@@ -57,8 +58,12 @@ export const KanbanBoard: React.FC<Props> = ({ jobs: initialJobs, onJobClick, on
 
   useEffect(() => { setJobs(initialJobs); }, [initialJobs]);
 
-  const byColumn = useCallback((col: KanbanColumn) =>
-    jobs.filter(j => j.kanbanColumn === col), [jobs]);
+  const byColumn = useCallback((col: KanbanColumn) => {
+    if (col === 'Discovered') {
+      return jobs.filter(j => j.kanbanColumn === 'Discovered' || j.kanbanColumn === 'Saved');
+    }
+    return jobs.filter(j => j.kanbanColumn === col);
+  }, [jobs]);
 
   const runMove = {
     mutate: ({ job, sourceCol, targetCol }: MoveJobPayload) => {
@@ -96,7 +101,14 @@ export const KanbanBoard: React.FC<Props> = ({ jobs: initialJobs, onJobClick, on
 
   const handleDrop = async (e: React.DragEvent, targetCol: KanbanColumn) => {
     e.preventDefault();
-    if (!dragging || dragging.sourceCol === targetCol) { setDragging(null); setOverCol(null); return; }
+    if (!dragging) { setDragging(null); setOverCol(null); return; }
+    const sameDiscoveryBucket =
+      isDiscoveryColumn(dragging.sourceCol) && targetCol === 'Discovered';
+    if (dragging.sourceCol === targetCol || sameDiscoveryBucket) {
+      setDragging(null);
+      setOverCol(null);
+      return;
+    }
 
     const job = jobs.find(j => j.userJobId === dragging.jobId);
     if (!job) {
@@ -177,15 +189,14 @@ export const KanbanBoard: React.FC<Props> = ({ jobs: initialJobs, onJobClick, on
                     draggable
                     onDragStart={e => handleDragStart(e, job)}
                     onClick={() => onJobClick?.(job)}
-                    className="
-                      bg-surface-container-lowest p-gutter rounded-xl border border-outline-variant
-                      shadow-[0_4px_12px_rgba(0,0,0,0.04)] transition-all
-                      cursor-grab active:cursor-grabbing
-                      hover:-translate-y-[2px] hover:border-primary
-                      select-none
-                      relative
-                      ${col === 'Interview' ? 'border-l-4 border-l-primary' : ''}
-                    "
+                    className={[
+                      'bg-surface-container-lowest p-gutter rounded-xl border border-outline-variant',
+                      'shadow-[0_4px_12px_rgba(0,0,0,0.04)] transition-all',
+                      'cursor-grab active:cursor-grabbing',
+                      'hover:-translate-y-[2px] hover:border-primary',
+                      'select-none relative',
+                      col === 'Interview' ? 'border-l-4 border-l-primary' : '',
+                    ].join(' ')}
                   >
                     <div className="flex justify-between items-start mb-3">
                       <div className="w-10 h-10 rounded-lg bg-secondary-fixed border border-outline-variant flex items-center justify-center text-[11px] font-bold text-on-secondary-fixed-variant">
@@ -198,9 +209,17 @@ export const KanbanBoard: React.FC<Props> = ({ jobs: initialJobs, onJobClick, on
                       )}
                     </div>
                     <h4 className="font-headline-sm text-[16px] text-on-surface mb-1 line-clamp-2">{job.title}</h4>
-                    <p className="font-body-sm text-body-sm text-on-surface-variant mb-4 truncate">
+                    <p className="font-body-sm text-body-sm text-on-surface-variant mb-2 truncate">
                       {job.company}{job.location ? ` • ${job.location}` : ''}
                     </p>
+                    <div className="flex flex-wrap gap-2 mb-3">
+                      {job.kanbanColumn === 'Saved' && (
+                        <span className="text-[10px] font-bold uppercase tracking-wide px-2 py-0.5 rounded bg-tertiary-container text-on-tertiary-container">
+                          Saved
+                        </span>
+                      )}
+                      {job.sourceName ? <JobSourceBadge name={job.sourceName} /> : null}
+                    </div>
                     {col === 'Interview' && (
                       <div className="bg-surface-container p-2 rounded-lg mb-4">
                         <div className="flex items-center gap-2 text-primary">

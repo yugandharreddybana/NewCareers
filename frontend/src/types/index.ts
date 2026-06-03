@@ -67,6 +67,8 @@ export interface ImportSummary {
 export interface Profile {
   targetRoles?: string[];
   techStack?: string[];
+  /** Skills inferred from CV + profile (ATS highlighting). */
+  atsKeywords?: string[];
   location?: string;
   salaryMin?: number;
   salaryMax?: number;
@@ -150,6 +152,10 @@ export interface JobsListResponse {
   dailyCount: number;
   dailyLimit: number;
   remaining: number;
+  totalCount?: number;
+  page?: number;
+  size?: number;
+  hasMore?: boolean;
 }
 
 export interface FetchSummary {
@@ -157,6 +163,30 @@ export interface FetchSummary {
   dailyCount: number;
   dailyLimit: number;
   remaining: number;
+}
+
+export interface DailyQuota {
+  key: string;
+  label: string;
+  used: number;
+  limit: number;
+  remaining: number;
+  resetsAt: string;
+  resetDescription: string;
+}
+
+export interface RateLimitHint {
+  label: string;
+  requestsPerMinute: number;
+  windowDescription: string;
+}
+
+export interface UsageLimits {
+  jobDelivery: DailyQuota;
+  aiTokens: DailyQuota;
+  skillApi: RateLimitHint;
+  generalApi: RateLimitHint;
+  timezoneId: string;
 }
 
 export interface Stats {

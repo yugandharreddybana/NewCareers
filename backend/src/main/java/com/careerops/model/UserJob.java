@@ -18,7 +18,6 @@ import java.util.UUID;
            @Index(name = "idx_user_jobs_user_kanban", columnList = "user_id, kanban_column")
        })
 @org.hibernate.annotations.SQLRestriction("deleted_at IS NULL")
-@org.hibernate.annotations.SQLDelete(sql = "UPDATE careerops.user_jobs SET deleted_at = CURRENT_TIMESTAMP WHERE id = ?")
 @org.hibernate.annotations.DynamicUpdate
 @Getter @Setter @NoArgsConstructor @AllArgsConstructor @Builder
 public class UserJob {

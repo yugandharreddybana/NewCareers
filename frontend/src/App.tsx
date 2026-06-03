@@ -23,7 +23,7 @@ import { HelmetProvider } from 'react-helmet-async';
 import { GoogleOAuthProvider } from '@react-oauth/google';
 import { AuthProvider } from './context/AuthContext';
 import { GOOGLE_CLIENT_ID } from './lib/env';
-import { ProtectedRoute, AdminRoute } from './components/ProtectedRoute';
+import { ProtectedRoute, AdminRoute, GuestRoute } from './components/ProtectedRoute';
 import { PageLoader } from './components/LoadingSpinner';
 import { ApiLoadingOverlay } from './components/ApiLoadingOverlay';
 import { ExperimentProvider } from './context/ExperimentContext';
@@ -115,13 +115,14 @@ export const App: React.FC = () => (
                 {/* ── Public routes ───────────────────────────────────────── */}
                 <Route path="/"                 element={<RouteWithBoundary label="Home"><Home /></RouteWithBoundary>} />
 
-                <Route path="/login"            element={<RouteWithBoundary label="Login"><Login /></RouteWithBoundary>} />
-                <Route path="/signup"           element={<RouteWithBoundary label="Sign up"><Signup /></RouteWithBoundary>} />
+                <Route element={<GuestRoute />}>
+                  <Route path="/login"            element={<RouteWithBoundary label="Login"><Login /></RouteWithBoundary>} />
+                  <Route path="/signup"           element={<RouteWithBoundary label="Sign up"><Signup /></RouteWithBoundary>} />
+                  <Route path="/forgot-password"  element={<RouteWithBoundary label="Forgot password"><ForgotPasswordPage /></RouteWithBoundary>} />
+                  <Route path="/reset-password"   element={<RouteWithBoundary label="Reset password"><ResetPasswordPage /></RouteWithBoundary>} />
+                </Route>
                 {/* Legacy /register → /signup so old emails still work. */}
                 <Route path="/register"         element={<Navigate to="/signup" replace />} />
-
-                <Route path="/forgot-password"  element={<RouteWithBoundary label="Forgot password"><ForgotPasswordPage /></RouteWithBoundary>} />
-                <Route path="/reset-password"   element={<RouteWithBoundary label="Reset password"><ResetPasswordPage /></RouteWithBoundary>} />
                 <Route path="/get-started"      element={<RouteWithBoundary label="Get started"><GetStarted /></RouteWithBoundary>} />
 
                 {/* ── Protected routes ────────────────────────────────────── */}

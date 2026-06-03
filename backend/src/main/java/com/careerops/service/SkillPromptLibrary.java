@@ -9,11 +9,9 @@ import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
-import org.springframework.web.reactive.function.client.WebClient;
 
 import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
-import java.time.Duration;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -23,11 +21,9 @@ import java.util.concurrent.ConcurrentHashMap;
  * Loads and caches skill prompts (SKILL.md) and reference documents.
  * Phase 2 extends Phase 1's 9 skills to 14 total.
  *
- * 4-Layer fallback chain:
- *   Layer 1: Upstream plugin repo (andrew-shwetzer/career-ops-plugin)
- *   Layer 2: Your fork (configurable via skill.prompt.fork.owner)
- *   Layer 3: Classpath bundled copies (src/main/resources/career-ops-skills/)
- *   Layer 4: Hardcoded minimal inline prompt (absolute last resort)
+ * 2-Layer fallback chain (offline/local-first):
+ *   Layer 1: Classpath bundled copies (src/main/resources/career-ops-skills/)
+ *   Layer 2: Hardcoded minimal inline prompt (absolute last resort)
  */
 @Service
 public class SkillPromptLibrary {
@@ -50,12 +46,15 @@ public class SkillPromptLibrary {
         "ats-endpoints.md",
         "resume-template.html",
         "profile-schema.md",
+        "professional-summary-contract.md",
         "states.md"
     );
 
     private static final Map<String, List<String>> SKILL_REFS = Map.ofEntries(
         Map.entry("evaluate",           List.of("scoring-rubric.md", "archetypes.md", "profile-schema.md", "states.md")),
-        Map.entry("tailor-resume",       List.of("ats-rules.md", "ats-endpoints.md", "resume-template.html", "profile-schema.md")),
+        Map.entry("tailor-resume",       List.of(
+                "ats-rules.md", "ats-endpoints.md", "resume-template.html",
+                "profile-schema.md", "professional-summary-contract.md")),
         Map.entry("apply",               List.of("profile-schema.md", "states.md")),
         Map.entry("outreach",            List.of("profile-schema.md")),
         Map.entry("research",            List.of("profile-schema.md")),
@@ -78,30 +77,11 @@ public class SkillPromptLibrary {
         this.careerMemoryService = careerMemoryService;
     }
 
-    @Value("${skill.prompt.upstream.owner:andrew-shwetzer}")
-    private String upstreamOwner;
-
-    @Value("${skill.prompt.upstream.repo:career-ops-plugin}")
-    private String upstreamRepo;
-
-    @Value("${skill.prompt.fork.owner:yugandharreddybana}")
-    private String forkOwner;
-
-    @Value("${skill.prompt.fork.repo:career-ops-plugin}")
-    private String forkRepo;
-
-    @Value("${skill.prompt.github.commit-sha:45f8f8b8098c1b67104d49d973cb8bc3e430489c}")
-    private String commitSha;
-
     private final ConcurrentHashMap<String, String> cache = new ConcurrentHashMap<>();
-
-    private final WebClient webClient = WebClient.builder()
-            .codecs(cfg -> cfg.defaultCodecs().maxInMemorySize(2 * 1024 * 1024))
-            .build();
 
     @PostConstruct
     public void init() {
-        log.info("SkillPromptLibrary: loading prompts from GitHub (4-layer fallback)...");
+        log.info("SkillPromptLibrary: loading prompts from bundled career-ops-skills (local-only mode)...");
         loadAll();
         log.info("SkillPromptLibrary: loaded {} entries into cache", cache.size());
     }
@@ -170,24 +150,46 @@ For each question, provide the question, ideal answer structure, and what the in
             sb.append("""
 \n\n---\n## ENHANCED ATS + HUMAN CV RULES (Phase 2)\n
 Apply ALL of the following rules when generating the tailored resume:\n
-1. Use CAR framework (Challenge → Action → Result) for every bullet point.
-2. Use strong past-tense action verbs only: Led, Built, Delivered, Grew, Reduced, Increased, Launched, Drove, Designed, Implemented, Optimised, Automated.
-3. Every achievement MUST include quantification: reduced X by Y% / saved €Z / increased output by N%.
-4. BANNED AI-sounding phrases: \"leveraged\", \"spearheaded\", \"synergies\", \"passionate about\", \"team player\", \"results-driven\", \"dynamic\", \"go-getter\", \"thought leader\".
-5. First-person authentic voice throughout. Irish English spelling.
-6. Every bullet must showcase unique candidate value and business impact to THIS specific employer.
-7. Mirror exact keywords from the JD naturally — do not keyword-stuff.
+1. PROFESSIONAL SUMMARY (NON-NEGOTIABLE): Read REFERENCE: professional-summary-contract.md.
+   Every CV must include a Professional Summary with exactly three sentences in this order:
+   (1) Who you are — short intro: profession, background, or area of expertise;
+   (2) Key skills/expertise — main skills from past/current roles relevant to THIS job (JD-aligned);
+   (3) Value you bring — how the candidate adds value to THIS company/role.
+   Do not omit, merge, or reorder these elements. The JSON `summary` field, HTML {{SUMMARY}},
+   and sections[].rewritten for "Professional Summary" must all use this same 3-sentence block.
+2. WORK EXPERIENCE (NON-NEGOTIABLE): Per tailor-resume SKILL.md — each role covers (in order):
+   role & scope, Actions (A), Impact (I) with quantifiable metrics, Value to team/company;
+   then a "Key Achievements:" block where every bullet follows AI = Action + Impact
+   (Action + Impact only — NOT Artificial Intelligence). CAR (Challenge→Action→Result)
+   may inform wording but Key Achievements must use Action + Impact with numbers.
+3. Use strong past-tense action verbs only: Led, Built, Delivered, Grew, Reduced, Increased, Launched, Drove, Designed, Implemented, Optimised, Automated.
+4. Every achievement MUST include quantification: reduced X by Y% / saved €Z / increased output by N%.
+5. BANNED AI-sounding phrases: \"leveraged\", \"spearheaded\", \"synergies\", \"passionate about\", \"team player\", \"results-driven\", \"dynamic\", \"go-getter\", \"thought leader\".
+6. First-person authentic voice throughout. Irish English spelling.
+7. Every bullet must showcase unique candidate value and business impact to THIS specific employer.
+8. Mirror exact keywords from the JD naturally — do not keyword-stuff.
 
-After calling save_resume_html with the full ATS HTML resume, return ONLY valid JSON (no markdown fences) with:
-- summary: string (2-3 sentences)
+When using agent tools: call save_resume_html with full ATS HTML, then return JSON (no raw HTML in JSON).
+
+When using the CareerOps dedicated tailor API (no tools): return ONLY valid JSON (no markdown fences) with:
+- summary: string (EXACTLY 3 sentences per rule 1 — Who you are / Key skills / Value you bring)
 - keywordsAdded: string[] (JD keywords woven in)
-- sections: [{ name, original, rewritten, rationale }] for Summary, Experience, Skills (min 3 sections)
+- sections: [{ name, original, rewritten, rationale }] — must include "Professional Summary" as first section with rewritten matching `summary`
 - warnings: string[] (optional ATS issues)
-Do NOT include raw HTML in the JSON — HTML is saved via save_resume_html only.
+- tailoringPlan: string (optional — gap analysis and section strategy from Steps 0–2)
+The server renders HTML from this JSON; do not return raw HTML in the JSON body.
 """);
         }
 
         return sb.toString();
+    }
+
+    /**
+     * Full SKILL.md + references + career memories + backend API execution block + SaaS JSON contract.
+     * Used by {@link SkillMdExecutorService} and dedicated pipelines (e.g. tailor-resume).
+     */
+    public String buildBackendSkillSystemPrompt(String skillName, @Nullable UUID userId) {
+        return buildFullSystemPrompt(skillName, userId) + SkillMdBackendAdapter.executionBlockFor(skillName);
     }
 
     public String getSkillMd(String skillName) {
@@ -213,50 +215,20 @@ Do NOT include raw HTML in the JSON — HTML is saved via save_resume_html only.
     }
 
     private @Nullable String fetchWithFallback(String filePath) {
-        String content = fetchFromGitHub(upstreamOwner, upstreamRepo, filePath);
+        String content = loadFromClasspath(filePath);
         if (content != null) {
-            log.debug("[Layer 1-upstream] loaded: {}", filePath);
-            return content;
-        }
-
-        if (forkOwner != null && !forkOwner.isBlank()) {
-            content = fetchFromGitHub(forkOwner, forkRepo, filePath);
-            if (content != null) {
-                log.warn("[Layer 2-fork] upstream unavailable, using fork for: {}", filePath);
-                return content;
-            }
-        }
-
-        content = loadFromClasspath(filePath);
-        if (content != null) {
-            log.warn("[Layer 3-classpath] GitHub unavailable, using bundled copy for: {}", filePath);
+            log.debug("[Layer 1-classpath] loaded bundled copy for: {}", filePath);
             return content;
         }
 
         String skill = extractSkillName(filePath);
         if (skill != null) {
-            log.error("[Layer 4-hardcoded] ALL layers failed for: {} — using minimal fallback", filePath);
+            log.error("[Layer 2-hardcoded] classpath missing for: {} — using minimal fallback", filePath);
             return getFallbackPrompt(skill);
         }
 
-        log.error("All 4 layers failed for reference doc: {}", filePath);
+        log.error("All local layers failed for reference doc: {}", filePath);
         return null;
-    }
-
-    private @Nullable String fetchFromGitHub(String owner, String repo, String filePath) {
-        try {
-            String url = "https://raw.githubusercontent.com/" +
-                    owner + "/" + repo + "/" + commitSha + "/" + filePath;
-            return webClient.get()
-                    .uri(url)
-                    .retrieve()
-                    .bodyToMono(String.class)
-                    .timeout(Duration.ofSeconds(10))
-                    .block();
-        } catch (Exception e) {
-            log.debug("GitHub fetch failed ({}/{}): {} — {}", owner, repo, filePath, e.getMessage());
-            return null;
-        }
     }
 
     private @Nullable String loadFromClasspath(String filePath) {

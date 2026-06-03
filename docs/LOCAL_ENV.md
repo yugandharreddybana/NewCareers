@@ -2,7 +2,7 @@
 
 ## Quick start (recommended)
 
-Uses in-memory H2 on Java port **8100** with one fully populated canonical mock job pre-loaded.
+Uses a **file-backed H2** database on Java port **8100** (default path `%USERPROFILE%\.careerops\db\` on Windows, `~/.careerops/db/` on macOS/Linux) so accounts and jobs **survive backend restarts**. One canonical mock job is seeded on first DB creation only.
 
 ```bash
 # Terminal 1 — Java (default `test` profile)
@@ -22,6 +22,17 @@ npm install && npm run dev
 
 Open http://localhost:5173 — the dashboard should show seeded jobs without calling fetch.
 
+### Local database persistence
+
+| Topic | Detail |
+|-------|--------|
+| Default DB file | `${user.home}/.careerops/db/careerops.mv.db` |
+| Override path | Set `H2_DATABASE_PATH` to a folder (no `.mv.db` suffix), e.g. `H2_DATABASE_PATH=D:/Career/careerops-db` before `mvn spring-boot:run` |
+| Reset local data | Stop Java, delete the `.mv.db` / `.trace.db` files in that folder, restart (schema + dev seed recreated) |
+| Seeded dev login | `dev@careerops.ie` / `password` (inserted only if missing; safe across restarts) |
+
+If you previously ran the backend when it used **in-memory** H2, that data is gone — register again once, or use the seeded dev account above.
+
 ## Port & URL matrix
 
 | Service    | URL | Notes |
@@ -36,7 +47,8 @@ Open http://localhost:5173 — the dashboard should show seeded jobs without cal
 | File | Purpose |
 |------|---------|
 | `middleware/.env` | `JAVA_BACKEND_URL`, `INTERNAL_TRUST_SECRET`, `JWT_PUBLIC_KEY`, Stripe placeholders |
-| `frontend/.env` or `.env.development` | `VITE_DEV_BYPASS_GUARDS=true` optional; leave API URL unset |
+| `frontend/.env` or `.env.development` | `VITE_DEV_BYPASS_GUARDS=false` (keep off); leave API URL unset |
+| `middleware/.env` | `DEV_AUTO_AUTH=true` only if you need API calls without logging in |
 | `frontend/.env.local` | `VITE_GOOGLE_CLIENT_ID` — same Web client ID as Java `GOOGLE_OAUTH_CLIENT_ID` |
 | `backend/.../application.properties` | Only for **dev** profile with Postgres (copy from `application.example.properties`) |
 | Repo root `.env` | Used when running Java with `dev` profile + Postgres; set `GOOGLE_OAUTH_CLIENT_ID` |
@@ -59,14 +71,32 @@ Open http://localhost:5173 — the dashboard should show seeded jobs without cal
 
 `JWT_PUBLIC_KEY` in middleware must match `jwt.public-key` in Java.
 
+## AI job matching (NVIDIA NIM)
+
+Onboarding and job scoring call NVIDIA NIM. Without a key you still get scraped jobs, but match scores use a heuristic fallback (`AI engine not configured (NVIDIA NIM)` in Java logs).
+
+1. Create a free API key at [build.nvidia.com](https://build.nvidia.com).
+2. Set `NVIDIA_API_KEY` in the environment **before** starting Java (same shell as `mvn spring-boot:run`), or add to repo root `.env` if you load it into the process.
+3. Restart the backend after setting the key.
+
+Optional: `NVIDIA_MAX_CONCURRENT=2` (default) limits parallel scoring during onboarding.
+
+## Adzuna (optional, more IE listings)
+
+```bash
+ADZUNA_APP_ID=your_app_id
+ADZUNA_APP_KEY=your_app_key
+```
+
+Register at [developer.adzuna.com](https://developer.adzuna.com/). Without these, Adzuna is skipped; IrishJobs, Jobs.ie, LinkedIn public, Remotive, and other sources still run.
+
 ## Loading more jobs
 
-Seeded jobs appear automatically in `test` profile. For live Adzuna/Reed jobs:
+Seeded jobs appear automatically in `test` profile. For live listings:
 
 1. Complete onboarding in the UI (or use dev user with seeded profile).
 2. Click **Fetch jobs** on the dashboard (`POST /api/v1/jobs/fetch`).
-3. For a profile-ranked live Adzuna role, use **Fetch live Adzuna match** (`POST /api/v1/jobs/fetch-adzuna-live`).
-4. Set `ADZUNA_APP_ID` / `ADZUNA_APP_KEY` in Java config when using `dev` profile.
+3. For a profile-ranked live Adzuna role, use **Fetch live Adzuna match** (`POST /api/v1/jobs/fetch-adzuna-live`) when Adzuna keys are set.
 
 ## Verify jobs API
 

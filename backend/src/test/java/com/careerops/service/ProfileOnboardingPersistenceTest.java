@@ -32,6 +32,8 @@ class ProfileOnboardingPersistenceTest {
     @Mock UserJobRepository userJobs;
     @Mock UserRepository users;
     @Mock AuditLogService audit;
+    @Mock CvService cvService;
+    @Mock CvSkillExtractionService skillExtraction;
 
     ProfileService profileService;
 
@@ -41,7 +43,8 @@ class ProfileOnboardingPersistenceTest {
 
     @BeforeEach
     void setUp() {
-        profileService = new ProfileService(profiles, cvs, userJobs, users, audit);
+        profileService = new ProfileService(profiles, cvs, userJobs, users, audit, cvService, skillExtraction);
+        when(skillExtraction.extractForUser(any(), any(), any())).thenReturn(List.of());
         profile = UserProfile.builder()
             .userId(userId)
             .onboarded(false)

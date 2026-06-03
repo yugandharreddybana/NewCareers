@@ -81,6 +81,22 @@ class ScrapeResponse(BaseModel):
     result: dict
 
 
+class PlaywrightJobScrapeRequest(BaseModel):
+    url: str
+    timeout: Optional[int] = 45
+
+
+class PlaywrightJobItem(BaseModel):
+    title: str
+    url: str
+    location: str = "Ireland"
+
+
+class PlaywrightJobScrapeResponse(BaseModel):
+    url: str
+    result: dict
+
+
 # ── Endpoints ─────────────────────────────────────────────────────────────────
 @app.get("/health")
 def health():
@@ -104,6 +120,66 @@ async def scrape_generic(body: ScrapeRequest):
         if not isinstance(result, dict):
             result = {"raw": result}
         return ScrapeResponse(url=body.url, result=result)
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+
+@app.post("/scrape/jobs/playwright", response_model=PlaywrightJobScrapeResponse)
+async def scrape_jobs_playwright(body: PlaywrightJobScrapeRequest):
+    """
+    Deterministic job-listing scrape using Playwright only (no LLM).
+    Returns structured jobs with title, url, and location.
+    """
+    from playwright.async_api import async_playwright
+
+    timeout_ms = max(5, min(body.timeout or 45, 120)) * 1000
+    jobs: list[dict] = []
+
+    try:
+        async with async_playwright() as p:
+            browser = await p.chromium.launch(headless=True)
+            page = await browser.new_page()
+            await page.goto(body.url, wait_until="networkidle", timeout=timeout_ms)
+
+            selectors = [
+                "a[href*='/job/']",
+                "a[href*='/jobs/']",
+                "a[href*='career']",
+                "a[href*='position']",
+                "a[href*='vacanc']",
+                "[data-automation-id='jobTitle']",
+                ".job-title a",
+                ".job-listing a",
+            ]
+            seen: set[str] = set()
+            for sel in selectors:
+                elements = await page.query_selector_all(sel)
+                for el in elements:
+                    try:
+                        title = (await el.inner_text()).strip()
+                        href = await el.get_attribute("href")
+                        if not title or len(title) < 4 or len(title) > 160:
+                            continue
+                        lower = title.lower()
+                        if any(x in lower for x in ("cookie", "privacy", "sign in")):
+                            continue
+                        if not href:
+                            continue
+                        url = href if href.startswith("http") else page.url.rstrip("/") + "/" + href.lstrip("/")
+                        key = title + "|" + url
+                        if key in seen:
+                            continue
+                        seen.add(key)
+                        jobs.append({"title": title, "url": url, "location": "Ireland"})
+                        if len(jobs) >= 25:
+                            break
+                    except Exception:
+                        continue
+                if len(jobs) >= 25:
+                    break
+
+            await browser.close()
+        return PlaywrightJobScrapeResponse(url=body.url, result={"jobs": jobs})
     except Exception as exc:
         raise HTTPException(status_code=500, detail=str(exc)) from exc
 

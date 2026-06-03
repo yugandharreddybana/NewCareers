@@ -36,9 +36,10 @@ function isSilentPath(url?: string): boolean {
   const path = pathOf(url);
   if (!path) return false;
   if (path === '/auth/me' || path === '/auth/refresh') return true;
+  if (path === '/experiments/variants' || path.startsWith('/experiments/')) return true;
   if (path === '/public/stats') return true;
   if (path === '/notifications' || path.startsWith('/notifications/')) return true;
-  if (path === '/onboarding/delivery/status') return true;
+  if (path.startsWith('/onboarding/delivery')) return true;
   return false;
 }
 
@@ -62,6 +63,9 @@ function messageFor(config: InternalAxiosRequestConfig): string {
   }
   if (path.includes('/onboarding/delivery')) {
     return 'Preparing your career package…';
+  }
+  if (path.includes('/skills/apply/answer')) {
+    return 'Writing your application answer…';
   }
   if (path.includes('/skills/') && method === 'post') {
     return 'Running AI skill…';

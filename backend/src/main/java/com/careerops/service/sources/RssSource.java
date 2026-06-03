@@ -19,11 +19,8 @@ import java.util.List;
 public class RssSource implements JobSource {
     private static final Logger log = LoggerFactory.getLogger(RssSource.class);
 
-    private static final String[] FEEDS = new String[] {
-        "https://www.irishjobs.ie/rss/it.xml",
-        "https://ie.indeed.com/rss?q=software+engineer&l=Ireland",
-        "https://www.jobs.ie/api/jobs/rss?keywords=software"
-    };
+    /** Legacy RSS endpoints — often 403/404; Irish boards use Stepstone HTML parsers instead. */
+    private static final String[] FEEDS = new String[] {};
 
     @Override public String name() { return "rss"; }
 

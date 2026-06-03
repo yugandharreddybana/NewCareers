@@ -179,13 +179,22 @@ export function proxyMiddleware() {
           : undefined) ||
         req.ip;
 
+      const isEvaluationPdfRequest =
+        req.method === 'POST' && servletPath === '/skills/pdf/evaluation-report';
+      const forwardData = isEvaluationPdfRequest && req.rawBody
+        ? req.rawBody
+        : req.body;
+
       const response = await forward({
         method: req.method,
         path: servletPath,
         userId: (req as Request & { user?: { id?: string } }).user?.id ?? req.userId,
-        data: req.body,
+        data: forwardData,
         params: req.query,
-        headers: req.headers as Record<string, unknown>,
+        headers: {
+          ...(req.headers as Record<string, unknown>),
+          ...(isEvaluationPdfRequest ? { 'content-type': 'application/json' } : {}),
+        },
         responseType: 'arraybuffer',
         ip: clientIp,
       });

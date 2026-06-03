@@ -81,7 +81,9 @@ export function normalizeJobDetail(raw: Partial<JobDetail>): JobDetail {
   };
   const card = normalizeJobCard(r);
   const detail: JobDetail = { ...card };
-  if (r.description) detail.description = String(r.description);
+  if (r.description != null && String(r.description).trim()) {
+    detail.description = String(r.description);
+  }
   if (r.sector) detail.sector = String(r.sector);
   const aiScore = r.aiScore ?? r.ai_score;
   if (aiScore != null) detail.aiScore = Number(aiScore);

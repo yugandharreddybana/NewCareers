@@ -45,6 +45,11 @@ class JobEvaluationPdfRenderTest {
             false,
             "AI advisory only.",
             null,
+            "Meets CareerOps apply threshold (4.0/5).",
+            List.of("Tailor your resume for this role and apply now."),
+            List.of("Led migration project with measurable impact."),
+            true,
+            true,
             new JobEvaluationPdfRequest.EvaluationSectionsDto(
                 "Executive summary text.",
                 "Background match details.",
@@ -60,6 +65,45 @@ class JobEvaluationPdfRenderTest {
         assertTrue(
             pdf[0] == '%' && pdf[1] == 'P' && pdf[2] == 'D' && pdf[3] == 'F',
             "Must be PDF magic bytes");
+    }
+
+    @Test
+    void rendersPdfWhenSummaryContainsUnclosedMetaTag() {
+        JobEvaluationPdfRequest request = new JobEvaluationPdfRequest(
+            "Engineer",
+            "Acme",
+            "Dublin",
+            80,
+            80,
+            "Worth applying",
+            "Posting mentions <meta charset=utf-8> requirements and <script> tags.",
+            List.of("Java"),
+            List.of("Go"),
+            List.of("Add Go experience"),
+            null,
+            null,
+            4.0,
+            null,
+            false,
+            "Advisory only.",
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            new JobEvaluationPdfRequest.EvaluationSectionsDto(
+                "A — Executive summary with <meta> in JD text.",
+                "B — Background.",
+                "C — Positioning.",
+                "D — Compensation.",
+                "E — Tailoring.",
+                "F — Interview prep."
+            )
+        );
+        byte[] pdf = pdfExportService.generateEvaluationReportPdf(request);
+        assertTrue(pdf.length > 100);
+        assertTrue(pdf[0] == '%' && pdf[1] == 'P' && pdf[2] == 'D' && pdf[3] == 'F');
     }
 
     @Test

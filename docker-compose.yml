@@ -1,0 +1,15 @@
+# Career Ops — Playwright scraper sidecar (starts automatically; backend connects via SCRAPER_BASE_URL)
+services:
+  scraper:
+    build: ./scraper
+    ports:
+      - "5500:5500"
+    environment:
+      SCRAPER_ALLOWED_ORIGINS: "*"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:5500/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    restart: unless-stopped

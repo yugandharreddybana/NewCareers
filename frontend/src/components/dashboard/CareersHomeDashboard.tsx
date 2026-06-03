@@ -1,4 +1,4 @@
-import { useCallback, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import toast from 'react-hot-toast';
 import { useAuth } from '@/context/AuthContext';
@@ -7,7 +7,10 @@ import { DashboardTopNav } from '@/components/dashboard/DashboardTopNav';
 import { TopMatchCard } from '@/components/dashboard/TopMatchCard';
 import { SKILL_COUNT } from '@/lib/skillCatalog';
 import type { RecommendedJob } from '@/services/discoveryApi';
-import { useRecommendedJobs, useFetchLiveJobMutation } from '@/hooks/queries';
+import { useRecommendedJobs, useFetchLiveJobMutation, useJobsList } from '@/hooks/queries';
+import { onboardingApi, type OnboardingDeliveryStatus } from '@/services/api';
+import { queryKeys } from '@/lib/queryKeys';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import type { JobCard } from '@/types';
 import { normalizeJobCard } from '@/lib/normalizeJobCard';
 import '@/styles/welcome-dashboard.css';
@@ -30,6 +33,33 @@ export function clearWelcomePendingFlag(): void {
   }
 }
 
+/** Auto-scrolling infinite loop of top match cards (marquee). Pauses on hover. */
+function TopMatchesMarquee({ jobs }: { jobs: JobCard[] }) {
+  const loopJobs = jobs.length === 1 ? [jobs[0]!, jobs[0]!] : [...jobs, ...jobs];
+  const durationSec = Math.max(32, jobs.length * 7);
+
+  return (
+    <div
+      className="marquee-container marquee-container--cards py-1 [mask-image:linear-gradient(to_right,transparent,black_5%,black_95%,transparent)]"
+      aria-label="Top job matches carousel"
+    >
+      <div
+        className="marquee-content inline-flex items-stretch gap-gutter"
+        style={{ animationDuration: `${durationSec}s` }}
+      >
+        {loopJobs.map((job, i) => (
+          <div
+            key={`${job.userJobId}-${i}`}
+            className="shrink-0 w-[min(88vw,320px)] sm:w-[340px] min-w-0 overflow-hidden"
+          >
+            <TopMatchCard job={job} animationDelay="0s" />
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 export function setWelcomePendingFlag(): void {
   try {
     sessionStorage.setItem(WELCOME_PENDING_KEY, '1');
@@ -41,6 +71,39 @@ export function setWelcomePendingFlag(): void {
 function firstName(full?: string | null): string {
   if (!full?.trim()) return 'there';
   return full.trim().split(/\s+/)[0] ?? 'there';
+}
+
+const ACTIVE_DELIVERY_STAGES = new Set([
+  'reading_cv',
+  'normalizing_cv',
+  'fetching_jobs',
+  'evaluating_jobs',
+]);
+
+function emptyMatchesMessage(
+  delivery: OnboardingDeliveryStatus | undefined,
+  totalPipeline: number,
+): string {
+  if (totalPipeline > 0) {
+    return `You have ${totalPipeline} role${totalPipeline === 1 ? '' : 's'} in your tracker — open the job board to view them.`;
+  }
+  if (!delivery || delivery.stage === 'idle') {
+    return 'Job matching has not run yet. Finish onboarding (upload a CV on the last step) or use Run job matching below.';
+  }
+  if (delivery.stage === 'failed') {
+    return (
+      delivery.error ??
+      delivery.message ??
+      'Job matching could not find enough roles that pass your filters.'
+    );
+  }
+  if (ACTIVE_DELIVERY_STAGES.has(delivery.stage)) {
+    return `${delivery.message || 'Still matching jobs…'} Refresh in a moment or wait for matching to finish.`;
+  }
+  if (delivery.stage === 'ready' || delivery.stage === 'ready_partial') {
+    return 'Matching finished, but no roles matched your target roles and location yet. Try Fetch jobs on the tracker or run job matching again.';
+  }
+  return 'No pipeline matches yet. Your onboarding job matching may still be processing, or live sources returned no roles that passed your filters.';
 }
 
 function recommendedToJobCard(job: RecommendedJob): JobCard {
@@ -69,6 +132,14 @@ export function CareersHomeDashboard({ celebrate = false }: Props) {
   const { user } = useAuth();
   const navigate = useNavigate();
   const matchesRef = useRef<HTMLDivElement>(null);
+  const queryClient = useQueryClient();
+
+  useEffect(() => {
+    if (celebrate) {
+      void queryClient.invalidateQueries({ queryKey: queryKeys.jobs.all });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.discovery.all });
+    }
+  }, [celebrate, queryClient]);
 
   const {
     data: recommended,
@@ -76,16 +147,56 @@ export function CareersHomeDashboard({ celebrate = false }: Props) {
     isError: matchesQueryError,
     refetch: refetchRecommended,
   } = useRecommendedJobs({ enabled: Boolean(user) });
+  const { data: jobsList } = useJobsList({ enabled: Boolean(user) });
   const fetchLive = useFetchLiveJobMutation();
   const [fetchError, setFetchError] = useState<string | null>(null);
   const [prependedJob, setPrependedJob] = useState<JobCard | null>(null);
 
-  const jobsFromCache = (recommended ?? []).slice(0, 3).map(recommendedToJobCard);
+  const jobsFromRecommended = (recommended ?? []).slice(0, 12).map(recommendedToJobCard);
+  const jobsFromPipeline = (jobsList?.items ?? []).slice(0, 12);
+  const jobsFromCache =
+    jobsFromRecommended.length > 0 ? jobsFromRecommended : jobsFromPipeline;
   const jobs = prependedJob
-    ? [prependedJob, ...jobsFromCache.filter(j => j.userJobId !== prependedJob.userJobId)].slice(0, 3)
+    ? [prependedJob, ...jobsFromCache.filter(j => j.userJobId !== prependedJob.userJobId)].slice(0, 12)
     : jobsFromCache;
+  const totalPipeline = jobsList?.items?.length ?? 0;
 
-  const matchesError = fetchError ?? (matchesQueryError ? 'Could not load your matches right now.' : null);
+  const showDeliveryStatus = Boolean(user) && !matchesLoading && jobs.length === 0;
+  const { data: deliveryStatus } = useQuery({
+    queryKey: queryKeys.onboarding.delivery(),
+    queryFn: () => onboardingApi.deliveryStatus(),
+    enabled: showDeliveryStatus,
+    refetchInterval: query => {
+      const stage = query.state.data?.stage ?? '';
+      if (ACTIVE_DELIVERY_STAGES.has(stage)) {
+        void queryClient.invalidateQueries({ queryKey: queryKeys.jobs.all });
+        void queryClient.invalidateQueries({ queryKey: queryKeys.discovery.all });
+        return 3000;
+      }
+      return false;
+    },
+  });
+
+  const runMatching = useMutation({
+    mutationFn: () => onboardingApi.startDelivery(),
+    onSuccess: () => {
+      toast.success('Job matching started — refresh in a minute.');
+      void queryClient.invalidateQueries({ queryKey: queryKeys.onboarding.delivery() });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.jobs.all });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.discovery.all });
+    },
+    onError: (err: unknown) => {
+      const msg =
+        err && typeof err === 'object' && 'response' in err
+          ? (err as { response?: { data?: { message?: string } } }).response?.data?.message
+          : undefined;
+      toast.error(msg ?? 'Could not start job matching.');
+    },
+  });
+
+  const matchesError =
+    fetchError
+    ?? (matchesQueryError && jobsFromCache.length === 0 ? 'Could not load your matches right now.' : null);
 
   const handleFetchJobs = async () => {
     setFetchError(null);
@@ -191,8 +302,28 @@ export function CareersHomeDashboard({ celebrate = false }: Props) {
             {!matchesLoading && jobs.length === 0 && (
               <div className="rounded-xl border border-dashed border-outline-variant bg-surface-container-low p-6 mb-4 text-center">
                 <p className="font-body-md text-on-surface-variant mb-3">
-                  No pipeline matches yet. Your onboarding job matching is still processing or no live sources returned jobs.
+                  {emptyMatchesMessage(deliveryStatus, totalPipeline)}
                 </p>
+                {totalPipeline > 0 && (
+                  <Link
+                    to="/jobs"
+                    className="inline-flex items-center gap-2 px-5 py-2.5 rounded-lg border border-primary text-primary font-label-md hover:bg-primary/5 mb-3"
+                  >
+                    Open job tracker
+                  </Link>
+                )}
+                {totalPipeline === 0 && (
+                  <button
+                    type="button"
+                    onClick={() => void runMatching.mutate()}
+                    disabled={runMatching.isPending || ACTIVE_DELIVERY_STAGES.has(deliveryStatus?.stage ?? '')}
+                    className="inline-flex items-center gap-2 px-5 py-2.5 rounded-lg border border-primary text-primary font-label-md hover:bg-primary/5 mb-3 mr-2 disabled:opacity-50"
+                  >
+                    {runMatching.isPending || ACTIVE_DELIVERY_STAGES.has(deliveryStatus?.stage ?? '')
+                      ? 'Matching…'
+                      : 'Run job matching'}
+                  </button>
+                )}
                 <button
                   type="button"
                   onClick={handleFetchJobs}
@@ -216,11 +347,9 @@ export function CareersHomeDashboard({ celebrate = false }: Props) {
               </div>
             )}
 
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-gutter">
-              {jobs.map((job, i) => (
-                <TopMatchCard key={job.userJobId} job={job} animationDelay={`${0.1 + i * 0.1}s`} />
-              ))}
-            </div>
+            {jobs.length > 0 && (
+              <TopMatchesMarquee jobs={jobs} />
+            )}
 
             {primaryLiveJob && (
               <div className="mt-6 rounded-xl border border-primary/25 bg-primary/5 p-5 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">

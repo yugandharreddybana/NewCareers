@@ -38,4 +38,12 @@ export const queryKeys = {
     all: ['cv'] as const,
     versions: () => [...queryKeys.cv.all, 'versions'] as const,
   },
+  onboarding: {
+    all: ['onboarding'] as const,
+    delivery: () => [...queryKeys.onboarding.all, 'delivery'] as const,
+  },
+  usage: {
+    all: ['usage'] as const,
+    limits: () => [...queryKeys.usage.all, 'limits'] as const,
+  },
 } as const;

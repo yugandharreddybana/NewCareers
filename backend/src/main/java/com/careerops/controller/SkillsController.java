@@ -1,14 +1,21 @@
 package com.careerops.controller;
 
+import com.careerops.dto.ApplyQuestionRequest;
+import com.careerops.dto.ApplyQuestionResponse;
 import com.careerops.dto.ConversationReplyRequest;
+import com.careerops.dto.SkillRunHistoryItem;
+import com.careerops.dto.TailorResumePreviewResponse;
 import com.careerops.dto.JobEvaluationPdfRequest;
 import com.careerops.dto.BatchRunStatusResponse;
 import com.careerops.dto.RunAllSkillsResponse;
 import com.careerops.dto.SkillRunResponse;
 import com.careerops.dto.SkillStartRequest;
 import com.careerops.ratelimit.RateLimited;
+import com.careerops.service.ApplyAssistService;
+import com.careerops.service.OutreachDraftService;
 import com.careerops.service.PdfExportService;
 import com.careerops.service.SkillService;
+import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.careerops.util.AuthUtil;
 import jakarta.validation.Valid;
 import org.slf4j.Logger;
@@ -18,6 +25,7 @@ import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
+import java.util.List;
 import java.util.UUID;
 
 /**
@@ -36,14 +44,20 @@ public class SkillsController {
 
     private static final Logger log = LoggerFactory.getLogger(SkillsController.class);
 
-    private final SkillService    skillService;
-    private final PdfExportService pdfService;
+    private final SkillService       skillService;
+    private final PdfExportService   pdfService;
+    private final ApplyAssistService applyAssist;
+    private final OutreachDraftService outreachDraft;
 
     public SkillsController(
             SkillService skillService,
-            PdfExportService pdfService) {
+            PdfExportService pdfService,
+            ApplyAssistService applyAssist,
+            OutreachDraftService outreachDraft) {
         this.skillService = skillService;
         this.pdfService   = pdfService;
+        this.applyAssist  = applyAssist;
+        this.outreachDraft = outreachDraft;
     }
 
     // ================================================================
@@ -85,6 +99,29 @@ public class SkillsController {
      *
      * Returns a new SkillRunResponse — may be another QUESTION if Claude asks again.
      */
+    /**
+     * Answer a single application-form question (Apply Assistant modal).
+     */
+    @PostMapping("/apply/answer")
+    @RateLimited(capacity = 10, requestsPerMinute = 10)
+    public ApplyQuestionResponse applyAnswer(@Valid @RequestBody ApplyQuestionRequest req) {
+        UUID userId = AuthUtil.currentUserId();
+        return applyAssist.answerQuestion(userId, req.userJobId(), req.question(), req.rerun());
+    }
+
+    /**
+     * Structured outreach: top 2 contacts with LinkedIn, email, and follow-up drafts.
+     */
+    @PostMapping("/outreach/draft")
+    @RateLimited(capacity = 10, requestsPerMinute = 10)
+    public ObjectNode outreachDraft(
+            @RequestParam UUID userJobId,
+            @RequestParam(defaultValue = "linkedin") String channel,
+            @RequestParam(defaultValue = "professional") String tone) {
+        UUID userId = AuthUtil.currentUserId();
+        return outreachDraft.buildDraft(userId, userJobId, channel, tone);
+    }
+
     @PostMapping("/conversation/reply")
     @RateLimited(capacity = 5, requestsPerMinute = 5)
     public SkillRunResponse replyToConversation(
@@ -164,6 +201,28 @@ public class SkillsController {
                 .orElseGet(() -> ResponseEntity.noContent().build());
     }
 
+    /**
+     * Skills with a saved run for this job — used to restore checkmarks after login/reload.
+     * GET /api/skills/completed/{userJobId}
+     */
+    @GetMapping("/completed/{userJobId}")
+    public List<String> getCompletedSkills(@PathVariable UUID userJobId) {
+        UUID userId = AuthUtil.currentUserId();
+        return skillService.listCompletedSkills(userId, userJobId);
+    }
+
+    /**
+     * Recent runs for a skill on a job (newest first) — version stack for diff UI.
+     * GET /api/skills/run-history/{userJobId}/{skillName}
+     */
+    @GetMapping("/run-history/{userJobId}/{skillName}")
+    public List<SkillRunHistoryItem> getRunHistory(
+            @PathVariable UUID userJobId,
+            @PathVariable String skillName) {
+        UUID userId = AuthUtil.currentUserId();
+        return skillService.listRunHistory(userId, userJobId, skillName);
+    }
+
     // ================================================================
     // PDF DOWNLOADS
     // ================================================================
@@ -227,6 +286,37 @@ public class SkillsController {
         byte[] pdf = pdfService.generateResumePdf(userId, userJobId);
         pdfResponse(pdf, "tailored-resume.pdf", response);
         return pdf;
+    }
+
+    /**
+     * Styled HTML + markdown for in-app tailor preview (plugin resume-template styling).
+     * GET /api/skills/resume/{userJobId}/preview
+     */
+    @GetMapping("/resume/{userJobId}/preview")
+    public ResponseEntity<TailorResumePreviewResponse> getTailoredResumePreview(
+            @PathVariable UUID userJobId) {
+        UUID userId = AuthUtil.currentUserId();
+        return skillService.getTailoredResumePreview(userId, userJobId)
+                .map(ResponseEntity::ok)
+                .orElseGet(() -> ResponseEntity.noContent().build());
+    }
+
+    /**
+     * Download tailored resume as DOCX (same content as PDF preview).
+     * GET /api/skills/docx/{userJobId}/resume
+     */
+    @GetMapping(value = "/docx/{userJobId}/resume", produces =
+            "application/vnd.openxmlformats-officedocument.wordprocessingml.document")
+    public byte[] downloadResumeDocx(
+            @PathVariable UUID userJobId,
+            jakarta.servlet.http.HttpServletResponse response) {
+        UUID userId = AuthUtil.currentUserId();
+        byte[] docx = pdfService.generateResumeDocx(userId, userJobId);
+        response.setHeader(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=\"tailored-resume.docx\"");
+        response.setContentType(
+                "application/vnd.openxmlformats-officedocument.wordprocessingml.document");
+        response.setHeader("X-Content-Type-Options", "nosniff");
+        return docx;
     }
 
     // ================================================================

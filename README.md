@@ -27,7 +27,7 @@ PostgreSQL / Redis
 See [docs/LOCAL_ENV.md](docs/LOCAL_ENV.md) for the full port/secret matrix.
 
 ```bash
-# Java first (default test profile → H2 + sample jobs on :8100)
+# Java backend (auto-starts Playwright scraper on :5500 — one-time: cd scraper && pip install -r requirements.txt && playwright install chromium)
 cd backend && mvn spring-boot:run
 
 cd middleware

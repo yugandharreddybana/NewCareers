@@ -72,6 +72,30 @@ const defaultHandlers = [
 	}),
 	http.post(`${API_ROOT}/jobs/fetch`, () => HttpResponse.json(clone(fixtures.MOCK_FETCH_SUMMARY))),
 	http.get(`${API_ROOT}/jobs/limits`, () => HttpResponse.json(clone(fixtures.MOCK_FETCH_SUMMARY))),
+	http.get(`${API_ROOT}/usage/limits`, () =>
+		HttpResponse.json({
+			jobDelivery: {
+				key: 'job_delivery',
+				label: 'New jobs per day',
+				used: fixtures.MOCK_FETCH_SUMMARY.dailyCount,
+				limit: fixtures.MOCK_FETCH_SUMMARY.dailyLimit,
+				remaining: fixtures.MOCK_FETCH_SUMMARY.remaining,
+				resetsAt: new Date(Date.now() + 86_400_000).toISOString(),
+				resetDescription: 'Resets at midnight (Europe/Dublin)',
+			},
+			aiTokens: {
+				key: 'ai_tokens',
+				label: 'AI token budget',
+				used: 50_000,
+				limit: 500_000,
+				remaining: 450_000,
+				resetsAt: new Date(Date.now() + 86_400_000).toISOString(),
+				resetDescription: 'Resets at midnight (Europe/Dublin)',
+			},
+			skillApi: { label: 'AI skill requests', requestsPerMinute: 30, windowDescription: 'Per minute (middleware)' },
+			generalApi: { label: 'API requests', requestsPerMinute: 60, windowDescription: 'Per minute (authenticated)' },
+			timezoneId: 'Europe/Dublin',
+		})),
 	http.get(`${API_ROOT}/jobs/stats`, () => HttpResponse.json(clone(fixtures.MOCK_STATS))),
 	http.get(`${API_ROOT}/jobs/recommended`, () => HttpResponse.json(clone(MOCK_RECOMMENDED_JOBS))),
 

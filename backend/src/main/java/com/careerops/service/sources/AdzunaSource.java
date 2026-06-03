@@ -78,6 +78,9 @@ public class AdzunaSource implements JobSource {
 
     @Override
     public boolean hasBudget() {
+        if (!hasCredentials()) {
+            return false;
+        }
         resetBudgetIfNeeded();
         return todayCalls.get() < dailyLimit;
     }

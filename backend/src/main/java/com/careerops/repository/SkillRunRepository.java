@@ -44,6 +44,9 @@ public interface SkillRunRepository extends JpaRepository<SkillRun, UUID> {
     Optional<SkillRun> findFirstByUserIdAndUserJobIdAndSkillOrderByCreatedAtDesc(
             UUID userId, UUID userJobId, String skill);
 
+    List<SkillRun> findByUserIdAndUserJobIdAndSkillOrderByCreatedAtDesc(
+            UUID userId, UUID userJobId, String skill, Pageable pageable);
+
     /**
      * Get all runs for a job — used for run-all status + PDF generation.
      */
@@ -60,6 +63,15 @@ public interface SkillRunRepository extends JpaRepository<SkillRun, UUID> {
      * Check if a skill has ever been run for this job (for PDF download availability).
      */
     boolean existsByUserIdAndUserJobIdAndSkill(UUID userId, UUID userJobId, String skill);
+
+    @Query("""
+        SELECT DISTINCT sr.skill FROM SkillRun sr
+        WHERE sr.userId = :userId AND sr.userJobId = :userJobId
+        ORDER BY sr.skill ASC
+        """)
+    List<String> findDistinctSkillsByUserIdAndUserJobId(
+            @Param("userId") UUID userId,
+            @Param("userJobId") UUID userJobId);
 
     /**
      * Nightly cleanup for expired results (3.058).

@@ -11,8 +11,6 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.util.UUID;
-import java.util.stream.Collectors;
-import java.util.stream.Stream;
 
 /**
  * Converts uploaded CV text + profile work history into Career-Ops style markdown (cv.md).
@@ -32,7 +30,7 @@ public class CvNormalizationService {
     private final NvidiaService nvidia;
     private final UserCvRepository cvRepo;
     private final UserProfileRepository profiles;
-    private final CvService cvService;
+    private final UserJobSkillMatchService skillMatchService;
 
     @Value("${nvidia.api.key:}")
     private String nvidiaApiKey;
@@ -68,6 +66,11 @@ public class CvNormalizationService {
 
         cv.setCvMarkdown(markdown);
         cvRepo.save(cv);
+        try {
+            skillMatchService.refreshAllForUser(userId);
+        } catch (Exception e) {
+            log.warn("Could not refresh pipeline skill matches after CV normalize userId={}: {}", userId, e.getMessage());
+        }
         log.info("Stored cv_markdown for userId={} ({} chars)", userId, markdown.length());
         return markdown;
     }

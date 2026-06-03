@@ -6,6 +6,7 @@ import com.careerops.model.UserProfile;
 import com.careerops.repository.UserJobRepository;
 import com.careerops.repository.UserProfileRepository;
 import com.careerops.service.sources.*;
+import com.careerops.service.sources.company.CompanyCareerSource;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -40,7 +41,7 @@ class JobDeliveryServiceIrishJobsTest {
     @Mock IrishJobsSource irishJobs;
     @Mock JobsIeSource jobsIe;
     @Mock JobsIrelandSource jobsIreland;
-    @Mock JsoupCompanySource companyPages;
+    @Mock CompanyCareerSource companyPages;
     @Mock LinkedInPublicSource linkedInPublic;
 
     private JobDeliveryService delivery;
@@ -52,7 +53,10 @@ class JobDeliveryServiceIrishJobsTest {
         delivery = new JobDeliveryService(
             scrape, dedup, nvidia, prompts, profiles, userJobs, cvService, limits, matcher,
             new ObjectMapper(), org.mockito.Mockito.mock(PlatformTransactionManager.class),
-            evaluationValidator, adzuna, indeed, irishJobs, jobsIe, jobsIreland, companyPages, linkedInPublic);
+            evaluationValidator,
+            org.mockito.Mockito.mock(StructuredJobEvaluationBuilder.class),
+            org.mockito.Mockito.mock(EvaluationReportEnrichmentService.class),
+            adzuna, indeed, irishJobs, jobsIe, jobsIreland, companyPages, linkedInPublic);
     }
 
     @Test

@@ -9,6 +9,7 @@ import { Button } from '@/components/ui';
 import { Avatar } from '@/components/ui';
 import { useAuth } from '@/context/AuthContext';
 import NotificationBell from '@/components/notifications/NotificationBell';
+import { NavUsageLimits } from '@/components/dashboard/NavUsageLimits';
 
 const BREADCRUMBS: Record<string, { label: string; parent?: string; parentPath?: string }> = {
   '/':                { label: 'Dashboard' },
@@ -74,8 +75,9 @@ export default function TopBar() {
         )}
       </div>
 
-      {/* Right actions */}
-      <div className="flex items-center gap-1">
+      {/* Usage + actions */}
+      <div className="flex items-center gap-2 shrink-0">
+        <NavUsageLimits />
         <NotificationBell />
 
         <Button

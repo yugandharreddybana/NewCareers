@@ -67,16 +67,18 @@ type PreferencesStepProps = {
 function ToggleChip({
   label,
   selected,
+  tone = 'default',
   onToggle,
 }: {
   label: string;
   selected: boolean;
+  tone?: 'default' | 'gap';
   onToggle: () => void;
 }) {
   return (
     <button
       type="button"
-      className={`onboarding-chip${selected ? ' onboarding-chip--selected' : ''}`}
+      className={`onboarding-chip${selected ? ' onboarding-chip--selected' : ''}${tone === 'gap' ? ' onboarding-chip--gap' : ''}`}
       onClick={onToggle}
       aria-pressed={selected}
     >
@@ -98,6 +100,7 @@ function ChipSection({
   onCustomChange,
   onAddCustom,
   customPlaceholder,
+  chipTone = 'default',
 }: {
   title: string;
   required?: boolean;
@@ -108,6 +111,7 @@ function ChipSection({
   onCustomChange: (v: string) => void;
   onAddCustom: () => void;
   customPlaceholder: string;
+  chipTone?: 'default' | 'gap';
 }) {
   const inputId = useId();
   const addId = useId();
@@ -124,6 +128,7 @@ function ChipSection({
             key={option}
             label={option}
             selected={selected.includes(option)}
+            tone={chipTone}
             onToggle={() => onToggle(option)}
           />
         ))}
@@ -132,6 +137,7 @@ function ChipSection({
             key={`custom-${entry}`}
             label={entry}
             selected
+            tone={chipTone}
             onToggle={() => onToggle(entry)}
           />
         ))}
@@ -171,58 +177,125 @@ function ChipSection({
   );
 }
 
+const SALARY_FLOOR_K = 0;
+const SALARY_CEILING_K = 300;
+const SALARY_GAP_K = 5;
+
+function clampSalaryRange(minK: number, maxK: number): { minK: number; maxK: number } {
+  let min = Math.max(SALARY_FLOOR_K, Math.min(SALARY_CEILING_K, Math.round(minK)));
+  let max = Math.max(SALARY_FLOOR_K, Math.min(SALARY_CEILING_K, Math.round(maxK)));
+  if (max < min + SALARY_GAP_K) {
+    max = Math.min(SALARY_CEILING_K, min + SALARY_GAP_K);
+  }
+  if (min > max - SALARY_GAP_K) {
+    min = Math.max(SALARY_FLOOR_K, max - SALARY_GAP_K);
+  }
+  return { minK: min, maxK: max };
+}
+
+function salarySymbol(currency: string): string {
+  if (currency === 'USD') return '$';
+  if (currency === 'GBP') return '£';
+  return '€';
+}
+
 function SalaryRangeSlider({
   minK,
   maxK,
+  currency,
   onChange,
 }: {
   minK: number;
   maxK: number;
+  currency: string;
   onChange: (minK: number, maxK: number) => void;
 }) {
-  const floor = 40;
-  const ceiling = 300;
-  const gap = 10;
+  const sym = salarySymbol(currency);
+  const span = SALARY_CEILING_K - SALARY_FLOOR_K;
+  const leftPct = span > 0 ? ((minK - SALARY_FLOOR_K) / span) * 100 : 0;
+  const rightPct = span > 0 ? 100 - ((maxK - SALARY_FLOOR_K) / span) * 100 : 0;
 
-  const leftPct = ((minK - floor) / (ceiling - floor)) * 100;
-  const rightPct = 100 - ((maxK - floor) / (ceiling - floor)) * 100;
+  const apply = (nextMin: number, nextMax: number) => {
+    const clamped = clampSalaryRange(nextMin, nextMax);
+    onChange(clamped.minK, clamped.maxK);
+  };
 
   const setMin = (v: number) => {
-    const next = Math.min(v, maxK - gap);
-    onChange(Math.max(floor, next), maxK);
+    apply(v, maxK);
   };
 
   const setMax = (v: number) => {
-    const next = Math.max(v, minK + gap);
-    onChange(minK, Math.min(ceiling, next));
+    apply(minK, v);
+  };
+
+  const onManualMin = (raw: string) => {
+    const parsed = raw === '' ? SALARY_FLOOR_K : Number(raw);
+    if (Number.isNaN(parsed)) return;
+    setMin(parsed);
+  };
+
+  const onManualMax = (raw: string) => {
+    const parsed = raw === '' ? SALARY_FLOOR_K : Number(raw);
+    if (Number.isNaN(parsed)) return;
+    setMax(parsed);
   };
 
   return (
-    <div className="onboarding-salary-slider">
-      <div className="onboarding-salary-slider__track-wrap">
-        <div className="onboarding-salary-slider__track-bg" />
-        <div
-          className="onboarding-salary-slider__track-fill"
-          style={{ left: `${leftPct}%`, right: `${rightPct}%` }}
-        />
-        <input
-          type="range"
-          className="onboarding-salary-slider__input"
-          min={floor}
-          max={ceiling}
-          value={minK}
-          aria-label="Minimum salary in thousands"
-          onChange={e => setMin(Number(e.target.value))}
-        />
-        <input
-          type="range"
-          className="onboarding-salary-slider__input"
-          min={floor}
-          max={ceiling}
-          value={maxK}
-          aria-label="Maximum salary in thousands"
-          onChange={e => setMax(Number(e.target.value))}
-        />
+    <div className="onboarding-salary-controls">
+      <div className="onboarding-salary-manual">
+        <label className="onboarding-salary-manual__field">
+          <span className="onboarding-salary-manual__label">Min ({sym}k)</span>
+          <input
+            type="number"
+            className="onboarding-salary-manual__input"
+            min={SALARY_FLOOR_K}
+            max={SALARY_CEILING_K}
+            step={1}
+            value={minK}
+            aria-label="Minimum salary in thousands"
+            onChange={e => onManualMin(e.target.value)}
+          />
+        </label>
+        <label className="onboarding-salary-manual__field">
+          <span className="onboarding-salary-manual__label">Max ({sym}k)</span>
+          <input
+            type="number"
+            className="onboarding-salary-manual__input"
+            min={SALARY_FLOOR_K}
+            max={SALARY_CEILING_K}
+            step={1}
+            value={maxK}
+            aria-label="Maximum salary in thousands"
+            onChange={e => onManualMax(e.target.value)}
+          />
+        </label>
+      </div>
+      <div className="onboarding-salary-slider">
+        <div className="onboarding-salary-slider__track-wrap">
+          <div className="onboarding-salary-slider__track-bg" />
+          <div
+            className="onboarding-salary-slider__track-fill"
+            style={{ left: `${leftPct}%`, right: `${rightPct}%` }}
+          />
+          <input
+            type="range"
+            className="onboarding-salary-slider__input"
+            min={SALARY_FLOOR_K}
+            max={SALARY_CEILING_K}
+            value={minK}
+            aria-label="Minimum salary slider"
+            onChange={e => setMin(Number(e.target.value))}
+          />
+          <input
+            type="range"
+            className="onboarding-salary-slider__input"
+            min={SALARY_FLOOR_K}
+            max={SALARY_CEILING_K}
+            value={maxK}
+            aria-label="Maximum salary slider"
+            onChange={e => setMax(Number(e.target.value))}
+          />
+        </div>
       </div>
     </div>
   );
@@ -265,7 +338,7 @@ export function PreferencesStep({ values, saving, onChange, onBack, onComplete }
   }, []);
 
   const salaryLabel = useMemo(() => {
-    const sym = values.salaryCurrency === 'USD' ? '$' : values.salaryCurrency === 'GBP' ? '£' : '€';
+    const sym = salarySymbol(values.salaryCurrency);
     return `${sym}${values.salaryMinK}k — ${sym}${values.salaryMaxK}k`;
   }, [values.salaryCurrency, values.salaryMinK, values.salaryMaxK]);
 
@@ -338,6 +411,7 @@ export function PreferencesStep({ values, saving, onChange, onBack, onComplete }
         <ChipSection
           title="Core Tech Stack"
           options={SUGGESTED_TECH}
+          chipTone="gap"
           selected={values.selectedTech}
           onToggle={tech => onChange({ selectedTech: toggleList(values.selectedTech, tech) })}
           customValue={customTech}
@@ -409,6 +483,7 @@ export function PreferencesStep({ values, saving, onChange, onBack, onComplete }
           <SalaryRangeSlider
             minK={values.salaryMinK}
             maxK={values.salaryMaxK}
+            currency={values.salaryCurrency}
             onChange={(salaryMinK, salaryMaxK) => onChange({ salaryMinK, salaryMaxK })}
           />
         </section>

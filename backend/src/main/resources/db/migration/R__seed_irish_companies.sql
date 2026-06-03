@@ -27,7 +27,8 @@ INSERT INTO irish_companies (name, careers_url, category) VALUES
 ('Revolut', 'https://www.revolut.com/en-IE/careers/', 'Fintech'),
 ('Atlassian', 'https://www.atlassian.com/company/careers/all-jobs#search&location=Dublin%2C+Ireland', 'SaaS'),
 ('MongoDB', 'https://www.mongodb.com/company/careers/departments', 'SaaS'),
-('Cloudflare', 'https://www.cloudflare.com/careers/jobs/?location=Dublin%2C+Ireland', 'SaaS')
+('Cloudflare', 'https://www.cloudflare.com/careers/jobs/?location=Dublin%2C+Ireland', 'SaaS'),
+('EY', 'https://careers.ey.com/ey/search/#?location=ireland', 'Professional Services')
 ON CONFLICT (name) DO UPDATE SET 
     careers_url = EXCLUDED.careers_url,
     category = EXCLUDED.category;

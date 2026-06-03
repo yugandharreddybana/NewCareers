@@ -4,6 +4,7 @@ import com.careerops.model.Job;
 import com.careerops.model.SeenJob;
 import com.careerops.repository.JobRepository;
 import com.careerops.repository.SeenJobRepository;
+import com.careerops.repository.UserJobRepository;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
@@ -19,9 +20,12 @@ public class DeduplicationService {
 
     private final JobRepository     jobs;
     private final SeenJobRepository seen;
+    private final UserJobRepository userJobs;
 
-    public DeduplicationService(JobRepository jobs, SeenJobRepository seen) {
-        this.jobs = jobs; this.seen = seen;
+    public DeduplicationService(JobRepository jobs, SeenJobRepository seen, UserJobRepository userJobs) {
+        this.jobs = jobs;
+        this.seen = seen;
+        this.userJobs = userJobs;
     }
 
     @Transactional(timeout = 10)
@@ -35,6 +39,32 @@ public class DeduplicationService {
             Job stored = jobs.findByFingerprint(j.getFingerprint()).orElseGet(() -> jobs.save(j));
             result.add(stored);
         }
+        return result;
+    }
+
+    /**
+     * For manual fetch / delivery: skip jobs already in the user's pipeline, not merely
+     * {@code seen_jobs} (onboarding marks many listings as seen before they enter the pipeline).
+     */
+    @Transactional(timeout = 10)
+    public List<Job> dedupForPipelineDelivery(UUID userId, List<Job> raw) {
+        Set<UUID> ownedJobIds = userJobs.findJobIdsByUserId(userId);
+        List<Job> result = new ArrayList<>();
+        Set<String> batch = new HashSet<>();
+        for (Job j : raw) {
+            if (j.getFingerprint() == null || j.getCompany() == null || j.getTitle() == null) {
+                continue;
+            }
+            if (!batch.add(j.getFingerprint())) {
+                continue;
+            }
+            Job stored = jobs.findByFingerprint(j.getFingerprint()).orElseGet(() -> jobs.save(j));
+            if (ownedJobIds.contains(stored.getId())) {
+                continue;
+            }
+            result.add(stored);
+        }
+        log.info("User {} pipeline dedup: {} new candidates from {} raw", userId, result.size(), raw.size());
         return result;
     }
 

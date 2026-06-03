@@ -114,6 +114,16 @@ public final class LinkedInDescriptionHelper {
 
     static String htmlToPlainText(String html) {
         Document doc = Jsoup.parse(html);
-        return doc.text().trim();
+        doc.select("button, [class*=show-more], [class*=show-less]").remove();
+        doc.select("br").prepend("\n");
+        doc.select("p, li, h1, h2, h3, h4, div[class*=description]").prepend("\n");
+        String text = doc.text()
+                .replace('\u00a0', ' ')
+                .replaceAll("(?i)\\bshow\\s+more\\b", "")
+                .replaceAll("(?i)\\bshow\\s+less\\b", "")
+                .replaceAll("[ \\t]+", " ")
+                .replaceAll("\\n{3,}", "\n\n")
+                .trim();
+        return text;
     }
 }

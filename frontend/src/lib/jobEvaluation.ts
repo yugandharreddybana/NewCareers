@@ -1,5 +1,5 @@
 import type { JobDetail } from '@/types';
-
+import { buildAtsKeywords, partitionAtsKeywords } from '@/lib/atsKeywords';
 import type { EvaluationData, EvaluationSections } from '@/types/skills-data';
 
 
@@ -39,6 +39,8 @@ export type JobEvaluationView = EvaluationData & {
   legacy?: boolean;
 
   evaluationStatus?: string;
+
+  storyBankCandidates?: string[];
 
   /** True when evaluation came from daily job delivery / stored breakdown */
 
@@ -89,6 +91,8 @@ const SECTION_KEYS = new Set([
   'salaryMatch',
 
   'cvImprovementTips',
+
+  'nextSteps',
 
   'verdict',
 
@@ -360,6 +364,8 @@ export function parseEvaluationReport(
 
     cvImprovementTips: asStringArray(raw.cvImprovementTips) ?? [],
 
+    nextSteps: asStringArray(raw.nextSteps) ?? [],
+
     sections,
 
   };
@@ -404,6 +410,9 @@ export function parseEvaluationReport(
 
   if (evalStatus) view.evaluationStatus = evalStatus;
 
+  const storyBankCandidates = asStringArray(raw.storyBankCandidates);
+  if (storyBankCandidates) view.storyBankCandidates = storyBankCandidates;
+
 
 
   const isV2 = schemaVersion != null && schemaVersion >= 2;
@@ -440,11 +449,151 @@ export function parseEvaluationReport(
 
 const HEURISTIC_PLACEHOLDER_TIP = 'Run a deep evaluation when AI capacity is available.';
 
+/** Substantive report with dimension rubric + narrative sections (local or AI). */
+/** Next-step bullets shown in the evaluation modal and PDF export. */
+export function resolveNextStepsForDisplay(evaluation: JobEvaluationView): string[] {
+  if ((evaluation.nextSteps?.length ?? 0) > 0) return evaluation.nextSteps ?? [];
+
+  const score5 = evaluation.applyScore;
+  const score100 = evaluation.overallScore;
+  const normalized = score5 != null ? score5 : score100 != null ? score100 / 20 : undefined;
+
+  if (normalized == null) {
+    return ['Run a full evaluation to get tailored next steps and A–F guidance.'];
+  }
+  if (normalized >= 4.5) {
+    return ['Strong match. Tailor your resume for this role and apply now.'];
+  }
+  if (normalized >= 3.0) {
+    return ['Solid fit. Tailor your resume and emphasize your strongest matched signals before applying.'];
+  }
+  return ['This role is a stretch. Prioritize better-matched roles unless this is strategically important.'];
+}
+
+export function hasRichEvaluationReport(evaluation?: JobEvaluationView | null): boolean {
+  if (!evaluation) return false;
+  const summary = evaluation.sections?.executiveSummary?.trim() ?? '';
+  const dimCount = evaluation.dimensions?.length ?? 0;
+  if (summary.length >= 80 && dimCount >= 8) return true;
+  if (summary.length >= 120 && dimCount >= 4) return true;
+  return false;
+}
+
 export function isHeuristicPlaceholderEvaluation(job: JobDetail): boolean {
+  const breakdown = job.scoreBreakdown as Record<string, unknown> | undefined;
+  if (breakdown?.evaluationStatus === 'complete_local' || breakdown?.evaluationStatus === 'complete') {
+    return false;
+  }
+  if (hasRichEvaluationReport(parseEvaluationReport(breakdown, { fromDailyDelivery: true }) ?? undefined)) {
+    return false;
+  }
+  if (breakdown?.evaluationStatus === 'heuristic_preview') return true;
   const summary = (job.humanSummary ?? '').toLowerCase();
-  if (summary.includes('heuristic') || summary.includes('rate-limited')) return true;
+  if (summary.includes('run full job evaluation')) return true;
   const tips = job.cvImprovementTips ?? [];
   return tips.length === 1 && tips[0] === HEURISTIC_PLACEHOLDER_TIP;
+}
+
+export function isPreviewEvaluation(job: JobDetail, evaluation?: JobEvaluationView): boolean {
+  if (evaluation?.evaluationStatus === 'complete_local' || evaluation?.evaluationStatus === 'complete') {
+    return false;
+  }
+  if (hasRichEvaluationReport(evaluation)) return false;
+  if ((evaluation?.dimensions?.length ?? 0) >= 4) return false;
+  const breakdown = job.scoreBreakdown as Record<string, unknown> | undefined;
+  if (breakdown?.evaluationStatus === 'complete_local' || breakdown?.evaluationStatus === 'complete') {
+    return false;
+  }
+  if (Array.isArray(breakdown?.dimensions) && (breakdown.dimensions as unknown[]).length >= 4) {
+    return false;
+  }
+  if (evaluation?.evaluationStatus === 'heuristic_preview') return true;
+  return isHeuristicPlaceholderEvaluation(job);
+}
+
+/** True only when report matches full EvaluationReportV2 richness expected by SKILL.md. */
+export function hasCompleteEvaluationReport(evaluation?: JobEvaluationView | null): boolean {
+  if (!evaluation) return false;
+
+  const status = (evaluation.evaluationStatus ?? '').toLowerCase();
+  const statusOk = status === 'complete' || status === 'complete_local';
+
+  const dimsOk = (evaluation.dimensions?.length ?? 0) >= 10;
+  const sections = evaluation.sections ?? {};
+  const sectionsOk =
+    Boolean(sections.executiveSummary?.trim()) &&
+    Boolean(sections.backgroundMatch?.trim()) &&
+    Boolean(sections.positioningStrategy?.trim()) &&
+    Boolean(sections.compensationAndMarket?.trim()) &&
+    Boolean(sections.tailoringPlan?.trim()) &&
+    Boolean(sections.interviewPrep?.trim());
+
+  return statusOk && dimsOk && sectionsOk;
+}
+
+/** Fill keyword-based gaps when stored evaluation is preview-only. */
+export function enrichPreviewEvaluation(
+  job: JobDetail,
+  profile?: { techStack?: string[]; targetRoles?: string[]; atsKeywords?: string[] } | null,
+  baseView?: JobEvaluationView,
+): JobEvaluationView {
+  const base = overlayPersistedJobSkills(baseView ?? resolveJobEvaluation(job), job);
+  const hasPersistedMatched = (job.matchedSkills?.length ?? 0) > 0;
+  const hasPersistedUnmatched = (job.unmatchedSkills?.length ?? 0) > 0;
+  if (hasPersistedMatched && hasPersistedUnmatched) {
+    return base;
+  }
+  if (hasPersistedMatched && !isPreviewEvaluation(job, base) && (base.unmatchedSkills?.length ?? 0) > 0) {
+    return base;
+  }
+  const matchedCount = base.matchedSkills?.length ?? 0;
+  const gapCount = base.unmatchedSkills?.length ?? 0;
+  if (!isPreviewEvaluation(job, base) && matchedCount > 1 && gapCount > 0) {
+    return base;
+  }
+
+  const keywords = buildAtsKeywords(profile);
+  if (!keywords.length) return base;
+
+  const haystack = `${job.title ?? ''}\n${job.description ?? ''}`;
+  const { matched, unmatched } = partitionAtsKeywords(haystack, keywords);
+  if (!matched.length && !unmatched.length) return base;
+
+  const tips = [...(base.cvImprovementTips ?? [])];
+  for (const gap of unmatched) {
+    const tip = `Develop or surface evidence for ${gap} — not mentioned in this posting.`;
+    if (!tips.includes(tip)) tips.push(tip);
+  }
+
+  const previewBackgroundMatch =
+    base.sections?.backgroundMatch
+    ?? (matched.length ? `Profile skills found in posting: ${matched.join(', ')}.` : undefined);
+  const previewPositioningStrategy =
+    base.sections?.positioningStrategy
+    ?? (unmatched.length ? `Close skill gaps in your CV or cover letter: ${unmatched.join(', ')}.` : undefined);
+  const previewTailoringPlan =
+    base.sections?.tailoringPlan
+    ?? (matched.length
+      ? `Mirror posting language for ${matched.join(', ')}${
+        unmatched.length ? `; add proof points for ${unmatched.join(', ')}` : ''
+      }.`
+      : undefined);
+
+  return {
+    ...base,
+    ...((matched.length && (base.matchedSkills?.length ?? 0) === 0)
+      ? { matchedSkills: matched }
+      : (base.matchedSkills ? { matchedSkills: base.matchedSkills } : {})),
+    ...(tips.length
+      ? { cvImprovementTips: tips }
+      : (base.cvImprovementTips ? { cvImprovementTips: base.cvImprovementTips } : {})),
+    sections: {
+      ...base.sections,
+      ...(previewBackgroundMatch ? { backgroundMatch: previewBackgroundMatch } : {}),
+      ...(previewPositioningStrategy ? { positioningStrategy: previewPositioningStrategy } : {}),
+      ...(previewTailoringPlan ? { tailoringPlan: previewTailoringPlan } : {}),
+    },
+  };
 }
 
 export function hasActionableCvTips(job: JobDetail): boolean {
@@ -473,6 +622,54 @@ export function hasStoredJobEvaluation(job: JobDetail): boolean {
 
 
 
+/** Full evaluation modal: narrative enrichment + API skill lists for chips. */
+export function buildJobEvaluationView(
+  job: JobDetail,
+  profile?: { techStack?: string[]; targetRoles?: string[]; atsKeywords?: string[] } | null,
+): JobEvaluationView {
+  const base = resolveJobEvaluation(job);
+  const enriched = enrichPreviewEvaluation(job, profile, base);
+  const lists = resolveJobSkillListsForDisplay(job);
+  return {
+    ...enriched,
+    matchedSkills: lists.matchedSkills,
+    unmatchedSkills: lists.unmatchedSkills,
+  };
+}
+
+/** Sidebar + match analysis: use API skill columns from refreshAndPersist (same as a fully evaluated job). */
+export function resolveJobSkillListsForDisplay(job: JobDetail): {
+  matchedSkills: string[];
+  unmatchedSkills: string[];
+} {
+  const matched = job.matchedSkills;
+  const unmatched = job.unmatchedSkills;
+  if (matched != null || unmatched != null) {
+    return {
+      matchedSkills: matched ?? [],
+      unmatchedSkills: unmatched ?? [],
+    };
+  }
+  const fromReport = resolveJobEvaluation(job);
+  return {
+    matchedSkills: fromReport.matchedSkills ?? [],
+    unmatchedSkills: fromReport.unmatchedSkills ?? [],
+  };
+}
+
+/** Prefer persisted CV↔JD skill columns over stale lists inside score_breakdown. */
+export function overlayPersistedJobSkills(
+  view: JobEvaluationView,
+  job: JobDetail,
+): JobEvaluationView {
+  if (job.matchedSkills == null && job.unmatchedSkills == null) return view;
+  return {
+    ...view,
+    matchedSkills: job.matchedSkills ?? view.matchedSkills ?? [],
+    unmatchedSkills: job.unmatchedSkills ?? view.unmatchedSkills ?? [],
+  };
+}
+
 export function resolveJobEvaluation(job: JobDetail): JobEvaluationView {
 
   const raw = job.scoreBreakdown;
@@ -481,7 +678,7 @@ export function resolveJobEvaluation(job: JobDetail): JobEvaluationView {
 
     const parsed = parseEvaluationReport(raw as Record<string, unknown>, { fromDailyDelivery: true });
 
-    if (parsed) return parsed;
+    if (parsed) return overlayPersistedJobSkills(parsed, job);
 
   }
 
@@ -561,11 +758,11 @@ export function evaluationFromSkillPayload(
 
     parsed.fromDailyDelivery = false;
 
-    return parsed;
+    return overlayPersistedJobSkills(parsed, merged);
 
   }
 
-  return resolveJobEvaluation(merged);
+  return overlayPersistedJobSkills(resolveJobEvaluation(merged), merged);
 
 }
 

@@ -84,6 +84,10 @@ public class NvidiaService {
         log.info("NvidiaService: max concurrent calls={}", maxConcurrent);
     }
 
+    public boolean isConfigured() {
+        return apiKey != null && !apiKey.isBlank();
+    }
+
     // ─── Core text generation ────────────────────────────────────────────────
 
     /**

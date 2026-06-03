@@ -71,8 +71,9 @@ public class JobMatchingService {
 
         if (stack.length > 0) {
             int stackHits = 0;
+            String hayLower = haystack.toLowerCase(Locale.ROOT);
             for (String skill : stack) {
-                if (haystack.contains(skill.toLowerCase())) {
+                if (CvSkillCanonical.jobHaystackContains(hayLower, skill)) {
                     matched.add(skill);
                     stackHits++;
                 }

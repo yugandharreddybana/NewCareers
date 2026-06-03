@@ -1,19 +1,9 @@
 /**
  * ProtectedRoute.tsx — auth guards for the React Router tree.
  *
- * Pass 6 fixes folded in:
- *   #6.004 / #6.037 — DEV_BYPASS comes from `lib/env.ts`. No more divergent
- *                    boolean derivations between AuthContext / Login / here.
- *   #6.005          — User.role is now populated by /auth/me; AdminRoute
- *                    correctly recognises administrators.
- *   #6.041          — ExperimentDashboardPage (and any future admin route)
- *                    is reachable for real admins.
- *   #6.047          — Non-admins navigating directly to /admin/* see a toast
- *                    explaining the redirect instead of silently bouncing.
- *
- * AppShell hosts the authenticated layout (sidebar, top bar, bottom nav).
- * Onboarding redirect: authenticated users without `onboarded` are funnelled
- * to /onboarding — except when they are already on it (avoids a redirect loop).
+ * ProtectedRoute — requires a valid session; unauthenticated users go to /login.
+ * GuestRoute       — login/signup only; authenticated users are sent to the app.
+ * AdminRoute       — requires ADMIN role.
  */
 import { Navigate, Outlet, useLocation } from 'react-router-dom';
 import { useEffect, useRef } from 'react';
@@ -21,22 +11,38 @@ import toast from 'react-hot-toast';
 import { useAuth } from '@/context/AuthContext';
 import AppShell from '@/components/layout/AppShell';
 import { PageLoader } from '@/components/LoadingSpinner';
-import { DEV_BYPASS } from '@/lib/env';
+
+const PUBLIC_AUTH_PATHS = new Set([
+  '/login',
+  '/signup',
+  '/register',
+  '/forgot-password',
+  '/reset-password',
+]);
+
+function loginRedirectTarget(
+  user: { onboarded?: boolean },
+  fromPath?: string,
+): string {
+  if (fromPath && !PUBLIC_AUTH_PATHS.has(fromPath) && fromPath !== '/') {
+    return fromPath;
+  }
+  return user.onboarded ? '/dashboard' : '/onboarding';
+}
+
+/** Full-width layouts render without the sidebar shell (onboarding, welcome, job detail). */
+function useFullWidthLayout(): boolean {
+  const location = useLocation();
+  const fullWidthPaths = ['/onboarding', '/welcome', '/dashboard', '/account', '/jobs', '/kanban'];
+  return (
+    fullWidthPaths.includes(location.pathname) || location.pathname.startsWith('/jobs/')
+  );
+}
 
 export function ProtectedRoute() {
   const { user, loading } = useAuth();
   const location = useLocation();
-
-  const fullWidthPaths = ['/onboarding', '/welcome', '/dashboard', '/account', '/jobs', '/kanban'];
-  const isFullWidth =
-    fullWidthPaths.includes(location.pathname) || location.pathname.startsWith('/jobs/');
-
-  if (DEV_BYPASS) {
-    if (isFullWidth) {
-      return <Outlet />;
-    }
-    return <AppShell />;
-  }
+  const isFullWidth = useFullWidthLayout();
 
   if (loading) return <PageLoader />;
 
@@ -50,8 +56,7 @@ export function ProtectedRoute() {
     );
   }
 
-  // Onboarding gate. The /onboarding route is itself rendered inside this
-  // ProtectedRoute, so we exempt that path to avoid a redirect loop.
+  // Onboarding gate — exempt /onboarding to avoid a redirect loop.
   if (!user.onboarded && location.pathname !== '/onboarding') {
     return <Navigate to="/onboarding" replace />;
   }
@@ -64,6 +69,29 @@ export function ProtectedRoute() {
 }
 
 /**
+ * GuestRoute — for login, signup, and password-reset pages only.
+ * Logged-in users are redirected into the app.
+ */
+export function GuestRoute() {
+  const { user, loading } = useAuth();
+  const location = useLocation();
+
+  if (loading) return <PageLoader />;
+
+  if (user) {
+    const from = (location.state as { from?: { pathname?: string } } | null)?.from?.pathname;
+    return (
+      <Navigate
+        to={loginRedirectTarget(user, from)}
+        replace
+      />
+    );
+  }
+
+  return <Outlet />;
+}
+
+/**
  * AdminRoute — requires `user.role === 'ADMIN'`.
  * Non-admin authenticated users are redirected to /dashboard with a toast.
  */
@@ -72,9 +100,7 @@ export function AdminRoute() {
   const location = useLocation();
   const toastShown = useRef(false);
 
-  // We can't call hooks conditionally — the toast effect is always declared,
-  // but only fires when we are about to redirect a non-admin. Pass 6 #6.047.
-  const willDeny = !DEV_BYPASS && !loading && !!user && user.role !== 'ADMIN';
+  const willDeny = !loading && !!user && user.role !== 'ADMIN';
 
   useEffect(() => {
     if (willDeny && !toastShown.current) {
@@ -83,8 +109,7 @@ export function AdminRoute() {
     }
   }, [willDeny]);
 
-  if (DEV_BYPASS) return <AppShell />;
-  if (loading)    return <PageLoader />;
+  if (loading) return <PageLoader />;
 
   if (!user) {
     return (
@@ -103,8 +128,5 @@ export function AdminRoute() {
   return <AppShell />;
 }
 
-// Default export so legacy imports (`import ProtectedRoute from ...`) keep working.
 export default ProtectedRoute;
-
-// Aliased <Outlet /> for any caller that imports it directly.
 export const ProtectedOutlet = Outlet;

@@ -30,7 +30,7 @@ public class Job {
 
     @Column(columnDefinition = "TEXT") private String description;
 
-    @Column(name = "source_url")  private String sourceUrl;
+    @Column(name = "source_url", columnDefinition = "TEXT") private String sourceUrl;
     @Column(name = "source_name") private String sourceName;
     private String sector;
 

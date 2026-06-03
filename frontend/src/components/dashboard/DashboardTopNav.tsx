@@ -1,6 +1,7 @@
 import { useCallback, useState } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { useAuth } from '@/context/AuthContext';
+import { NavUsageLimits } from '@/components/dashboard/NavUsageLimits';
 
 function firstName(full?: string | null): string {
   if (!full?.trim()) return 'U';
@@ -60,6 +61,7 @@ export function DashboardTopNav() {
           </Link>
         </div>
         <div className="flex items-center gap-0.5 sm:gap-base shrink-0">
+          <NavUsageLimits />
           <button
             type="button"
             className="p-2 text-secondary hover:text-primary transition-colors"

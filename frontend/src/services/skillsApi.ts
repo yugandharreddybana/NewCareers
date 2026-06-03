@@ -15,9 +15,52 @@ const RUN_ALL_TIMEOUT_MS  = 600_000;
 const PDF_TIMEOUT_MS      = 60_000;
 const PDF_BUNDLE_TIMEOUT  = 120_000;
 
+async function withFreshSessionRetry<T>(request: () => Promise<T>): Promise<T> {
+  await ensureFreshSession();
+  try {
+    return await request();
+  } catch (err) {
+    const status = (err as { response?: { status?: number } })?.response?.status;
+    if (status === 401 || status === 403) {
+      await ensureFreshSession();
+      return request();
+    }
+    throw err;
+  }
+}
+
 export const skillsApi = {
   start: (req: SkillStartRequest): Promise<SkillRunResponse> =>
-    api.post<SkillRunResponse>('/skills/start', req, { timeout: SKILL_TIMEOUT_MS }).then(r => r.data),
+    api.post<SkillRunResponse>('/skills/start', req, {
+      timeout: SKILL_TIMEOUT_MS,
+      skipGlobalLoader: true,
+    }).then(r => r.data),
+
+  outreachDraft: (userJobId: string, channel = 'linkedin', tone = 'professional') =>
+    api
+      .post<import('@/types/skills-data').OutreachData>(
+        '/skills/outreach/draft',
+        null,
+        {
+          params: { userJobId, channel, tone },
+          timeout: SKILL_TIMEOUT_MS,
+          skipGlobalLoader: true,
+        },
+      )
+      .then(r => r.data),
+
+  applyQuestionAnswer: (
+    userJobId: string,
+    question: string,
+    rerun = false,
+  ): Promise<{ answer: string }> =>
+    api
+      .post<{ answer: string }>(
+        '/skills/apply/answer',
+        { userJobId, question, rerun },
+        { timeout: SKILL_TIMEOUT_MS, skipGlobalLoader: true },
+      )
+      .then(r => r.data),
 
   reply: (req: ConversationReplyRequest): Promise<SkillRunResponse> =>
     api.post<SkillRunResponse>('/skills/conversation/reply', req, { timeout: SKILL_TIMEOUT_MS }).then(r => r.data),
@@ -41,16 +84,35 @@ export const skillsApi = {
   getLastRun: async (userJobId: string, skillName: string): Promise<SkillRunResponse | null> => {
     const r = await api.get<SkillRunResponse>(`/skills/last-run/${userJobId}/${skillName}`, {
       skipGlobalLoader: true,
-      validateStatus: (status) => status === 200 || status === 204,
+      validateStatus: (status) => status === 200 || status === 204 || status === 404,
     });
-    if (r.status === 204) return null;
+    if (r.status === 204 || r.status === 404) return null;
     return r.data;
   },
 
+  getCompletedSkills: async (userJobId: string): Promise<string[]> => {
+    const r = await api.get<string[]>(`/skills/completed/${userJobId}`, {
+      skipGlobalLoader: true,
+      validateStatus: (status) => status === 200 || status === 404,
+    });
+    if (r.status === 404) return [];
+    return r.data ?? [];
+  },
+
+  getRunHistory: async (userJobId: string, skillName: string) => {
+    const r = await api.get<Array<{ id: string; createdAt: string; output: Record<string, unknown> }>>(
+      `/skills/run-history/${userJobId}/${skillName}`,
+      { skipGlobalLoader: true },
+    );
+    return r.data ?? [];
+  },
+
   downloadSkillPdf: async (userJobId: string, skillName: string): Promise<void> => {
-    const response = await api.get(
-      `/skills/pdf/${userJobId}/${skillName}`,
-      { responseType: 'blob', timeout: PDF_TIMEOUT_MS },
+    const response = await withFreshSessionRetry(() =>
+      api.get(
+        `/skills/pdf/${userJobId}/${skillName}`,
+        { responseType: 'blob', timeout: PDF_TIMEOUT_MS },
+      ),
     );
     triggerDownload(asPdfBlob(response.data), `${skillName}-report.pdf`);
   },
@@ -60,13 +122,18 @@ export const skillsApi = {
     filename: string,
   ): Promise<void> => {
     try {
-      await ensureFreshSession();
       const { sanitizeJobEvaluationPdfPayload } = await import('@/lib/downloadJobEvaluationPdf');
       const body = sanitizeJobEvaluationPdfPayload(payload);
-      const response = await api.post('/skills/pdf/evaluation-report', body, {
-        responseType: 'blob',
-        timeout: PDF_TIMEOUT_MS,
-      });
+      // Force deterministic JSON payload to avoid transport-time serialization edge cases.
+      const jsonBody = JSON.stringify(body);
+      JSON.parse(jsonBody);
+      const response = await withFreshSessionRetry(() =>
+        api.post('/skills/pdf/evaluation-report', jsonBody, {
+          responseType: 'blob',
+          timeout: PDF_TIMEOUT_MS,
+          headers: { 'Content-Type': 'application/json' },
+        }),
+      );
       const blob = asPdfBlob(response.data);
       if (blob.size < 5) {
         throw new Error('Empty PDF response');
@@ -79,19 +146,54 @@ export const skillsApi = {
   },
 
   downloadAllPdf: async (userJobId: string): Promise<void> => {
-    const response = await api.get(
-      `/skills/pdf/${userJobId}/all`,
-      { responseType: 'blob', timeout: PDF_BUNDLE_TIMEOUT },
+    const response = await withFreshSessionRetry(() =>
+      api.get(
+        `/skills/pdf/${userJobId}/all`,
+        { responseType: 'blob', timeout: PDF_BUNDLE_TIMEOUT },
+      ),
     );
     triggerDownload(asPdfBlob(response.data), 'careerops-complete-pack.pdf');
   },
 
   downloadResumePdf: async (userJobId: string): Promise<void> => {
-    const response = await api.get(
-      `/skills/pdf/${userJobId}/resume`,
-      { responseType: 'blob', timeout: PDF_TIMEOUT_MS },
+    const response = await withFreshSessionRetry(() =>
+      api.get(
+        `/skills/pdf/${userJobId}/resume`,
+        { responseType: 'blob', timeout: PDF_TIMEOUT_MS },
+      ),
     );
     triggerDownload(asPdfBlob(response.data), 'tailored-resume.pdf');
+  },
+
+  downloadResumeDocx: async (userJobId: string): Promise<void> => {
+    const response = await withFreshSessionRetry(() =>
+      api.get(
+        `/skills/docx/${userJobId}/resume`,
+        {
+          responseType: 'blob',
+          timeout: PDF_TIMEOUT_MS,
+        },
+      ),
+    );
+    const blob = response.data instanceof Blob
+      ? response.data
+      : new Blob([response.data as BlobPart], {
+          type: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+        });
+    triggerDownload(blob, 'tailored-resume.docx');
+  },
+
+  getResumePreview: async (userJobId: string) => {
+    const r = await api.get<{
+      html: string;
+      tailoredMarkdown: string;
+      baselineMarkdown: string;
+    }>(`/skills/resume/${userJobId}/preview`, {
+      skipGlobalLoader: true,
+      validateStatus: (status) => status === 200 || status === 204 || status === 404,
+    });
+    if (r.status === 204 || r.status === 404) return null;
+    return r.data;
   },
 
   evaluate:      (userJobId: string)                       => skillsApi.start({ skillName: 'evaluate', userJobId }),
@@ -142,6 +244,9 @@ async function pdfDownloadErrorMessage(err: unknown): Promise<string> {
   }
   if (ax.response?.status === 401) {
     return 'Sign in again to download your evaluation PDF.';
+  }
+  if (ax.response?.status === 403) {
+    return 'Download was blocked by auth/session checks. Please retry once; if it persists, sign in again.';
   }
   if (ax.response?.status === 502) {
     return 'Backend unavailable — ensure Java and middleware are running.';

@@ -16,6 +16,26 @@ import jwt from 'jsonwebtoken';
 import { verifySessionToken } from './jwtVerification.js';
 
 const COOKIE = process.env.COOKIE_NAME || 'co_session';
+const DEV_USER_ID = '00000000-0000-0000-0000-000000000001';
+
+/** Opt-in only: fake dev user when no/invalid JWT (never default — breaks logout testing). */
+function devAutoAuthEnabled(): boolean {
+  return process.env.NODE_ENV === 'development' && process.env.DEV_AUTO_AUTH === 'true';
+}
+
+function applyDevUser(req: Request): void {
+  req.userId = DEV_USER_ID;
+  req.email = 'dev@careerops.ie';
+  req.role = 'ADMIN';
+
+  const trustHeader = process.env.INTERNAL_TRUST_HEADER || 'X-Internal-User-Id';
+  req.headers[trustHeader] = req.userId;
+  req.headers[trustHeader.toLowerCase()] = req.userId;
+  if (process.env.INTERNAL_TRUST_SECRET) {
+    req.headers['X-Internal-Secret'] = process.env.INTERNAL_TRUST_SECRET;
+    req.headers['x-internal-secret'] = process.env.INTERNAL_TRUST_SECRET;
+  }
+}
 
 // F5 fix: augment Express Request so downstream route handlers are typed
 declare global {
@@ -45,18 +65,8 @@ export function authGuard(req: Request, res: Response, next: NextFunction): void
   const cookie = readCookieToken(req);
 
   if (!bearer && !cookie) {
-    if (process.env.NODE_ENV === 'development') {
-      req.userId = '00000000-0000-0000-0000-000000000001';
-      req.email  = 'dev@careerops.ie';
-      req.role   = 'ADMIN';
-
-      const trustHeader = process.env.INTERNAL_TRUST_HEADER || 'X-Internal-User-Id';
-      req.headers[trustHeader] = req.userId;
-      req.headers[trustHeader.toLowerCase()] = req.userId;
-      if (process.env.INTERNAL_TRUST_SECRET) {
-        req.headers['X-Internal-Secret'] = process.env.INTERNAL_TRUST_SECRET;
-        req.headers['x-internal-secret'] = process.env.INTERNAL_TRUST_SECRET;
-      }
+    if (devAutoAuthEnabled()) {
+      applyDevUser(req);
       return next();
     }
     res.status(401).json({ error: 'Unauthorized — no token provided' });
@@ -95,19 +105,8 @@ export function authGuard(req: Request, res: Response, next: NextFunction): void
     }
   }
 
-  // Local dev: stale cookies should not block PDF/skills when no valid JWT is present.
-  if (process.env.NODE_ENV === 'development') {
-    req.userId = '00000000-0000-0000-0000-000000000001';
-    req.email  = 'dev@careerops.ie';
-    req.role   = 'ADMIN';
-
-    const trustHeader = process.env.INTERNAL_TRUST_HEADER || 'X-Internal-User-Id';
-    req.headers[trustHeader] = req.userId;
-    req.headers[trustHeader.toLowerCase()] = req.userId;
-    if (process.env.INTERNAL_TRUST_SECRET) {
-      req.headers['X-Internal-Secret'] = process.env.INTERNAL_TRUST_SECRET;
-      req.headers['x-internal-secret'] = process.env.INTERNAL_TRUST_SECRET;
-    }
+  if (devAutoAuthEnabled()) {
+    applyDevUser(req);
     return next();
   }
 

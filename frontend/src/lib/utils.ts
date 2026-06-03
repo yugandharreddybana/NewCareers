@@ -24,6 +24,21 @@ export function timeAgo(iso: string): string {
   return new Date(iso).toLocaleDateString('en-IE', { month: 'short', day: 'numeric' });
 }
 
+/** Exact local date/time when a job was pulled into the pipeline (deliveredAt). */
+export function formatPulledAt(iso?: string | null): string {
+  if (!iso) return 'Unknown';
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return 'Unknown';
+  return d.toLocaleString('en-IE', {
+    day: 'numeric',
+    month: 'short',
+    year: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false,
+  });
+}
+
 /** Greeting based on current hour */
 export function greeting(): string {
   const h = new Date().getHours();

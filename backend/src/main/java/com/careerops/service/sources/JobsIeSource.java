@@ -3,9 +3,6 @@ package com.careerops.service.sources;
 import com.careerops.model.Job;
 import com.careerops.model.UserProfile;
 import org.jsoup.Jsoup;
-import org.jsoup.nodes.Document;
-import org.jsoup.nodes.Element;
-import org.jsoup.select.Elements;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
@@ -16,8 +13,7 @@ import java.util.Arrays;
 import java.util.List;
 
 /**
- * Scrapes Jobs.ie search results using Jsoup.
- * Searches each target role sorted by date and collects up to 40 listings.
+ * Scrapes Jobs.ie search results (StepStone unified result list).
  */
 @Component
 public class JobsIeSource implements JobSource {
@@ -36,34 +32,35 @@ public class JobsIeSource implements JobSource {
         for (String role : Arrays.copyOf(roles, Math.min(roles.length, 3))) {
             try {
                 String url = BASE + "/jobs/it-software/?q=" + role.replace(" ", "+") + "&sort=date";
-                Document doc = Jsoup.connect(url)
-                    .userAgent("Mozilla/5.0 (compatible; CareerOpsBot/1.0)")
-                    .timeout(10_000).get();
+                String html = Jsoup.connect(url)
+                    .userAgent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36")
+                    .timeout(20_000)
+                    .header("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8")
+                    .header("Accept-Language", "en-IE,en;q=0.9")
+                    .ignoreContentType(true)
+                    .execute().body();
 
-                Elements listings = doc.select("article.job, div[class*=job-result], li[class*=job]");
-                if (listings.isEmpty()) listings = doc.select("h2 > a[href*=/job], h3 > a[href*=/job]");
-
-                for (Element el : listings) {
-                    Element titleEl = el.select("h2 a, h3 a, a[class*=title]").first();
-                    if (titleEl == null) continue;
-                    String title   = titleEl.text().trim();
-                    String company = el.select("[class*=company],[class*=employer]").text().trim();
-                    String location= el.select("[class*=location],[class*=place]").text().trim();
-                    String href    = titleEl.absUrl("href");
-
-                    if (title.isEmpty() || title.length() > 150) continue;
-                    if (company.isEmpty())  company  = "Unknown";
-                    if (location.isEmpty()) location = "Ireland";
-
+                int before = out.size();
+                for (StepstonePreloadedParser.Listing listing : StepstonePreloadedParser.parse(html, BASE)) {
+                    String company = listing.company().isBlank() ? "Unknown" : listing.company();
+                    String location = listing.location().isBlank() ? "Ireland" : listing.location();
                     Job j = Job.builder()
-                        .title(title).company(company).location(location)
-                        .sourceUrl(href.isEmpty() ? url : href)
-                        .sourceName("Jobs.ie").currency("EUR")
-                        .postedAt(Instant.now()).build();
+                        .title(listing.title())
+                        .company(company)
+                        .location(location)
+                        .sourceUrl(StepstonePreloadedParser.toAbsoluteUrl(BASE, listing.relativeUrl()))
+                        .sourceName("Jobs.ie")
+                        .currency("EUR")
+                        .postedAt(Instant.now())
+                        .build();
                     j.setFingerprint(FingerprintUtil.of(j.getCompany(), j.getTitle(), j.getLocation()));
                     out.add(j);
-                    if (out.size() >= 40) return out;
+                    if (out.size() >= 40) {
+                        return out;
+                    }
                 }
+                log.info("Jobs.ie fetched {} jobs for role '{}' ({} total)",
+                    out.size() - before, role, out.size());
             } catch (Exception e) {
                 log.warn("Jobs.ie fetch failed for role '{}': {}", role, e.getMessage());
             }

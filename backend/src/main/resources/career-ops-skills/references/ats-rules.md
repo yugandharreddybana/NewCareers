@@ -35,6 +35,14 @@ For each job entry:
 - Location on same line as company (optional)
 - 3-5 bullet points per role
 
+## Professional Summary (when included)
+
+Must follow `references/professional-summary-contract.md` — exactly three sentences:
+
+1. Who you are (profession, background, or expertise)
+2. Key skills/expertise (relevant to the target role)
+3. Value you bring (to this company/role)
+
 ## Content
 
 - All text must be real text (selectable, searchable). No text-in-images.
