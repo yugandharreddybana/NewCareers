@@ -27,6 +27,11 @@ import java.util.concurrent.Executors;
 
 /**
  * First-run onboarding pipeline: normalize CV → scrape → AI-evaluate until ≥3 jobs ready.
+ *
+ * Enhancement: integrates JobEvaluationProgressStore to broadcast SSE events to the frontend
+ * during the pipeline. The frontend (Onboarding.tsx) connects to GET /api/jobs/evaluation-progress
+ * and receives SOURCE_FOUND, JOB_EVALUATED, and COMPLETE events so the user sees live progress
+ * instead of a static loading spinner.
  */
 @Service
 @Slf4j
@@ -40,6 +45,7 @@ public class OnboardingDeliveryService {
     private final ObjectMapper mapper;
     private final TransactionTemplate progressTx;
     private final CacheManager cacheManager;
+    private final JobEvaluationProgressStore progressStore;
 
     private final ExecutorService executor = Executors.newVirtualThreadPerTaskExecutor();
     private final ConcurrentHashMap<UUID, Boolean> running = new ConcurrentHashMap<>();
@@ -55,7 +61,8 @@ public class OnboardingDeliveryService {
             JobDeliveryService jobDelivery,
             ObjectMapper mapper,
             PlatformTransactionManager transactionManager,
-            CacheManager cacheManager) {
+            CacheManager cacheManager,
+            JobEvaluationProgressStore progressStore) {
         this.profiles = profiles;
         this.userJobs = userJobs;
         this.cvService = cvService;
@@ -65,6 +72,7 @@ public class OnboardingDeliveryService {
         this.progressTx = new TransactionTemplate(transactionManager);
         this.progressTx.setPropagationBehavior(TransactionDefinition.PROPAGATION_REQUIRES_NEW);
         this.cacheManager = cacheManager;
+        this.progressStore = progressStore;
     }
 
     private void evictProfileCache(UUID userId) {
@@ -140,6 +148,12 @@ public class OnboardingDeliveryService {
             cvNormalization.normalizeAndStore(userId);
 
             saveProgress(userId, progress(Stage.fetching_jobs, "Searching job boards in your area…", 0, 0));
+
+            // Deliver jobs with SSE progress callbacks.
+            // jobDelivery.deliverForOnboarding calls the Consumer<OnboardingDeliveryProgress> below
+            // for each evaluation milestone. We additionally emit SSE events from the progress store
+            // for source-level counts (SOURCE_FOUND is emitted by JobScrapeService/JobDeliveryService
+            // via progressStore.recordSourceFound when each board finishes scraping).
             jobDelivery.deliverForOnboarding(
                 userId,
                 OnboardingDeliveryDtos.DEFAULT_TARGET_COUNT,
@@ -163,6 +177,11 @@ public class OnboardingDeliveryService {
                     finalP.jobsDiscovered(),
                     done == Stage.failed ? msg : null
                 ));
+
+                // Broadcast COMPLETE event to any connected SSE client
+                if (progressStore.hasListener(userId)) {
+                    progressStore.markComplete(userId, evaluated);
+                }
             }
         } catch (Exception e) {
             log.warn("Onboarding delivery failed for userId={}: {}", userId, e.getMessage());
