@@ -13,17 +13,26 @@ import com.careerops.repository.NotificationRepository;
 import com.careerops.repository.UserJobRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Service;
 
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
+import java.util.concurrent.CompletableFuture;
 
 /**
  * Task 21 — ApplicationPlannerService
- * Auto-generates next-action tasks for a job based on its current stage.
- * Also handles task completion, upcoming queries, and overdue notifications.
+ *
+ * Batch 3 update:
+ *  - generatePlanAsync() runs the heavy Gemini call in a background thread (@Async).
+ *    The controller returns 202 Accepted immediately; the client polls or receives
+ *    a WebSocket/SSE notification when the plan is ready.
+ *  - generatePlan() is kept as a synchronous convenience for internal callers
+ *    (cron jobs, tests, etc.).
+ *  - On completion, a PLANNER_READY notification is pushed to NotificationRepository
+ *    (picked up by the SSE notification stream).
  */
 @Service
 @RequiredArgsConstructor
@@ -36,10 +45,45 @@ public class ApplicationPlannerService {
     private final DeadlineEventRepository deadlineRepo;
     private final NotificationRepository notificationRepo;
     private final GeminiService geminiService;
+    private final AiProviderMetricsService aiMetrics;
+
+    // ── Async entry point (Batch 3) ────────────────────────────────────────────
+
+    /**
+     * Batch 3: Async plan generation — returns a CompletableFuture immediately.
+     * The heavy Gemini call runs on the Spring @Async executor (defined in
+     * AsyncConfig or defaults to SimpleAsyncTaskExecutor).
+     *
+     * On success: saves tasks and pushes a PLANNER_READY notification.
+     * On failure: logs and pushes a PLANNER_FAILED notification so the UI
+     *             can show a "Try again" button rather than spinning forever.
+     */
+    @Async("skillExecutor")
+    public CompletableFuture<List<ApplicationTask>> generatePlanAsync(UUID userJobId, UUID userId) {
+        log.info("[PlannerAsync] Starting background plan generation for userJobId={} userId={}",
+                userJobId, userId);
+        try {
+            List<ApplicationTask> tasks = generatePlan(userJobId, userId);
+            pushNotification(userId, userJobId, "PLANNER_READY",
+                    "Your application plan is ready!",
+                    "AI has generated " + tasks.size() + " action items for your application.");
+            log.info("[PlannerAsync] Complete for userJobId={} — {} tasks", userJobId, tasks.size());
+            return CompletableFuture.completedFuture(tasks);
+        } catch (Exception e) {
+            log.error("[PlannerAsync] Failed for userJobId={}: {}", userJobId, e.getMessage());
+            pushNotification(userId, userJobId, "PLANNER_FAILED",
+                    "Application plan could not be generated",
+                    "Please try again. Error: " + e.getMessage());
+            return CompletableFuture.failedFuture(e);
+        }
+    }
+
+    // ── Synchronous plan generation ────────────────────────────────────────────
 
     /**
      * Task 22 — Auto-generates a set of next-action tasks for the given job.
      * Clears auto-generated tasks and replaces them with fresh AI-derived plan.
+     * Synchronous version — used internally and by tests.
      */
     public List<ApplicationTask> generatePlan(UUID userJobId, UUID userId) {
         UserJob userJob = userJobRepo.findById(userJobId)
@@ -49,7 +93,6 @@ public class ApplicationPlannerService {
             throw ApiException.forbidden("Access denied to userJob: " + userJobId);
         }
 
-        // Resolve the underlying Job to get title and company
         Job job = jobRepo.findById(userJob.getJobId())
                 .orElseThrow(() -> ApiException.notFound("Job not found: " + userJob.getJobId()));
 
@@ -75,11 +118,20 @@ public class ApplicationPlannerService {
             jobTitle, company, stage
         );
 
-        String aiResponse = geminiService.generateContent(prompt, userId, "application-plan");
+        long startMs = System.currentTimeMillis();
+        String aiResponse;
+        try {
+            aiResponse = geminiService.generateContent(prompt, userId, "application-plan");
+            aiMetrics.recordSuccess("gemini", System.currentTimeMillis() - startMs);
+        } catch (Exception e) {
+            aiMetrics.recordFailure("gemini");
+            log.warn("[Planner] Gemini failed, creating default tasks: {}", e.getMessage());
+            return createDefaultTasks(userJobId, userId, jobTitle, company);
+        }
+
         List<ApplicationTask> created = new ArrayList<>();
 
         try {
-            // Parse simplified JSON array manually
             String[] blocks = aiResponse.split("\\},\\s*\\{");
             for (String block : blocks) {
                 ApplicationTask task = new ApplicationTask();
@@ -184,6 +236,26 @@ public class ApplicationPlannerService {
 
         task.setReminderSent(true);
         taskRepo.save(task);
+    }
+
+    // ── Notification helper (Batch 3) ──────────────────────────────────────────
+
+    private void pushNotification(UUID userId, UUID userJobId, String type, String title, String body) {
+        try {
+            Notification n = new Notification();
+            n.setId(UUID.randomUUID());
+            n.setUserId(userId);
+            n.setType(type);
+            n.setTitle(title);
+            n.setBody(body);
+            n.setRead(false);
+            n.setCreatedAt(Instant.now());
+            n.setEntityType("user_job");
+            n.setEntityId(userJobId);
+            notificationRepo.save(n);
+        } catch (Exception e) {
+            log.warn("[Planner] Could not push notification type={}: {}", type, e.getMessage());
+        }
     }
 
     // ---- Mappers for 2.056 ----

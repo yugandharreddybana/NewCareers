@@ -5,11 +5,15 @@ import org.jspecify.annotations.Nullable;
 import com.careerops.exception.ApiException;
 import com.careerops.model.InterviewQuestionBank;
 import com.careerops.model.InterviewSession;
+import com.careerops.model.Notification;
 import com.careerops.model.UserJob;
 import com.careerops.repository.InterviewQuestionBankRepository;
 import com.careerops.repository.InterviewSessionRepository;
+import com.careerops.repository.NotificationRepository;
 import com.careerops.repository.UserJobRepository;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.HttpStatus;
+import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -18,30 +22,129 @@ import java.time.Instant;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
+import java.util.concurrent.CompletableFuture;
 
 /**
  * Phase 3.1 — Mock Interview Service
  *
- * Runs turn-by-turn text-based mock interviews.
- * Each reply is scored by Gemini and stored in interview_question_bank.
- * When all questions are answered, the session is completed with a summary.
+ * Batch 3 update:
+ *  - generateInterviewKitAsync() runs the heavy Gemini call in a background
+ *    @Async worker and notifies via NotificationRepository when done.
+ *    The controller returns 202 Accepted immediately; client polls or listens
+ *    on the SSE notification stream.
+ *  - start() and reply() remain synchronous (they are fast DB + light AI calls).
+ *  - AiProviderMetricsService is used to record Gemini latency/failures.
  */
 @Service
+@Slf4j
 public class MockInterviewService {
 
     private final InterviewSessionRepository sessionRepo;
     private final InterviewQuestionBankRepository questionRepo;
     private final UserJobRepository userJobRepo;
+    private final NotificationRepository notificationRepo;
     private final GeminiService gemini;
+    private final AiProviderMetricsService aiMetrics;
 
     public MockInterviewService(InterviewSessionRepository sessionRepo,
                                  InterviewQuestionBankRepository questionRepo,
                                  UserJobRepository userJobRepo,
-                                 GeminiService gemini) {
+                                 NotificationRepository notificationRepo,
+                                 GeminiService gemini,
+                                 AiProviderMetricsService aiMetrics) {
         this.sessionRepo = sessionRepo;
         this.questionRepo = questionRepo;
         this.userJobRepo = userJobRepo;
+        this.notificationRepo = notificationRepo;
         this.gemini = gemini;
+        this.aiMetrics = aiMetrics;
+    }
+
+    // ── Batch 3: Async interview kit generation ────────────────────────────────
+
+    /**
+     * Batch 3: Generate the interview question kit in the background.
+     * Returns a CompletableFuture immediately — the caller should return 202 Accepted.
+     *
+     * On success: saves questions and pushes a MOCK_INTERVIEW_KIT_READY notification.
+     * On failure: pushes a MOCK_INTERVIEW_KIT_FAILED notification.
+     *
+     * @param userId    user requesting the kit
+     * @param userJobId the job to generate questions for
+     * @param jobTitle  job title (passed in so we don't need a DB lookup in the async thread)
+     * @param jobDesc   job description snippet
+     * @param cvSummary user CV summary
+     */
+    @Async("skillExecutor")
+    public CompletableFuture<List<InterviewQuestionBank>> generateInterviewKitAsync(
+            UUID userId,
+            UUID userJobId,
+            String jobTitle,
+            String jobDesc,
+            String cvSummary) {
+
+        log.info("[MockInterviewAsync] Generating kit for userJobId={} userId={}", userJobId, userId);
+        try {
+            List<InterviewQuestionBank> questions =
+                    generateInterviewKit(userId, userJobId, jobTitle, jobDesc, cvSummary);
+            pushNotification(userId, userJobId, "MOCK_INTERVIEW_KIT_READY",
+                    "Your interview kit is ready!",
+                    "AI has generated " + questions.size() + " questions for \"" + jobTitle + "\".");
+            log.info("[MockInterviewAsync] Kit complete: {} questions for userJobId={}",
+                    questions.size(), userJobId);
+            return CompletableFuture.completedFuture(questions);
+        } catch (Exception e) {
+            log.error("[MockInterviewAsync] Failed for userJobId={}: {}", userJobId, e.getMessage());
+            pushNotification(userId, userJobId, "MOCK_INTERVIEW_KIT_FAILED",
+                    "Interview kit could not be generated",
+                    "Please try again. Error: " + e.getMessage());
+            return CompletableFuture.failedFuture(e);
+        }
+    }
+
+    /**
+     * Synchronous kit generation — used internally and by tests.
+     * Calls Gemini to produce N interview questions with model answers.
+     */
+    public List<InterviewQuestionBank> generateInterviewKit(
+            UUID userId,
+            UUID userJobId,
+            String jobTitle,
+            String jobDesc,
+            String cvSummary) {
+
+        String prompt = String.format("""
+                You are an expert technical and behavioural interview coach.
+                Generate 8 interview questions for the following role.
+
+                Job title: %s
+                Job description (excerpt): %.600s
+                Candidate CV summary: %.400s
+
+                For each question provide:
+                - question (the interview question text)
+                - modelAnswer (2-3 sentence ideal answer)
+                - skillArea (one of: TECHNICAL, BEHAVIOURAL, SITUATIONAL, CULTURE_FIT)
+
+                Return as a JSON array:
+                [{"question":"","modelAnswer":"","skillArea":""}]
+                """,
+                jobTitle,
+                jobDesc != null ? jobDesc : "",
+                cvSummary != null ? cvSummary : ""
+        );
+
+        long startMs = System.currentTimeMillis();
+        String aiResponse;
+        try {
+            aiResponse = gemini.generate(prompt, userId, "mock-interview-kit");
+            aiMetrics.recordSuccess("gemini", System.currentTimeMillis() - startMs);
+        } catch (Exception e) {
+            aiMetrics.recordFailure("gemini");
+            throw new RuntimeException("Gemini failed to generate interview kit: " + e.getMessage(), e);
+        }
+
+        return parseAndSaveQuestions(userId, userJobId, aiResponse);
     }
 
     // ── Start a new mock interview session ────────────────────────────────────
@@ -53,7 +156,6 @@ public class MockInterviewService {
             throw new ApiException(HttpStatus.NOT_FOUND, "UserJob not found");
         }
 
-        // Load kit questions for this job
         List<InterviewQuestionBank> kit = questionRepo.findByUserJobIdOrderByCreatedAtDesc(userJobId);
         if (kit.isEmpty())
             throw new ApiException(HttpStatus.BAD_REQUEST,
@@ -69,8 +171,7 @@ public class MockInterviewService {
                 .build()
         );
 
-        // Return session + first question
-        InterviewQuestionBank first = kit.get(kit.size() - 1); // oldest question first
+        InterviewQuestionBank first = kit.get(kit.size() - 1);
         return Map.of(
             "sessionId", session.getId(),
             "totalQuestions", kit.size(),
@@ -96,7 +197,6 @@ public class MockInterviewService {
             .filter(q -> q.getUserJobId().equals(session.getUserJobId()))
             .orElseThrow(() -> new ApiException(HttpStatus.NOT_FOUND, "Question not found or access denied"));
 
-        // Score the answer via Gemini
         String scorePrompt = String.format("""
             Rate this interview answer on a scale of 0 to 10.
             Question: %s
@@ -108,7 +208,16 @@ public class MockInterviewService {
             FEEDBACK: [one sentence of constructive feedback]
             """, question.getQuestion(), question.getModelAnswer(), userAnswer);
 
-        String aiResp = gemini.generate(scorePrompt, userId, "mock-interview");
+        long startMs = System.currentTimeMillis();
+        String aiResp;
+        try {
+            aiResp = gemini.generate(scorePrompt, userId, "mock-interview");
+            aiMetrics.recordSuccess("gemini", System.currentTimeMillis() - startMs);
+        } catch (Exception e) {
+            aiMetrics.recordFailure("gemini");
+            aiResp = "SCORE: 5\nFEEDBACK: Could not score answer — please try again.";
+        }
+
         BigDecimal score = parseScore(aiResp);
         String feedback = parseFeedback(aiResp);
 
@@ -116,7 +225,6 @@ public class MockInterviewService {
         question.setScore(score);
         questionRepo.save(question);
 
-        // Check if all questions for this session's job are answered
         List<InterviewQuestionBank> allQs = questionRepo
             .findByUserJobIdOrderByCreatedAtDesc(session.getUserJobId());
         long answered = allQs.stream()
@@ -132,9 +240,11 @@ public class MockInterviewService {
             session.setStatus("completed");
             session.setCompletedAt(Instant.now());
             sessionRepo.save(session);
+            pushNotification(userId, session.getUserJobId(), "MOCK_INTERVIEW_COMPLETE",
+                    "Mock interview complete!",
+                    "You scored " + String.format("%.1f", avg) + "/10 overall.");
         }
 
-        // Determine next question
         @Nullable InterviewQuestionBank next = allQs.stream()
             .filter(q -> q.getUserAnswer() == null || q.getUserAnswer().isBlank())
             .findFirst().orElse(null);
@@ -150,7 +260,7 @@ public class MockInterviewService {
         );
     }
 
-    // ── Get session history for a job ─────────────────────────────────────────
+    // ── Get session history ────────────────────────────────────────────────────
     public List<InterviewSession> historyForJob(UUID userJobId, UUID userId) {
         UserJob userJob = userJobRepo.findById(userJobId)
             .orElseThrow(() -> new ApiException(HttpStatus.NOT_FOUND, "UserJob not found"));
@@ -164,7 +274,41 @@ public class MockInterviewService {
         return sessionRepo.findByUserIdOrderByStartedAtDesc(userId);
     }
 
-    // ── Parse Gemini score response ───────────────────────────────────────────
+    // ── Parse kit response ─────────────────────────────────────────────────────
+
+    private List<InterviewQuestionBank> parseAndSaveQuestions(
+            UUID userId, UUID userJobId, String aiResponse) {
+        List<InterviewQuestionBank> saved = new java.util.ArrayList<>();
+        try {
+            String clean = aiResponse
+                    .replaceAll("```[^\\n]*\\n?", "")
+                    .replaceAll("```", "")
+                    .trim();
+            // Split on }, { boundaries
+            String[] blocks = clean.split("\\},\\s*\\{");
+            for (String block : blocks) {
+                String question   = extractField(block, "question", null);
+                String modelAns   = extractField(block, "modelAnswer", null);
+                String skillArea  = extractField(block, "skillArea", "GENERAL");
+                if (question == null || question.isBlank()) continue;
+
+                InterviewQuestionBank q = InterviewQuestionBank.builder()
+                        .id(UUID.randomUUID())
+                        .userId(userId)
+                        .userJobId(userJobId)
+                        .question(question)
+                        .modelAnswer(modelAns != null ? modelAns : "")
+                        .skillArea(skillArea)
+                        .build();
+                saved.add(questionRepo.save(q));
+            }
+        } catch (Exception e) {
+            log.warn("[MockInterview] Could not parse kit questions: {}", e.getMessage());
+        }
+        return saved;
+    }
+
+    // ── Parse Gemini score response ────────────────────────────────────────────
     private BigDecimal parseScore(@Nullable String resp) {
         if (resp == null) return BigDecimal.ZERO;
         for (String line : resp.split("\n")) {
@@ -185,6 +329,37 @@ public class MockInterviewService {
             }
         }
         return "";
+    }
+
+    private @Nullable String extractField(String block, String key, @Nullable String fallback) {
+        try {
+            String marker = "\"" + key + "\":\"";
+            int start = block.indexOf(marker);
+            if (start < 0) return fallback;
+            int valueStart = start + marker.length();
+            int valueEnd = block.indexOf("\"", valueStart);
+            return valueEnd > valueStart ? block.substring(valueStart, valueEnd) : fallback;
+        } catch (Exception e) { return fallback; }
+    }
+
+    // ── Notification helper (Batch 3) ──────────────────────────────────────────
+
+    private void pushNotification(UUID userId, UUID userJobId, String type, String title, String body) {
+        try {
+            Notification n = new Notification();
+            n.setId(UUID.randomUUID());
+            n.setUserId(userId);
+            n.setType(type);
+            n.setTitle(title);
+            n.setBody(body);
+            n.setRead(false);
+            n.setCreatedAt(Instant.now());
+            n.setEntityType("user_job");
+            n.setEntityId(userJobId);
+            notificationRepo.save(n);
+        } catch (Exception e) {
+            log.warn("[MockInterview] Could not push notification type={}: {}", type, e.getMessage());
+        }
     }
 
     // ---- Mappers for 2.056 ----
