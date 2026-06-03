@@ -5,6 +5,7 @@ import com.careerops.model.UserProfile;
 import com.careerops.repository.UserJobRepository;
 import com.careerops.repository.UserProfileRepository;
 import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -14,7 +15,6 @@ import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.support.TransactionTemplate;
 
 import jakarta.annotation.PostConstruct;
-import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
@@ -54,6 +54,11 @@ public class ParallelJobEvaluationService {
     private final CvService cvService;
     private final JobMatchingService matcher;
     private final DeduplicationService dedup;
+    // BUG-3.005 FIX: Inject the shared Spring-managed ObjectMapper instead of calling
+    // new ObjectMapper() inside ScoredResult.failed(). ObjectMapper construction is
+    // expensive — under a 50-job parallel evaluation all failing, the old code created
+    // 50 separate ObjectMapper instances unnecessarily.
+    private final ObjectMapper mapper;
 
     @Value("${jobs.parallel.eval.pool.size:15}")
     private int evalPoolSize;
@@ -72,7 +77,8 @@ public class ParallelJobEvaluationService {
             PlatformTransactionManager txManager,
             CvService cvService,
             JobMatchingService matcher,
-            DeduplicationService dedup) {
+            DeduplicationService dedup,
+            ObjectMapper mapper) {
         this.evaluationBuilder = evaluationBuilder;
         this.validator = validator;
         this.evaluationEnrichment = evaluationEnrichment;
@@ -83,6 +89,7 @@ public class ParallelJobEvaluationService {
         this.cvService = cvService;
         this.matcher = matcher;
         this.dedup = dedup;
+        this.mapper = mapper;
     }
 
     @PostConstruct
@@ -146,7 +153,7 @@ public class ParallelJobEvaluationService {
                                     rankedJob.job().getTitle(), ex.getMessage());
                             // Record progress even on failure — never block the progress bar
                             progressStore.recordJobEvaluated(userId, rankedJob.job().getSourceName());
-                            return ScoredResult.failed(rankedJob.job());
+                            return ScoredResult.failed(rankedJob.job(), mapper);
                         }))
                 .collect(Collectors.toList());
 
@@ -216,16 +223,19 @@ public class ParallelJobEvaluationService {
         log.warn("[Parallel eval] All retries exhausted for job '{}' — using fallback score",
                 job.getTitle());
         progressStore.recordJobEvaluated(userId, job.getSourceName());
-        return ScoredResult.failed(job);
+        return ScoredResult.failed(job, mapper);
     }
 
     // ── Result record ────────────────────────────────────────────────────────
 
     public record ScoredResult(Job job, JsonNode scoreBreakdown, int matchPercent) {
-        /** Factory for failed evaluations — job is retained with 0% match and INCOMPLETE status. */
-        public static ScoredResult failed(Job job) {
-            com.fasterxml.jackson.databind.node.ObjectNode node =
-                    new com.fasterxml.jackson.databind.ObjectMapper().createObjectNode();
+        /**
+         * Factory for failed evaluations — job is retained with 0% match and INCOMPLETE status.
+         * BUG-3.005 FIX: Takes the shared ObjectMapper as a parameter instead of creating
+         * a new ObjectMapper() per call (which was expensive and wasteful at scale).
+         */
+        public static ScoredResult failed(Job job, ObjectMapper mapper) {
+            com.fasterxml.jackson.databind.node.ObjectNode node = mapper.createObjectNode();
             node.put("evaluationStatus", "INCOMPLETE");
             node.put("matchPercent", 0);
             node.put("overallScore", 0);

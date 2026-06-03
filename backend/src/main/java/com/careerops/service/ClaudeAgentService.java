@@ -5,6 +5,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
+import jakarta.annotation.PreDestroy;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
@@ -29,6 +30,10 @@ import java.util.UUID;
  * 3. Append tool_result back into the message history
  * 4. Loop until Claude returns end_turn or max iterations exceeded
  * 5. If ask_user tool is called, immediately PAUSE and return NeedsAnswer
+ *
+ * NOTE: The system currently runs on the NVIDIA API (NvidiaAgentService).
+ * This service is maintained as a ready drop-in for future migration back to Anthropic Claude.
+ * All fixes applied here keep it production-ready for that migration.
  */
 @Service
 public class ClaudeAgentService {
@@ -36,9 +41,13 @@ public class ClaudeAgentService {
     private static final Logger log = LoggerFactory.getLogger(ClaudeAgentService.class);
 
     private static final String ANTHROPIC_API_URL = "https://api.anthropic.com/v1/messages";
-    private static final String ANTHROPIC_VERSION = "2024-10-22"; // 3.016 — Bumped to latest stable
 
-    @Value("${anthropic.api.key}")
+    // BUG-3.001 FIX: Correct Anthropic API version header.
+    // This is the API contract version (fixed at "2023-06-01"), NOT the model release date.
+    // Sending any other value (e.g. "2024-10-22") causes a 400 Bad Request on every call.
+    private static final String ANTHROPIC_VERSION = "2023-06-01";
+
+    @Value("${anthropic.api.key:}")
     private String apiKey;
 
     @Value("${anthropic.model:claude-opus-4-5}")
@@ -56,9 +65,10 @@ public class ClaudeAgentService {
     private final RestClient webClient;
     private final SkillToolDispatcher dispatcher;
     private final ObjectMapper mapper;
-    private final JsonNode toolDefinitions; // 3.014 — Pre-computed tool definitions
+    private final JsonNode toolDefinitions;
     private final io.github.resilience4j.circuitbreaker.CircuitBreaker circuitBreaker;
-    private final java.util.concurrent.ExecutorService toolExecutor; // 3.020 — Dedicated pool for tools
+    // BUG-3.002 FIX: Declared as field so @PreDestroy can shut it down cleanly.
+    private final java.util.concurrent.ExecutorService toolExecutor;
     private final TokenUsageService tokenUsageService;
     private final UserConsentService consentService;
     private final MeterRegistry meterRegistry;
@@ -75,7 +85,6 @@ public class ClaudeAgentService {
         this.consentService = consentService;
         this.meterRegistry = meterRegistry;
 
-        // 3.020 — Configure dedicated thread pool for tool execution
         this.toolExecutor = java.util.concurrent.Executors.newFixedThreadPool(10, r -> {
             Thread t = new Thread(r);
             t.setName("tool-exec-" + t.threadId());
@@ -83,7 +92,6 @@ public class ClaudeAgentService {
             return t;
         });
 
-        // 3.019 — Configure circuit breaker for Anthropic API
         this.circuitBreaker = circuitBreakerRegistry.circuitBreaker("anthropic",
             io.github.resilience4j.circuitbreaker.CircuitBreakerConfig.custom()
                 .slidingWindowSize(20)
@@ -97,10 +105,20 @@ public class ClaudeAgentService {
         this.webClient = RestClient.builder()
             .baseUrl(ANTHROPIC_API_URL)
             .defaultHeader(HttpHeaders.CONTENT_TYPE, MediaType.APPLICATION_JSON_VALUE)
-            // 3.015 — Required for prompt caching
             .defaultHeader("anthropic-beta", "prompt-caching-2024-07-31")
             .build();
-        this.toolDefinitions = buildToolDefinitions(); // 3.014 — Compute once at startup
+        this.toolDefinitions = buildToolDefinitions();
+    }
+
+    // BUG-3.002 FIX: Shut down the dedicated tool executor on application stop.
+    // Without this the 10-thread fixed pool leaks on every redeploy/restart.
+    @PreDestroy
+    public void shutdown() {
+        toolExecutor.shutdown();
+    }
+
+    public boolean isConfigured() {
+        return apiKey != null && !apiKey.isBlank();
     }
 
     public AgentResult run(
@@ -110,7 +128,7 @@ public class ClaudeAgentService {
             UUID userJobId) {
 
         consentService.validateAiConsent(userId);
-        long deadline = System.currentTimeMillis() + (120 * 1000); // 3.020 — 2-minute global deadline
+        long deadline = System.currentTimeMillis() + (120 * 1000);
         int iterations = 0;
 
         while (iterations < maxIterations) {
@@ -126,7 +144,6 @@ public class ClaudeAgentService {
             body.put("model", model);
             body.put("max_tokens", maxTokens);
 
-            // 3.015 — Add prompt caching to system prompt (if large) and tools
             ArrayNode systemArr = mapper.createArrayNode();
             ObjectNode systemBlock = mapper.createObjectNode();
             systemBlock.put("type", "text");
@@ -136,7 +153,7 @@ public class ClaudeAgentService {
             body.set("system", systemArr);
 
             body.set("messages", messages);
-            body.set("tools", toolDefinitions); // 3.014 — Use pre-computed tools
+            body.set("tools", toolDefinitions);
 
             JsonNode response = callWithRetry(body, userId, "Skill Run");
             if (response == null) {
@@ -147,7 +164,6 @@ public class ClaudeAgentService {
 
             if ("end_turn".equals(stopReason)) {
                 String text = extractTextContent(response);
-                // 3.018 — Handle cases where Claude returns no text (only tool_use blocks followed by end_turn)
                 if (text.isEmpty()) {
                     return AgentResult.error("The AI finished its work but did not generate a final report. Please try resuming or starting again.");
                 }
@@ -176,13 +192,11 @@ public class ClaudeAgentService {
                         return AgentResult.needsAnswer(question, messages, toolUseId);
                     }
 
-                    // 3.020 — Check deadline again before each tool call
                     String result;
                     if (System.currentTimeMillis() > deadline) {
                         log.warn("Claude agent deadline reached during tool loop for userId={}", userId);
                         result = "Tool execution aborted: Global process deadline reached.";
                     } else {
-                        // 3.020 — Per-tool-call timeout (30s) using dedicated executor
                         try {
                             result = java.util.concurrent.CompletableFuture.supplyAsync(
                                 () -> dispatcher.dispatch(toolName, toolInput, userId, userJobId),
@@ -237,17 +251,13 @@ public class ClaudeAgentService {
 
                     try {
                         JsonNode resp = mapper.readTree(s);
-                        
-                        // 3.075 — Record token usage
                         JsonNode usage = resp.path("usage");
                         if (!usage.isMissingNode()) {
                             int input  = usage.path("input_tokens").asInt(0);
                             int output = usage.path("output_tokens").asInt(0);
-                            // Approximate cost for Opus: $15/M input, $75/M output
                             double cost = (input * 0.000015) + (output * 0.000075);
                             tokenUsageService.record(userId, feature, model, input, output, cost);
                         }
-                        
                         return resp;
                     } catch (Exception e) {
                         throw new RuntimeException("Failed to parse Claude response", e);
@@ -261,10 +271,14 @@ public class ClaudeAgentService {
                 throw com.careerops.exception.ApiException.internalError("AI engine is currently unavailable (circuit breaker open).");
             } catch (RestClientResponseException ex) {
                 int status = ex.getStatusCode().value();
+                // BUG-3.003 FIX: Throw a clear ApiException on 401 instead of returning an empty
+                // ObjectNode. The old code returned mapper.createObjectNode() which passed the
+                // null-check in run(), fell through to stopReason="", and produced a misleading
+                // "Unexpected stop_reason" error rather than "Invalid API key".
                 if (status == 401) {
                     sample.stop(meterRegistry.timer("outbound.call.latency", "service", "anthropic_agent", "status", "failure"));
                     log.error("Anthropic API key is invalid (401).");
-                    return mapper.createObjectNode();
+                    throw com.careerops.exception.ApiException.internalError("Invalid Anthropic API key (401). Check your ANTHROPIC_API_KEY configuration.");
                 }
                 if (status == 429 || status == 529) {
                     if (attempt == maxAttempts) {

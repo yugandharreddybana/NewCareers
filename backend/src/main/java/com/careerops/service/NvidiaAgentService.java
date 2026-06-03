@@ -26,8 +26,9 @@ import java.util.concurrent.*;
 /**
  * Agentic loop service backed by NVIDIA NIM (OpenAI tool_calls format).
  *
- * Drop-in replacement for ClaudeAgentService. Preserves the same public API:
- *   AgentResult run(String systemPrompt, ArrayNode messages, UUID userId, UUID userJobId)
+ * This is the ACTIVE AI provider. ClaudeAgentService is maintained as a ready
+ * drop-in for future migration back to Anthropic — both services share identical
+ * public API, tool definitions, and agentic loop semantics.
  *
  * Tool-calling differences vs Anthropic:
  *   Anthropic stop_reason = "tool_use"   → NVIDIA finish_reason = "tool_calls"
@@ -50,7 +51,11 @@ public class NvidiaAgentService {
     @Value("${nvidia.agent.model:meta/llama-3.3-70b-instruct}")
     private String model;
 
-    @Value("${nvidia.model:meta/llama-3.3-70b-instruct}")
+    // BUG-3.004 FIX: fallbackModel now binds to a DIFFERENT property with a DIFFERENT default.
+    // Previously both model and fallbackModel resolved to the same string, so the 404 fallback
+    // path silently retried with the same model and never actually tried an alternative.
+    // Override in application.properties with: nvidia.fallback.model=meta/llama-3.1-70b-instruct
+    @Value("${nvidia.fallback.model:meta/llama-3.1-70b-instruct}")
     private String fallbackModel;
 
     @Value("${nvidia.max.tokens:8192}")
@@ -154,7 +159,6 @@ public class NvidiaAgentService {
 
             // ── Tool calls ───────────────────────────────────────────────────
             if ("tool_calls".equals(stopReason)) {
-                // Append assistant message to history (OpenAI format)
                 ObjectNode assistantMsg = mapper.createObjectNode();
                 assistantMsg.put("role", "assistant");
                 assistantMsg.set("content", message.path("content"));
@@ -175,13 +179,11 @@ public class NvidiaAgentService {
 
                     log.debug("NvidiaAgentService calling tool: {} (id={})", toolName, toolCallId);
 
-                    // ask_user causes immediate pause
                     if ("ask_user".equals(toolName)) {
                         String question = toolInput.path("question").asText("I need more information to continue.");
                         return AgentResult.needsAnswer(question, messages, toolCallId);
                     }
 
-                    // Dispatch with per-tool timeout
                     String toolResult;
                     if (System.currentTimeMillis() > deadline) {
                         toolResult = "Tool execution aborted: global deadline reached.";
@@ -201,7 +203,6 @@ public class NvidiaAgentService {
                         }
                     }
 
-                    // Append tool result in OpenAI format: role=tool
                     ObjectNode toolResultMsg = mapper.createObjectNode();
                     toolResultMsg.put("role", "tool");
                     toolResultMsg.put("tool_call_id", toolCallId);
@@ -226,13 +227,11 @@ public class NvidiaAgentService {
         body.put("model", model);
         body.put("max_tokens", maxTokens);
 
-        // Prepend system message
         ArrayNode fullMessages = mapper.createArrayNode();
         fullMessages.addObject().put("role", "system").put("content", systemPrompt);
         fullMessages.addAll(messages);
         body.set("messages", fullMessages);
 
-        // OpenAI tool definitions format
         body.set("tools", toolDefinitions);
         body.put("tool_choice", "auto");
         return body;
@@ -281,10 +280,12 @@ public class NvidiaAgentService {
                 if (status == 401) {
                     sample.stop(meterRegistry.timer("outbound.call.latency", "service", "nvidia_agent", "status", "failure"));
                     log.error("NVIDIA API key invalid (401)");
-                    throw com.careerops.exception.ApiException.internalError("Invalid NVIDIA API key");
+                    throw com.careerops.exception.ApiException.internalError("Invalid NVIDIA API key (401). Check your NVIDIA_API_KEY configuration.");
                 }
+                // BUG-3.004 FIX: fallbackModel is now a genuinely different model so this retry
+                // will actually attempt a different model instead of looping on the same 404.
                 if (status == 404 && attempt == 1 && !model.equals(fallbackModel)) {
-                    log.warn("NVIDIA model {} not found (404), retrying with {}", model, fallbackModel);
+                    log.warn("NVIDIA model {} not found (404), retrying with fallback {}", model, fallbackModel);
                     body.put("model", fallbackModel);
                     continue;
                 }
