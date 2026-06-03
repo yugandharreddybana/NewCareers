@@ -1,4 +1,4 @@
-import { Fragment, useEffect, useState } from 'react';
+import { Fragment, useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 
 import { useNavigate } from 'react-router-dom';
@@ -25,6 +25,8 @@ import { FieldLabel } from '@/components/onboarding/RequiredLabel';
 import { MonthYearField } from '@/components/onboarding/MonthYearField';
 import { buildOnboardingProfilePayload } from '@/lib/buildOnboardingProfilePayload';
 import { JobSearchRadarLoader } from '@/components/onboarding/JobSearchRadarLoader';
+import { JobEvaluationProgressModal } from '@/components/JobEvaluationProgressModal';
+import { useJobEvaluationProgress } from '@/hooks/useJobEvaluationProgress';
 import {
   readWelcomePendingFlag,
   setWelcomePendingFlag,
@@ -555,6 +557,9 @@ export default function Onboarding() {
 
   const { updateProfile, user } = useAuth();
   const queryClient = useQueryClient();
+  const { progress, progressPercent, connect } = useJobEvaluationProgress(user?.id ?? null);
+  const [showModal, setShowModal] = useState(false);
+  const navigatedAfterEvalRef = useRef(false);
 
   const nav = useNavigate();
 
@@ -680,12 +685,21 @@ export default function Onboarding() {
     setDeliveryStatus(null);
     setMatchingOverlay(false);
     setSaving(false);
+    setShowModal(false);
     void queryClient.invalidateQueries({ queryKey: queryKeys.jobs.all });
     void queryClient.invalidateQueries({ queryKey: queryKeys.discovery.all });
     nav('/dashboard?welcome=1', { replace: true });
   }
 
+  useEffect(() => {
+    if (progress.status !== 'complete' || navigatedAfterEvalRef.current) return;
+    navigatedAfterEvalRef.current = true;
+    const t = window.setTimeout(() => finishToDashboard(), 1500);
+    return () => window.clearTimeout(t);
+  }, [progress.status]);
+
   async function handleFinish() {
+    navigatedAfterEvalRef.current = false;
     setSaving(true);
     setMatchingOverlay(true);
     setDeliveryFailed(null);
@@ -720,6 +734,9 @@ export default function Onboarding() {
 
       await updateProfile(payload);
       await profileApi.uploadCv(p.cvFile);
+
+      setShowModal(true);
+      connect();
 
       setDeliveryStatus({
         stage: 'reading_cv',
@@ -808,7 +825,18 @@ export default function Onboarding() {
 
   return (
     <>
-      {(matchingOverlay || deliveryFailed) &&
+      {showModal && (
+        <JobEvaluationProgressModal
+          progress={progress}
+          progressPercent={progressPercent}
+          onClose={() => {
+            setShowModal(false);
+            finishToDashboard();
+          }}
+        />
+      )}
+
+      {(matchingOverlay || deliveryFailed) && !showModal &&
         createPortal(
           <JobSearchRadarLoader
             locationHint={location.trim() || 'Dublin, Ireland'}
