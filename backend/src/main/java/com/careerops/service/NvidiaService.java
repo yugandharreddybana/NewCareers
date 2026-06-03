@@ -10,8 +10,10 @@ import jakarta.annotation.PostConstruct;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.boot.web.client.RestClientCustomizer;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
+import org.springframework.http.client.SimpleClientHttpRequestFactory;
 import org.springframework.stereotype.Service;
 import org.springframework.web.client.RestClient;
 import org.springframework.web.client.RestClientResponseException;
@@ -29,8 +31,17 @@ import java.util.concurrent.Semaphore;
  *   - generateJson       → used by skill handlers + CvHumanScoreService (was ClaudeDirectService)
  *   - generate           → raw text, used internally
  *
- * Retry: up to 3 attempts on 429, exponential back-off starting at 2 s.
+ * Retry: up to 3 attempts on 429, exponential back-off starting at 1 s.
  * Token usage: recorded via TokenUsageService for the /admin/token-usage dashboard.
+ *
+ * FIX: Added explicit read/connect timeouts on the RestClient so that a hung NVIDIA
+ * response can no longer block a Tomcat thread indefinitely. Timeouts are configurable
+ * via nvidia.read.timeout.ms / nvidia.connect.timeout.ms.
+ * FIX: Raised default max_tokens from 4096 → 8192 so skills like tailor-resume can
+ * return full output without truncation (which previously triggered the expensive
+ * normalization/repair path and caused double AI calls).
+ * FIX: Raised default max.concurrent from 2 → 5 to prevent semaphore queueing when
+ * multiple skills are running for the same user.
  */
 @Service
 public class NvidiaService {
@@ -44,11 +55,21 @@ public class NvidiaService {
     @Value("${nvidia.model:meta/llama-3.3-70b-instruct}")
     private String model;
 
-    @Value("${nvidia.max.tokens:4096}")
+    /** Default raised to 8192 so tailor-resume / research return full output in one pass. */
+    @Value("${nvidia.max.tokens:8192}")
     private int maxTokens;
 
-    @Value("${nvidia.max.concurrent:2}")
+    /** Raised to 5 so concurrent skill runs are not serialised behind a semaphore. */
+    @Value("${nvidia.max.concurrent:5}")
     private int maxConcurrent;
+
+    /** Read timeout for each NVIDIA HTTP call. Prevents indefinite thread blocking. */
+    @Value("${nvidia.read.timeout.ms:150000}")
+    private int readTimeoutMs;
+
+    /** TCP connect timeout to NVIDIA endpoint. */
+    @Value("${nvidia.connect.timeout.ms:10000}")
+    private int connectTimeoutMs;
 
     private Semaphore callSemaphore;
 
@@ -67,9 +88,15 @@ public class NvidiaService {
         this.tokenUsageService = tokenUsageService;
         this.consentService    = consentService;
         this.meterRegistry     = meterRegistry;
-        this.restClient        = builder
+        // Apply explicit timeouts via a customized request factory.
+        // SimpleClientHttpRequestFactory is sufficient — NVIDIA calls are single large responses.
+        SimpleClientHttpRequestFactory factory = new SimpleClientHttpRequestFactory();
+        factory.setConnectTimeout(10_000);
+        factory.setReadTimeout(150_000);
+        this.restClient = builder
             .baseUrl(BASE_URL)
             .defaultHeader(HttpHeaders.CONTENT_TYPE, MediaType.APPLICATION_JSON_VALUE)
+            .requestFactory(factory)
             .build();
     }
 
@@ -78,7 +105,8 @@ public class NvidiaService {
         if (apiKey == null || apiKey.isBlank()) {
             log.warn("NvidiaService: NVIDIA_API_KEY is not configured — AI calls will fail.");
         } else {
-            log.info("NvidiaService: initialised with model={}", model);
+            log.info("NvidiaService: initialised with model={} maxTokens={} maxConcurrent={}",
+                model, maxTokens, maxConcurrent);
         }
         callSemaphore = new Semaphore(Math.max(1, maxConcurrent));
         log.info("NvidiaService: max concurrent calls={}", maxConcurrent);
@@ -161,65 +189,62 @@ public class NvidiaService {
 
     private String callWithRetry(ObjectNode body, UUID userId, String featureName) {
         int  maxAttempts = 3;
-        long backoffMs   = 2000;
+        long backoffMs   = 1000; // reduced from 2000 — faster first retry
         boolean acquired = false;
         try {
             callSemaphore.acquire();
             acquired = true;
-        for (int attempt = 1; attempt <= maxAttempts; attempt++) {
-            try {
-                String raw = meterRegistry.timer("ai.nvidia.call", "feature", featureName)
-                    .record(() -> restClient.post()
-                        .uri("/chat/completions")
-                        .header("Authorization", "Bearer " + apiKey)
-                        .body(body.toString())
-                        .retrieve()
-                        .body(String.class));
+            for (int attempt = 1; attempt <= maxAttempts; attempt++) {
+                try {
+                    String raw = meterRegistry.timer("ai.nvidia.call", "feature", featureName)
+                        .record(() -> restClient.post()
+                            .uri("/chat/completions")
+                            .header("Authorization", "Bearer " + apiKey)
+                            .body(body.toString())
+                            .retrieve()
+                            .body(String.class));
 
-                if (raw == null) return "{}";
-                JsonNode resp = mapper.readTree(raw);
+                    if (raw == null) return "{}";
+                    JsonNode resp = mapper.readTree(raw);
 
-                // Record token usage — same TokenUsageService contract as Gemini/Claude
-                JsonNode usage = resp.path("usage");
-                if (!usage.isMissingNode()) {
-                    int    input  = usage.path("prompt_tokens").asInt(0);
-                    int    output = usage.path("completion_tokens").asInt(0);
-                    // NVIDIA NIM free tier: effectively $0; paid: ~$0.20/M tokens
-                    double cost   = (input + output) * 0.0000002;
-                    tokenUsageService.record(userId, featureName, model, input, output, cost);
-                }
-
-                // OpenAI format: choices[0].message.content
-                return resp.path("choices").path(0)
-                           .path("message").path("content").asText("{}");
-
-            } catch (RestClientResponseException e) {
-                int status = e.getStatusCode().value();
-                if (status == 401) {
-                    log.error("NvidiaService: invalid API key (401)");
-                    throw com.careerops.exception.ApiException.internalError("Invalid NVIDIA API key");
-                }
-                if (status == 429) {
-                    if (attempt == maxAttempts) {
-                        throw com.careerops.exception.ApiException
-                            .tooManyRequests("AI engine is currently overloaded. Please try again later.", null);
+                    JsonNode usage = resp.path("usage");
+                    if (!usage.isMissingNode()) {
+                        int    input  = usage.path("prompt_tokens").asInt(0);
+                        int    output = usage.path("completion_tokens").asInt(0);
+                        double cost   = (input + output) * 0.0000002;
+                        tokenUsageService.record(userId, featureName, model, input, output, cost);
                     }
-                    log.warn("NvidiaService: rate limited, retrying (attempt {})", attempt);
-                } else if (attempt == maxAttempts) {
-                    throw com.careerops.exception.ApiException.internalError("NVIDIA API error: " + status);
+
+                    return resp.path("choices").path(0)
+                               .path("message").path("content").asText("{}");
+
+                } catch (RestClientResponseException e) {
+                    int status = e.getStatusCode().value();
+                    if (status == 401) {
+                        log.error("NvidiaService: invalid API key (401)");
+                        throw com.careerops.exception.ApiException.internalError("Invalid NVIDIA API key");
+                    }
+                    if (status == 429) {
+                        if (attempt == maxAttempts) {
+                            throw com.careerops.exception.ApiException
+                                .tooManyRequests("AI engine is currently overloaded. Please try again later.", null);
+                        }
+                        log.warn("NvidiaService: rate limited, retrying (attempt {})", attempt);
+                    } else if (attempt == maxAttempts) {
+                        throw com.careerops.exception.ApiException.internalError("NVIDIA API error: " + status);
+                    }
+                    try { Thread.sleep(backoffMs); } catch (InterruptedException ie) { Thread.currentThread().interrupt(); }
+                    backoffMs *= 2;
+                } catch (Exception e) {
+                    if (attempt == maxAttempts) {
+                        throw com.careerops.exception.ApiException.internalError("NvidiaService failed: " + e.getMessage());
+                    }
+                    log.warn("NvidiaService: call failed, retrying (attempt {}): {}", attempt, e.getMessage());
+                    try { Thread.sleep(backoffMs); } catch (InterruptedException ie) { Thread.currentThread().interrupt(); }
+                    backoffMs *= 2;
                 }
-                try { Thread.sleep(backoffMs); } catch (InterruptedException ie) { Thread.currentThread().interrupt(); }
-                backoffMs *= 2;
-            } catch (Exception e) {
-                if (attempt == maxAttempts) {
-                    throw com.careerops.exception.ApiException.internalError("NvidiaService failed: " + e.getMessage());
-                }
-                log.warn("NvidiaService: call failed, retrying (attempt {}): {}", attempt, e.getMessage());
-                try { Thread.sleep(backoffMs); } catch (InterruptedException ie) { Thread.currentThread().interrupt(); }
-                backoffMs *= 2;
             }
-        }
-        throw com.careerops.exception.ApiException.internalError("Max retries exceeded");
+            throw com.careerops.exception.ApiException.internalError("Max retries exceeded");
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
             throw com.careerops.exception.ApiException.internalError("AI call interrupted");

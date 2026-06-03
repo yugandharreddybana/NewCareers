@@ -15,6 +15,7 @@ import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
+import org.springframework.http.client.SimpleClientHttpRequestFactory;
 import org.springframework.stereotype.Service;
 import org.springframework.web.client.RestClient;
 import org.springframework.web.client.RestClientResponseException;
@@ -38,6 +39,14 @@ import java.util.concurrent.*;
  *
  * All other logic (deadline, per-tool timeout, ask_user, end_turn) is identical to
  * ClaudeAgentService.
+ *
+ * FIX: Raised agent deadline from 120s → configurable (default 160s) to give
+ * multi-step skills (tailor-resume, research, compare) enough time to complete
+ * all tool calls + final generation without hitting a premature abort.
+ * FIX: Added explicit connect/read timeouts on the RestClient (150s read) so that
+ * a hung NVIDIA response cannot block a Tomcat thread indefinitely.
+ * FIX: Reduced initial retry backoff from 2000ms → 1000ms for faster recovery on
+ * transient failures.
  */
 @Service
 public class NvidiaAgentService {
@@ -51,10 +60,6 @@ public class NvidiaAgentService {
     @Value("${nvidia.agent.model:meta/llama-3.3-70b-instruct}")
     private String model;
 
-    // BUG-3.004 FIX: fallbackModel now binds to a DIFFERENT property with a DIFFERENT default.
-    // Previously both model and fallbackModel resolved to the same string, so the 404 fallback
-    // path silently retried with the same model and never actually tried an alternative.
-    // Override in application.properties with: nvidia.fallback.model=meta/llama-3.1-70b-instruct
     @Value("${nvidia.fallback.model:meta/llama-3.1-70b-instruct}")
     private String fallbackModel;
 
@@ -63,6 +68,14 @@ public class NvidiaAgentService {
 
     @Value("${anthropic.max.tool.iterations:25}")
     private int maxIterations;
+
+    /**
+     * Per-agent-run deadline in seconds. Raised to 160s (was hardcoded 120s) to give
+     * multi-step skills enough room to complete all tool calls plus final generation.
+     * Override with nvidia.agent.deadline.seconds in application.properties.
+     */
+    @Value("${nvidia.agent.deadline.seconds:160}")
+    private int agentDeadlineSeconds;
 
     private final RestClient         restClient;
     private final SkillToolDispatcher dispatcher;
@@ -103,9 +116,15 @@ public class NvidiaAgentService {
                 .ignoreExceptions(com.careerops.exception.ApiException.class)
                 .build());
 
+        // Explicit timeouts on the RestClient: connect 10s, read 150s.
+        // Without these, a hung NVIDIA response blocks Tomcat threads indefinitely.
+        SimpleClientHttpRequestFactory factory = new SimpleClientHttpRequestFactory();
+        factory.setConnectTimeout(10_000);
+        factory.setReadTimeout(150_000);
         this.restClient = RestClient.builder()
             .baseUrl(BASE_URL)
             .defaultHeader(HttpHeaders.CONTENT_TYPE, MediaType.APPLICATION_JSON_VALUE)
+            .requestFactory(factory)
             .build();
 
         this.toolDefinitions = buildToolDefinitions();
@@ -127,7 +146,7 @@ public class NvidiaAgentService {
         if (!isConfigured()) {
             return AgentResult.error("AI engine not configured. Set NVIDIA_API_KEY in your environment.");
         }
-        long deadline   = System.currentTimeMillis() + (120 * 1000);
+        long deadline   = System.currentTimeMillis() + ((long) agentDeadlineSeconds * 1000);
         int  iterations = 0;
 
         while (iterations < maxIterations) {
@@ -242,7 +261,7 @@ public class NvidiaAgentService {
     private JsonNode callWithRetry(ObjectNode body, UUID userId, String feature) {
         Timer.Sample sample     = Timer.start(meterRegistry);
         int          maxAttempts = 3;
-        long         backoffMs   = 2000;
+        long         backoffMs   = 1000; // reduced from 2000 — faster first retry
 
         for (int attempt = 1; attempt <= maxAttempts; attempt++) {
             try {
@@ -282,8 +301,6 @@ public class NvidiaAgentService {
                     log.error("NVIDIA API key invalid (401)");
                     throw com.careerops.exception.ApiException.internalError("Invalid NVIDIA API key (401). Check your NVIDIA_API_KEY configuration.");
                 }
-                // BUG-3.004 FIX: fallbackModel is now a genuinely different model so this retry
-                // will actually attempt a different model instead of looping on the same 404.
                 if (status == 404 && attempt == 1 && !model.equals(fallbackModel)) {
                     log.warn("NVIDIA model {} not found (404), retrying with fallback {}", model, fallbackModel);
                     body.put("model", fallbackModel);
