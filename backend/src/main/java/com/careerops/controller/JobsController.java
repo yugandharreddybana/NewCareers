@@ -4,20 +4,22 @@ import com.careerops.dto.JobDtos.*;
 import com.careerops.exception.ApiException;
 import com.careerops.model.Job;
 import com.careerops.model.UserJob;
+import com.careerops.model.UserProfile;
 import com.careerops.repository.JobRepository;
 import com.careerops.repository.UserJobRepository;
+import com.careerops.repository.UserProfileRepository;
 import com.careerops.service.CvService;
 import com.careerops.service.DailyLimitService;
 import com.careerops.service.EvaluationReportEnrichmentService;
 import com.careerops.service.JobDeliveryService;
 import com.careerops.service.JobDescriptionEnrichmentService;
+import com.careerops.service.JobMatchingService;
 import com.careerops.service.JobRecommendationService;
 import com.careerops.service.KanbanService;
+import com.careerops.service.ParallelJobEvaluationService;
 import com.careerops.service.UserJobSkillMatchService;
-import com.careerops.model.UserProfile;
-import com.careerops.repository.UserProfileRepository;
-import com.fasterxml.jackson.databind.JsonNode;
 import com.careerops.util.AuthUtil;
+import com.fasterxml.jackson.databind.JsonNode;
 import jakarta.persistence.criteria.*;
 import org.springframework.data.domain.*;
 import org.springframework.data.jpa.domain.Specification;
@@ -28,6 +30,15 @@ import org.springframework.web.bind.annotation.*;
 import java.util.*;
 
 /**
+ * Jobs Controller
+ *
+ * B1-G2 FIX: detail() (GET /{userJobId}) now calls
+ * ParallelJobEvaluationService.evaluateDeep() instead of calling
+ * evaluationEnrichment.ensureComplete() directly. evaluateDeep() is
+ * cache-aware: on a cache hit it returns instantly; on a miss it runs the
+ * full evaluation and writes the result to AiEvalCacheService so subsequent
+ * opens of the same job card are served from cache.
+ *
  * CORS Policy:
  * - Allowed Origins: from ${cors.allowed.origins}
  * - Methods: GET, POST, PUT, PATCH, DELETE, OPTIONS
@@ -39,17 +50,18 @@ import java.util.*;
 @io.micrometer.core.annotation.Timed
 public class JobsController {
 
-    private final UserJobRepository        userJobs;
-    private final JobRepository            jobs;
-    private final JobDeliveryService       delivery;
-    private final DailyLimitService        limits;
-    private final JobRecommendationService recommendations;
-    private final KanbanService                    kanban;
-    private final JobDescriptionEnrichmentService  descriptionEnrichment;
-    private final UserJobSkillMatchService       skillMatchService;
-    private final EvaluationReportEnrichmentService evaluationEnrichment;
-    private final UserProfileRepository          profiles;
-    private final CvService                      cvService;
+    private final UserJobRepository                  userJobs;
+    private final JobRepository                      jobs;
+    private final JobDeliveryService                 delivery;
+    private final DailyLimitService                  limits;
+    private final JobRecommendationService           recommendations;
+    private final KanbanService                      kanban;
+    private final JobDescriptionEnrichmentService    descriptionEnrichment;
+    private final UserJobSkillMatchService           skillMatchService;
+    private final EvaluationReportEnrichmentService  evaluationEnrichment;
+    private final UserProfileRepository              profiles;
+    private final CvService                          cvService;
+    private final ParallelJobEvaluationService       parallelEval;  // B1-G2
 
     public JobsController(UserJobRepository u, JobRepository j, JobDeliveryService d,
                           DailyLimitService l, JobRecommendationService r, KanbanService k,
@@ -57,18 +69,20 @@ public class JobsController {
                           UserJobSkillMatchService skillMatchService,
                           EvaluationReportEnrichmentService evaluationEnrichment,
                           UserProfileRepository profiles,
-                          CvService cvService) {
-        this.userJobs               = u;
-        this.jobs                   = j;
-        this.delivery               = d;
-        this.limits                 = l;
-        this.recommendations        = r;
-        this.kanban                 = k;
-        this.descriptionEnrichment  = descriptionEnrichment;
-        this.skillMatchService      = skillMatchService;
-        this.evaluationEnrichment   = evaluationEnrichment;
-        this.profiles               = profiles;
-        this.cvService              = cvService;
+                          CvService cvService,
+                          ParallelJobEvaluationService parallelEval) {
+        this.userJobs              = u;
+        this.jobs                  = j;
+        this.delivery              = d;
+        this.limits                = l;
+        this.recommendations       = r;
+        this.kanban                = k;
+        this.descriptionEnrichment = descriptionEnrichment;
+        this.skillMatchService     = skillMatchService;
+        this.evaluationEnrichment  = evaluationEnrichment;
+        this.profiles              = profiles;
+        this.cvService             = cvService;
+        this.parallelEval          = parallelEval;
     }
 
     @GetMapping
@@ -77,8 +91,6 @@ public class JobsController {
             @RequestParam(defaultValue = "0") int page,
             @RequestParam(defaultValue = "20") int size) {
         UUID uid = AuthUtil.currentUserId();
-        // List every job in the user's pipeline — min-match is enforced when delivering new jobs,
-        // not when viewing jobs already saved to their tracker.
         int safeSize = Math.max(1, Math.min(size, 500));
         Pageable pageable = PageRequest.of(page, safeSize);
         Page<UserJob> userJobPage = userJobs.findByUserIdOrderByDeliveredAtDesc(uid, pageable);
@@ -86,14 +98,14 @@ public class JobsController {
         Set<UUID> jobIds = userJobList.stream().map(UserJob::getJobId).collect(java.util.stream.Collectors.toSet());
         Map<UUID, Job> jobMap = new HashMap<>();
         if (!jobIds.isEmpty()) {
-            for (Job j : jobs.findAllById(jobIds)) {
-                jobMap.put(j.getId(), j);
+            for (Job jj : jobs.findAllById(jobIds)) {
+                jobMap.put(jj.getId(), jj);
             }
         }
         for (UserJob uj : userJobList) {
-            Job j = jobMap.get(uj.getJobId());
-            if (j != null) {
-                skillMatchService.refreshAndPersist(uj, j);
+            Job jj = jobMap.get(uj.getJobId());
+            if (jj != null) {
+                skillMatchService.refreshAndPersist(uj, jj);
             }
         }
         List<JobCardResponse> cards = userJobList.stream()
@@ -112,6 +124,19 @@ public class JobsController {
         );
     }
 
+    /**
+     * GET /{userJobId} — Job detail / job-open endpoint.
+     *
+     * B1-G2 FIX: now routes through ParallelJobEvaluationService.evaluateDeep()
+     * which is cache-aware:
+     *   - Cache HIT  → returns the previously computed full report instantly
+     *   - Cache MISS → runs full StructuredJobEvaluationBuilder evaluation,
+     *                  writes the result to AiEvalCacheService, then returns it
+     *
+     * This completes the two-tier architecture:
+     *   Feed  → evaluateAllLight()  (cheap, matchPercent only, cached)
+     *   Open  → evaluateDeep()      (full breakdown, cached after first open)
+     */
     @GetMapping("/{userJobId}")
     @Transactional
     public JobDetailResponse detail(@PathVariable UUID userJobId) {
@@ -122,12 +147,17 @@ public class JobsController {
                 .orElseThrow(() -> new ApiException(HttpStatus.NOT_FOUND, "Job missing"));
         j = descriptionEnrichment.enrichIfMissing(j);
         skillMatchService.refreshAndPersist(uj, j);
+
         UserProfile profile = profiles.findByUserId(uid)
-            .orElseThrow(() -> new ApiException(HttpStatus.BAD_REQUEST, "Complete your profile first"));
-        String cvText = cvService.activeCvText(uid);
-        JsonNode report = evaluationEnrichment.ensureComplete(
-            uid, j, profile, cvText, uj.getScoreBreakdown(), "job_detail");
-        persistEvaluationReport(uj, report);
+                .orElseThrow(() -> new ApiException(HttpStatus.BAD_REQUEST, "Complete your profile first"));
+
+        // B1-G2: route through evaluateDeep() for cache-aware full evaluation
+        JobMatchingService.ScoredJob rankedJob =
+                new JobMatchingService.ScoredJob(j, uj.getMatchPercent() != null ? uj.getMatchPercent() : 0, List.of());
+        ParallelJobEvaluationService.ScoredResult deep =
+                parallelEval.evaluateDeep(rankedJob, profile, uid, "job_detail");
+
+        persistEvaluationReport(uj, deep.scoreBreakdown());
         return JobDetailResponse.from(uj, j);
     }
 
@@ -165,10 +195,6 @@ public class JobsController {
         return out.toArray(new String[0]);
     }
 
-    /**
-     * Soft-delete a job from the user's pipeline.
-     * DELETE /api/jobs/{userJobId}
-     */
     @DeleteMapping("/{userJobId}")
     @ResponseStatus(HttpStatus.NO_CONTENT)
     @Transactional
@@ -176,15 +202,10 @@ public class JobsController {
         UUID uid = AuthUtil.currentUserId();
         UserJob uj = userJobs.findByIdAndUserId(userJobId, uid)
                 .orElseThrow(() -> new ApiException(HttpStatus.NOT_FOUND, "Not found"));
-        // Soft-delete via entity state — avoids @SQLDelete + @Version parameter binding issues on H2.
         uj.setDeletedAt(java.time.Instant.now());
         userJobs.save(uj);
     }
 
-    /**
-     * Recompute matched/unmatched skills for every job in the user's pipeline (e.g. after CV upload or matcher fixes).
-     * POST /api/jobs/refresh-skills
-     */
     @PostMapping("/refresh-skills")
     @Transactional
     public JobListResponse refreshAllSkills(
@@ -195,9 +216,6 @@ public class JobsController {
         return list(page, size);
     }
 
-    /**
-     * Re-fetch posting text from the source URL (use when the overview description is empty).
-     */
     @PostMapping("/{userJobId}/description")
     @Transactional
     public JobDetailResponse enrichDescription(@PathVariable UUID userJobId) {
@@ -219,10 +237,6 @@ public class JobsController {
         return delivery.deliver(AuthUtil.currentUserId(), count);
     }
 
-    /**
-     * Fetch up to 10 profile-matched jobs from IrishJobs.ie only.
-     * POST /api/jobs/fetch-irishjobs?count=10
-     */
     @PostMapping("/fetch-irishjobs")
     public FetchSummary fetchIrishJobs(@RequestParam(defaultValue = "10") int count) {
         if (count < 1 || count > 10) {
@@ -231,31 +245,18 @@ public class JobsController {
         return delivery.deliverFromIrishJobs(AuthUtil.currentUserId(), count);
     }
 
-    /**
-     * Fetch one live job from all available sources (Adzuna → Indeed fallback),
-     * profile-ranked, and add it to the user's pipeline.
-     * POST /api/jobs/fetch-live
-     */
     @PostMapping("/fetch-live")
     public JobCardResponse fetchLive() {
         return delivery.deliverOneLiveMatch(AuthUtil.currentUserId());
     }
 
-    /**
-     * Fetch one live job from Adzuna, profile-ranked, and add it to the user's pipeline.
-     * POST /api/jobs/fetch-adzuna-live
-     * @deprecated use /fetch-live instead
-     */
+    /** @deprecated use /fetch-live instead */
     @PostMapping("/fetch-adzuna-live")
     public JobCardResponse fetchAdzunaLive() {
         return delivery.deliverOneLiveAdzunaMatch(AuthUtil.currentUserId());
     }
 
-    /**
-     * Fetch one live job from Indeed (Ireland RSS), profile-ranked, and add it to the user's pipeline.
-     * POST /api/jobs/fetch-indeed-live
-     * @deprecated use /fetch-live instead
-     */
+    /** @deprecated use /fetch-live instead */
     @PostMapping("/fetch-indeed-live")
     public JobCardResponse fetchIndeedLive() {
         return delivery.deliverOneLiveIndeedMatch(AuthUtil.currentUserId());
@@ -265,12 +266,7 @@ public class JobsController {
     @Transactional(readOnly = true)
     public FetchSummary limits() {
         UUID uid = AuthUtil.currentUserId();
-        return new FetchSummary(
-            0,
-            limits.getCount(uid),
-            limits.max(),
-            limits.remaining(uid)
-        );
+        return new FetchSummary(0, limits.getCount(uid), limits.max(), limits.remaining(uid));
     }
 
     @GetMapping("/stats")
@@ -279,53 +275,33 @@ public class JobsController {
         return kanban.getStats(AuthUtil.currentUserId());
     }
 
-    // ── Section 7 — Task 71: GET /jobs/recommended ─────────────────────────────
-
-    /**
-     * Returns top 5 recommended jobs from the user's Discovered pipeline.
-     * Each job includes a "whyRecommended" label explaining the match reason.
-     * Must be declared BEFORE /{userJobId} to avoid the wildcard capturing
-     * the literal string "recommended".
-     */
     @GetMapping("/recommended")
     @Transactional(readOnly = true)
     public List<RecommendationResponse> recommended() {
         return recommendations.getRecommendations(AuthUtil.currentUserId());
     }
 
-    // ── Section 7 — Task 72: GET /jobs/search ─────────────────────────────────
-
-    /**
-     * Server-side filtered search across the user's existing job pipeline.
-     * Filters applied in-memory after fetching all user_jobs
-     * (efficient for typical pipeline size of < 500 jobs).
-     *
-     * Query params: q, location, minSalary, maxSalary, sponsorship, remote, page, size
-     */
     @GetMapping("/search")
     @Transactional(readOnly = true)
     public JobSearchResponse search(
-            @RequestParam(required = false)       String  q,
-            @RequestParam(required = false)       String  location,
-            @RequestParam(required = false)       Integer minSalary,
-            @RequestParam(required = false)       Integer maxSalary,
-            @RequestParam(required = false)       Boolean sponsorship,
-            @RequestParam(required = false)       Boolean remote,
-            @RequestParam(defaultValue = "0")     int     page,
-            @RequestParam(defaultValue = "20")    int     size) {
+            @RequestParam(required = false)    String  q,
+            @RequestParam(required = false)    String  location,
+            @RequestParam(required = false)    Integer minSalary,
+            @RequestParam(required = false)    Integer maxSalary,
+            @RequestParam(required = false)    Boolean sponsorship,
+            @RequestParam(required = false)    Boolean remote,
+            @RequestParam(defaultValue = "0")  int     page,
+            @RequestParam(defaultValue = "20") int     size) {
 
         UUID uid = AuthUtil.currentUserId();
         int safeSize = Math.max(1, Math.min(size, 50));
         Pageable pageable = PageRequest.of(page, safeSize, Sort.by("deliveredAt").descending());
-
         Specification<UserJob> spec = buildSearchSpec(uid, q, location, minSalary, maxSalary, sponsorship, remote);
         Page<UserJob> userJobPage = userJobs.findAll(spec, pageable);
-
         List<JobCardResponse> cards = userJobPage.getContent().stream()
                 .map(uj -> JobCardResponse.from(uj, uj.getJob()))
                 .filter(Objects::nonNull)
                 .toList();
-
         return new JobSearchResponse(
             cards,
             userJobPage.getTotalElements(),
@@ -335,17 +311,15 @@ public class JobsController {
         );
     }
 
-    private Specification<UserJob> buildSearchSpec(UUID uid, String q, String loc, Integer minS, Integer maxS, Boolean spons, Boolean rem) {
+    private Specification<UserJob> buildSearchSpec(UUID uid, String q, String loc,
+            Integer minS, Integer maxS, Boolean spons, Boolean rem) {
         return (root, query, cb) -> {
             List<Predicate> p = new ArrayList<>();
             p.add(cb.equal(root.get("userId"), uid));
-
-            // Eager fetch Job to avoid N+1, but only for the data query (not count)
             if (query.getResultType() != Long.class && query.getResultType() != long.class) {
                 root.fetch("job", JoinType.INNER);
             }
             Join<UserJob, Job> job = root.join("job");
-
             if (q != null && !q.isBlank()) {
                 String pat = "%" + q.toLowerCase() + "%";
                 p.add(cb.or(
@@ -372,7 +346,6 @@ public class JobsController {
             if (Boolean.TRUE.equals(spons)) {
                 p.add(cb.equal(job.get("sponsorship"), true));
             }
-
             return cb.and(p.toArray(new Predicate[0]));
         };
     }
