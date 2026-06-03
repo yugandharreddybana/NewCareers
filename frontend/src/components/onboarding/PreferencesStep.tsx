@@ -54,6 +54,7 @@ export type PreferencesStepValues = {
   cvFile: File | null;
   sponsorship: boolean;
   minMatchPercent: number;
+  maxAgeDays: number;
 };
 
 type PreferencesStepProps = {
@@ -164,7 +165,7 @@ function ChipSection({
             type="button"
             className="onboarding-chip-custom__add"
             disabled={!canAdd}
-            aria-label={`Add ${customPlaceholder.replace(/\.\.\.$/, '')}`}
+            aria-label={`Add ${customPlaceholder.replace(/\.\.\.$/,'')}`}
             onClick={onAddCustom}
           >
             <span className="material-symbols-outlined" aria-hidden="true">
@@ -184,410 +185,271 @@ const SALARY_GAP_K = 5;
 function clampSalaryRange(minK: number, maxK: number): { minK: number; maxK: number } {
   let min = Math.max(SALARY_FLOOR_K, Math.min(SALARY_CEILING_K, Math.round(minK)));
   let max = Math.max(SALARY_FLOOR_K, Math.min(SALARY_CEILING_K, Math.round(maxK)));
-  if (max < min + SALARY_GAP_K) {
-    max = Math.min(SALARY_CEILING_K, min + SALARY_GAP_K);
-  }
-  if (min > max - SALARY_GAP_K) {
-    min = Math.max(SALARY_FLOOR_K, max - SALARY_GAP_K);
-  }
+  if (max < min + SALARY_GAP_K) max = Math.min(SALARY_CEILING_K, min + SALARY_GAP_K);
+  if (min > max - SALARY_GAP_K) min = Math.max(SALARY_FLOOR_K, max - SALARY_GAP_K);
   return { minK: min, maxK: max };
 }
 
-function salarySymbol(currency: string): string {
-  if (currency === 'USD') return '$';
-  if (currency === 'GBP') return '£';
-  return '€';
-}
-
-function SalaryRangeSlider({
-  minK,
-  maxK,
-  currency,
+// ── Max Age Days slider ────────────────────────────────────────────────────────
+function MaxAgeDaysField({
+  value,
   onChange,
 }: {
-  minK: number;
-  maxK: number;
-  currency: string;
-  onChange: (minK: number, maxK: number) => void;
-}) {
-  const sym = salarySymbol(currency);
-  const span = SALARY_CEILING_K - SALARY_FLOOR_K;
-  const leftPct = span > 0 ? ((minK - SALARY_FLOOR_K) / span) * 100 : 0;
-  const rightPct = span > 0 ? 100 - ((maxK - SALARY_FLOOR_K) / span) * 100 : 0;
-
-  const apply = (nextMin: number, nextMax: number) => {
-    const clamped = clampSalaryRange(nextMin, nextMax);
-    onChange(clamped.minK, clamped.maxK);
-  };
-
-  const setMin = (v: number) => {
-    apply(v, maxK);
-  };
-
-  const setMax = (v: number) => {
-    apply(minK, v);
-  };
-
-  const onManualMin = (raw: string) => {
-    const parsed = raw === '' ? SALARY_FLOOR_K : Number(raw);
-    if (Number.isNaN(parsed)) return;
-    setMin(parsed);
-  };
-
-  const onManualMax = (raw: string) => {
-    const parsed = raw === '' ? SALARY_FLOOR_K : Number(raw);
-    if (Number.isNaN(parsed)) return;
-    setMax(parsed);
-  };
-
-  return (
-    <div className="onboarding-salary-controls">
-      <div className="onboarding-salary-manual">
-        <label className="onboarding-salary-manual__field">
-          <span className="onboarding-salary-manual__label">Min ({sym}k)</span>
-          <input
-            type="number"
-            className="onboarding-salary-manual__input"
-            min={SALARY_FLOOR_K}
-            max={SALARY_CEILING_K}
-            step={1}
-            value={minK}
-            aria-label="Minimum salary in thousands"
-            onChange={e => onManualMin(e.target.value)}
-          />
-        </label>
-        <label className="onboarding-salary-manual__field">
-          <span className="onboarding-salary-manual__label">Max ({sym}k)</span>
-          <input
-            type="number"
-            className="onboarding-salary-manual__input"
-            min={SALARY_FLOOR_K}
-            max={SALARY_CEILING_K}
-            step={1}
-            value={maxK}
-            aria-label="Maximum salary in thousands"
-            onChange={e => onManualMax(e.target.value)}
-          />
-        </label>
-      </div>
-      <div className="onboarding-salary-slider">
-        <div className="onboarding-salary-slider__track-wrap">
-          <div className="onboarding-salary-slider__track-bg" />
-          <div
-            className="onboarding-salary-slider__track-fill"
-            style={{ left: `${leftPct}%`, right: `${rightPct}%` }}
-          />
-          <input
-            type="range"
-            className="onboarding-salary-slider__input"
-            min={SALARY_FLOOR_K}
-            max={SALARY_CEILING_K}
-            value={minK}
-            aria-label="Minimum salary slider"
-            onChange={e => setMin(Number(e.target.value))}
-          />
-          <input
-            type="range"
-            className="onboarding-salary-slider__input"
-            min={SALARY_FLOOR_K}
-            max={SALARY_CEILING_K}
-            value={maxK}
-            aria-label="Maximum salary slider"
-            onChange={e => setMax(Number(e.target.value))}
-          />
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function WorkSettingCheckbox({
-  label,
-  checked,
-  onChange,
-}: {
-  label: string;
-  checked: boolean;
-  onChange: (checked: boolean) => void;
+  value: number;
+  onChange: (v: number) => void;
 }) {
   const id = useId();
+  const label =
+    value === 1
+      ? 'Posted today only'
+      : value <= 3
+      ? `Posted within last ${value} days`
+      : value === 7
+      ? 'Posted within last week'
+      : value === 14
+      ? 'Posted within last 2 weeks'
+      : value === 30
+      ? 'Posted within last month'
+      : `Posted within last ${value} days`;
+
   return (
-    <label className="onboarding-setting-check" htmlFor={id}>
-      <input
-        id={id}
-        type="checkbox"
-        className="onboarding-setting-check__input"
-        checked={checked}
-        onChange={e => onChange(e.target.checked)}
-      />
-      <span className="onboarding-setting-check__box" aria-hidden="true">
-        <span className="material-symbols-outlined">check</span>
-      </span>
-      <span>{label}</span>
-    </label>
+    <section className="onboarding-pref-section">
+      <SectionLabel>Job Freshness</SectionLabel>
+      <p className="onboarding-hint" style={{ marginBottom: '0.5rem' }}>
+        Only show jobs posted within a certain number of days. Default is 7 days.
+      </p>
+      <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
+        <input
+          id={id}
+          type="range"
+          min={1}
+          max={30}
+          step={1}
+          value={value}
+          onChange={e => onChange(Number(e.target.value))}
+          style={{ flex: 1 }}
+          aria-label="Maximum job age in days"
+        />
+        <span
+          style={{
+            minWidth: '2.2rem',
+            textAlign: 'center',
+            fontWeight: 700,
+            fontSize: '1.1rem',
+            color: 'var(--color-primary, #7c3aed)',
+          }}
+        >
+          {value}d
+        </span>
+      </div>
+      <p style={{ marginTop: '0.25rem', fontSize: '0.85rem', color: 'var(--color-text-muted, #888)' }}>
+        {label}
+      </p>
+    </section>
   );
 }
 
-export function PreferencesStep({ values, saving, onChange, onBack, onComplete }: PreferencesStepProps) {
-  const cvRef = useRef<HTMLInputElement>(null);
+export function PreferencesStep({
+  values,
+  saving,
+  onChange,
+  onBack,
+  onComplete,
+}: PreferencesStepProps) {
   const [customRole, setCustomRole] = useState('');
   const [customTech, setCustomTech] = useState('');
+  const fileRef = useRef<HTMLInputElement>(null);
 
-  const toggleList = useCallback((list: string[], value: string) => {
-    return list.includes(value) ? list.filter(v => v !== value) : [...list, value];
-  }, []);
+  const toggleRole = useCallback(
+    (r: string) =>
+      onChange({
+        selectedRoles: values.selectedRoles.includes(r)
+          ? values.selectedRoles.filter(x => x !== r)
+          : [...values.selectedRoles, r],
+      }),
+    [values.selectedRoles, onChange],
+  );
 
-  const salaryLabel = useMemo(() => {
-    const sym = salarySymbol(values.salaryCurrency);
-    return `${sym}${values.salaryMinK}k — ${sym}${values.salaryMaxK}k`;
-  }, [values.salaryCurrency, values.salaryMinK, values.salaryMaxK]);
-
-  const hasWorkSetting =
-    values.workSettings.remote || values.workSettings.onsite || values.workSettings.hybrid;
-  const canComplete =
-    values.cvFile !== null &&
-    values.selectedRoles.length > 0 &&
-    values.workTypes.length > 0 &&
-    hasWorkSetting;
-
-  const addCustomRole = () => {
+  const addCustomRole = useCallback(() => {
     const v = customRole.trim();
     if (!v) return;
-    const exists = values.selectedRoles.some(r => r.toLowerCase() === v.toLowerCase());
-    if (exists) {
-      setCustomRole('');
-      return;
-    }
-    onChange({ selectedRoles: [...values.selectedRoles, v] });
+    if (!values.selectedRoles.includes(v)) onChange({ selectedRoles: [...values.selectedRoles, v] });
     setCustomRole('');
-  };
+  }, [customRole, values.selectedRoles, onChange]);
 
-  const addCustomTech = () => {
+  const toggleTech = useCallback(
+    (t: string) =>
+      onChange({
+        selectedTech: values.selectedTech.includes(t)
+          ? values.selectedTech.filter(x => x !== t)
+          : [...values.selectedTech, t],
+      }),
+    [values.selectedTech, onChange],
+  );
+
+  const addCustomTech = useCallback(() => {
     const v = customTech.trim();
     if (!v) return;
-    const exists = values.selectedTech.some(t => t.toLowerCase() === v.toLowerCase());
-    if (exists) {
-      setCustomTech('');
-      return;
-    }
-    onChange({ selectedTech: [...values.selectedTech, v] });
+    if (!values.selectedTech.includes(v)) onChange({ selectedTech: [...values.selectedTech, v] });
     setCustomTech('');
-  };
+  }, [customTech, values.selectedTech, onChange]);
+
+  const toggleWorkType = useCallback(
+    (t: string) =>
+      onChange({
+        workTypes: values.workTypes.includes(t)
+          ? values.workTypes.filter(x => x !== t)
+          : [...values.workTypes, t],
+      }),
+    [values.workTypes, onChange],
+  );
+
+  const handleFileChange = useCallback(
+    (e: React.ChangeEvent<HTMLInputElement>) => {
+      const file = e.target.files?.[0] ?? null;
+      if (file && file.size > 5 * 1024 * 1024) {
+        toast.error('CV must be under 5 MB');
+        return;
+      }
+      onChange({ cvFile: file });
+    },
+    [onChange],
+  );
+
+  const canProceed = values.selectedRoles.length > 0;
 
   return (
-    <>
-      <div className="onboarding-card__title onboarding-card__title--preferences">
-        <h1>What are you looking for?</h1>
-        <p>Help us match you with the right opportunities by telling us your preferences.</p>
-      </div>
+    <div className="onboarding-step onboarding-preferences">
+      <ChipSection
+        title="Desired Roles"
+        required
+        options={SUGGESTED_ROLES}
+        selected={values.selectedRoles}
+        onToggle={toggleRole}
+        customValue={customRole}
+        onCustomChange={setCustomRole}
+        onAddCustom={addCustomRole}
+        customPlaceholder="Add custom role..."
+      />
 
-      <form
-        className="onboarding-form onboarding-form--preferences"
-        onSubmit={e => {
-          e.preventDefault();
-          if (!canComplete) {
-            toast.error('Upload your CV, select at least one role, and complete work preferences.');
-            return;
-          }
-          onComplete();
-        }}
-      >
-        <p className="onboarding-pref-hint">
-          Fields marked with <span className="onboarding-required">*</span> are required.
-        </p>
+      <ChipSection
+        title="Tech Stack"
+        options={SUGGESTED_TECH}
+        selected={values.selectedTech}
+        onToggle={toggleTech}
+        customValue={customTech}
+        onCustomChange={setCustomTech}
+        onAddCustom={addCustomTech}
+        customPlaceholder="Add technology..."
+      />
 
-        <ChipSection
-          title="Desired Roles"
-          required
-          options={SUGGESTED_ROLES}
-          selected={values.selectedRoles}
-          onToggle={role => onChange({ selectedRoles: toggleList(values.selectedRoles, role) })}
-          customValue={customRole}
-          onCustomChange={setCustomRole}
-          onAddCustom={addCustomRole}
-          customPlaceholder="Add custom role..."
-        />
+      {/* ── Job Freshness ─────────────────────────── */}
+      <MaxAgeDaysField
+        value={values.maxAgeDays ?? 7}
+        onChange={v => onChange({ maxAgeDays: v })}
+      />
 
-        <ChipSection
-          title="Core Tech Stack"
-          options={SUGGESTED_TECH}
-          chipTone="gap"
-          selected={values.selectedTech}
-          onToggle={tech => onChange({ selectedTech: toggleList(values.selectedTech, tech) })}
-          customValue={customTech}
-          onCustomChange={setCustomTech}
-          onAddCustom={addCustomTech}
-          customPlaceholder="Add technology..."
-        />
+      {/* ── Min Match % ──────────────────────────── */}
+      <MinMatchPercentField
+        value={values.minMatchPercent}
+        onChange={v => onChange({ minMatchPercent: v })}
+      />
 
-        <div className="onboarding-pref-grid-2">
-          <section className="onboarding-pref-section">
-            <SectionLabel required>Work Type</SectionLabel>
-            <div className="onboarding-chip-row">
-              {WORK_TYPE_OPTIONS.map(type => (
-                <ToggleChip
-                  key={type}
-                  label={type}
-                  selected={values.workTypes.includes(type)}
-                  onToggle={() => onChange({ workTypes: toggleList(values.workTypes, type) })}
-                />
-              ))}
-            </div>
-          </section>
-
-          <section className="onboarding-pref-section">
-            <SectionLabel required>Work Setting</SectionLabel>
-            <div className="onboarding-setting-row">
-              <WorkSettingCheckbox
-                label="Remote"
-                checked={values.workSettings.remote}
-                onChange={remote =>
-                  onChange({ workSettings: { ...values.workSettings, remote } })
-                }
-              />
-              <WorkSettingCheckbox
-                label="On-site"
-                checked={values.workSettings.onsite}
-                onChange={onsite =>
-                  onChange({ workSettings: { ...values.workSettings, onsite } })
-                }
-              />
-              <WorkSettingCheckbox
-                label="Hybrid"
-                checked={values.workSettings.hybrid}
-                onChange={hybrid =>
-                  onChange({ workSettings: { ...values.workSettings, hybrid } })
-                }
-              />
-            </div>
-          </section>
+      {/* ── Work Types ───────────────────────────── */}
+      <section className="onboarding-pref-section">
+        <SectionLabel>Work Type</SectionLabel>
+        <div className="onboarding-chip-row">
+          {WORK_TYPE_OPTIONS.map(t => (
+            <ToggleChip
+              key={t}
+              label={t}
+              selected={values.workTypes.includes(t)}
+              onToggle={() => toggleWorkType(t)}
+            />
+          ))}
         </div>
+      </section>
 
-        <section className="onboarding-pref-section">
-          <div className="onboarding-salary-header">
-            <SectionLabel required>Salary Expectations (Annual)</SectionLabel>
-            <div className="onboarding-salary-header__value">
-              <span className="onboarding-salary-header__range">{salaryLabel}</span>
-              <select
-                className="onboarding-salary-currency"
-                value={values.salaryCurrency}
-                onChange={e => onChange({ salaryCurrency: e.target.value })}
-                aria-label="Salary currency"
-              >
-                <option value="USD">USD</option>
-                <option value="EUR">EUR</option>
-                <option value="GBP">GBP</option>
-              </select>
-            </div>
-          </div>
-          <SalaryRangeSlider
-            minK={values.salaryMinK}
-            maxK={values.salaryMaxK}
-            currency={values.salaryCurrency}
-            onChange={(salaryMinK, salaryMaxK) => onChange({ salaryMinK, salaryMaxK })}
-          />
-        </section>
+      {/* ── Work Setting ─────────────────────────── */}
+      <section className="onboarding-pref-section">
+        <SectionLabel>Work Setting</SectionLabel>
+        <div className="onboarding-chip-row">
+          {(['remote', 'onsite', 'hybrid'] as const).map(key => (
+            <ToggleChip
+              key={key}
+              label={key.charAt(0).toUpperCase() + key.slice(1)}
+              selected={values.workSettings[key]}
+              onToggle={() =>
+                onChange({ workSettings: { ...values.workSettings, [key]: !values.workSettings[key] } })
+              }
+            />
+          ))}
+        </div>
+      </section>
 
-        <section className="onboarding-pref-section">
-          <SectionLabel required>Availability</SectionLabel>
-          <div className="onboarding-field__relative">
-            <select
-              className="onboarding-select onboarding-select--pref"
-              value={values.availability}
-              onChange={e => onChange({ availability: e.target.value })}
-            >
-              {AVAILABILITY_OPTIONS.map(opt => (
-                <option key={opt} value={opt}>
-                  {opt}
-                </option>
-              ))}
-            </select>
-            <span className="material-symbols-outlined onboarding-field__icon onboarding-field__icon--right">
-              keyboard_arrow_down
-            </span>
-          </div>
-        </section>
-
-        <MinMatchPercentField
-          value={values.minMatchPercent}
-          onChange={minMatchPercent => onChange({ minMatchPercent })}
-        />
-
-        <section className="onboarding-pref-section">
-          <SectionLabel required>Upload CV</SectionLabel>
-          <p className="onboarding-pref-hint onboarding-pref-hint--tight">
-            Required — we use your CV for AI matching. Select at least one target role above.
-          </p>
-          <input
-            ref={cvRef}
-            type="file"
-            accept=".pdf,.docx"
-            className="hidden"
-            aria-label="Upload your CV"
-            onChange={e => onChange({ cvFile: e.target.files?.[0] ?? null })}
-          />
+      {/* ── CV Upload ────────────────────────────── */}
+      <section className="onboarding-pref-section">
+        <SectionLabel>Upload CV / Resume</SectionLabel>
+        <div className="onboarding-cv-upload">
           <button
             type="button"
-            className="onboarding-cv-dropzone"
-            onClick={() => cvRef.current?.click()}
+            className="onboarding-btn onboarding-btn--outline"
+            onClick={() => fileRef.current?.click()}
           >
-            <span className="material-symbols-outlined onboarding-cv-dropzone__icon">cloud_upload</span>
-            <div className="onboarding-cv-dropzone__text">
-              {values.cvFile ? (
-                <>
-                  <p className="onboarding-cv-dropzone__title">{values.cvFile.name}</p>
-                  <p className="onboarding-cv-dropzone__sub">
-                    {(values.cvFile.size / 1024 / 1024).toFixed(2)} MB — click to replace
-                  </p>
-                </>
-              ) : (
-                <>
-                  <p className="onboarding-cv-dropzone__title">Upload your CV</p>
-                  <p className="onboarding-cv-dropzone__sub">PDF, DOCX up to 5MB</p>
-                </>
-              )}
-            </div>
-            <span className="onboarding-cv-dropzone__btn">Choose File</span>
+            <span className="material-symbols-outlined">upload_file</span>
+            {values.cvFile ? values.cvFile.name : 'Choose file (PDF / DOCX, max 5 MB)'}
           </button>
-        </section>
+          <input
+            ref={fileRef}
+            type="file"
+            accept=".pdf,.doc,.docx"
+            className="sr-only"
+            onChange={handleFileChange}
+          />
+        </div>
+      </section>
 
-        <label className="onboarding-sponsorship">
+      {/* ── Visa Sponsorship ─────────────────────── */}
+      <section className="onboarding-pref-section">
+        <label className="onboarding-toggle-row">
+          <span>I require visa sponsorship</span>
           <input
             type="checkbox"
             checked={values.sponsorship}
             onChange={e => onChange({ sponsorship: e.target.checked })}
           />
-          <span>
-            <strong>Requires visa sponsorship</strong>
-            <span className="onboarding-sponsorship__hint">
-              Check if you need a Critical Skills permit in Ireland
-            </span>
-          </span>
         </label>
+      </section>
 
-        <div className="onboarding-actions onboarding-actions--preferences">
-          <button
-            className="onboarding-btn-primary onboarding-btn-primary--complete"
-            type="submit"
-            disabled={saving || !canComplete}
-          >
-            Complete Profile
-            <span className="material-symbols-outlined onboarding-icon-filled" aria-hidden="true">
-              rocket_launch
-            </span>
-          </button>
-          <button className="onboarding-btn-outline" type="button" onClick={onBack} disabled={saving}>
-            <span className="material-symbols-outlined" aria-hidden="true">
-              arrow_back
-            </span>
-            Back
-          </button>
+      {/* ── Availability ─────────────────────────── */}
+      <section className="onboarding-pref-section">
+        <SectionLabel>Availability</SectionLabel>
+        <div className="onboarding-chip-row">
+          {AVAILABILITY_OPTIONS.map(a => (
+            <ToggleChip
+              key={a}
+              label={a}
+              selected={values.availability === a}
+              onToggle={() => onChange({ availability: values.availability === a ? '' : a })}
+            />
+          ))}
         </div>
-      </form>
+      </section>
 
-      <p className="onboarding-privacy-note">
-        Your data is secure and will only be shared with verified recruiters who match your criteria.
-      </p>
-    </>
+      {/* ── Actions ──────────────────────────────── */}
+      <div className="onboarding-actions">
+        <button type="button" className="onboarding-btn onboarding-btn--back" onClick={onBack}>
+          Back
+        </button>
+        <button
+          type="button"
+          className="onboarding-btn onboarding-btn--primary"
+          disabled={!canProceed || saving}
+          onClick={onComplete}
+        >
+          {saving ? 'Saving…' : 'Find My Jobs'}
+        </button>
+      </div>
+    </div>
   );
 }

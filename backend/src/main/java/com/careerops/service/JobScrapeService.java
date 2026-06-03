@@ -1,161 +1,91 @@
 package com.careerops.service;
 
-import com.careerops.dto.SearchParams;
-import com.careerops.model.Job;
-import com.careerops.model.UserProfile;
+import com.careerops.model.JobListing;
 import com.careerops.service.sources.*;
-import com.careerops.service.sources.company.CompanyCareerSource;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
-import java.time.Instant;
-import java.time.temporal.ChronoUnit;
-import java.util.ArrayList;
-import java.util.Collections;
-import java.util.List;
+import java.util.*;
 import java.util.concurrent.*;
-import jakarta.annotation.PreDestroy;
+import java.util.stream.Collectors;
 
 /**
- * Section 7 — Task 67
- * Orchestrates all JobSource implementations using the Strategy pattern.
- *
- * fetchRaw(profile)       — background parallel scrape across all sources
- * search(params, profile) — on-demand keyword search across sources that support it
- *
- * Sources registered (16 total):
- *   Free/no-key:  IrishJobsSource, JobsIeSource, JobsIrelandSource,
- *                 LinkedInPublicSource, JsoupCompanySource,
- *                 RemotiveSource, TheMuseSource, JobicySource, RssSource,
- *                 WeWorkRemotelySource, EuroJobsSource, TwinAiSource
- *   API-key:      ReedSource, AdzunaSource
- *   On-demand:    SerpApiJobSource, IndeedRssSource
- *
- * All sources are fail-safe: exceptions and timeouts return empty list.
- * Thread pool: 10 threads to accommodate the expanded source list.
+ * Orchestrates ALL job sources in parallel.
+ * Every source that implements JobSource is injected automatically via the
+ * Spring-managed list. Sources are fired concurrently; results are merged,
+ * de-duplicated and returned.
  */
 @Service
 public class JobScrapeService {
 
     private static final Logger log = LoggerFactory.getLogger(JobScrapeService.class);
+    private static final int THREAD_POOL = 16;
+    private static final int TIMEOUT_SECONDS = 30;
 
     private final List<JobSource> sources;
-    private final ExecutorService executor = Executors.newFixedThreadPool(10);
+    private final DeduplicationService deduplicationService;
+    private final ExecutorService executor;
 
-    @Value("${jobs.freshness.default.hours:96}")
-    private int defaultFreshnessHours;
-
-    public JobScrapeService(
-            IrishJobsSource irish, JobsIeSource jobsIe,
-            JobsIrelandSource jobsIreland, LinkedInPublicSource linkedIn,
-            CompanyCareerSource companies,
-            RemotiveSource rm, TheMuseSource tm,
-            JobicySource jb, RssSource rs,
-            ReedSource r, AdzunaSource a,
-            TwinAiSource twin,
-            SerpApiJobSource serp,
-            IndeedRssSource indeed,
-            WeWorkRemotelySource wwr,
-            EuroJobsSource euro) {
-        // Order: Irish-focused sources first, then general free/no-key,
-        // API-key sources next, on-demand search sources last (serp, indeed)
-        this.sources = List.of(
-            irish, jobsIe, jobsIreland, linkedIn, companies,
-            rm, tm, jb, rs,
-            wwr, euro,
-            r, a, twin,
-            serp, indeed
-        );
+    public JobScrapeService(List<JobSource> sources,
+                            DeduplicationService deduplicationService) {
+        this.sources = sources;
+        this.deduplicationService = deduplicationService;
+        this.executor = Executors.newFixedThreadPool(THREAD_POOL,
+                r -> { Thread t = new Thread(r, "job-scraper"); t.setDaemon(true); return t; });
     }
 
-    // ── Background scrape ────────────────────────────────────────────────────
+    /**
+     * Scrape all enabled sources in parallel.
+     *
+     * @param keyword    job search keyword
+     * @param location   location string (e.g. "Dublin", "Ireland")
+     * @param maxAgeDays only include jobs posted within this many days (0 = no filter)
+     * @return merged, de-duplicated list of job listings
+     */
+    public List<JobListing> scrapeAll(String keyword, String location, int maxAgeDays) {
+        List<JobSource> enabled = sources.stream()
+                .filter(JobSource::isEnabled)
+                .collect(Collectors.toList());
 
-    public List<Job> fetchRaw(UserProfile profile) {
-        log.info("Starting parallel fetch across {} sources for userId={}",
-                sources.size(), profile.getUserId());
+        log.info("Scraping {} sources in parallel for '{}' / '{}' (maxAgeDays={})",
+                enabled.size(), keyword, location, maxAgeDays);
 
-        List<CompletableFuture<List<Job>>> futures = sources.stream()
-            .filter(JobSource::hasBudget)
-            .map(s -> {
-                long timeoutSec = s instanceof CompanyCareerSource ? 120 : 25;
-                return CompletableFuture.supplyAsync(() -> {
-                    try {
-                        return s.fetch(profile);
-                    } catch (Exception e) {
-                        log.warn("Source '{}' failed: {}", s.name(), e.getMessage());
-                        return Collections.<Job>emptyList();
-                    }
-                }, executor).orTimeout(timeoutSec, TimeUnit.SECONDS).exceptionally(ex -> {
-                    log.warn("Source '{}' timed out or failed: {}", s.name(), ex.getMessage());
-                    return Collections.emptyList();
-                });
-            })
-            .toList();
-
-        List<Job> allJobs = futures.stream()
-            .map(CompletableFuture::join)
-            .flatMap(List::stream)
-            .toList();
-
-        List<Job> fresh = applyFreshness(allJobs, profile);
-        log.info("Total collected: {}. After freshness filter: {}/{}",
-                allJobs.size(), fresh.size(), allJobs.size());
-        return fresh;
-    }
-
-    // ── On-demand search ──────────────────────────────────────────────────────
-
-    public List<Job> search(SearchParams params, UserProfile profile) {
-        log.info("Starting parallel search across {} sources for query='{}'",
-                sources.size(), params.toSearchQuery());
-
-        List<CompletableFuture<List<Job>>> futures = sources.stream()
-            .filter(JobSource::hasBudget)
-            .map(s -> CompletableFuture.supplyAsync(() -> {
+        List<Future<List<JobListing>>> futures = new ArrayList<>();
+        for (JobSource source : enabled) {
+            futures.add(executor.submit(() -> {
                 try {
-                    return s.search(params, profile);
-                } catch (com.careerops.exception.ApiException apiEx) {
-                    throw apiEx;
+                    List<JobListing> results = source.fetch(keyword, location, maxAgeDays);
+                    log.info("[{}] fetched {} jobs", source.sourceName(), results.size());
+                    return results;
                 } catch (Exception e) {
-                    log.warn("Search source '{}' failed: {}", s.name(), e.getMessage());
-                    return Collections.<Job>emptyList();
+                    log.error("[{}] unexpected error during fetch: {}", source.sourceName(), e.getMessage());
+                    return Collections.<JobListing>emptyList();
                 }
-            }, executor).orTimeout(25, TimeUnit.SECONDS).exceptionally(ex -> {
-                log.warn("Search source '{}' timed out or failed: {}", s.name(), ex.getMessage());
-                return Collections.emptyList();
-            }))
-            .toList();
+            }));
+        }
 
-        List<Job> results = futures.stream()
-            .map(CompletableFuture::join)
-            .flatMap(List::stream)
-            .toList();
+        List<JobListing> all = new ArrayList<>();
+        for (Future<List<JobListing>> future : futures) {
+            try {
+                all.addAll(future.get(TIMEOUT_SECONDS, TimeUnit.SECONDS));
+            } catch (TimeoutException te) {
+                log.warn("A scraper timed out after {}s", TIMEOUT_SECONDS);
+            } catch (Exception e) {
+                log.error("Error collecting scraper result", e);
+            }
+        }
 
-        log.info("On-demand search total: {} results", results.size());
-        return results;
+        List<JobListing> deduped = deduplicationService.deduplicate(all);
+        log.info("Total after dedup: {}", deduped.size());
+        return deduped;
     }
 
-    @PreDestroy
-    public void shutdown() {
-        log.info("Shutting down JobScrapeService executor...");
-        executor.shutdown();
-    }
-
-    /** All registered scrape/search sources (order preserved). */
-    public List<JobSource> getSources() {
-        return List.copyOf(sources);
-    }
-
-    // ── Helpers ────────────────────────────────────────────────────────────
-
-    private List<Job> applyFreshness(List<Job> jobs, UserProfile profile) {
-        int hours = profile.getFreshnessHours() == null
-                ? defaultFreshnessHours : profile.getFreshnessHours();
-        Instant cutoff = Instant.now().minus(hours, ChronoUnit.HOURS);
-        return jobs.stream()
-                .filter(j -> j.getPostedAt() == null || j.getPostedAt().isAfter(cutoff))
-                .toList();
+    /** Returns the names of all enabled sources – used by the progress modal. */
+    public List<String> getEnabledSourceNames() {
+        return sources.stream()
+                .filter(JobSource::isEnabled)
+                .map(JobSource::sourceName)
+                .collect(Collectors.toList());
     }
 }
