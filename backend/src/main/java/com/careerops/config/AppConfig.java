@@ -5,12 +5,25 @@ import okhttp3.OkHttpClient;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.context.annotation.Primary;
 
 import java.util.concurrent.TimeUnit;
 
 /**
- * Central infrastructure beans:
- * - Shared OkHttpClient with a connection pool (used by all scrapers + API callers)
+ * Central infrastructure beans.
+ *
+ * Provides a single shared OkHttpClient with a ConnectionPool used by all
+ * scrapers and REST API callers. Annotated @Primary so it wins any
+ * OkHttpClient autowiring competition (e.g. if a test config or future
+ * module also registers one).
+ *
+ * Configuration keys (all in application.properties under scraper.http.*):
+ *   max-connections            total pool size across all hosts
+ *   max-connections-per-host   max connections to any single hostname
+ *   connect-timeout-ms         TCP connect timeout
+ *   read-timeout-ms            socket read timeout
+ *   write-timeout-ms           socket write timeout
+ *   keep-alive-duration-seconds how long idle connections stay alive
  */
 @Configuration
 public class AppConfig {
@@ -34,11 +47,12 @@ public class AppConfig {
     private int keepAliveDurationSeconds;
 
     /**
-     * Single shared OkHttpClient for all scrapers and REST API calls.
-     * Uses a ConnectionPool so TCP connections are reused across sources,
-     * dramatically reducing connection-setup overhead during parallel scraping.
+     * Single shared pooled OkHttpClient.
+     * All scrapers and REST callers should inject this bean by type or
+     * via @Qualifier("sharedHttpClient") to reuse TCP connections.
      */
-    @Bean
+    @Primary
+    @Bean(name = "sharedHttpClient")
     public OkHttpClient sharedHttpClient() {
         ConnectionPool pool = new ConnectionPool(
                 maxConnections,
