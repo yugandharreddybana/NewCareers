@@ -17,8 +17,9 @@ import java.util.concurrent.ThreadPoolExecutor;
  *  - scraperExecutor  : parallel job scraping (IO-bound, larger pool)
  *  - aiExecutor       : AI scoring / evaluation (CPU+network bound)
  *  - emailExecutor    : email dispatch (low-priority, small pool)
- *
- * Separating pools prevents a slow AI call from starving job scraping.
+ *  - skillExecutor    : Batch 3 — heavy background skills (MockInterview kit,
+ *                        ApplicationPlanner plan generation). Separate from aiExecutor
+ *                        so a queue of planner tasks can't starve feed-scoring.
  */
 @EnableAsync
 @Configuration
@@ -50,6 +51,17 @@ public class AsyncConfig {
     @Value("${async.email.queue-capacity:100}")
     private int emailQueueCapacity;
 
+    // ─── Skill executor (Batch 3) ────────────────────────────
+    // Used by @Async("skillExecutor") in ApplicationPlannerService and MockInterviewService.
+    // Sized for long-running Gemini calls: small core (these are rare user-triggered actions),
+    // large queue so requests back up gracefully under load rather than being rejected.
+    @Value("${async.skill.core-pool-size:4}")
+    private int skillCorePool;
+    @Value("${async.skill.max-pool-size:12}")
+    private int skillMaxPool;
+    @Value("${async.skill.queue-capacity:200}")
+    private int skillQueueCapacity;
+
     @Bean(name = "scraperExecutor")
     public Executor scraperExecutor() {
         return buildExecutor("scraper", scrapingCorePool, scrapingMaxPool, scrapingQueueCapacity,
@@ -66,6 +78,17 @@ public class AsyncConfig {
     public Executor emailExecutor() {
         return buildExecutor("email", emailCorePool, emailMaxPool, emailQueueCapacity,
                 discardOldestPolicy("email"));
+    }
+
+    /**
+     * Batch 3 — Background executor for heavy skill operations.
+     * ApplicationPlannerService.generatePlanAsync() and
+     * MockInterviewService.generateInterviewKitAsync() both use this pool.
+     */
+    @Bean(name = "skillExecutor")
+    public Executor skillExecutor() {
+        return buildExecutor("skill", skillCorePool, skillMaxPool, skillQueueCapacity,
+                callerRunsPolicy("skill"));
     }
 
     // ─── helpers ────────────────────────────────────────────

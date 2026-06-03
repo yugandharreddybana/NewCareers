@@ -4,82 +4,81 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
+import java.util.UUID;
 import java.util.function.Supplier;
 
 /**
- * Batch 3 — AI Provider Router
+ * Batch 3 — AI Provider Router (fixed)
  *
- * Routes AI scoring calls to the best available provider.
- * Primary: NVIDIA (fast, cheap).
- * Fallback: Claude (reliable, slightly slower).
+ * Routes lightweight AI scoring calls through a primary + fallback provider.
  *
- * Failover triggers when NVIDIA is "degraded" as measured by
+ * Primary:  GeminiService  (cheap, fast single-turn calls)
+ * Fallback: ClaudeDirectService (reliable, slightly slower)
+ *
+ * NvidiaAgentService is intentionally NOT used here — it implements a
+ * multi-turn agentic loop (run()) that is incompatible with simple
+ * text-in / text-out light-scoring calls.
+ *
+ * Failover triggers when Gemini is "degraded" as measured by
  * AiProviderMetricsService (3+ consecutive failures OR avg latency > threshold).
- *
- * Usage:
- * <pre>
- *   String result = router.route(
- *       () -> nvidiaService.generate(prompt, userId, tag),   // primary
- *       () -> claudeDirectService.generate(prompt, userId),  // fallback
- *       userId
- *   );
- * </pre>
- *
- * The router also records success/failure metrics automatically.
  */
 @Service
 @Slf4j
 public class AiProviderRouter {
 
     private final AiProviderMetricsService metrics;
-    private final NvidiaAgentService nvidiaAgent;
+    private final GeminiService gemini;
     private final ClaudeDirectService claudeDirect;
 
     @Value("${ai.router.latency.threshold.ms:8000}")
     private long latencyThresholdMs;
 
-    public static final String PROVIDER_NVIDIA = "nvidia";
+    public static final String PROVIDER_GEMINI = "gemini";
     public static final String PROVIDER_CLAUDE = "claude";
 
+    // System prompt used for all light-eval Claude fallback calls
+    private static final String LIGHT_EVAL_SYSTEM_PROMPT =
+        "You are a job-matching engine. Return only valid JSON. No markdown, no explanation.";
+
     public AiProviderRouter(AiProviderMetricsService metrics,
-                             NvidiaAgentService nvidiaAgent,
+                             GeminiService gemini,
                              ClaudeDirectService claudeDirect) {
         this.metrics = metrics;
-        this.nvidiaAgent = nvidiaAgent;
+        this.gemini = gemini;
         this.claudeDirect = claudeDirect;
     }
 
-    // ── Main routing method ────────────────────────────────────────────────────
+    // ── Main routing method ─────────────────────────────────────────────────
 
     /**
      * Execute the primary supplier; fall back to the secondary on failure or degradation.
      * Metrics are recorded automatically for both providers.
      *
-     * @param primary   NVIDIA call (cheap, fast)
+     * @param primary   Gemini call (cheap, fast)
      * @param fallback  Claude call (reliable)
      * @param context   human-readable label for logging (e.g. userId or skill tag)
      * @return result string from whichever provider succeeded
      * @throws RuntimeException if both providers fail
      */
     public String route(Supplier<String> primary, Supplier<String> fallback, String context) {
-        // If NVIDIA is already degraded, skip straight to Claude
-        if (metrics.isDegraded(PROVIDER_NVIDIA, latencyThresholdMs)) {
-            log.warn("[AiRouter] NVIDIA degraded (consecutive={} avgLatency={}ms) — routing straight to Claude for context={}",
-                    metrics.consecutiveFailures(PROVIDER_NVIDIA),
-                    metrics.avgLatency(PROVIDER_NVIDIA),
+        // If Gemini is already degraded, skip straight to Claude
+        if (metrics.isDegraded(PROVIDER_GEMINI, latencyThresholdMs)) {
+            log.warn("[AiRouter] Gemini degraded (consecutive={} avgLatency={}ms) — routing to Claude for context={}",
+                    metrics.consecutiveFailures(PROVIDER_GEMINI),
+                    metrics.avgLatency(PROVIDER_GEMINI),
                     context);
             return executeFallback(fallback, context);
         }
 
-        // Try primary (NVIDIA)
+        // Try primary (Gemini)
         long start = System.currentTimeMillis();
         try {
             String result = primary.get();
-            metrics.recordSuccess(PROVIDER_NVIDIA, System.currentTimeMillis() - start);
+            metrics.recordSuccess(PROVIDER_GEMINI, System.currentTimeMillis() - start);
             return result;
         } catch (Exception primaryEx) {
-            metrics.recordFailure(PROVIDER_NVIDIA);
-            log.warn("[AiRouter] NVIDIA failed for context={}: {} — falling back to Claude",
+            metrics.recordFailure(PROVIDER_GEMINI);
+            log.warn("[AiRouter] Gemini failed for context={}: {} — falling back to Claude",
                     context, primaryEx.getMessage());
         }
 
@@ -88,13 +87,16 @@ public class AiProviderRouter {
     }
 
     /**
-     * Convenience overload: wraps NvidiaAgentService.chat() and ClaudeDirectService.generate()
+     * Convenience overload: wraps GeminiService.generate() and ClaudeDirectService.generate()
      * with a shared prompt. Use this for simple text-in / text-out scoring calls.
+     *
+     * ClaudeDirectService.generate() requires a separate system prompt and user prompt;
+     * for light-eval calls the system prompt is the fixed LIGHT_EVAL_SYSTEM_PROMPT constant.
      */
-    public String routePrompt(String prompt, java.util.UUID userId, String tag) {
+    public String routePrompt(String prompt, UUID userId, String tag) {
         return route(
-            () -> nvidiaAgent.chat(prompt, userId, tag),
-            () -> claudeDirect.generate(prompt, userId),
+            () -> gemini.generate(prompt, userId, tag),
+            () -> claudeDirect.generate(LIGHT_EVAL_SYSTEM_PROMPT, prompt, userId, tag),
             userId + "/" + tag
         );
     }

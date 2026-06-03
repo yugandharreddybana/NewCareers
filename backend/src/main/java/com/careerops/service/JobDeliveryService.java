@@ -36,8 +36,16 @@ import java.util.stream.Collectors;
 /**
  * Wires scrape -> dedup -> JobMatchingService pre-rank -> parallel NvidiaService score -> top-N -> persist.
  *
- * AI engine migrated from GeminiService to NvidiaService (NVIDIA NIM, OpenAI-compatible).
- * Output contract is identical: generateJsonAsync returns a JsonNode with matchPercent, overallScore, etc.
+ * FIX (DB-001): The previous check-then-insert pattern
+ *   (findByUserIdAndJobId().isPresent() + save())
+ * was not atomic. Under parallel discovery-pool inserts, two threads could both
+ * pass the isPresent() check for the same (userId, jobId) and both attempt an
+ * INSERT, causing the UK constraint violation (23505).
+ *
+ * All inserts now go through upsertUserJob() which uses a try/catch on
+ * DataIntegrityViolationException to silently swallow duplicate-key errors.
+ * The read-check is kept as a fast-path to avoid redundant DB work, but
+ * the write is made safe regardless of the race.
  */
 @Service
 @SuppressWarnings("all")
@@ -140,7 +148,6 @@ public class JobDeliveryService {
         JobCardResponse result;
 
         if (profilePrefersIreland(p)) {
-            // Ireland-focused profile: try Irish boards first, then general sources
             result = tryDeliverLive(userId, p, irishJobs, "irishjobs_live", errors);
             if (result != null) return result;
 
@@ -162,7 +169,6 @@ public class JobDeliveryService {
             result = tryDeliverLive(userId, p, linkedInPublic, "linkedin_public_live", errors);
             if (result != null) return result;
         } else {
-            // General profile: try Adzuna first (richer data), then remaining sources
             result = tryDeliverLive(userId, p, adzuna, "adzuna_live", errors);
             if (result != null) return result;
 
@@ -242,18 +248,19 @@ public class JobDeliveryService {
 
         for (JobMatchingService.ScoredJob candidate : ranked) {
             Job j = candidate.job();
-            var existing = userJobs.findByUserIdAndJobId(userId, j.getId());
-            if (existing.isPresent()) {
+            // Fast-path read check (avoids expensive AI evaluation for known duplicates)
+            if (userJobs.findByUserIdAndJobId(userId, j.getId()).isPresent()) {
                 continue;
             }
             JsonNode json = evaluationBuilder.build(
                 userId, j, p, cvText, candidate, sourceTag, "complete_local");
             Scored scored = toScored(j, json, sourceTag);
-            // if (enforceMinMatchPercent && scored.match() < minPct) continue;
             if (enforceMinMatchPercent && scored.match() < minPct) {
                 continue;
             }
-            persistSingle(userId, scored);
+            // FIX DB-001: use upsert so concurrent inserts don't race on the UK constraint
+            boolean inserted = upsertUserJob(userId, scored);
+            if (!inserted) continue; // already existed — try next candidate
             dedup.markSeen(userId, List.of(j));
             UserJob saved = userJobs.findByUserIdAndJobId(userId, j.getId())
                 .orElseThrow(() -> new ApiException(HttpStatus.INTERNAL_SERVER_ERROR, "Could not save live job"));
@@ -279,9 +286,6 @@ public class JobDeliveryService {
         return deliverOneLiveMatch(userId);
     }
 
-    /**
-     * Profile-matched delivery from IrishJobs.ie only (scrape → pre-rank → AI score → persist).
-     */
     public FetchSummary deliverFromIrishJobs(UUID userId, int desiredCount) {
         if (!irishJobs.hasBudget()) {
             throw new ApiException(HttpStatus.SERVICE_UNAVAILABLE, "IrishJobs source unavailable.");
@@ -305,9 +309,6 @@ public class JobDeliveryService {
         return deliverScored(userId, p, raw, desiredCount, "daily_delivery");
     }
 
-    /**
-     * One best profile-matched job per board/API source, plus best match per company career page.
-     */
     private List<Job> collectOnePerSourceAndCompanies(UUID userId, UserProfile profile) {
         List<Job> assembled = new ArrayList<>();
         int minPct = minMatchThreshold(profile);
@@ -381,7 +382,6 @@ public class JobDeliveryService {
         return out;
     }
 
-    /** Skip location-only matches (e.g. Motor Mechanics for a developer profile). */
     private static boolean isRoleOrStackRelevant(JobMatchingService.ScoredJob candidate) {
         return candidate.reasons().stream().anyMatch(r -> {
             String lower = r.toLowerCase(Locale.ROOT);
@@ -428,6 +428,7 @@ public class JobDeliveryService {
                 break;
             }
             Job j = candidate.job();
+            // Fast-path read check
             if (userJobs.findByUserIdAndJobId(userId, j.getId()).isPresent()) {
                 continue;
             }
@@ -443,6 +444,7 @@ public class JobDeliveryService {
             toPersist.add(scored);
         }
 
+        // FIX DB-001: persistResults now uses upsertUserJob internally
         Integer saved = transactionTemplate.execute(status -> persistResults(userId, toPersist));
         int delivered = saved == null ? 0 : saved;
         log.info("User {} delivered {} new jobs (tag {})", userId, delivered, sourceTag);
@@ -464,9 +466,6 @@ public class JobDeliveryService {
         }
     }
 
-    /**
-     * Onboarding first-run delivery: no daily-limit gate; reports progress as each job is evaluated and saved.
-     */
     public int deliverForOnboarding(
             UUID userId,
             int targetCount,
@@ -541,27 +540,25 @@ public class JobDeliveryService {
         Set<String> companies = new HashSet<>();
         List<Job> persistedJobs = new ArrayList<>();
 
-        // Sequential scoring avoids NVIDIA 429s during first-run onboarding (parallel burst of 25+ calls).
         for (JobMatchingService.ScoredJob rankedJob : ranked) {
             if (evaluated >= targetCount) break;
             Job j = rankedJob.job();
             try {
-                JsonNode json;
                 Scored scored = scoreOnboardingJob(j, rankedJob, p, cvText, systemPrompt, userId, minPct);
                 int match = scored.match();
-                // if (match < minPct) continue;
                 if (enforceMinMatchPercent && match < minPct) {
                     continue;
                 }
                 String companyKey = normalizeCompany(j.getCompany());
                 if (!companies.add(companyKey)) continue;
 
-                transactionTemplate.execute(status -> {
-                    persistSingle(userId, scored);
-                    return null;
-                });
-                persistedJobs.add(j);
-                evaluated++;
+                // FIX DB-001: upsert inside transaction
+                boolean inserted = transactionTemplate.execute(status -> upsertUserJob(userId, scored));
+                if (Boolean.TRUE.equals(inserted)) {
+                    persistedJobs.add(j);
+                    evaluated++;
+                }
+
                 com.careerops.dto.OnboardingDeliveryDtos.Stage stage =
                     evaluated >= minRequired
                         ? (evaluated >= targetCount
@@ -593,28 +590,23 @@ public class JobDeliveryService {
         return evaluated;
     }
 
-    private void persistSingle(UUID userId, Scored s) {
-        if (userJobs.findByUserIdAndJobId(userId, s.job().getId()).isPresent()) return;
-        UserJob uj = UserJob.builder()
-            .userId(userId).jobId(s.job().getId())
-            .matchPercent(s.match())
-            .aiScore(s.json().path("overallScore").asInt(s.match()))
-            .matchedSkills(toArr(s.json().path("matchedSkills")))
-            .unmatchedSkills(toArr(s.json().path("unmatchedSkills")))
-            .cvImprovementTips(toArr(s.json().path("cvImprovementTips")))
-            .humanSummary(s.json().path("humanSummary").asText(null))
-            .verdict(s.json().path("verdict").asText(null))
-            .scoreBreakdown(s.json())
-            .build();
-        userJobs.save(uj);
-    }
+    // ── FIX DB-001: Atomic upsert ───────────────────────────────────────────────
 
-    protected int persistResults(UUID userId, List<Scored> top) {
-        List<Job> newlySaved = new ArrayList<>();
-        for (Scored s : top) {
-            if (userJobs.findByUserIdAndJobId(userId, s.job().getId()).isPresent()) {
-                continue;
-            }
+    /**
+     * Attempt to insert a UserJob row. If the row already exists (due to a concurrent
+     * insert racing on the UK constraint), swallows the DataIntegrityViolationException
+     * and returns false. Returns true if the row was newly inserted.
+     *
+     * This replaces the old read-check-then-insert pattern which was not atomic
+     * under concurrent discovery-pool inserts (DB error 23505).
+     */
+    private boolean upsertUserJob(UUID userId, Scored s) {
+        // Fast-path: skip expensive save() if row is already visible in this transaction
+        if (userJobs.findByUserIdAndJobId(userId, s.job().getId()).isPresent()) {
+            log.debug("[upsert] Skipping duplicate userId={} jobId={}", userId, s.job().getId());
+            return false;
+        }
+        try {
             UserJob uj = UserJob.builder()
                 .userId(userId).jobId(s.job().getId())
                 .matchPercent(s.match())
@@ -627,7 +619,33 @@ public class JobDeliveryService {
                 .scoreBreakdown(s.json())
                 .build();
             userJobs.save(uj);
-            newlySaved.add(s.job());
+            return true;
+        } catch (org.springframework.dao.DataIntegrityViolationException dive) {
+            // Race condition: another thread inserted the same (userId, jobId) between
+            // our read check and our write. This is expected under parallel discovery-pool
+            // inserts and is safe to ignore.
+            log.debug("[upsert] Concurrent insert detected for userId={} jobId={} — silently ignored",
+                    userId, s.job().getId());
+            return false;
+        }
+    }
+
+    /**
+     * Legacy entry point kept for backward compat. Now delegates to upsertUserJob()
+     * internally for all inserts.
+     * @deprecated call upsertUserJob() directly
+     */
+    private void persistSingle(UUID userId, Scored s) {
+        upsertUserJob(userId, s);
+    }
+
+    protected int persistResults(UUID userId, List<Scored> top) {
+        List<Job> newlySaved = new ArrayList<>();
+        for (Scored s : top) {
+            boolean inserted = upsertUserJob(userId, s);
+            if (inserted) {
+                newlySaved.add(s.job());
+            }
         }
 
         if (!newlySaved.isEmpty()) {
@@ -669,14 +687,6 @@ public class JobDeliveryService {
         );
     }
 
-    /**
-     * Onboarding scoring: use NVIDIA when possible; fall back to keyword heuristic when the API
-     * errors or returns a partial/empty evaluation that would score below the user's min match %.
-     */
-    /**
-     * Bulk-save scraped roles using keyword/heuristic scores so the job board is populated
-     * immediately; NVIDIA scoring can refine the top matches afterward.
-     */
     private int persistDiscoveryPoolHeuristic(
             UUID userId, List<Job> deduped, UserProfile p, int minPct, String cvText) {
         List<Job> candidates = deduped.stream()
@@ -693,18 +703,14 @@ public class JobDeliveryService {
             JsonNode report = evaluationBuilder.build(
                 userId, j, p, cvText, rankedJob, "onboarding_pool", "complete_local");
             Scored scored = toScored(j, report, "onboarding_pool");
-            // if (scored.match() < minPct) continue;
             if (enforceMinMatchPercent && scored.match() < minPct) {
                 continue;
             }
-            if (userJobs.findByUserIdAndJobId(userId, j.getId()).isPresent()) {
-                continue;
+            // FIX DB-001: upsert inside its own transaction to isolate each insert
+            boolean inserted = transactionTemplate.execute(status -> upsertUserJob(userId, scored));
+            if (Boolean.TRUE.equals(inserted)) {
+                saved++;
             }
-            transactionTemplate.execute(status -> {
-                persistSingle(userId, scored);
-                return null;
-            });
-            saved++;
         }
         return saved;
     }
