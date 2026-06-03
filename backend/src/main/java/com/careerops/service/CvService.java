@@ -19,45 +19,51 @@ import java.util.List;
 import java.util.UUID;
 
 /**
- * Batch 3 — CV Service
+ * CV Service
  *
- * upload() : upload + parse + store in Supabase bucket
+ * upload()  : upload + parse + store in Supabase bucket
  * history() : list all CVs for a user, newest first
- * delete() : remove from DB + Supabase bucket; auto-promote next
+ * delete()  : remove from DB + Supabase bucket; auto-promote next
+ * activate(): switch active CV — evicts AI eval cache so stale scores are purged
  * downloadUrl() : 10-min signed URL from Supabase
  * activeCvText() : parsed text of the active CV (used by AI skills)
- * activeCvDownloadUrl() : signed URL of the active CV file
+ *
+ * B1-G1 FIX: AiEvalCacheService injected; evictAllForUser() is called
+ * in upload(), activate(), and delete() so AI scores are never served
+ * stale after a CV change.
  */
 @Service
 @Slf4j
 public class CvService {
 
-    private final UserCvRepository repo;
-    private final SupabaseStorageService storage;
-    private final CvParserService parser;
-    private final VirusScannerService virusScanner;
+    private final UserCvRepository       repo;
+    private final SupabaseStorageService  storage;
+    private final CvParserService         parser;
+    private final VirusScannerService     virusScanner;
     private final com.careerops.util.FileUtil fileUtil;
-    private final CvNormalizationService cvNormalization;
-    private final String bucket;
+    private final CvNormalizationService  cvNormalization;
+    private final AiEvalCacheService      aiEvalCache;   // B1-G1
+    private final String                  bucket;
 
-    private static final long MAX = 5L * 1024 * 1024;
-    /** DB-only CV rows when Supabase is not configured (local dev). */
+    private static final long   MAX              = 5L * 1024 * 1024;
     private static final String LOCAL_DEV_PREFIX = "local-dev/";
 
     public CvService(UserCvRepository repo,
-            SupabaseStorageService storage,
-            CvParserService parser,
-            VirusScannerService virusScanner,
-            com.careerops.util.FileUtil fileUtil,
-            CvNormalizationService cvNormalization,
-            @Value("${supabase.bucket.cv}") String bucket) {
-        this.repo = repo;
-        this.storage = storage;
-        this.parser = parser;
-        this.virusScanner = virusScanner;
-        this.fileUtil = fileUtil;
+                     SupabaseStorageService storage,
+                     CvParserService parser,
+                     VirusScannerService virusScanner,
+                     com.careerops.util.FileUtil fileUtil,
+                     CvNormalizationService cvNormalization,
+                     AiEvalCacheService aiEvalCache,
+                     @Value("${supabase.bucket.cv}") String bucket) {
+        this.repo            = repo;
+        this.storage         = storage;
+        this.parser          = parser;
+        this.virusScanner    = virusScanner;
+        this.fileUtil        = fileUtil;
         this.cvNormalization = cvNormalization;
-        this.bucket = bucket;
+        this.aiEvalCache     = aiEvalCache;
+        this.bucket          = bucket;
     }
 
     @Transactional(timeout = 10)
@@ -68,17 +74,13 @@ public class CvService {
             throw new ApiException(HttpStatus.PAYLOAD_TOO_LARGE, "Max 5 MB");
 
         String name = fileUtil.sanitizeFilename(file.getOriginalFilename());
-        String lc = name.toLowerCase();
+        String lc   = name.toLowerCase();
         if (!(lc.endsWith(".pdf") || lc.endsWith(".docx")))
             throw new ApiException(HttpStatus.UNSUPPORTED_MEDIA_TYPE, "Only PDF or DOCX");
 
-        // 3.027 — Hardened magic bytes check
         validateMagicBytes(file);
 
-        // 3.026 — Read file bytes ONCE to avoid heap exhaustion (5MB max)
         byte[] fileBytes = file.getBytes();
-
-        // 3.010 — Virus scanning (Issue 2.050)
         virusScanner.scan(fileBytes, name);
 
         repo.findFirstByUserIdAndIsActiveTrueOrderByUploadedAtDesc(userId).ifPresent(c -> {
@@ -86,18 +88,15 @@ public class CvService {
             repo.save(c);
         });
 
-        String path = userId + "/" + System.currentTimeMillis() + "-" + name;
-
+        String path   = userId + "/" + System.currentTimeMillis() + "-" + name;
         String parsed = parser.extract(new java.io.ByteArrayInputStream(fileBytes), file.getContentType(), name);
 
         if (storage.isConfigured()) {
             storage.upload(bucket, path, fileBytes, file.getContentType(), userId);
         } else {
             path = LOCAL_DEV_PREFIX + path;
-            log.warn(
-                    "Supabase not configured — stored parsed CV text only (path={}). "
-                            + "Set SUPABASE_URL and SUPABASE_SERVICE_KEY for file downloads.",
-                    path);
+            log.warn("Supabase not configured — stored parsed CV text only (path={}). "
+                   + "Set SUPABASE_URL and SUPABASE_SERVICE_KEY for file downloads.", path);
         }
 
         UserCv cv = UserCv.builder()
@@ -110,6 +109,7 @@ public class CvService {
                 .fileData(storage.isConfigured() ? null : fileBytes)
                 .build();
         UserCv saved = repo.save(cv);
+
         try {
             cvNormalization.normalizeAndStore(userId);
             log.info("CV markdown normalized for userId={} after upload", userId);
@@ -117,10 +117,15 @@ public class CvService {
             log.warn("CV markdown normalization failed for userId={} (parsed text still available): {}",
                 userId, e.getMessage());
         }
+
+        // B1-G1: Evict ALL cached AI scores so the next evaluation
+        // uses the new CV content rather than returning stale cached results.
+        aiEvalCache.evictAllForUser(userId);
+        log.info("AI eval cache evicted for userId={} after CV upload", userId);
+
         return saved;
     }
 
-    /** Plugin-equivalent baseline CV markdown (data/resume.md). */
     public String activeCvMarkdown(UUID userId) {
         return repo.findFirstByUserIdAndIsActiveTrueOrderByUploadedAtDesc(userId)
             .map(c -> c.getCvMarkdown() != null && !c.getCvMarkdown().isBlank()
@@ -139,34 +144,36 @@ public class CvService {
                 .filter(c -> c.getUserId().equals(userId))
                 .orElseThrow(() -> new ApiException(HttpStatus.NOT_FOUND, "CV not found"));
 
-        String storagePath = cv.getStoragePath();
-        boolean wasActive = Boolean.TRUE.equals(cv.getIsActive());
+        String  storagePath = cv.getStoragePath();
+        boolean wasActive   = Boolean.TRUE.equals(cv.getIsActive());
 
         repo.delete(cv);
 
         if (wasActive) {
             repo.findByUserIdOrderByUploadedAtDesc(userId)
-                    .stream().findFirst()
-                    .ifPresent(next -> {
-                        next.setIsActive(true);
-                        repo.save(next);
-                    });
+                .stream().findFirst()
+                .ifPresent(next -> {
+                    next.setIsActive(true);
+                    repo.save(next);
+                });
+            // B1-G1: deleting active CV causes implicit switch — evict stale scores
+            aiEvalCache.evictAllForUser(userId);
+            log.info("AI eval cache evicted for userId={} after active CV delete", userId);
         }
 
-        // 3.028 — Saga pattern: Delete from storage ONLY after DB transaction commits
-        if (storagePath != null && !storagePath.isBlank() && !isLocalDevPath(storagePath) && storage.isConfigured()) {
+        if (storagePath != null && !storagePath.isBlank()
+                && !isLocalDevPath(storagePath) && storage.isConfigured()) {
             org.springframework.transaction.support.TransactionSynchronizationManager.registerSynchronization(
-                    new org.springframework.transaction.support.TransactionSynchronization() {
-                        @Override
-                        public void afterCommit() {
-                            try {
-                                storage.delete(bucket, storagePath, userId);
-                            } catch (Exception e) {
-                                // Log but don't fail (the file is orphaned but the DB is clean)
-                                log.error("Failed to delete file from Supabase after DB commit: {}", storagePath, e);
-                            }
+                new org.springframework.transaction.support.TransactionSynchronization() {
+                    @Override
+                    public void afterCommit() {
+                        try {
+                            storage.delete(bucket, storagePath, userId);
+                        } catch (Exception e) {
+                            log.error("Failed to delete file from Supabase after DB commit: {}", storagePath, e);
                         }
-                    });
+                    }
+                });
         }
     }
 
@@ -175,7 +182,7 @@ public class CvService {
                 .filter(c -> c.getUserId().equals(userId))
                 .orElseThrow(() -> new ApiException(HttpStatus.NOT_FOUND, "CV not found"));
         if (isLocalDevPath(cv.getStoragePath()) || !storage.isConfigured()) {
-            return "/api/v1/profile/cv/download/" + cvId.toString() + "/content";
+            return "/api/v1/profile/cv/download/" + cvId + "/content";
         }
         return storage.signedUrl(bucket, cv.getStoragePath(), 600, userId);
     }
@@ -188,9 +195,7 @@ public class CvService {
 
     public byte[] downloadContent(UUID userId, UUID cvId) {
         UserCv cv = requireCv(userId, cvId);
-        if (cv.getFileData() != null) {
-            return cv.getFileData();
-        }
+        if (cv.getFileData() != null) return cv.getFileData();
         throw new ApiException(HttpStatus.NOT_FOUND, "No local file data available.");
     }
 
@@ -204,11 +209,8 @@ public class CvService {
         return repo.findFirstByUserIdAndIsActiveTrueOrderByUploadedAtDesc(userId).isPresent();
     }
 
-    /** Prefer structured markdown; fall back to parsed plain text. */
     public String cvTextForAi(UserCv cv) {
-        if (cv.getCvMarkdown() != null && !cv.getCvMarkdown().isBlank()) {
-            return cv.getCvMarkdown();
-        }
+        if (cv.getCvMarkdown() != null && !cv.getCvMarkdown().isBlank()) return cv.getCvMarkdown();
         return cv.getParsedText() != null ? cv.getParsedText() : "";
     }
 
@@ -216,7 +218,7 @@ public class CvService {
         return repo.findFirstByUserIdAndIsActiveTrueOrderByUploadedAtDesc(userId)
                 .map(c -> {
                     if (isLocalDevPath(c.getStoragePath()) || !storage.isConfigured()) {
-                        return "/api/v1/profile/cv/download/" + c.getId().toString() + "/content";
+                        return "/api/v1/profile/cv/download/" + c.getId() + "/content";
                     }
                     return storage.signedUrl(bucket, c.getStoragePath(), 600, userId);
                 })
@@ -227,20 +229,27 @@ public class CvService {
         return path != null && path.startsWith(LOCAL_DEV_PREFIX);
     }
 
+    /**
+     * Switch the active CV.
+     * B1-G1: evicts all AI eval cache entries so the next job evaluation
+     * re-runs against the newly activated CV rather than serving stale scores.
+     */
     @Transactional(timeout = 10)
     public List<UserCv> activate(UUID userId, UUID cvId) {
-        List<UserCv> all = repo.findByUserIdOrderByUploadedAtDesc(userId);
-        boolean anyMatched = false;
+        List<UserCv> all        = repo.findByUserIdOrderByUploadedAtDesc(userId);
+        boolean      anyMatched = false;
         for (UserCv c : all) {
             boolean active = c.getId().equals(cvId);
-            if (active)
-                anyMatched = true;
+            if (active) anyMatched = true;
             c.setIsActive(active);
         }
-        if (!anyMatched) {
-            throw new ApiException(HttpStatus.NOT_FOUND, "CV not found");
-        }
-        return repo.saveAll(all);
+        if (!anyMatched) throw new ApiException(HttpStatus.NOT_FOUND, "CV not found");
+        List<UserCv> saved = repo.saveAll(all);
+
+        // B1-G1: stale scores must be evicted after CV switch
+        aiEvalCache.evictAllForUser(userId);
+        log.info("AI eval cache evicted for userId={} after CV activation", userId);
+        return saved;
     }
 
     public com.careerops.dto.UserCvDTO toDTO(UserCv cv) {
@@ -258,40 +267,31 @@ public class CvService {
     }
 
     private void validateMagicBytes(MultipartFile file) throws IOException {
-        String name = file.getOriginalFilename();
+        String name        = file.getOriginalFilename();
         String contentType = file.getContentType();
-        if (name == null || contentType == null) {
+        if (name == null || contentType == null)
             throw new ApiException(HttpStatus.BAD_REQUEST, "Invalid file metadata");
-        }
 
         try (java.io.InputStream is = file.getInputStream()) {
             byte[] magic = new byte[4];
-            int read = is.read(magic);
-            if (read < 4)
-                throw new ApiException(HttpStatus.BAD_REQUEST, "File too small or invalid");
+            int    read  = is.read(magic);
+            if (read < 4) throw new ApiException(HttpStatus.BAD_REQUEST, "File too small or invalid");
 
-            boolean magicPdf = (magic[0] == 0x25 && magic[1] == 0x50 && magic[2] == 0x44 && magic[3] == 0x46); // %PDF
-            boolean magicZip = (magic[0] == 0x50 && magic[1] == 0x4B && magic[2] == 0x03 && magic[3] == 0x04); // PK..
-                                                                                                               // (DOCX
-                                                                                                               // is a
-                                                                                                               // zip)
+            boolean magicPdf = (magic[0] == 0x25 && magic[1] == 0x50 && magic[2] == 0x44 && magic[3] == 0x46);
+            boolean magicZip = (magic[0] == 0x50 && magic[1] == 0x4B && magic[2] == 0x03 && magic[3] == 0x04);
 
-            String ext = name.substring(name.lastIndexOf(".") + 1).toLowerCase();
-            boolean extPdf = "pdf".equals(ext);
+            String  ext    = name.substring(name.lastIndexOf(".") + 1).toLowerCase();
+            boolean extPdf  = "pdf".equals(ext);
             boolean extDocx = "docx".equals(ext);
+            boolean ctPdf   = "application/pdf".equals(contentType);
+            boolean ctDocx  = "application/vnd.openxmlformats-officedocument.wordprocessingml.document".equals(contentType);
+            boolean loose   = "application/octet-stream".equals(contentType);
 
-            boolean ctPdf = "application/pdf".equals(contentType);
-            boolean ctDocx = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
-                    .equals(contentType);
-            boolean looseContentType = "application/octet-stream".equals(contentType);
-
-            // 3.027 — Magic bytes + extension; browsers often send application/octet-stream
-            boolean validPdf = magicPdf && extPdf && (ctPdf || looseContentType);
-            boolean validDocx = magicZip && extDocx && (ctDocx || looseContentType);
+            boolean validPdf  = magicPdf && extPdf  && (ctPdf  || loose);
+            boolean validDocx = magicZip && extDocx && (ctDocx || loose);
 
             if (!validPdf && !validDocx) {
-                log.error(
-                        "File validation failed: magicPdf={}, extPdf={}, ctPdf={}, magicZip={}, extDocx={}, ctDocx={}",
+                log.error("File validation failed: magicPdf={} extPdf={} ctPdf={} magicZip={} extDocx={} ctDocx={}",
                         magicPdf, extPdf, ctPdf, magicZip, extDocx, ctDocx);
                 throw new ApiException(HttpStatus.UNSUPPORTED_MEDIA_TYPE,
                         "Security violation: File content, extension, and type do not match (Expected PDF or DOCX).");
