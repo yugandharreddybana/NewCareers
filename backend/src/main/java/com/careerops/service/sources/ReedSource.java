@@ -1,77 +1,95 @@
 package com.careerops.service.sources;
 
-import com.careerops.model.Job;
-import com.careerops.model.UserProfile;
+import com.careerops.model.JobListing;
 import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
-import org.springframework.web.reactive.function.client.WebClient;
+import org.springframework.web.util.UriComponentsBuilder;
 
-import java.nio.charset.StandardCharsets;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Base64;
 import java.util.List;
 
+/**
+ * Reed.co.uk job board adapter.
+ *
+ * Batch-2 improvements:
+ *  - Uses shared JobApiHttpClient (pooled OkHttpClient) with Basic auth header
+ *  - URL built with UriComponentsBuilder for safe encoding
+ *  - ObjectMapper is injected (Spring-managed)
+ */
 @Component
 public class ReedSource implements JobSource {
+
     private static final Logger log = LoggerFactory.getLogger(ReedSource.class);
-    private final WebClient client;
-    private final String key;
+    private static final String REED_API = "https://www.reed.co.uk/api/1.0/search";
 
-    public ReedSource(JobApiHttpClient httpClient, @Value("${reed.api.key}") String key) {
-        this.client = httpClient.createClient("https://www.reed.co.uk/api/1.0");
-        this.key = key;
+    private final JobApiHttpClient httpClient;
+    private final ObjectMapper     mapper;
+
+    @Value("${reed.api.key:}")
+    private String apiKey;
+
+    @Autowired
+    public ReedSource(JobApiHttpClient httpClient, ObjectMapper mapper) {
+        this.httpClient = httpClient;
+        this.mapper     = mapper;
     }
 
-    @Override public String name() { return "reed"; }
+    @Override public String sourceName() { return "Reed"; }
+    @Override public boolean isEnabled()  { return apiKey != null && !apiKey.isBlank(); }
 
     @Override
-    public boolean hasBudget() {
-        return key != null && !key.isBlank() && !key.startsWith("YOUR_");
-    }
+    public List<JobListing> fetch(String keyword, String location, int maxAgeDays) {
+        List<JobListing> results = new ArrayList<>();
+        if (!isEnabled()) return results;
 
-    @Override
-    public List<Job> fetch(UserProfile profile) {
-        List<Job> out = new ArrayList<>();
-        if (key == null || key.isBlank() || key.startsWith("YOUR_")) return out;
-        String role = profile.getTargetRoles() == null || profile.getTargetRoles().length == 0
-            ? "software engineer" : profile.getTargetRoles()[0];
-        String basic = Base64.getEncoder().encodeToString((key + ":").getBytes(StandardCharsets.UTF_8));
         try {
-            JsonNode root = client.get().uri(b -> b.path("/search")
-                    .queryParam("keywords", role)
-                    .queryParam("locationName", "Ireland")
-                    .queryParam("resultsToTake", 30).build())
-                .header("Authorization", "Basic " + basic)
-                .retrieve().bodyToMono(JsonNode.class)
-                .timeout(java.time.Duration.ofSeconds(15))
-                .block();
-            if (root == null) return out;
-            for (JsonNode r : root.path("results")) {
-                Job j = Job.builder()
-                    .title(r.path("jobTitle").asText())
-                    .company(r.path("employerName").asText("Unknown"))
-                    .location(r.path("locationName").asText())
-                    .salaryMin(r.path("minimumSalary").isNumber() ? r.path("minimumSalary").asInt() : null)
-                    .salaryMax(r.path("maximumSalary").isNumber() ? r.path("maximumSalary").asInt() : null)
-                    .description(r.path("jobDescription").asText())
-                    .sourceUrl(r.path("jobUrl").asText())
-                    .sourceName("Reed")
-                    .currency("EUR")
-                    .postedAt(parseDate(r.path("date").asText()))
-                    .build();
-                j.setFingerprint(FingerprintUtil.of(j.getCompany(), j.getTitle(), j.getLocation()));
-                out.add(j);
-            }
-        } catch (Exception e) { log.warn("Reed fetch failed: {}", e.getMessage()); }
-        return out;
-    }
+            String url = UriComponentsBuilder.fromHttpUrl(REED_API)
+                    .queryParam("keywords",       keyword)
+                    .queryParam("locationName",   location.isBlank() ? "" : location)
+                    .queryParam("resultsToTake",  50)
+                    .build().toUriString();
 
-    private static Instant parseDate(String s) {
-        try { return s == null || s.isBlank() ? Instant.now() : Instant.parse(s + "T00:00:00Z"); }
-        catch (Exception e) { return Instant.now(); }
+            // Reed uses HTTP Basic auth: apiKey as username, empty password
+            String basicAuth = "Basic " + Base64.getEncoder()
+                    .encodeToString((apiKey + ":").getBytes());
+
+            String json = httpClient.getWithHeader(url, "Authorization", basicAuth);
+            if (json.isBlank()) return results;
+
+            JsonNode root = mapper.readTree(json);
+            JsonNode jobs = root.path("results");
+
+            for (JsonNode job : jobs) {
+                try {
+                    String  title    = job.path("jobTitle").asText();
+                    String  company  = job.path("employerName").asText();
+                    String  loc      = job.path("locationName").asText();
+                    String  link     = job.path("jobUrl").asText();
+                    String  dateStr  = job.path("date").asText();
+                    Instant posted   = null;
+                    if (!dateStr.isBlank()) {
+                        try { posted = Instant.parse(dateStr); } catch (Exception ignored) {}
+                    }
+
+                    JobListing j = new JobListing();
+                    j.setTitle(title);   j.setCompany(company); j.setLocation(loc);
+                    j.setUrl(link);      j.setSource(sourceName()); j.setPostedAt(posted);
+                    results.add(j);
+                } catch (Exception e) {
+                    log.debug("Reed item parse error", e);
+                }
+            }
+            log.debug("Reed: fetched {} jobs", results.size());
+        } catch (Exception e) {
+            log.warn("Reed fetch failed: {}", e.getMessage());
+        }
+        return results;
     }
 }

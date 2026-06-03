@@ -5,49 +5,68 @@ import okhttp3.Request;
 import okhttp3.Response;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.stereotype.Component;
 
 /**
- * Thin HTTP utility used by scrapers that need raw GET responses.
- * Uses the shared OkHttpClient bean (connection-pooled) injected from AppConfig.
+ * Thin HTTP utility used by all scrapers for raw GET requests.
  *
- * All scrapers should use this instead of creating their own RestTemplate
- * or Jsoup connections for JSON/text endpoints.
+ * Uses the shared pooled OkHttpClient bean from AppConfig.
+ * All scrapers should use this instead of creating their own
+ * RestTemplate or Jsoup connections for JSON/text endpoints.
+ *
+ * Methods:
+ *   get(url)                         — basic GET with default User-Agent
+ *   get(url, userAgent)              — GET with custom User-Agent
+ *   getWithHeader(url, name, value)  — GET with a single extra header (e.g. Authorization)
  */
 @Component
 public class JobApiHttpClient {
 
     private static final Logger log = LoggerFactory.getLogger(JobApiHttpClient.class);
+    private static final String DEFAULT_UA = "Mozilla/5.0 (compatible; CareerOps/2.0)";
 
     private final OkHttpClient httpClient;
 
-    public JobApiHttpClient(OkHttpClient sharedHttpClient) {
+    public JobApiHttpClient(@Qualifier("sharedHttpClient") OkHttpClient sharedHttpClient) {
         this.httpClient = sharedHttpClient;
     }
 
-    /**
-     * Performs a GET request and returns the response body as a String.
-     * Returns empty string on error instead of throwing.
-     */
+    /** GET with default User-Agent. Returns empty string on error. */
     public String get(String url) {
-        return get(url, "Mozilla/5.0 (compatible; CareerOps/2.0)");
+        return get(url, DEFAULT_UA);
     }
 
+    /** GET with custom User-Agent. Returns empty string on error. */
     public String get(String url, String userAgent) {
-        Request request = new Request.Builder()
+        return execute(new Request.Builder()
                 .url(url)
-                .header("User-Agent", userAgent)
-                .header("Accept", "application/json,text/html,*/*")
+                .header("User-Agent",      userAgent)
+                .header("Accept",          "application/json,text/html,*/*")
                 .header("Accept-Encoding", "gzip, deflate")
-                .build();
+                .build());
+    }
+
+    /** GET with a custom extra header (e.g. Authorization: Basic ...). */
+    public String getWithHeader(String url, String headerName, String headerValue) {
+        return execute(new Request.Builder()
+                .url(url)
+                .header("User-Agent",      DEFAULT_UA)
+                .header("Accept",          "application/json,*/*")
+                .header("Accept-Encoding", "gzip, deflate")
+                .header(headerName,        headerValue)
+                .build());
+    }
+
+    private String execute(Request request) {
         try (Response response = httpClient.newCall(request).execute()) {
             if (!response.isSuccessful()) {
-                log.warn("HTTP {} for URL: {}", response.code(), url);
+                log.warn("HTTP {} for: {}", response.code(), request.url());
                 return "";
             }
             return response.body() != null ? response.body().string() : "";
         } catch (Exception e) {
-            log.warn("GET failed [{}]: {}", url, e.getMessage());
+            log.warn("GET failed [{}]: {}", request.url(), e.getMessage());
             return "";
         }
     }
