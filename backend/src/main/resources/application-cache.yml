@@ -1,7 +1,6 @@
 # ─────────────────────────────────────────────────────────────
-# Batch 4 – Cache configuration
-# Include this profile in application.yml:
-#   spring.profiles.active: ...,cache
+# Cache profile configuration (activated via spring.profiles.include=cache
+# in application.properties)
 # ─────────────────────────────────────────────────────────────
 spring:
   cache:
@@ -10,6 +9,7 @@ spring:
       - userStats
       - sourceMetadata
       - companyInfo
+      - featureFlags
 
   # ── Local (Caffeine) ─────────────────────────────────────────
   # Caffeine specs are wired programmatically in CacheConfig.java
@@ -30,4 +30,4 @@ management:
   endpoints:
     web:
       exposure:
-        include: caches,health,info
+        include: caches,health,info,metrics,prometheus,loggers

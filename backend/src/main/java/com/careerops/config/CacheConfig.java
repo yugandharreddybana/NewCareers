@@ -1,12 +1,10 @@
 package com.careerops.config;
 
 import com.github.benmanes.caffeine.cache.Caffeine;
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.cache.CacheManager;
 import org.springframework.cache.annotation.EnableCaching;
-import org.springframework.cache.concurrent.ConcurrentMapCacheManager;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.context.annotation.Primary;
@@ -22,71 +20,76 @@ import java.util.Map;
 import java.util.concurrent.TimeUnit;
 
 /**
- * Cache configuration for Batch 4.
+ * Cache configuration – Batch 4.
  *
  * Strategy:
- *   - When Redis is available (spring.data.redis.host is set) a
- *     {@link RedisCacheManager} is used so cache survives restarts
+ *   – When Redis is available (spring.data.redis.host is set) a
+ *     {@link RedisCacheManager} is used so the cache survives restarts
  *     and is shared across pods.
- *   - Otherwise a local {@link CaffeineCacheManager} is used
- *     (ideal for dev / single-instance deployments).
+ *   – Otherwise a local {@link com.github.benmanes.caffeine.cache.Cache}
+ *     via CaffeineCacheManager is used (ideal for dev / single-instance).
  *
  * Cache names and TTLs
  * ─────────────────────
- *  "userStats"      – per-user derived counts/charts          5 min
- *  "sourceMetadata" – job-source labels / icons               60 min
- *  "companyInfo"    – company logos / descriptions            60 min
-/**
- * Batch 4 – in-process cache layer.
+ *  "userStats"      – per-user derived counts/charts          5 min  / 2 000 entries
+ *  "sourceMetadata" – job-source labels / icons               60 min / 500 entries
+ *  "companyInfo"    – company logos / descriptions            60 min / 1 000 entries
  *
- * Current backend uses no external cache infrastructure, so we wire a simple
- * ConcurrentMapCacheManager (no additional dependency required).
- *
- * Cache names:
- *  - "userJobStats"   : per-user stats DTO (COUNT / AVG queries), TTL managed by
- *                       explicit eviction on write operations in UserJobService.
- *  - "featureFlags"   : rarely-changing feature-flag lookup table.
- *
- * When Redis is added later, replace ConcurrentMapCacheManager with
- * RedisCacheManager and set individual TTLs per cache name via
- * RedisCacheConfiguration.
+ * Legacy aliases (kept for backward compat with Batch 1-3 callers)
+ * ──────────────────────────────────────────────────────────────────
+ *  CACHE_USER_JOB_STATS  → maps to "userStats"
+ *  CACHE_FEATURE_FLAGS   → separate cache, 60 min
  */
 @Configuration
 @EnableCaching
 public class CacheConfig {
 
-    public static final String USER_STATS       = "userStats";
-    public static final String SOURCE_METADATA  = "sourceMetadata";
-    public static final String COMPANY_INFO     = "companyInfo";
+    // ── Batch 4 cache name constants ─────────────────────────────────────────
+    public static final String USER_STATS      = "userStats";
+    public static final String SOURCE_METADATA = "sourceMetadata";
+    public static final String COMPANY_INFO    = "companyInfo";
+
+    // ── Legacy aliases (Batch 1-3 backward compat) ────────────────────────
+    /** @deprecated Use {@link #USER_STATS} */
+    @Deprecated
+    public static final String CACHE_USER_JOB_STATS = USER_STATS;
+    public static final String CACHE_FEATURE_FLAGS  = "featureFlags";
 
     // ── Caffeine (local, no Redis) ────────────────────────────────────────────
     @Bean
     @Primary
     @ConditionalOnMissingBean(name = "redisCacheManager")
     public CacheManager caffeineCacheManager() {
-        CaffeineCacheManager manager = new CaffeineCacheManager();
+        com.github.benmanes.caffeine.spring.CaffeineCacheManager manager =
+                new com.github.benmanes.caffeine.spring.CaffeineCacheManager();
 
-        // Per-cache specs registered explicitly so TTLs differ
         manager.registerCustomCache(USER_STATS,
-            Caffeine.newBuilder()
-                .expireAfterWrite(5, TimeUnit.MINUTES)
-                .maximumSize(2_000)
-                .recordStats()
-                .build());
+                Caffeine.newBuilder()
+                        .expireAfterWrite(5, TimeUnit.MINUTES)
+                        .maximumSize(2_000)
+                        .recordStats()
+                        .build());
 
         manager.registerCustomCache(SOURCE_METADATA,
-            Caffeine.newBuilder()
-                .expireAfterWrite(60, TimeUnit.MINUTES)
-                .maximumSize(500)
-                .recordStats()
-                .build());
+                Caffeine.newBuilder()
+                        .expireAfterWrite(60, TimeUnit.MINUTES)
+                        .maximumSize(500)
+                        .recordStats()
+                        .build());
 
         manager.registerCustomCache(COMPANY_INFO,
-            Caffeine.newBuilder()
-                .expireAfterWrite(60, TimeUnit.MINUTES)
-                .maximumSize(1_000)
-                .recordStats()
-                .build());
+                Caffeine.newBuilder()
+                        .expireAfterWrite(60, TimeUnit.MINUTES)
+                        .maximumSize(1_000)
+                        .recordStats()
+                        .build());
+
+        manager.registerCustomCache(CACHE_FEATURE_FLAGS,
+                Caffeine.newBuilder()
+                        .expireAfterWrite(60, TimeUnit.MINUTES)
+                        .maximumSize(200)
+                        .recordStats()
+                        .build());
 
         return manager;
     }
@@ -96,33 +99,22 @@ public class CacheConfig {
     @ConditionalOnProperty(name = "spring.data.redis.host")
     public CacheManager redisCacheManager(RedisConnectionFactory factory) {
         GenericJackson2JsonRedisSerializer serializer =
-            new GenericJackson2JsonRedisSerializer();
+                new GenericJackson2JsonRedisSerializer();
 
         RedisCacheConfiguration defaultCfg = RedisCacheConfiguration.defaultCacheConfig()
-            .serializeValuesWith(
-                RedisSerializationContext.SerializationPair.fromSerializer(serializer))
-            .disableCachingNullValues();
+                .serializeValuesWith(
+                        RedisSerializationContext.SerializationPair.fromSerializer(serializer))
+                .disableCachingNullValues();
 
         Map<String, RedisCacheConfiguration> perCacheConfig = new HashMap<>();
-        perCacheConfig.put(USER_STATS,
-            defaultCfg.entryTtl(Duration.ofMinutes(5)));
-        perCacheConfig.put(SOURCE_METADATA,
-            defaultCfg.entryTtl(Duration.ofMinutes(60)));
-        perCacheConfig.put(COMPANY_INFO,
-            defaultCfg.entryTtl(Duration.ofMinutes(60)));
+        perCacheConfig.put(USER_STATS,      defaultCfg.entryTtl(Duration.ofMinutes(5)));
+        perCacheConfig.put(SOURCE_METADATA, defaultCfg.entryTtl(Duration.ofMinutes(60)));
+        perCacheConfig.put(COMPANY_INFO,    defaultCfg.entryTtl(Duration.ofMinutes(60)));
+        perCacheConfig.put(CACHE_FEATURE_FLAGS, defaultCfg.entryTtl(Duration.ofMinutes(60)));
 
         return RedisCacheManager.builder(factory)
-            .cacheDefaults(defaultCfg.entryTtl(Duration.ofMinutes(10)))
-            .withInitialCacheConfigurations(perCacheConfig)
-            .build();
-    public static final String CACHE_USER_JOB_STATS = "userJobStats";
-    public static final String CACHE_FEATURE_FLAGS   = "featureFlags";
-
-    @Bean
-    public CacheManager cacheManager() {
-        return new ConcurrentMapCacheManager(
-                CACHE_USER_JOB_STATS,
-                CACHE_FEATURE_FLAGS
-        );
+                .cacheDefaults(defaultCfg.entryTtl(Duration.ofMinutes(10)))
+                .withInitialCacheConfigurations(perCacheConfig)
+                .build();
     }
 }
