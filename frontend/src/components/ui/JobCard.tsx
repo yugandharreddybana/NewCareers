@@ -1,3 +1,4 @@
+import { memo } from 'react';
 import { Link } from 'react-router-dom';
 import { JobCard as JC } from '@/types';
 import {
@@ -52,7 +53,7 @@ function timeAgo(iso: string): string {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-export default function JobCardUI({ job }: { job: JC }) {
+const JobCardUI = memo(function JobCardUI({ job }: { job: JC }) {
   const salary = job.salaryMin && job.salaryMax
     ? `€${(job.salaryMin / 1000).toFixed(0)}k – €${(job.salaryMax / 1000).toFixed(0)}k`
     : job.salaryMin ? `€${(job.salaryMin / 1000).toFixed(0)}k+` : null;
@@ -62,10 +63,9 @@ export default function JobCardUI({ job }: { job: JC }) {
     ? job.humanSummary.length > 100 ? job.humanSummary.slice(0, 97) + '…' : job.humanSummary
     : null;
 
-  // Skill chips: show up to 4 matched skills + overflow chip
-  const allSkills   = job.matchedSkills ?? [];
+  const allSkills     = job.matchedSkills ?? [];
   const visibleSkills = allSkills.slice(0, 4);
-  const overflow    = allSkills.length - visibleSkills.length;
+  const overflow      = allSkills.length - visibleSkills.length;
 
   return (
     <div
@@ -73,17 +73,12 @@ export default function JobCardUI({ job }: { job: JC }) {
       aria-label={`${job.title} at ${job.company}${job.matchPercent != null ? `, ${job.matchPercent}% match` : ''}`}
       className="group relative bg-white border border-slate-200 rounded-2xl p-5 h-full flex flex-col gap-4 hover:shadow-md hover:border-slate-300 transition-all duration-200"
     >
-
-      {/* Left accent bar on hover */}
       <div className="absolute left-0 top-4 bottom-4 w-0.5 rounded-full bg-emerald-500 opacity-0 group-hover:opacity-100 transition-opacity duration-200" />
 
-      {/* ── Header row: company avatar + title + source badge ── */}
       <div className="flex items-start gap-3">
-        {/* Company avatar */}
         <div className={`w-11 h-11 rounded-xl flex items-center justify-center text-sm font-bold shrink-0 ${avatarColor(job.company)}`}>
           {companyInitials(job.company) || <Building2 size={18} />}
         </div>
-
         <div className="flex-1 min-w-0">
           <h3 className="font-bold text-slate-900 text-sm leading-snug truncate group-hover:text-emerald-700 transition-colors">
             {job.title}
@@ -92,14 +87,11 @@ export default function JobCardUI({ job }: { job: JC }) {
         </div>
       </div>
 
-      {/* ── Match score bar ── */}
       {job.matchPercent != null && (
         <div>
           <div className="flex justify-between text-xs mb-1.5">
             <span className="text-slate-400 font-medium">Match score</span>
-            <span className={`font-bold ${matchTextColor(job.matchPercent)}`}>
-              {job.matchPercent}%
-            </span>
+            <span className={`font-bold ${matchTextColor(job.matchPercent)}`}>{job.matchPercent}%</span>
           </div>
           <div className="h-1.5 bg-slate-100 rounded-full overflow-hidden">
             <div
@@ -110,7 +102,6 @@ export default function JobCardUI({ job }: { job: JC }) {
         </div>
       )}
 
-      {/* ── Meta row ── */}
       <div className="flex flex-wrap gap-x-4 gap-y-1.5">
         {job.location && (
           <div className="flex items-center gap-1.5 text-xs text-slate-500">
@@ -138,7 +129,6 @@ export default function JobCardUI({ job }: { job: JC }) {
         )}
       </div>
 
-      {/* ── Source + pre-match badges ── */}
       <div className="flex items-center gap-2 flex-wrap">
         {job.sourceName ? <JobSourceBadge name={job.sourceName} /> : null}
         {job.preMatchScore != null && job.preMatchScore > 0 && (
@@ -149,7 +139,6 @@ export default function JobCardUI({ job }: { job: JC }) {
         )}
       </div>
 
-      {/* ── Matched skills chips ── */}
       {visibleSkills.length > 0 && (
         <div className="flex flex-wrap gap-1.5">
           {visibleSkills.map(sk => (
@@ -165,14 +154,10 @@ export default function JobCardUI({ job }: { job: JC }) {
         </div>
       )}
 
-      {/* ── Summary excerpt ── */}
       {summary && (
-        <p className="text-[11px] leading-relaxed text-slate-500 italic line-clamp-2">
-          {summary}
-        </p>
+        <p className="text-[11px] leading-relaxed text-slate-500 italic line-clamp-2">{summary}</p>
       )}
 
-      {/* ── CTA buttons ── */}
       <div className="mt-auto flex gap-2 pt-1">
         {job.sourceUrl && (
           <a
@@ -195,6 +180,7 @@ export default function JobCardUI({ job }: { job: JC }) {
       </div>
     </div>
   );
-}
+});
 
 JobCardUI.displayName = 'JobCard';
+export default JobCardUI;
