@@ -5,6 +5,7 @@ import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.cache.CacheManager;
 import org.springframework.cache.annotation.EnableCaching;
+import org.springframework.cache.caffeine.CaffeineCacheManager;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.context.annotation.Primary;
@@ -26,19 +27,20 @@ import java.util.concurrent.TimeUnit;
  *   – When Redis is available (spring.data.redis.host is set) a
  *     {@link RedisCacheManager} is used so the cache survives restarts
  *     and is shared across pods.
- *   – Otherwise a local {@link com.github.benmanes.caffeine.cache.Cache}
- *     via CaffeineCacheManager is used (ideal for dev / single-instance).
+ *   – Otherwise a local {@link CaffeineCacheManager} is used
+ *     (ideal for dev / single-instance deployments).
  *
  * Cache names and TTLs
  * ─────────────────────
  *  "userStats"      – per-user derived counts/charts          5 min  / 2 000 entries
  *  "sourceMetadata" – job-source labels / icons               60 min / 500 entries
  *  "companyInfo"    – company logos / descriptions            60 min / 1 000 entries
+ *  "featureFlags"   – feature flag lookups                    60 min / 200 entries
  *
  * Legacy aliases (kept for backward compat with Batch 1-3 callers)
  * ──────────────────────────────────────────────────────────────────
  *  CACHE_USER_JOB_STATS  → maps to "userStats"
- *  CACHE_FEATURE_FLAGS   → separate cache, 60 min
+ *  CACHE_FEATURE_FLAGS   → maps to "featureFlags"
  */
 @Configuration
 @EnableCaching
@@ -60,8 +62,7 @@ public class CacheConfig {
     @Primary
     @ConditionalOnMissingBean(name = "redisCacheManager")
     public CacheManager caffeineCacheManager() {
-        com.github.benmanes.caffeine.spring.CaffeineCacheManager manager =
-                new com.github.benmanes.caffeine.spring.CaffeineCacheManager();
+        CaffeineCacheManager manager = new CaffeineCacheManager();
 
         manager.registerCustomCache(USER_STATS,
                 Caffeine.newBuilder()
@@ -107,9 +108,9 @@ public class CacheConfig {
                 .disableCachingNullValues();
 
         Map<String, RedisCacheConfiguration> perCacheConfig = new HashMap<>();
-        perCacheConfig.put(USER_STATS,      defaultCfg.entryTtl(Duration.ofMinutes(5)));
-        perCacheConfig.put(SOURCE_METADATA, defaultCfg.entryTtl(Duration.ofMinutes(60)));
-        perCacheConfig.put(COMPANY_INFO,    defaultCfg.entryTtl(Duration.ofMinutes(60)));
+        perCacheConfig.put(USER_STATS,          defaultCfg.entryTtl(Duration.ofMinutes(5)));
+        perCacheConfig.put(SOURCE_METADATA,     defaultCfg.entryTtl(Duration.ofMinutes(60)));
+        perCacheConfig.put(COMPANY_INFO,        defaultCfg.entryTtl(Duration.ofMinutes(60)));
         perCacheConfig.put(CACHE_FEATURE_FLAGS, defaultCfg.entryTtl(Duration.ofMinutes(60)));
 
         return RedisCacheManager.builder(factory)
