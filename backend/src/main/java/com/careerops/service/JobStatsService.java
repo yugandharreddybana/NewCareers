@@ -24,6 +24,12 @@ import java.util.UUID;
  * "userStats" cache (TTL 5 min via {@link CacheConfig}).  Write paths
  * that mutate UserJob rows call {@code @CacheEvict} so stale stats are
  * never served after a state change.
+ *
+ * Eviction strategy:
+ *   Cached keys are composite: "<userId>:summary" and "<userId>:activity:<days>".
+ *   Caffeine does not support key-prefix wildcard eviction, so evictUserStats
+ *   uses allEntries=true to flush the entire userStats cache for that user.
+ *   Given the small TTL (5 min) and max 2 000 entries this is safe and correct.
  */
 @Slf4j
 @Service
@@ -43,7 +49,7 @@ public class JobStatsService {
     public JobStatsDto getSummaryStats(UUID userId) {
         log.debug("[JobStatsService] cache miss – computing summary stats for user {}", userId);
 
-        long total     = userJobRepository.countByUserId(userId);
+        long total      = userJobRepository.countByUserId(userId);
         double avgMatch = userJobRepository.avgMatchPercentForUser(userId);
         long withScore  = userJobRepository.countByUserIdAndScoreBreakdownIsNotNull(userId);
 
@@ -70,28 +76,32 @@ public class JobStatsService {
 
         Instant since = Instant.now().minus(days, ChronoUnit.DAYS);
         Map<String, Long> stats = new LinkedHashMap<>();
-        stats.put("totalInPeriod",    userJobRepository.countByUserIdAndDeliveredAtAfter(userId, since));
-        stats.put("appliedInPeriod",  userJobRepository.countByUserIdAndKanbanColumnAndDeliveredAtAfter(userId, "Applied", since));
-        stats.put("interviewInPeriod",userJobRepository.countByUserIdAndKanbanColumnAndDeliveredAtAfter(userId, "Interview", since));
-        stats.put("offerInPeriod",    userJobRepository.countByUserIdAndKanbanColumnAndDeliveredAtAfter(userId, "Offer", since));
+        stats.put("totalInPeriod",     userJobRepository.countByUserIdAndDeliveredAtAfter(userId, since));
+        stats.put("appliedInPeriod",   userJobRepository.countByUserIdAndKanbanColumnAndDeliveredAtAfter(userId, "Applied", since));
+        stats.put("interviewInPeriod", userJobRepository.countByUserIdAndKanbanColumnAndDeliveredAtAfter(userId, "Interview", since));
+        stats.put("offerInPeriod",     userJobRepository.countByUserIdAndKanbanColumnAndDeliveredAtAfter(userId, "Offer", since));
         return stats;
     }
 
     // ── Eviction ──────────────────────────────────────────────────────────────
 
     /**
-     * Call this whenever a UserJob is created, updated, or deleted for a user
-     * so all cached stats entries for that user are invalidated.
+     * Evicts ALL entries in the userStats cache.
+     *
+     * Cache keys are composite ("<userId>:summary", "<userId>:activity:<days>").
+     * Caffeine has no wildcard key eviction, so we flush the whole cache.
+     * With a 5-min TTL and max 2 000 entries this is acceptable; other users'
+     * entries will be lazily re-populated on next request.
+     *
+     * Call this whenever a UserJob is created, updated, or deleted.
      */
-    @CacheEvict(value = CacheConfig.USER_STATS, allEntries = false,
-                keyGenerator = "userStatsCacheKeyGenerator")
+    @CacheEvict(value = CacheConfig.USER_STATS, allEntries = true)
     public void evictUserStats(UUID userId) {
-        log.debug("[JobStatsService] evicting userStats cache for user {}", userId);
+        log.debug("[JobStatsService] evicting userStats cache (all entries) after mutation for user {}", userId);
     }
 
     /**
-     * Convenience method that accepts a userId string (useful from event
-     * listeners / Spring events where typed UUID may not be available).
+     * Full cache flush – use when a bulk operation affects many users.
      */
     @CacheEvict(value = CacheConfig.USER_STATS, allEntries = true)
     public void evictAllUserStats() {
