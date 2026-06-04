@@ -1,62 +1,114 @@
 package com.careerops.repository;
 
 import com.careerops.model.UserJob;
-import org.springframework.data.jpa.repository.JpaRepository;
-import org.springframework.data.jpa.repository.JpaSpecificationExecutor;
-import org.springframework.data.jpa.repository.Query;
-import org.springframework.data.repository.query.Param;
-
-import java.time.Instant;
-import java.util.List;
-import java.util.Optional;
-import java.util.Set;
-import java.util.UUID;
-
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
+import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Query;
+import org.springframework.data.repository.query.Param;
+import org.springframework.stereotype.Repository;
 
-public interface UserJobRepository extends JpaRepository<UserJob, UUID>, JpaSpecificationExecutor<UserJob> {
+import java.util.List;
+import java.util.Optional;
+import java.util.UUID;
 
-    List<UserJob> findByUserIdOrderByDeliveredAtDesc(UUID userId);
-    Page<UserJob> findByUserIdOrderByDeliveredAtDesc(UUID userId, Pageable pageable);
+@Repository
+public interface UserJobRepository extends JpaRepository<UserJob, UUID> {
+
+    // ─── Paginated card list (minimal fields via projection) ────────────────
+    @Query("""
+        SELECT uj.id            AS userJobId,
+               j.id             AS jobId,
+               j.title          AS title,
+               j.company        AS company,
+               j.location       AS location,
+               j.jobType        AS jobType,
+               j.source         AS source,
+               uj.matchPercent  AS matchPercent,
+               uj.status        AS status,
+               uj.kanbanColumn  AS kanbanColumn,
+               uj.isFavorite    AS isFavorite,
+               uj.deliveredAt   AS deliveredAt
+        FROM UserJob uj
+        JOIN uj.job j
+        WHERE uj.userId = :userId
+        ORDER BY uj.deliveredAt DESC
+        """)
+    Page<JobCardProjection> findCardsByUserId(@Param("userId") UUID userId, Pageable pageable);
+
+    // ─── Filtered by kanban column ───────────────────────────────────────────
+    @Query("""
+        SELECT uj.id            AS userJobId,
+               j.id             AS jobId,
+               j.title          AS title,
+               j.company        AS company,
+               j.location       AS location,
+               j.jobType        AS jobType,
+               j.source         AS source,
+               uj.matchPercent  AS matchPercent,
+               uj.status        AS status,
+               uj.kanbanColumn  AS kanbanColumn,
+               uj.isFavorite    AS isFavorite,
+               uj.deliveredAt   AS deliveredAt
+        FROM UserJob uj
+        JOIN uj.job j
+        WHERE uj.userId = :userId
+          AND uj.kanbanColumn = :column
+        ORDER BY uj.deliveredAt DESC
+        """)
+    Page<JobCardProjection> findCardsByUserIdAndColumn(
+            @Param("userId") UUID userId,
+            @Param("column") String column,
+            Pageable pageable);
+
+    // ─── Favorites only ──────────────────────────────────────────────────────
+    @Query("""
+        SELECT uj.id            AS userJobId,
+               j.id             AS jobId,
+               j.title          AS title,
+               j.company        AS company,
+               j.location       AS location,
+               j.jobType        AS jobType,
+               j.source         AS source,
+               uj.matchPercent  AS matchPercent,
+               uj.status        AS status,
+               uj.kanbanColumn  AS kanbanColumn,
+               uj.isFavorite    AS isFavorite,
+               uj.deliveredAt   AS deliveredAt
+        FROM UserJob uj
+        JOIN uj.job j
+        WHERE uj.userId = :userId
+          AND uj.isFavorite = true
+        ORDER BY uj.matchPercent DESC NULLS LAST
+        """)
+    Page<JobCardProjection> findFavoriteCardsByUserId(
+            @Param("userId") UUID userId,
+            Pageable pageable);
+
+    // ─── Stats queries (cheap aggregates — cached at service layer) ──────────
+    @Query("SELECT COUNT(uj) FROM UserJob uj WHERE uj.userId = :userId")
+    long countByUserId(@Param("userId") UUID userId);
+
+    @Query("SELECT COUNT(uj) FROM UserJob uj WHERE uj.userId = :userId AND uj.kanbanColumn = :col")
+    long countByUserIdAndColumn(@Param("userId") UUID userId, @Param("col") String col);
+
+    @Query("SELECT COUNT(uj) FROM UserJob uj WHERE uj.userId = :userId AND uj.isFavorite = true")
+    long countFavoritesByUserId(@Param("userId") UUID userId);
+
+    @Query("SELECT AVG(uj.matchPercent) FROM UserJob uj WHERE uj.userId = :userId AND uj.matchPercent IS NOT NULL")
+    Double avgMatchPercentByUserId(@Param("userId") UUID userId);
+
+    // ─── Column distribution for Kanban header badges ───────────────────────
+    @Query("""
+        SELECT uj.kanbanColumn AS col, COUNT(uj) AS cnt
+        FROM UserJob uj
+        WHERE uj.userId = :userId
+        GROUP BY uj.kanbanColumn
+        """)
+    List<Object[]> countByUserIdGroupByColumn(@Param("userId") UUID userId);
+
+    // ─── Single record lookups ───────────────────────────────────────────────
     Optional<UserJob> findByUserIdAndJobId(UUID userId, UUID jobId);
 
-    @Query("SELECT uj.jobId FROM UserJob uj WHERE uj.userId = :userId")
-    Set<UUID> findJobIdsByUserId(@Param("userId") UUID userId);
-    Optional<UserJob> findByIdAndUserId(UUID id, UUID userId);
-
-    @Query("select uj from UserJob uj where uj.userId = :uid and uj.kanbanColumn <> 'Discovered'")
-    List<UserJob> findKanbanForUser(@Param("uid") UUID userId);
-
-    long countByUserId(UUID userId);
-    long countByUserIdAndKanbanColumn(UUID userId, String column);
-
-    /**
-     * Returns each distinct kanbanColumn + count in one query.
-     * Each Object[] row is [kanbanColumn (String), count (Long)].
-     */
-    @Query("SELECT uj.kanbanColumn, COUNT(uj) FROM UserJob uj WHERE uj.userId = :uid GROUP BY uj.kanbanColumn")
-    List<Object[]> countByColumnForUser(@Param("uid") UUID userId);
-
-    /**
-     * Average match% for the user in a single aggregation query.
-     * Returns 0.0 when no rows exist.
-     */
-    @Query("SELECT COALESCE(AVG(uj.matchPercent), 0.0) FROM UserJob uj WHERE uj.userId = :uid AND uj.matchPercent IS NOT NULL")
-    double avgMatchPercentForUser(@Param("uid") UUID userId);
-
-    /**
-     * Task 135 — AdminService.platformStats(): how many jobs were delivered
-     * (i.e. UserJob rows created) since a given instant.
-     */
-    @Query("SELECT COUNT(uj) FROM UserJob uj WHERE uj.deliveredAt >= :since")
-    long countDeliveredSince(@Param("since") Instant since);
-
-    long countByUserIdAndDeliveredAtAfter(UUID userId, Instant since);
-
-    long countByUserIdAndKanbanColumnAndDeliveredAtAfter(UUID userId, String column, Instant since);
-
-    List<UserJob> findTop3ByUserIdAndDeliveredAtAfterAndMatchPercentIsNotNullOrderByMatchPercentDesc(UUID userId, Instant since);
-
-    long countByUserIdAndScoreBreakdownIsNotNull(UUID userId);
+    boolean existsByUserIdAndJobId(UUID userId, UUID jobId);
 }
