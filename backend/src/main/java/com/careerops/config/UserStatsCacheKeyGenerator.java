@@ -8,15 +8,22 @@ import java.util.UUID;
 
 /**
  * Custom key generator that produces cache keys in the pattern
- * {@code "<userId>:*"} for userId-scoped entries.
+ * {@code "<userId>:<suffix>"} for userId-scoped entries.
  *
- * Used by {@link com.careerops.service.JobStatsService#evictUserStats(UUID)}
- * to evict all stat variants for one user (summary + activity:N days).
+ * Usage example:
+ * <pre>
+ *   \@Cacheable(value = CacheConfig.USER_STATS, keyGenerator = "userStatsCacheKeyGenerator")
+ * </pre>
  *
- * NOTE: Caffeine does not support wildcard eviction natively, so the
- * evictUserStats path uses allEntries=true as a safe fallback.  With
- * Redis you can register a custom eviction script; for now full-cache
- * eviction is acceptable given the small TTL (5 min).
+ * NOTE: The default {@code JobStatsService} methods use inline SpEL keys
+ * (e.g. {@code key = "#userId + ':summary'"}) which are equivalent and
+ * preferred for clarity.  This generator is provided as a convenience for
+ * callers that prefer annotation-level key generation without SpEL.
+ *
+ * NOTE: Caffeine does not support wildcard eviction natively, so evictUserStats
+ * uses allEntries=true as a safe fallback.  With Redis you can register a
+ * custom eviction script; for now full-cache eviction is acceptable given
+ * the small TTL (5 min).
  */
 @Component("userStatsCacheKeyGenerator")
 public class UserStatsCacheKeyGenerator implements KeyGenerator {

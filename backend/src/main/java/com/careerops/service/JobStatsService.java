@@ -55,14 +55,14 @@ public class JobStatsService {
 
         Map<String, Long> byColumn = new LinkedHashMap<>();
         userJobRepository.countByColumnForUser(userId)
-            .forEach(row -> byColumn.put((String) row[0], (Long) row[1]));
+                .forEach(row -> byColumn.put((String) row[0], (Long) row[1]));
 
         return JobStatsDto.builder()
-            .totalJobs(total)
-            .avgMatchPercent(avgMatch)
-            .jobsWithAiScore(withScore)
-            .byKanbanColumn(byColumn)
-            .build();
+                .totalJobs(total)
+                .avgMatchPercent(avgMatch)
+                .jobsWithAiScore(withScore)
+                .byKanbanColumn(byColumn)
+                .build();
     }
 
     /**
@@ -76,10 +76,14 @@ public class JobStatsService {
 
         Instant since = Instant.now().minus(days, ChronoUnit.DAYS);
         Map<String, Long> stats = new LinkedHashMap<>();
-        stats.put("totalInPeriod",     userJobRepository.countByUserIdAndDeliveredAtAfter(userId, since));
-        stats.put("appliedInPeriod",   userJobRepository.countByUserIdAndKanbanColumnAndDeliveredAtAfter(userId, "Applied", since));
-        stats.put("interviewInPeriod", userJobRepository.countByUserIdAndKanbanColumnAndDeliveredAtAfter(userId, "Interview", since));
-        stats.put("offerInPeriod",     userJobRepository.countByUserIdAndKanbanColumnAndDeliveredAtAfter(userId, "Offer", since));
+        stats.put("totalInPeriod",
+                userJobRepository.countByUserIdAndDeliveredAtAfter(userId, since));
+        stats.put("appliedInPeriod",
+                userJobRepository.countByUserIdAndKanbanColumnAndDeliveredAtAfter(userId, "Applied", since));
+        stats.put("interviewInPeriod",
+                userJobRepository.countByUserIdAndKanbanColumnAndDeliveredAtAfter(userId, "Interview", since));
+        stats.put("offerInPeriod",
+                userJobRepository.countByUserIdAndKanbanColumnAndDeliveredAtAfter(userId, "Offer", since));
         return stats;
     }
 
