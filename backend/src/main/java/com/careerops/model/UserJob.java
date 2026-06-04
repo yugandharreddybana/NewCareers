@@ -14,8 +14,11 @@ import java.util.UUID;
 @Table(name = "user_jobs", schema = "careerops",
        uniqueConstraints = @UniqueConstraint(columnNames = {"user_id","job_id"}),
        indexes = {
-           @Index(name = "idx_user_jobs_user_delivered", columnList = "user_id, delivered_at DESC"),
-           @Index(name = "idx_user_jobs_user_kanban", columnList = "user_id, kanban_column")
+           @Index(name = "idx_user_jobs_user_delivered",  columnList = "user_id, delivered_at DESC"),
+           @Index(name = "idx_user_jobs_user_kanban",     columnList = "user_id, kanban_column"),
+           @Index(name = "idx_user_jobs_user_match",      columnList = "user_id, match_percent DESC"),
+           @Index(name = "idx_user_jobs_user_favorite",   columnList = "user_id, is_favorite"),
+           @Index(name = "idx_user_jobs_user_status",     columnList = "user_id, status")
        })
 @org.hibernate.annotations.SQLRestriction("deleted_at IS NULL")
 @org.hibernate.annotations.DynamicUpdate
@@ -32,6 +35,7 @@ public class UserJob {
 
     @Column(name = "ai_score") private Integer aiScore;
     @Column(name = "match_percent") private Integer matchPercent;
+    @Column(name = "is_favorite") @Builder.Default private boolean isFavorite = false;
 
     @Type(StringArrayType.class)
     @Column(name = "matched_skills", columnDefinition = "text array")
@@ -75,4 +79,3 @@ public class UserJob {
         if (kanbanColumn == null) kanbanColumn = "Discovered";
     }
 }
-
