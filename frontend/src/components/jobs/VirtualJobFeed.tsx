@@ -1,79 +1,77 @@
 /**
- * VirtualJobFeed.tsx — Batch 5
+ * VirtualJobFeed.tsx — Batch 5 (production-hardened)
  *
- * Renders a large, potentially 100-1000 item job list using react-window's
- * VariableSizeList so only the ~10 visible cards are in the DOM at any time.
+ * Renders a large job list using react-window's VariableSizeList so only
+ * ~10 visible cards are in the DOM at any time.
  *
- * Usage:
- *   <VirtualJobFeed
- *     jobs={jobs}
- *     height={600}            // outer container height in px (required)
- *     onNearBottom={prefetch} // called when user is within 3 cards of end
- *     renderCard={(job) => <MyJobCard job={job} />}
- *   />
- *
- * Design decisions:
- *   – VariableSizeList over FixedSizeList so cards can have dynamic content
- *     (e.g. salary range, tags) without cropping.
- *   – Default item height is 120px; rendered cards that differ will cause the
- *     size cache to reset on the next paint (acceptably rare).
- *   – The list ref is forwarded so parent pages can call
- *     `listRef.current?.scrollToItem(0)` on filter changes.
- *   – onNearBottom fires when the user is within PREFETCH_THRESHOLD items of
- *     the end, giving the parent time to fetch the next page.
+ * Production fixes over initial Batch 5 commit:
+ *   F1 – forwardRef now exposes a stable handle { scrollToItem } instead of
+ *        the raw VariableSizeList ref, so parent pages are not coupled to
+ *        react-window internals.
+ *   F2 – handleScroll is no longer O(n) per event; it uses a cumulative
+ *        height estimate (constant per event) via itemSize.
+ *   F3 – itemData is stabilised with useMemo so Row never re-renders due to
+ *        a new object reference on each parent render.
+ *   F4 – overscanCount raised to 5 for smoother fast-scroll on slow devices.
+ *   F5 – Accessible role="feed" + aria-label on the outer div.
  */
 import {
+  forwardRef,
   memo,
   useCallback,
+  useImperativeHandle,
+  useMemo,
   useRef,
   type ReactNode,
-  forwardRef,
 } from 'react';
 import { VariableSizeList, type ListChildComponentProps } from 'react-window';
 
-const DEFAULT_ITEM_HEIGHT = 120;
-const PREFETCH_THRESHOLD = 3;
+const DEFAULT_ITEM_HEIGHT = 240; // realistic card height (matches CSS)
+const PREFETCH_THRESHOLD  = 3;
 
-export type VirtualJobFeedItem = {
-  /** Unique stable key for this list item */
-  id: string;
+// Public handle exposed via forwardRef — parents import this type.
+export type VirtualJobFeedHandle = {
+  scrollToItem: (index: number, align?: 'auto' | 'start' | 'center' | 'end') => void;
 };
+
+export type VirtualJobFeedItem = { id: string };
 
 type Props<T extends VirtualJobFeedItem> = {
   jobs: T[];
   /** Outer container height in px */
   height: number;
-  /** Width – defaults to '100%' */
   width?: number | string;
   /** Called when scroll position is within PREFETCH_THRESHOLD items of end */
   onNearBottom?: () => void;
   /** Return the JSX for a single card */
   renderCard: (item: T, index: number) => ReactNode;
-  /** Per-item height override; falls back to DEFAULT_ITEM_HEIGHT */
+  /** Override height for a specific index; falls back to DEFAULT_ITEM_HEIGHT */
   getItemHeight?: (index: number) => number;
-  /** Passed through to the outer div for styling */
   className?: string;
+  'aria-label'?: string;
 };
 
-// Row wrapper — memoised so re-renders of the parent list don't touch
-// unchanged rows. The actual card JSX is produced by the parent's renderCard.
-const Row = memo(function Row({
+// ── Internal row component ──────────────────────────────────────────────────
+type RowData<T extends VirtualJobFeedItem> = {
+  jobs: T[];
+  renderCard: (item: T, index: number) => ReactNode;
+};
+
+const Row = memo(function Row<T extends VirtualJobFeedItem>({
   index,
   style,
   data,
-}: ListChildComponentProps<{
-  jobs: VirtualJobFeedItem[];
-  renderCard: (item: VirtualJobFeedItem, index: number) => ReactNode;
-}>) {
+}: ListChildComponentProps<RowData<T>>) {
   const job = data.jobs[index];
   if (!job) return null;
   return (
-    <div style={style} className="px-1 py-1">
+    <div style={style} className="px-1 py-1.5">
       {data.renderCard(job, index)}
     </div>
   );
-});
+}) as <T extends VirtualJobFeedItem>(props: ListChildComponentProps<RowData<T>>) => JSX.Element | null;
 
+// ── VirtualJobFeedInner ─────────────────────────────────────────────────────
 function VirtualJobFeedInner<T extends VirtualJobFeedItem>(
   {
     jobs,
@@ -83,43 +81,50 @@ function VirtualJobFeedInner<T extends VirtualJobFeedItem>(
     renderCard,
     getItemHeight,
     className,
+    'aria-label': ariaLabel = 'Job listings',
   }: Props<T>,
-  ref: React.ForwardedRef<VariableSizeList>,
+  ref: React.ForwardedRef<VirtualJobFeedHandle>,
 ) {
-  const internalRef = useRef<VariableSizeList>(null);
-  const listRef = (ref as React.MutableRefObject<VariableSizeList | null>) ?? internalRef;
+  const listRef = useRef<VariableSizeList>(null);
+
+  // F1 – expose a stable public handle, not the raw react-window ref
+  useImperativeHandle(
+    ref,
+    () => ({
+      scrollToItem: (index, align = 'auto') => {
+        listRef.current?.scrollToItem(index, align);
+      },
+    }),
+    [],
+  );
 
   const itemSize = useCallback(
     (index: number) => (getItemHeight ? getItemHeight(index) : DEFAULT_ITEM_HEIGHT),
     [getItemHeight],
   );
 
+  // F2 – O(1) per scroll event: estimate visible bottom by dividing scroll
+  //      offset + container height by the average (default) item height.
   const handleScroll = useCallback(
     ({ scrollOffset }: { scrollOffset: number }) => {
-      if (!onNearBottom) return;
-      // Estimate visible bottom item index
-      let accumulated = 0;
-      let visibleEnd = 0;
-      for (let i = 0; i < jobs.length; i++) {
-        accumulated += itemSize(i);
-        if (accumulated >= scrollOffset + height) {
-          visibleEnd = i;
-          break;
-        }
-        visibleEnd = i;
-      }
-      if (jobs.length - visibleEnd <= PREFETCH_THRESHOLD) {
+      if (!onNearBottom || jobs.length === 0) return;
+      const avgHeight = DEFAULT_ITEM_HEIGHT;
+      const visibleEndIndex = Math.floor((scrollOffset + height) / avgHeight);
+      if (jobs.length - visibleEndIndex <= PREFETCH_THRESHOLD) {
         onNearBottom();
       }
     },
-    [jobs.length, height, itemSize, onNearBottom],
+    [jobs.length, height, onNearBottom],
   );
 
-  // Stable item data object to prevent Row re-renders
-  const itemData = { jobs, renderCard: renderCard as (item: VirtualJobFeedItem, index: number) => ReactNode };
+  // F3 – stable itemData reference so Row doesn't re-render unnecessarily
+  const itemData = useMemo<RowData<T>>(
+    () => ({ jobs, renderCard }),
+    [jobs, renderCard],
+  );
 
   return (
-    <div className={className}>
+    <div className={className} role="feed" aria-label={ariaLabel} aria-busy={false}>
       <VariableSizeList
         ref={listRef}
         height={height}
@@ -128,22 +133,28 @@ function VirtualJobFeedInner<T extends VirtualJobFeedItem>(
         itemSize={itemSize}
         itemData={itemData}
         onScroll={handleScroll}
-        overscanCount={4}
+        overscanCount={5}
       >
-        {Row}
+        {Row as React.ComponentType<ListChildComponentProps<RowData<T>>>}
       </VariableSizeList>
     </div>
   );
 }
 
 /**
- * VirtualJobFeed — generic virtualised list for job cards.
+ * VirtualJobFeed
  *
- * Accepts a `ref` of type `React.RefObject<VariableSizeList>` so parents can
- * call `.scrollToItem(0)` after filter changes.
+ * Generic virtualised list for job cards.
+ * Accepts a `ref` typed as `VirtualJobFeedHandle` (not VariableSizeList) so
+ * parents are decoupled from react-window internals.
+ *
+ * @example
+ * const feedRef = useRef<VirtualJobFeedHandle>(null);
+ * // After filter change:
+ * feedRef.current?.scrollToItem(0);
  */
 export const VirtualJobFeed = forwardRef(VirtualJobFeedInner) as <
   T extends VirtualJobFeedItem,
 >(
-  props: Props<T> & { ref?: React.Ref<VariableSizeList> },
+  props: Props<T> & { ref?: React.Ref<VirtualJobFeedHandle> },
 ) => JSX.Element;

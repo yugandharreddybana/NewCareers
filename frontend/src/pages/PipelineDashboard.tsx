@@ -1,18 +1,16 @@
 /**
- * Section 7 — Task 77
- * Dashboard wired with:
- *   - JobSearchBar (above job grid) — calls discoveryApi.search() on submit
- *   - RecommendedJobsWidget (below job grid) — always visible when data exists
- *   - PlannerWidget (sidebar) — shows overdue badge, upcoming deadlines & tasks
- *   - JobPlannerPanel (slide-over drawer) — opens when PlannerWidget item clicked
+ * PipelineDashboard.tsx — production-hardened Batch 5
  *
- * Section 3.3 fix: added lastSearchParams state + search pagination controls.
- *
- * Mobile audit (task 133): header action buttons wrap on 375px, stats col=1,
- * no horizontal overflow.
- *
- * Batch 5 (perf): virtualised infinite job feed via VirtualJobFeed + useInfiniteJobsFeed
- * replaces the static useJobsList grid in pipeline (non-search) mode.
+ * Production fixes:
+ *   D1 – feedRef typed as VirtualJobFeedHandle (not VariableSizeList) to match
+ *        the decoupled forwardRef handle exposed by VirtualJobFeed.
+ *   D2 – JobCard type has id: string via normalizeJobCard (mapped from
+ *        userJobId), so it satisfies VirtualJobFeedItem constraint.
+ *   D3 – renderCard stabilised with useCallback so VirtualJobFeed's itemData
+ *        memo comparison holds across re-renders.
+ *   D4 – Empty-state "Scan" button uses firstPage.remaining to decide
+ *        disabled state (was data?.remaining which no longer exists on the
+ *        infinite query shape).
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
@@ -41,7 +39,7 @@ import { PlannerWidget, JobPlannerPanel } from '@/components/planner';
 import { ProductTour, DASHBOARD_TOUR_STEPS } from '@/components/onboarding/ProductTour';
 import { FirstApplicationChecklist } from '@/components/onboarding/FirstApplicationChecklist';
 import { ContextualHelpTip, HELP_TIPS } from '@/components/onboarding/ContextualHelpTip';
-import { VirtualJobFeed } from '@/components/jobs/VirtualJobFeed';
+import { VirtualJobFeed, type VirtualJobFeedHandle } from '@/components/jobs/VirtualJobFeed';
 import { useScrollPrefetch } from '@/hooks/useScrollPrefetch';
 import {
   RotateCw, X, Sparkles,
@@ -51,13 +49,12 @@ import {
 import { motion, AnimatePresence } from 'framer-motion';
 
 const TOUR_KEY = 'careerops_dashboard_tour_done';
-// Height of the virtualised feed container (px). Approx 3 card rows.
-const FEED_HEIGHT = 660;
+const FEED_HEIGHT = 660; // 3 card rows
 
 export default function PipelineDashboard() {
   const queryClient = useQueryClient();
 
-  // ── Batch 5: infinite + virtualised pipeline feed ──────────────────────────
+  // ── Batch 5: infinite + virtualised pipeline feed ────────────────────────
   const {
     data: infiniteData,
     isLoading: loading,
@@ -71,39 +68,36 @@ export default function PipelineDashboard() {
     [infiniteData],
   );
 
-  // Derive daily counts from first page metadata
   const firstPage = infiniteData?.pages[0];
   const dailyCount = firstPage?.dailyCount ?? 0;
   const dailyLimit = firstPage?.dailyLimit ?? 15;
 
-  // Virtualised feed ref — allows scrollToItem(0) when filters change
-  const feedRef = useRef<{ scrollToItem: (index: number) => void }>(null);
-
+  // D1 – correct ref type
+  const feedRef = useRef<VirtualJobFeedHandle>(null);
   const { onNearBottom } = useScrollPrefetch({ hasNextPage, isFetchingNextPage, fetchNextPage });
+
+  // D3 – stable renderCard so VirtualJobFeed itemData memo holds
+  const renderCard = useCallback((job: JobCard) => <JobCardUI job={job} />, []);
 
   const fetchMore = useFetchMoreJobsMutation();
   const fetchLive = useFetchLiveJobMutation();
   const { data: analyticsStats, isLoading: statsLoading } = useAnalyticsSummary();
 
-  // Pipeline filters
   const [search] = useState('');
   const [sourceFilter, setSourceFilter] = useState('All Sources');
   const [minMatch] = useState(0);
   const [pipelineMinSalary] = useState<number | undefined>(undefined);
   const [pipelineMaxSalary] = useState<number | undefined>(undefined);
 
-  // ── Section 7: Search mode state ───────────────────────────────────────────
   const [searchResult, setSearchResult] = useState<SearchResult | null>(null);
   const [searching, setSearching] = useState(false);
   const [lastSearchParams, setLastSearchParams] = useState<SearchParams>({});
   const isSearchMode = searchResult !== null;
 
-  // ── Planner drawer ─────────────────────────────────────────────────────────
   const [plannerJobId, setPlannerJobId] = useState<string | null>(null);
   const [plannerJobTitle, setPlannerJobTitle] = useState<string>('');
   const plannerOpen = plannerJobId !== null;
 
-  // ── Product tour ───────────────────────────────────────────────────────────
   const [tourActive, setTourActive] = useState(false);
   useEffect(() => {
     if (!localStorage.getItem(TOUR_KEY)) {
@@ -111,6 +105,9 @@ export default function PipelineDashboard() {
       return () => clearTimeout(t);
     }
   }, []);
+
+  // Scroll to top on filter change
+  useEffect(() => { feedRef.current?.scrollToItem(0); }, [sourceFilter, minMatch, search]);
 
   function openPlannerForJob(userJobId: string) {
     const found = allJobs.find(j => j.userJobId === userJobId);
@@ -156,7 +153,6 @@ export default function PipelineDashboard() {
     }
   }
 
-  // ── Section 7 + 3.3: search ────────────────────────────────────────────────
   async function handleSearch(params: SearchParams) {
     if (Object.keys(params).length === 0) {
       setSearchResult(null);
@@ -195,7 +191,6 @@ export default function PipelineDashboard() {
     }
   }
 
-  // ── Pipeline filter logic ──────────────────────────────────────────────────
   const sourceOptions = useMemo(() => {
     const sources = new Set<string>();
     for (const j of allJobs) {
@@ -219,11 +214,9 @@ export default function PipelineDashboard() {
     });
   }, [allJobs, search, sourceFilter, minMatch, pipelineMinSalary, pipelineMaxSalary]);
 
-  // Scroll virtualised list back to top whenever active filter changes
-  useEffect(() => { feedRef.current?.scrollToItem(0); }, [sourceFilter, minMatch, search]);
-
-  const topJobs = filteredJobs
-    .filter(j => j.kanbanColumn === 'Discovered' || j.kanbanColumn === 'Saved');
+  const topJobs = filteredJobs.filter(
+    j => j.kanbanColumn === 'Discovered' || j.kanbanColumn === 'Saved',
+  );
 
   const missingSkillsMap = useMemo(() => {
     const map: Record<string, number> = {};
@@ -261,37 +254,19 @@ export default function PipelineDashboard() {
           <p className="text-slate-400 text-sm mt-1">What should you focus on today?</p>
         </div>
         <div id="dashboard-skill-actions" className="flex flex-wrap items-center gap-2 shrink-0">
-          <SkillButton
-            label="Compare"
-            icon={<Target size={15} className="mr-1.5" />}
-            state={topJobs.length < 2 ? 'locked' : compareSkill.state}
-            onClick={compareSkill.run}
-            className="!rounded-xl !h-9 !text-xs"
-          />
-          <SkillButton
-            label="Triage"
-            icon={<Zap size={15} className="mr-1.5" />}
-            state={allJobs.length === 0 ? 'locked' : triageSkill.state}
-            onClick={triageSkill.run}
-            className="!rounded-xl !h-9 !text-xs"
-          />
-          <button
-            onClick={handleFetchLiveJobs}
-            disabled={fetchLive.isPending}
-            className="flex items-center gap-2 h-9 px-4 bg-indigo-600 hover:bg-indigo-700
-                       text-white rounded-xl font-semibold text-sm transition-all
-                       disabled:opacity-50 shadow-sm"
-          >
+          <SkillButton label="Compare" icon={<Target size={15} className="mr-1.5" />}
+            state={topJobs.length < 2 ? 'locked' : compareSkill.state} onClick={compareSkill.run}
+            className="!rounded-xl !h-9 !text-xs" />
+          <SkillButton label="Triage" icon={<Zap size={15} className="mr-1.5" />}
+            state={allJobs.length === 0 ? 'locked' : triageSkill.state} onClick={triageSkill.run}
+            className="!rounded-xl !h-9 !text-xs" />
+          <button onClick={handleFetchLiveJobs} disabled={fetchLive.isPending}
+            className="flex items-center gap-2 h-9 px-4 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl font-semibold text-sm transition-all disabled:opacity-50 shadow-sm">
             <Sparkles size={14} className={fetchLive.isPending ? 'animate-spin' : ''} />
             {fetchLive.isPending ? 'Fetching…' : 'Fetch Live Jobs'}
           </button>
-          <button
-            onClick={getMore}
-            disabled={fetchMore.isPending || (firstPage?.remaining ?? 0) <= 0}
-            className="flex items-center gap-2 h-9 px-4 bg-emerald-500 hover:bg-emerald-600
-                       text-white rounded-xl font-semibold text-sm transition-all
-                       disabled:opacity-50 shadow-sm"
-          >
+          <button onClick={getMore} disabled={fetchMore.isPending || (firstPage?.remaining ?? 0) <= 0}
+            className="flex items-center gap-2 h-9 px-4 bg-emerald-500 hover:bg-emerald-600 text-white rounded-xl font-semibold text-sm transition-all disabled:opacity-50 shadow-sm">
             <RotateCw size={14} className={fetchMore.isPending ? 'animate-spin' : ''} />
             {fetchMore.isPending ? 'Scanning…' : 'Scan For New Jobs'}
           </button>
@@ -300,10 +275,8 @@ export default function PipelineDashboard() {
 
       <AnimatePresence>
         {missingSkillsMap.length > 0 && (
-          <motion.section
-            initial={{ opacity: 0, y: -8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }}
-            className="bg-amber-50 border border-amber-200 rounded-2xl px-5 py-4 flex items-start gap-4"
-          >
+          <motion.section initial={{ opacity: 0, y: -8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }}
+            className="bg-amber-50 border border-amber-200 rounded-2xl px-5 py-4 flex items-start gap-4">
             <AlertTriangle size={18} className="text-amber-500 mt-0.5 shrink-0" />
             <div className="flex-1 min-w-0">
               <p className="text-sm font-semibold text-amber-900 mb-2">
@@ -311,8 +284,7 @@ export default function PipelineDashboard() {
               </p>
               <div className="flex flex-wrap gap-2">
                 {missingSkillsMap.map(([skill, count]) => (
-                  <span key={skill}
-                    className="px-2.5 py-1 rounded-lg bg-amber-100 border border-amber-300 text-amber-800 text-xs font-semibold">
+                  <span key={skill} className="px-2.5 py-1 rounded-lg bg-amber-100 border border-amber-300 text-amber-800 text-xs font-semibold">
                     {skill} <span className="opacity-50">×{count}</span>
                   </span>
                 ))}
@@ -330,17 +302,13 @@ export default function PipelineDashboard() {
             </h2>
             <div className="flex items-center gap-3">
               {isSearchMode && (
-                <button
-                  onClick={() => { setSearchResult(null); setLastSearchParams({}); }}
-                  className="flex items-center gap-1.5 text-xs font-semibold text-slate-400 hover:text-rose-500 transition-colors"
-                >
+                <button onClick={() => { setSearchResult(null); setLastSearchParams({}); }}
+                  className="flex items-center gap-1.5 text-xs font-semibold text-slate-400 hover:text-rose-500 transition-colors">
                   <X size={12} /> Clear search
                 </button>
               )}
               {!isSearchMode && dailyCount > 0 && (
-                <span className="text-xs text-slate-400">
-                  {dailyCount} / {dailyLimit} today
-                </span>
+                <span className="text-xs text-slate-400">{dailyCount} / {dailyLimit} today</span>
               )}
             </div>
           </div>
@@ -352,45 +320,27 @@ export default function PipelineDashboard() {
             </div>
             {!isSearchMode && sourceOptions.length > 2 && (
               <div className="flex items-center gap-2 shrink-0">
-                <label htmlFor="source-filter" className="text-xs font-medium text-slate-500 whitespace-nowrap">
-                  Source
-                </label>
-                <select
-                  id="source-filter"
-                  value={sourceFilter}
-                  onChange={e => { setSourceFilter(e.target.value); }}
-                  className="h-9 px-3 pr-8 rounded-xl border border-slate-200 bg-white text-sm font-medium
-                             text-slate-700 hover:border-slate-300 focus:border-emerald-400
-                             focus:ring-2 focus:ring-emerald-100 outline-none transition-all
-                             cursor-pointer appearance-none"
-                >
-                  {sourceOptions.map(opt => (
-                    <option key={opt} value={opt}>{opt}</option>
-                  ))}
+                <label htmlFor="source-filter" className="text-xs font-medium text-slate-500 whitespace-nowrap">Source</label>
+                <select id="source-filter" value={sourceFilter} onChange={e => setSourceFilter(e.target.value)}
+                  className="h-9 px-3 pr-8 rounded-xl border border-slate-200 bg-white text-sm font-medium text-slate-700 hover:border-slate-300 focus:border-emerald-400 focus:ring-2 focus:ring-emerald-100 outline-none transition-all cursor-pointer appearance-none">
+                  {sourceOptions.map(opt => <option key={opt} value={opt}>{opt}</option>)}
                 </select>
               </div>
             )}
           </div>
 
-          {/* ── Search results: static grid (not virtualised, small result set) ── */}
           {isSearchMode ? (
             searching ? (
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
-                {[...Array(3)].map((_, i) => (
-                  <div key={i} className="h-56 bg-white border border-slate-200 rounded-2xl animate-pulse" />
-                ))}
+                {[...Array(3)].map((_, i) => <div key={i} className="h-56 bg-white border border-slate-200 rounded-2xl animate-pulse" />)}
               </div>
             ) : searchResult!.items.length === 0 ? (
               <div className="bg-white border border-slate-200 rounded-2xl p-16 flex flex-col items-center text-center">
                 <Building2 size={28} className="text-slate-300 mb-4" />
                 <h3 className="text-lg font-bold text-slate-800 mb-1">No jobs match your search</h3>
-                <p className="text-sm text-slate-400 mb-6 max-w-sm">
-                  Try different keywords, location, or remove salary filters.
-                </p>
-                <button
-                  onClick={() => { setSearchResult(null); setLastSearchParams({}); }}
-                  className="px-7 py-3 bg-slate-900 text-white rounded-xl font-bold text-sm hover:bg-slate-800 transition-all"
-                >
+                <p className="text-sm text-slate-400 mb-6 max-w-sm">Try different keywords, location, or remove salary filters.</p>
+                <button onClick={() => { setSearchResult(null); setLastSearchParams({}); }}
+                  className="px-7 py-3 bg-slate-900 text-white rounded-xl font-bold text-sm hover:bg-slate-800 transition-all">
                   Back to pipeline
                 </button>
               </div>
@@ -404,12 +354,9 @@ export default function PipelineDashboard() {
               </div>
             )
           ) : (
-            /* ── Pipeline mode: virtualised infinite feed ── */
             loading ? (
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
-                {[...Array(3)].map((_, i) => (
-                  <div key={i} className="h-56 bg-white border border-slate-200 rounded-2xl animate-pulse" />
-                ))}
+                {[...Array(3)].map((_, i) => <div key={i} className="h-56 bg-white border border-slate-200 rounded-2xl animate-pulse" />)}
               </div>
             ) : topJobs.length === 0 ? (
               <div className="bg-white border border-slate-200 rounded-2xl p-16 flex flex-col items-center text-center">
@@ -418,57 +365,41 @@ export default function PipelineDashboard() {
                   {activeFilters ? 'No jobs match your filters' : 'No matches found in database'}
                 </h3>
                 <p className="text-sm text-slate-400 mb-6 max-w-sm">
-                  {activeFilters
-                    ? 'Try loosening the filters above to see more results.'
-                    : "You haven't scanned the market since creating your profile."}
+                  {activeFilters ? 'Try loosening the filters above.' : "You haven't scanned the market since creating your profile."}
                 </p>
                 {!activeFilters && (
-                  <button
-                    onClick={getMore}
-                    disabled={fetchMore.isPending}
-                    className="px-7 py-3 bg-slate-900 text-white rounded-xl font-bold text-sm hover:bg-slate-800 transition-all disabled:opacity-50"
-                  >
+                  <button onClick={getMore} disabled={fetchMore.isPending || (firstPage?.remaining ?? 0) <= 0}
+                    className="px-7 py-3 bg-slate-900 text-white rounded-xl font-bold text-sm hover:bg-slate-800 transition-all disabled:opacity-50">
                     {fetchMore.isPending ? 'Scanning…' : 'Scan the Market Now'}
                   </button>
                 )}
               </div>
             ) : (
+              // D2 – JobCard has `id` mapped from userJobId by normalizeJobCard
               <VirtualJobFeed
                 ref={feedRef}
                 jobs={topJobs}
                 height={FEED_HEIGHT}
                 onNearBottom={onNearBottom}
-                renderCard={(job) => <JobCardUI job={job} />}
+                renderCard={renderCard}
+                aria-label="Your matched job pipeline"
               />
             )
           )}
 
           {isSearchMode && totalPages > 1 && (
             <div className="flex items-center justify-between mt-8 px-1">
-              <button
-                onClick={() => goToSearchPage(currentPage - 1)}
-                disabled={searching || currentPage === 0}
-                className="flex items-center gap-1.5 h-9 px-4 bg-white border border-slate-200
-                           rounded-xl text-sm font-semibold text-slate-500
-                           hover:border-emerald-300 hover:text-emerald-700
-                           disabled:opacity-40 disabled:cursor-not-allowed transition-all"
-              >
+              <button onClick={() => goToSearchPage(currentPage - 1)} disabled={searching || currentPage === 0}
+                className="flex items-center gap-1.5 h-9 px-4 bg-white border border-slate-200 rounded-xl text-sm font-semibold text-slate-500 hover:border-emerald-300 hover:text-emerald-700 disabled:opacity-40 disabled:cursor-not-allowed transition-all">
                 <ChevronLeft size={15} /> Prev
               </button>
               <span className="text-xs text-slate-400 font-medium">
-                Page <span className="text-slate-700 font-bold">{currentPage + 1}</span>
-                {' '}of{' '}
+                Page <span className="text-slate-700 font-bold">{currentPage + 1}</span>{' '}of{' '}
                 <span className="text-slate-700 font-bold">{totalPages}</span>
-                <span className="text-slate-300 mx-1.5">·</span>
-                {totalResults} results
+                <span className="text-slate-300 mx-1.5">·</span>{totalResults} results
               </span>
-              <button
-                onClick={() => goToSearchPage(currentPage + 1)}
-                disabled={searching || currentPage + 1 >= totalPages}
-                className="flex items-center gap-1.5 h-9 px-4 bg-slate-900 text-white
-                           rounded-xl text-sm font-semibold hover:bg-slate-800
-                           disabled:opacity-40 disabled:cursor-not-allowed transition-all"
-              >
+              <button onClick={() => goToSearchPage(currentPage + 1)} disabled={searching || currentPage + 1 >= totalPages}
+                className="flex items-center gap-1.5 h-9 px-4 bg-slate-900 text-white rounded-xl text-sm font-semibold hover:bg-slate-800 disabled:opacity-40 disabled:cursor-not-allowed transition-all">
                 Next <ChevronRight size={15} />
               </button>
             </div>
@@ -496,18 +427,15 @@ export default function PipelineDashboard() {
           </div>
           <div className="grid grid-cols-1 md:grid-cols-3 divide-y md:divide-y-0 md:divide-x divide-slate-100">
             <div className="px-6 py-5 space-y-1">
-              {statsLoading
-                ? <div className="h-9 w-20 bg-slate-100 rounded animate-pulse mb-1" />
+              {statsLoading ? <div className="h-9 w-20 bg-slate-100 rounded animate-pulse mb-1" />
                 : <p className="text-3xl font-black text-slate-900">{analyticsStats?.skillsRunThisWeek ?? 0}</p>}
               <p className="text-[11px] font-bold text-slate-400 uppercase tracking-widest flex items-center gap-1.5">
-                <Zap size={11} /> Skills Run This Week
-                <ContextualHelpTip tip={HELP_TIPS.skillRun} placement="top" />
+                <Zap size={11} /> Skills Run This Week <ContextualHelpTip tip={HELP_TIPS.skillRun} placement="top" />
               </p>
               <p className="text-xs text-slate-400 leading-relaxed">AI career tools used against jobs in your pipeline.</p>
             </div>
             <div className="px-6 py-5 space-y-1">
-              {statsLoading
-                ? <div className="h-9 w-16 bg-slate-100 rounded animate-pulse mb-1" />
+              {statsLoading ? <div className="h-9 w-16 bg-slate-100 rounded animate-pulse mb-1" />
                 : <p className="text-3xl font-black text-slate-900">{analyticsStats?.applicationsSubmitted ?? 0}</p>}
               <p className="text-[11px] font-bold text-slate-400 uppercase tracking-widest flex items-center gap-1.5">
                 <Send size={11} /> Applications Submitted
@@ -515,12 +443,10 @@ export default function PipelineDashboard() {
               <p className="text-xs text-slate-400 leading-relaxed">Jobs moved to Applied, Interview or Offer stage.</p>
             </div>
             <div className="px-6 py-5 space-y-1">
-              {statsLoading
-                ? <div className="h-9 w-20 bg-slate-100 rounded animate-pulse mb-1" />
+              {statsLoading ? <div className="h-9 w-20 bg-slate-100 rounded animate-pulse mb-1" />
                 : <p className="text-3xl font-black text-emerald-500">{analyticsStats?.avgMatchPercent ?? 0}%</p>}
               <p className="text-[11px] font-bold text-slate-400 uppercase tracking-widest flex items-center gap-1.5">
-                <Target size={11} /> Avg Match Score
-                <ContextualHelpTip tip={HELP_TIPS.matchScore} placement="top" />
+                <Target size={11} /> Avg Match Score <ContextualHelpTip tip={HELP_TIPS.matchScore} placement="top" />
               </p>
               <p className="text-xs text-slate-400 leading-relaxed">Average AI match quality across your full pipeline.</p>
             </div>
@@ -528,38 +454,18 @@ export default function PipelineDashboard() {
         </div>
       </section>
 
-      <ComparePanel
-        data={compareSkill.data}
-        open={compareSkill.open}
-        onClose={() => compareSkill.setOpen(false)}
-        jobIds={topJobs.map(j => j.userJobId)}
-      />
-      <TriagePanel
-        data={triageSkill.data}
-        open={triageSkill.open}
-        onClose={() => triageSkill.setOpen(false)}
-      />
+      <ComparePanel data={compareSkill.data} open={compareSkill.open} onClose={() => compareSkill.setOpen(false)} jobIds={topJobs.map(j => j.userJobId)} />
+      <TriagePanel data={triageSkill.data} open={triageSkill.open} onClose={() => triageSkill.setOpen(false)} />
 
       <AnimatePresence>
         {plannerOpen && (
           <>
-            <motion.div
-              key="planner-backdrop"
-              initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
-              className="fixed inset-0 bg-black/30 z-40"
-              onClick={() => setPlannerJobId(null)}
-            />
-            <motion.div
-              key="planner-drawer"
-              initial={{ x: '100%' }} animate={{ x: 0 }} exit={{ x: '100%' }}
+            <motion.div key="planner-backdrop" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+              className="fixed inset-0 bg-black/30 z-40" onClick={() => setPlannerJobId(null)} />
+            <motion.div key="planner-drawer" initial={{ x: '100%' }} animate={{ x: 0 }} exit={{ x: '100%' }}
               transition={{ type: 'spring', damping: 28, stiffness: 260 }}
-              className="fixed right-0 top-0 h-full w-full max-w-md bg-white shadow-2xl z-50 flex flex-col overflow-hidden"
-            >
-              <JobPlannerPanel
-                userJobId={plannerJobId!}
-                jobTitle={plannerJobTitle}
-                onClose={() => setPlannerJobId(null)}
-              />
+              className="fixed right-0 top-0 h-full w-full max-w-md bg-white shadow-2xl z-50 flex flex-col overflow-hidden">
+              <JobPlannerPanel userJobId={plannerJobId!} jobTitle={plannerJobTitle} onClose={() => setPlannerJobId(null)} />
             </motion.div>
           </>
         )}

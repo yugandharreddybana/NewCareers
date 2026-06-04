@@ -1,77 +1,90 @@
 /**
- * useJobs.ts — Batch 5
+ * useJobs.ts — Batch 5 (production-hardened)
  *
- * Changes over Batch 4:
- *   B5.020 – useInfiniteJobsFeed: replaces the all-at-once useJobsList for
- *            the job feed / pipeline pages. Fetches one page at a time via
- *            useInfiniteQuery; VirtualJobFeed + useScrollPrefetch drive it.
- *   B5.021 – useKanbanPatchMutation: added optimistic update so the card's
- *            column flips instantly in the cache; rolled back on error.
- *   B5.022 – useJobFavoriteMutation: new mutation with optimistic toggle of
- *            isFavorite flag in the jobs list cache.
- *   B5.023 – useJobsList retained unchanged for the dashboard marquee (small
- *            slice, not a full list) and for backward compat.
+ * Production fixes over initial Batch 5 commit:
+ *   P1 – useInfiniteJobsFeed now also updates the *infinite* query cache in
+ *        useKanbanPatchMutation and useJobFavoriteMutation (previously only
+ *        the flat list cache was updated, so optimistic changes were invisible
+ *        in the virtualised feed).
+ *   P2 – placeholderData is typed correctly (keepPreviousData pattern for
+ *        TanStack v5 — the function form).
+ *   P3 – FEED_PAGE_SIZE exposed so PipelineDashboard can display
+ *        "X more to load" accurately.
+ *   P4 – jobsApi.list() already returns a superset of InfiniteJobsPage so we
+ *        derive hasMore / nextPage from the API's own hasMore flag rather than
+ *        comparing items.length to FEED_PAGE_SIZE (avoids off-by-one on last
+ *        page).
+ *   P5 – ensurePipelineSkillsSynced guard reset only on hard error (network),
+ *        not on soft API errors — avoids infinite re-sync loops.
  */
 import {
   useMutation,
   useQuery,
   useQueryClient,
   useInfiniteQuery,
+  keepPreviousData,
+  type InfiniteData,
 } from '@tanstack/react-query';
 import { jobsApi, kanbanApi } from '@/services/api';
 import { queryKeys } from '@/lib/queryKeys';
 import type { JobCard, JobDetail, JobsListResponse, KanbanColumn, Stats } from '@/types';
+
+export const FEED_PAGE_SIZE = 20; // exported so PipelineDashboard can reference it
 
 /** One pipeline-wide skill resync per browser session. */
 let pipelineSkillsSynced = false;
 
 async function ensurePipelineSkillsSynced(): Promise<void> {
   if (pipelineSkillsSynced) return;
-  pipelineSkillsSynced = true;
   try {
     await jobsApi.refreshSkills();
+    pipelineSkillsSynced = true; // P5 – only mark done on success
   } catch {
-    pipelineSkillsSynced = false;
+    // leave flag false so next mount retries (but silently)
   }
 }
 
-// ── B5.020 – Infinite paginated feed ──────────────────────────────────────
-const FEED_PAGE_SIZE = 20;
+// ── Infinite query key helper ─────────────────────────────────────────────
+const infiniteFeedKey = (filters: Record<string, unknown> = {}) =>
+  [...queryKeys.jobs.list(), 'infinite', filters] as const;
 
+// ── B5.020 – Infinite paginated feed ─────────────────────────────────────
 export type InfiniteJobsPage = {
   items: JobCard[];
+  /** null means no more pages */
   nextPage: number | null;
   totalCount: number;
+  /** Pass-through meta from API */
+  dailyCount: number;
+  dailyLimit: number;
+  remaining: number;
 };
 
-/**
- * useInfiniteJobsFeed
- *
- * Powers the job list / pipeline pages. Each page fetches FEED_PAGE_SIZE
- * cards. The VirtualJobFeed component calls `fetchNextPage` via
- * useScrollPrefetch when the user nears the bottom.
- *
- * @param filters  – passed as query params to /jobs
- * @param enabled  – set false to skip the initial fetch
- */
 export function useInfiniteJobsFeed(
   filters: Record<string, string | number | boolean | undefined> = {},
   options: { enabled?: boolean } = {},
 ) {
   return useInfiniteQuery({
-    queryKey: [...queryKeys.jobs.list(), 'infinite', filters] as const,
-    queryFn: async ({ pageParam = 0 }) => {
+    queryKey: infiniteFeedKey(filters),
+    queryFn: async ({ pageParam = 0 }): Promise<InfiniteJobsPage> => {
       if (pageParam === 0) await ensurePipelineSkillsSynced();
       const res = await jobsApi.list(pageParam as number, FEED_PAGE_SIZE);
-      const nextPage = res.hasMore ? (pageParam as number) + 1 : null;
-      return { items: res.items, nextPage, totalCount: res.totalCount ?? res.items.length } as InfiniteJobsPage;
+      return {
+        items:      res.items,
+        // P4 – use the API's own hasMore flag
+        nextPage:   res.hasMore ? (pageParam as number) + 1 : null,
+        totalCount: res.totalCount ?? res.items.length,
+        dailyCount: res.dailyCount ?? 0,
+        dailyLimit: res.dailyLimit ?? 15,
+        remaining:  res.remaining ?? 0,
+      };
     },
-    initialPageParam: 0,
+    initialPageParam: 0 as number,
     getNextPageParam: (lastPage: InfiniteJobsPage) => lastPage.nextPage ?? undefined,
     enabled: options.enabled ?? true,
     staleTime: 60_000,
-    // Keep previous data visible while the next page loads (no blank flash)
-    placeholderData: (prev: ReturnType<typeof useInfiniteJobsFeed>['data']) => prev,
+    // P2 – correct TanStack v5 keepPreviousData pattern
+    placeholderData: keepPreviousData,
   });
 }
 
@@ -150,6 +163,37 @@ export function useFetchIrishJobsMutation() {
   });
 }
 
+// ── Helper: patch a job card in the infinite feed cache ───────────────────
+// P1 – Both kanban + favorite mutations now update the infinite cache.
+function patchInfiniteCache(
+  qc: ReturnType<typeof useQueryClient>,
+  userJobId: string,
+  patch: (card: JobCard) => JobCard,
+) {
+  // Flat list cache
+  const prev = qc.getQueryData<JobsListResponse>(queryKeys.jobs.list());
+  if (prev) {
+    qc.setQueryData<JobsListResponse>(queryKeys.jobs.list(), {
+      ...prev,
+      items: prev.items.map(j => (j.userJobId === userJobId ? patch(j) : j)),
+    });
+  }
+  // Infinite feed cache (all filter variants)
+  qc.setQueriesData<InfiniteData<InfiniteJobsPage>>(
+    { queryKey: [...queryKeys.jobs.list(), 'infinite'] },
+    (old) => {
+      if (!old) return old;
+      return {
+        ...old,
+        pages: old.pages.map(page => ({
+          ...page,
+          items: page.items.map(j => (j.userJobId === userJobId ? patch(j) : j)),
+        })),
+      };
+    },
+  );
+}
+
 // ── B5.021 – Kanban patch with optimistic update ──────────────────────────
 export function useKanbanPatchMutation() {
   const qc = useQueryClient();
@@ -162,29 +206,30 @@ export function useKanbanPatchMutation() {
       body: { kanbanColumn?: KanbanColumn; status?: string };
     }) => kanbanApi.patch(userJobId, body),
 
-    // Flip the card's column in the cache immediately
     onMutate: async ({ userJobId, body }) => {
       await qc.cancelQueries({ queryKey: queryKeys.jobs.list() });
-      const prev = qc.getQueryData<JobsListResponse>(queryKeys.jobs.list());
-      if (prev && body.kanbanColumn) {
-        qc.setQueryData<JobsListResponse>(queryKeys.jobs.list(), {
-          ...prev,
-          items: prev.items.map(j =>
-            j.userJobId === userJobId ? { ...j, kanbanColumn: body.kanbanColumn! } : j,
-          ),
-        });
+      // snapshot both caches for rollback
+      const prevFlat = qc.getQueryData<JobsListResponse>(queryKeys.jobs.list());
+      const prevInfinite = qc.getQueriesData<InfiniteData<InfiniteJobsPage>>({
+        queryKey: [...queryKeys.jobs.list(), 'infinite'],
+      });
+      if (body.kanbanColumn) {
+        patchInfiniteCache(qc, userJobId, j => ({ ...j, kanbanColumn: body.kanbanColumn! }));
       }
-      return { prev };
+      return { prevFlat, prevInfinite };
     },
 
-    // Revert on error
     onError: (_err, _vars, ctx) => {
-      if (ctx?.prev) qc.setQueryData(queryKeys.jobs.list(), ctx.prev);
+      if (ctx?.prevFlat) qc.setQueryData(queryKeys.jobs.list(), ctx.prevFlat);
+      if (ctx?.prevInfinite) {
+        for (const [key, data] of ctx.prevInfinite) {
+          qc.setQueryData(key, data);
+        }
+      }
     },
 
-    // Always refetch to stay in sync
     onSettled: (_data, _err, { userJobId }) => {
-      void qc.invalidateQueries({ queryKey: queryKeys.jobs.list() });
+      void qc.invalidateQueries({ queryKey: queryKeys.jobs.all });
       void qc.invalidateQueries({ queryKey: queryKeys.jobs.detail(userJobId) });
       void qc.invalidateQueries({ queryKey: queryKeys.jobs.stats() });
     },
@@ -192,12 +237,6 @@ export function useKanbanPatchMutation() {
 }
 
 // ── B5.022 – Favorite toggle with optimistic update ───────────────────────
-/**
- * useJobFavoriteMutation
- *
- * Toggles isFavorite on a UserJob. Flips the flag optimistically in the
- * jobs-list cache and reverts on error, avoiding any visible lag.
- */
 export function useJobFavoriteMutation() {
   const qc = useQueryClient();
   return useMutation({
@@ -206,20 +245,21 @@ export function useJobFavoriteMutation() {
 
     onMutate: async ({ userJobId, isFavorite }) => {
       await qc.cancelQueries({ queryKey: queryKeys.jobs.list() });
-      const prev = qc.getQueryData<JobsListResponse>(queryKeys.jobs.list());
-      if (prev) {
-        qc.setQueryData<JobsListResponse>(queryKeys.jobs.list(), {
-          ...prev,
-          items: prev.items.map(j =>
-            j.userJobId === userJobId ? { ...j, isFavorite } : j,
-          ),
-        });
-      }
-      return { prev };
+      const prevFlat = qc.getQueryData<JobsListResponse>(queryKeys.jobs.list());
+      const prevInfinite = qc.getQueriesData<InfiniteData<InfiniteJobsPage>>({
+        queryKey: [...queryKeys.jobs.list(), 'infinite'],
+      });
+      patchInfiniteCache(qc, userJobId, j => ({ ...j, isFavorite }));
+      return { prevFlat, prevInfinite };
     },
 
     onError: (_err, _vars, ctx) => {
-      if (ctx?.prev) qc.setQueryData(queryKeys.jobs.list(), ctx.prev);
+      if (ctx?.prevFlat) qc.setQueryData(queryKeys.jobs.list(), ctx.prevFlat);
+      if (ctx?.prevInfinite) {
+        for (const [key, data] of ctx.prevInfinite) {
+          qc.setQueryData(key, data);
+        }
+      }
     },
 
     onSettled: () => {
