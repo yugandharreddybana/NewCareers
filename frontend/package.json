@@ -34,6 +34,7 @@
     "react-helmet-async": "^3.0.0",
     "react-hot-toast": "^2.4.1",
     "react-router-dom": "^6.27.0",
+    "react-window": "^1.8.10",
     "recharts": "^2.13.0",
     "tailwind-merge": "^2.5.4",
     "web-vitals": "^5.2.0"
@@ -48,6 +49,7 @@
     "@types/react": "^18.3.12",
     "@types/react-dom": "^18.3.1",
     "@types/react-helmet-async": "^1.0.1",
+    "@types/react-window": "^1.8.8",
     "@vitejs/plugin-react": "^4.3.3",
     "@vitest/coverage-v8": "^2.0.0",
     "autoprefixer": "^10.4.20",
