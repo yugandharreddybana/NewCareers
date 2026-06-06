@@ -141,7 +141,7 @@ Legacy `users.ai_processing_consent` is **deprecated** (V114); `user_consents` i
 | `contact_interactions` | Notes, interaction history |
 | `outreach_*` | Campaign copy, message bodies |
 
-These tables reference `user_id`. They are **not individually scrubbed** by the current erasure service; they remain attached to the anonymized account UUID. Identity fields in `users` / `user_profiles` / CVs are removed so the UUID alone is not relinkable to a living identity without other leaks.
+Networking/outreach tables reference `user_id` and are **not individually scrubbed** by the current erasure service; they remain attached to the anonymized account UUID. By contrast, AI personal data (`skill_runs`, `ai_token_usage`, `career_memories`, `skill_conversations`) is **hard-deleted** on erasure. Identity fields in `users` / `user_profiles` / CVs are removed so the UUID alone is not relinkable to a living identity without other leaks.
 
 ### 8. Security & session artefacts
 
@@ -220,13 +220,13 @@ sequenceDiagram
 |-------------|----------------|
 | Email signup | `AuthService.register` → `recordSignupConsents` |
 | Google signup | `AuthService.createGoogleUser` → `recordSignupConsents` |
-| Account settings | `ConsentController` → `updateConsent` |
+| Account settings | `ConsentController` → `updateConsent`; AI withdrawal → `UserConsentController` → `withdrawAiConsent` |
 | AI skills | `UserConsentService.validateAiConsent` |
 | Marketing email | `requireMarketingConsent` |
 | Analytics | `hasAnalyticsConsent` / `requireAnalyticsConsent` |
 
 Frontend: `frontend/src/components/gdpr/PrivacySettingsSection.tsx`  
-API: `GET /consents`, `POST /consents` (proxied via middleware).
+API: `GET /consents`, `POST /consents`, `DELETE /user/consent/ai` (proxied via middleware).
 
 ---
 
@@ -236,13 +236,14 @@ API: `GET /consents`, `POST /consents` (proxied via middleware).
 |-------|--------------|-------------|---------|
 | **Access / portability** | Art. 15, 20 | **Export my data** on `/account` | `GET /account/export` → `GdprExportService` |
 | **Erasure** | Art. 17 | **Delete account** (password or Google re-auth) | `DELETE` or `POST /account/delete` → `UserAnonymizationService` |
-| **Restrict processing** | Art. 18 | Turn off AI / marketing / analytics consents | `POST /consents` |
+| **Restrict processing** | Art. 18 | Turn off AI / marketing / analytics consents | `POST /consents`; AI off → `DELETE /user/consent/ai` |
+| **Withdraw consent** | Art. 7(3) | Turn off AI processing (Account privacy) | `DELETE /user/consent/ai` → `withdrawAiConsent` (append-only row + 30-day `skill_runs` purge) |
 | **Object** | Art. 21 | Withdraw marketing / analytics | Same consent toggles |
 | **Information** | Art. 13–14 | Read `/privacy` | Static legal page |
 
 ### Export contents (`my-data.json`)
 
-Included: `UserExport` (no secrets), full `UserProfile`, CV metadata (`parsed_text`, `cv_markdown`, paths — **not** `file_data`), `user_jobs`, `audit_logs`, all `user_consents`.
+Included: `UserExport` (no secrets), full `UserProfile`, CV metadata (`parsed_text`, `cv_markdown`, paths — **not** `file_data`), `user_jobs`, `audit_logs`, all `user_consents`, **`skill_runs`** (full JSON `output` + `resumeHtml` for tailored CVs), **`token_usage`** (feature, model, tokens used, date).
 
 Excluded: `password_hash`, `google_sub`, raw CV bytes.
 
@@ -255,6 +256,7 @@ sequenceDiagram
     participant Anon as UserAnonymizationService
     participant Auth as AuthService
     participant CV as CvService
+    participant AI as AI_tables
     participant Store as SupabaseStorage
 
     User->>Account: DELETE /account { password | idToken }
@@ -264,9 +266,10 @@ sequenceDiagram
     Anon->>Anon: scrubProfile (clear PII fields)
     Anon->>Anon: users.email → deleted_{uuid}@redacted.invalid
     Note over Anon: name → "Deleted User", clear password/google_sub, set deleted_at
+    Anon->>AI: delete skill_runs, ai_token_usage, career_memories, skill_conversations
+    Anon->>Anon: audit ACCOUNT_DELETED_GDPR
     Anon->>Anon: audit_logs.nullifyUserId
     Anon->>Store: purgeUserFiles(userId prefix)
-    Anon->>Anon: audit ACCOUNT_DELETED_GDPR
 ```
 
 **Soft-delete model:** the `users` row is retained with pseudonymous identifiers for referential integrity. `@SQLRestriction` prevents the account from authenticating or appearing in normal queries.
@@ -283,10 +286,10 @@ Cron: `CronJobService.runGdprRetentionCleanup` — **03:00 Europe/Dublin** daily
 | `password_resets` | **30 days** | `deleteByCreatedAtBefore` |
 | `refresh_tokens` | Until `expires_at` | `deleteByExpiresAtBefore` (+ logout paths) |
 | `user_consents` for deleted users | **30 days** after `users.deleted_at` | `deleteForUsersDeletedBefore` |
-| `skill_runs` | Skill-specific TTL (1–7 days) or none | `expires_at` on row |
+| `skill_runs` | **90-day global cap** (`created_at`); 24–48h cache TTL while active (`expires_at`); **30-day per-user purge on AI consent withdrawal**; **deleted on account erasure** | `deleteByCreatedAtBefore` in `runGdprRetentionCleanup`; `pruneExpiredSkillRuns`; `deleteByUserIdAndCreatedAtBefore`; `deleteAllByUserId` |
 | `email_verifications` | Until consumed / expired | Application logic |
 
-Each cleanup run writes `GDPR_RETENTION_CLEANUP` to `audit_logs` with deletion counts.
+Each cleanup run writes `GDPR_RETENTION_CLEANUP` to `audit_logs` with deletion counts (`auditLogsDeleted`, `passwordResetsDeleted`, `refreshTokensDeleted`, `userConsentsDeleted`, `skillRunsDeleted`).
 
 ---
 

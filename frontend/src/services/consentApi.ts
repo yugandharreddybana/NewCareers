@@ -23,6 +23,15 @@ export interface UpdateConsentBody {
   accepted: boolean;
 }
 
+export interface AiConsentWithdrawalResponse {
+  id: string;
+  consentType: ConsentType;
+  version: string;
+  accepted: boolean;
+  acceptedAt: string;
+  skillRunsDeleted: number;
+}
+
 export const consentApi = {
   getConsents: (): Promise<ConsentStatusResponse> =>
     api.get<ConsentStatusResponse>('/consents').then(r => r.data),
@@ -35,4 +44,7 @@ export const consentApi = {
         accepted,
       } satisfies UpdateConsentBody)
       .then(() => undefined),
+
+  withdrawAiConsent: (): Promise<AiConsentWithdrawalResponse> =>
+    api.delete<AiConsentWithdrawalResponse>('/user/consent/ai').then(r => r.data),
 };

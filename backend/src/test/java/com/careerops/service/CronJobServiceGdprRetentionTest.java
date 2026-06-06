@@ -68,6 +68,7 @@ class CronJobServiceGdprRetentionTest {
         when(passwordResets.deleteByCreatedAtBefore(any())).thenReturn(3);
         when(refreshTokens.deleteByExpiresAtBefore(any())).thenReturn(7);
         when(userConsents.deleteForUsersDeletedBefore(any())).thenReturn(2);
+        when(skillRuns.deleteByCreatedAtBefore(any())).thenReturn(5);
 
         Instant before = Instant.now();
         cronJobService.runGdprRetentionCleanup();
@@ -92,6 +93,11 @@ class CronJobServiceGdprRetentionTest {
         assertThat(consentCutoff.getValue())
                 .isBetween(before.minus(31, ChronoUnit.DAYS), after.minus(29, ChronoUnit.DAYS));
 
+        ArgumentCaptor<Instant> skillRunCutoff = ArgumentCaptor.forClass(Instant.class);
+        verify(skillRuns).deleteByCreatedAtBefore(skillRunCutoff.capture());
+        assertThat(skillRunCutoff.getValue())
+                .isBetween(before.minus(91, ChronoUnit.DAYS), after.minus(89, ChronoUnit.DAYS));
+
         @SuppressWarnings("unchecked")
         ArgumentCaptor<Map<String, Object>> metadataCaptor = ArgumentCaptor.forClass(Map.class);
         verify(audit).log(isNull(), eq("GDPR_RETENTION_CLEANUP"), isNull(), metadataCaptor.capture());
@@ -100,6 +106,7 @@ class CronJobServiceGdprRetentionTest {
                 .containsEntry("auditLogsDeleted", 10)
                 .containsEntry("passwordResetsDeleted", 3)
                 .containsEntry("refreshTokensDeleted", 7)
-                .containsEntry("userConsentsDeleted", 2);
+                .containsEntry("userConsentsDeleted", 2)
+                .containsEntry("skillRunsDeleted", 5);
     }
 }

@@ -3,7 +3,11 @@ package com.careerops.service;
 import com.careerops.exception.ApiException;
 import com.careerops.model.User;
 import com.careerops.model.UserProfile;
+import com.careerops.repository.AiTokenUsageRepository;
 import com.careerops.repository.AuditLogRepository;
+import com.careerops.repository.CareerMemoryRepository;
+import com.careerops.repository.SkillConversationRepository;
+import com.careerops.repository.SkillRunRepository;
 import com.careerops.repository.UserProfileRepository;
 import com.careerops.repository.UserRepository;
 import jakarta.servlet.http.HttpServletRequest;
@@ -28,6 +32,10 @@ public class UserAnonymizationService {
     private final SupabaseStorageService storage;
     private final AuditLogService audit;
     private final AuditLogRepository auditLogs;
+    private final SkillRunRepository skillRuns;
+    private final AiTokenUsageRepository tokenUsage;
+    private final CareerMemoryRepository careerMemories;
+    private final SkillConversationRepository skillConversations;
 
     public UserAnonymizationService(
             UserRepository users,
@@ -36,7 +44,11 @@ public class UserAnonymizationService {
             CvService cvService,
             SupabaseStorageService storage,
             AuditLogService audit,
-            AuditLogRepository auditLogs) {
+            AuditLogRepository auditLogs,
+            SkillRunRepository skillRuns,
+            AiTokenUsageRepository tokenUsage,
+            CareerMemoryRepository careerMemories,
+            SkillConversationRepository skillConversations) {
         this.users = users;
         this.profiles = profiles;
         this.authService = authService;
@@ -44,6 +56,10 @@ public class UserAnonymizationService {
         this.storage = storage;
         this.audit = audit;
         this.auditLogs = auditLogs;
+        this.skillRuns = skillRuns;
+        this.tokenUsage = tokenUsage;
+        this.careerMemories = careerMemories;
+        this.skillConversations = skillConversations;
     }
 
     @Transactional(timeout = 30)
@@ -69,6 +85,16 @@ public class UserAnonymizationService {
         user.setGoogleSub(null);
         user.setDeletedAt(deletedAt);
         users.save(user);
+
+        int skillRunsDeleted = skillRuns.deleteAllByUserId(userId);
+        tokenUsage.deleteAllByUserId(userId);
+        careerMemories.deleteByUserId(userId);
+        int conversationsDeleted = skillConversations.deleteAllByUserId(userId);
+        log.info("Deleted AI personal data for userId={}: skillRuns={} conversations={}",
+                userId, skillRunsDeleted, conversationsDeleted);
+
+        audit.log(userId, "GDPR_ERASURE_COMPLETE", request, Map.of(
+                "message", "Cascade deleted skill_runs, token_usage, career_memory for userId=" + userId));
 
         audit.log(userId, "ACCOUNT_DELETED_GDPR", request, Map.of("deletedAt", deletedAt.toString()));
 

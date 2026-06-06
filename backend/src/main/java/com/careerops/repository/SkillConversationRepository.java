@@ -55,4 +55,14 @@ public interface SkillConversationRepository extends JpaRepository<SkillConversa
     @Transactional
     @Query("DELETE FROM SkillConversation sc WHERE sc.expiresAt < :now AND sc.status = 'pending_answer'")
     int deleteAllExpired(@Param("now") Instant now);
+
+    @Modifying
+    @Transactional
+    @Query("DELETE FROM SkillConversation sc WHERE sc.userId = :userId")
+    int deleteAllByUserId(@Param("userId") UUID userId);
+
+    @Modifying
+    @Transactional
+    void deleteByUserIdAndSkillAndUserJobIdAndStatus(
+            UUID userId, String skill, UUID userJobId, String status);
 }

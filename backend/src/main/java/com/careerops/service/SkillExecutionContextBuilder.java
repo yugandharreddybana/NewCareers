@@ -1,5 +1,6 @@
 package com.careerops.service;
 
+import com.careerops.dto.SkillExecutionContext;
 import com.careerops.dto.SkillStartRequest;
 import com.careerops.model.Job;
 import com.careerops.model.SkillRun;
@@ -29,6 +30,9 @@ public class SkillExecutionContextBuilder {
     private static final int MAX_CV = 14_000;
     private static final int MAX_JD = 10_000;
     private static final int MAX_EVAL_SNIPPET = 4_000;
+    /** Agent tool-loop system prompt — smaller token budget than SKILL.md user message. */
+    private static final int MAX_INLINE_CV = 6_000;
+    private static final int MAX_INLINE_JD = 3_000;
 
     private final UserProfileRepository profiles;
     private final UserJobRepository userJobs;
@@ -56,6 +60,18 @@ public class SkillExecutionContextBuilder {
         this.watchlist = watchlist;
         this.companyWebResearch = companyWebResearch;
         this.mapper = mapper;
+    }
+
+    /**
+     * Pre-load profile, CV, and job for NvidiaAgentService system-prompt injection.
+     */
+    public SkillExecutionContext build(UUID userId, UUID userJobId, String skillName) {
+        StringBuilder sb = new StringBuilder();
+        sb.append("=== PRE-LOADED CONTEXT (do NOT call read_profile, read_resume, or read_job — data is already here) ===\n");
+        appendInlineProfile(sb, userId);
+        appendInlineCv(sb, userId);
+        appendInlineJob(sb, userId, userJobId);
+        return new SkillExecutionContext(userId, userJobId, skillName, sb.toString());
     }
 
     public String buildUserMessage(String skill, UUID userId, UUID userJobId, SkillStartRequest req) {
@@ -278,6 +294,70 @@ public class SkillExecutionContextBuilder {
         return userJobs.findByIdAndUserId(userJobId, userId)
             .flatMap(uj -> jobs.findById(uj.getJobId()))
             .orElse(null);
+    }
+
+    private void appendInlineProfile(StringBuilder sb, UUID userId) {
+        try {
+            profiles.findByUserId(userId).ifPresent(p -> {
+                sb.append("\n--- USER PROFILE ---\n");
+                if (p.getTargetRoles() != null) {
+                    sb.append("target_roles: ").append(Arrays.toString(p.getTargetRoles())).append("\n");
+                }
+                if (p.getTechStack() != null) {
+                    sb.append("tech_stack: ").append(Arrays.toString(p.getTechStack())).append("\n");
+                }
+                if (p.getLocation() != null) sb.append("location: ").append(p.getLocation()).append("\n");
+                if (p.getSalaryMin() != null) sb.append("salary_min: ").append(p.getSalaryMin()).append("\n");
+                if (p.getSalaryMax() != null) sb.append("salary_max: ").append(p.getSalaryMax()).append("\n");
+                if (p.getExperienceLevel() != null) {
+                    sb.append("experience_level: ").append(p.getExperienceLevel()).append("\n");
+                }
+                if (p.getSponsorshipRequired() != null) {
+                    sb.append("sponsorship_required: ").append(p.getSponsorshipRequired()).append("\n");
+                }
+            });
+        } catch (Exception ignored) {
+            // Match NvidiaAgentService: one failed section must not break the rest
+        }
+    }
+
+    private void appendInlineCv(StringBuilder sb, UUID userId) {
+        try {
+            String cv = cvService.activeCvText(userId);
+            if (cv == null || cv.isBlank()) {
+                String md = cvService.activeCvMarkdown(userId);
+                if (md != null && !md.isBlank()) cv = md;
+            }
+            if (cv != null && !cv.isBlank()) {
+                String truncated = cv.length() > MAX_INLINE_CV
+                        ? cv.substring(0, MAX_INLINE_CV) + "\n...[CV truncated]"
+                        : cv;
+                sb.append("\n--- USER CV/RESUME ---\n").append(truncated).append("\n");
+            }
+        } catch (Exception ignored) {
+            // Match NvidiaAgentService: one failed section must not break the rest
+        }
+    }
+
+    private void appendInlineJob(StringBuilder sb, UUID userId, UUID userJobId) {
+        if (userJobId == null) return;
+        try {
+            userJobs.findByIdAndUserId(userJobId, userId).ifPresent(uj ->
+                jobs.findById(uj.getJobId()).ifPresent(j -> {
+                    sb.append("\n--- JOB POSTING ---\n");
+                    sb.append("title: ").append(j.getTitle()).append("\n");
+                    sb.append("company: ").append(j.getCompany()).append("\n");
+                    sb.append("location: ").append(j.getLocation()).append("\n");
+                    String desc = j.getDescription() != null ? j.getDescription() : "";
+                    String truncDesc = desc.length() > MAX_INLINE_JD
+                            ? desc.substring(0, MAX_INLINE_JD) + "\n...[truncated]"
+                            : desc;
+                    sb.append("description:\n").append(truncDesc).append("\n");
+                })
+            );
+        } catch (Exception ignored) {
+            // Match NvidiaAgentService: one failed section must not break the rest
+        }
     }
 
     private static boolean matchesCompany(UserJob uj, String filter) {

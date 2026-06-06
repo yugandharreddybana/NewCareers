@@ -1,5 +1,6 @@
 package com.careerops.dto;
 
+import com.careerops.model.UserConsent;
 import com.careerops.model.UserConsent.ConsentType;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
@@ -43,5 +44,19 @@ public class ConsentDtos {
             ConsentTypeStatus aiProcessing,
             ConsentTypeStatus marketing,
             ConsentTypeStatus analytics
+    ) {}
+
+    public record WithdrawAiConsentResult(
+            UserConsent consent,
+            int skillRunsDeleted
+    ) {}
+
+    public record AiConsentWithdrawalResponse(
+            UUID id,
+            ConsentType consentType,
+            String version,
+            boolean accepted,
+            Instant acceptedAt,
+            int skillRunsDeleted
     ) {}
 }

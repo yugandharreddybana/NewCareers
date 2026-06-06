@@ -1,11 +1,14 @@
 package com.careerops.dto;
 
+import com.careerops.model.AiTokenUsage;
 import com.careerops.model.AuditLog;
+import com.careerops.model.SkillRun;
 import com.careerops.model.User;
 import com.careerops.model.UserConsent;
 import com.careerops.model.UserCv;
 import com.careerops.model.UserJob;
 import com.careerops.model.UserProfile;
+import com.fasterxml.jackson.annotation.JsonProperty;
 import com.fasterxml.jackson.databind.JsonNode;
 
 import java.time.Instant;
@@ -27,8 +30,46 @@ public final class GdprExportDtos {
             List<UserCvExport> cvs,
             List<UserJob> jobs,
             List<AuditLog> auditLogs,
-            List<UserConsent> consents
+            List<UserConsent> consents,
+            @JsonProperty("skill_runs") List<SkillRunExport> skillRuns,
+            @JsonProperty("token_usage") List<TokenUsageExport> tokenUsage
     ) {}
+
+    public record SkillRunExport(
+            UUID id,
+            UUID userJobId,
+            String skill,
+            Instant createdAt,
+            Instant expiresAt,
+            JsonNode output,
+            String resumeHtml
+    ) {
+        public static SkillRunExport from(SkillRun sr) {
+            return new SkillRunExport(
+                    sr.getId(),
+                    sr.getUserJobId(),
+                    sr.getSkill(),
+                    sr.getCreatedAt(),
+                    sr.getExpiresAt(),
+                    sr.getOutput(),
+                    sr.getResumeHtml());
+        }
+    }
+
+    public record TokenUsageExport(
+            String feature,
+            String model,
+            @JsonProperty("tokens_used") int tokensUsed,
+            @JsonProperty("date") Instant date
+    ) {
+        public static TokenUsageExport from(AiTokenUsage tu) {
+            return new TokenUsageExport(
+                    tu.getFeature(),
+                    tu.getModel(),
+                    tu.getTotalTokens(),
+                    tu.getCreatedAt());
+        }
+    }
 
     public record UserExport(
             UUID id,

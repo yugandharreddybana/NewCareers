@@ -51,6 +51,8 @@ public interface SkillRunRepository extends JpaRepository<SkillRun, UUID> {
     /**
      * Get all runs for a job — used for run-all status + PDF generation.
      */
+    List<SkillRun> findAllByUserIdOrderByCreatedAtDesc(UUID userId);
+
     List<SkillRun> findAllByUserIdAndUserJobIdOrderByCreatedAtDesc(UUID userId, UUID userJobId);
 
     Page<SkillRun> findByUserIdAndUserJobIdOrderByCreatedAtDesc(UUID userId, UUID userJobId, Pageable pageable);
@@ -82,5 +84,28 @@ public interface SkillRunRepository extends JpaRepository<SkillRun, UUID> {
     @Query("DELETE FROM SkillRun sr WHERE sr.expiresAt < :now")
     int deleteAllExpired(@Param("now") Instant now);
 
+    @Modifying
+    @Transactional
+    @Query("DELETE FROM SkillRun sr WHERE sr.userId = :userId")
+    int deleteAllByUserId(@Param("userId") UUID userId);
+
     long countByUserIdAndCreatedAtAfter(UUID userId, Instant since);
+
+    /**
+     * GDPR Art. 7(3): purge AI skill outputs older than retention cutoff on consent withdrawal.
+     */
+    @Modifying
+    @Transactional
+    @Query("DELETE FROM SkillRun sr WHERE sr.userId = :userId AND sr.createdAt < :cutoff")
+    int deleteByUserIdAndCreatedAtBefore(
+            @Param("userId") UUID userId,
+            @Param("cutoff") Instant cutoff);
+
+    /**
+     * GDPR Art. 5(1)(e): global retention cap — purge skill outputs older than cutoff (all users).
+     */
+    @Modifying
+    @Transactional
+    @Query("DELETE FROM SkillRun sr WHERE sr.createdAt < :cutoff")
+    int deleteByCreatedAtBefore(@Param("cutoff") Instant cutoff);
 }

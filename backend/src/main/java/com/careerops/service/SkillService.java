@@ -28,6 +28,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
+import jakarta.annotation.PreDestroy;
 import jakarta.persistence.EntityManager;
 import jakarta.persistence.PersistenceContext;
 import org.slf4j.Logger;
@@ -41,6 +42,7 @@ import org.springframework.transaction.support.TransactionTemplate;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
 import java.util.*;
+import java.util.concurrent.TimeUnit;
 
 /**
  * Orchestrates all CareerOps skills using bundled SKILL.md instructions.
@@ -69,6 +71,11 @@ public class SkillService {
         "evaluate",       "CV Evaluation",
         "research",       "Company Research",
         "prep-interview", "Interview Prep"
+    );
+
+    private static final Set<String> EMAIL_NOTIFY_SKILLS = Set.of(
+            "evaluate", "research", "prep-interview",
+            "tailor-resume", "cover-letter", "outreach"
     );
 
     @PersistenceContext
@@ -107,6 +114,21 @@ public class SkillService {
 
     private final java.util.concurrent.ExecutorService batchExecutor =
             java.util.concurrent.Executors.newFixedThreadPool(4);
+
+    @PreDestroy
+    public void shutdownBatchExecutor() {
+        log.info("Shutting down SkillService batchExecutor...");
+        batchExecutor.shutdown();
+        try {
+            if (!batchExecutor.awaitTermination(30, TimeUnit.SECONDS)) {
+                log.warn("batchExecutor did not terminate in 30s, forcing shutdown");
+                batchExecutor.shutdownNow();
+            }
+        } catch (InterruptedException e) {
+            batchExecutor.shutdownNow();
+            Thread.currentThread().interrupt();
+        }
+    }
 
     @Value("${skill.conversation.expire.minutes:30}")
     private int conversationExpireMinutes;
@@ -338,22 +360,25 @@ public class SkillService {
         });
 
         SkillStartRequest req = new SkillStartRequest(skill, userJobId, null, null, null, null, null, null);
+        // 1. Run AI outside transaction (can take 30-60s)
+        JsonNode output = skillMdExecutor.execute(skill, userId, userJobId, req, supplement);
+        if ("evaluate".equals(skill)) {
+            output = normalizeEvaluateOutput(output, userJobId);
+        }
+        // 2. Save result in short write transaction
+        final JsonNode finalOutput = output;
         return writeTx.execute(status -> {
-            JsonNode output = skillMdExecutor.execute(skill, userId, userJobId, req, supplement);
-            if ("evaluate".equals(skill)) {
-                output = normalizeEvaluateOutput(output, userJobId);
-            }
             SkillRun run = SkillRun.builder()
                 .userId(userId)
                 .userJobId(userJobId)
                 .skill(skill)
                 .input(mapper.createObjectNode())
-                .output(output)
+                .output(finalOutput)
                 .expiresAt(computeExpiry(skill))
                 .build();
             skillRuns.save(run);
             triggerSkillCompleteEvents(skill, userId, userJobId);
-            return SkillRunResponse.result(skill, output);
+            return SkillRunResponse.result(skill, finalOutput);
         });
     }
 
@@ -378,10 +403,9 @@ public class SkillService {
                 } else if (resp.type() == SkillRunResponse.Type.QUESTION) {
                     pending++;
                 } else if (resp.type() == SkillRunResponse.Type.PROFILE_INCOMPLETE) {
-                    results.clear();
+                    failed++;
                     results.put(skill, resp);
-                    return new RunAllSkillsResponse(
-                            SkillPromptLibrary.ALL_SKILLS.size(), 0, 1, 0, results);
+                    // Do NOT clear or return early — continue running other skills
                 } else {
                     failed++;
                 }
@@ -448,7 +472,7 @@ public class SkillService {
                 .findAllByUserIdAndUserJobIdOrderByCreatedAtDesc(userId, b.getUserJobId());
         Map<String, SkillRunResponse> results = new LinkedHashMap<>();
         for (SkillRun r : runs) {
-            if (r.getCreatedAt().isAfter(b.getCreatedAt()) && !results.containsKey(r.getSkill())) {
+            if (!r.getCreatedAt().isBefore(b.getCreatedAt()) && !results.containsKey(r.getSkill())) {
                 results.put(r.getSkill(), SkillRunResponse.result(r.getSkill(), r.getOutput()));
             }
         }
@@ -608,6 +632,10 @@ public class SkillService {
      * Non-fatal — failures never affect the skill save or HTTP response.
      */
     private void triggerSkillCompleteEvents(String skill, UUID userId, UUID userJobId) {
+        if (!EMAIL_NOTIFY_SKILLS.contains(skill)) {
+            log.debug("Skipping completion email for non-notifiable skill={}", skill);
+            return;
+        }
         try {
             String displayName = SKILL_DISPLAY_NAMES.getOrDefault(
                     skill,
@@ -722,10 +750,8 @@ public class SkillService {
 
     private void clearStaleConversation(UUID userId, String skill, UUID userJobId) {
         writeTx.executeWithoutResult(status ->
-            conversations.findByUserIdAndStatus(userId, "pending_answer").stream()
-                .filter(c -> skill.equals(c.getSkill()))
-                .filter(c -> userJobId == null || userJobId.equals(c.getUserJobId()))
-                .forEach(conversations::delete));
+            conversations.deleteByUserIdAndSkillAndUserJobIdAndStatus(
+                userId, skill, userJobId, "pending_answer"));
     }
 
     private void invalidateSkillCache(UUID userId, UUID userJobId, String skill) {
@@ -740,6 +766,8 @@ public class SkillService {
 
     private JsonNode normalizeTailorResumeOutput(
             JsonNode output, UUID userId, UUID userJobId, boolean fromDedicatedPipeline) {
+        UserProfile profile = loadProfile(userId);
+        Job job = loadJob(userJobId);
         com.fasterxml.jackson.databind.node.ObjectNode out = output != null && output.isObject()
                 ? (com.fasterxml.jackson.databind.node.ObjectNode) output.deepCopy()
                 : mapper.createObjectNode();
@@ -764,7 +792,7 @@ public class SkillService {
             mergeTailorFromBuilder(out, userId, userJobId, baseline);
         } else if (!fromDedicatedPipeline && summary.isBlank() && !baseline.isBlank()) {
             out.put("summary", tailorResumeBuilder.build(
-                    userId, loadProfile(userId), loadJob(userJobId), baseline, "normalize")
+                    userId, profile, job, baseline, "normalize")
                 .path("summary").asText(""));
         }
         if (!out.has("keywordsAdded") || !out.get("keywordsAdded").isArray()) {
@@ -776,8 +804,6 @@ public class SkillService {
                 : mapper.createArrayNode();
         appendProfessionalSummaryWarnings(out.path("summary").asText(""), warnings);
         out.set("warnings", warnings);
-        UserProfile profile = loadProfile(userId);
-        Job job = loadJob(userJobId);
         if (out instanceof com.fasterxml.jackson.databind.node.ObjectNode outNode) {
             tailorResumeBuilder.repairExperienceSectionsInPlace(outNode, profile, job, userId);
         }
@@ -787,7 +813,7 @@ public class SkillService {
                 && out.path("resumeHtml").asText("").isBlank()
                 && userJobId != null) {
             ObjectNode built = tailorResumeBuilder.build(
-                    userId, profile, loadJob(userJobId), baseline, "normalize");
+                    userId, profile, job, baseline, "normalize");
             out.put("resumeHtml", built.path("resumeHtml").asText(""));
             out.set("sections", built.path("sections"));
             out.put("tailoredMarkdown", built.path("tailoredMarkdown").asText(""));
@@ -800,8 +826,10 @@ public class SkillService {
             UUID userId,
             UUID userJobId,
             String baseline) {
+        UserProfile profile = loadProfile(userId);
+        Job job = loadJob(userJobId);
         ObjectNode built = tailorResumeBuilder.build(
-                userId, loadProfile(userId), loadJob(userJobId), baseline, "merged");
+                userId, profile, job, baseline, "merged");
         if (out.path("summary").asText("").isBlank()) {
             out.put("summary", built.path("summary").asText(""));
         }
@@ -809,7 +837,7 @@ public class SkillService {
         if (out.path("keywordsAdded").isEmpty()) {
             out.set("keywordsAdded", built.path("keywordsAdded"));
         }
-        tailorResumeBuilder.attachRenderedPreview(out, loadProfile(userId), userId, loadJob(userJobId));
+        tailorResumeBuilder.attachRenderedPreview(out, profile, userId, job);
         out.put("baselineMarkdown", built.path("baselineMarkdown").asText(""));
     }
 
@@ -869,7 +897,8 @@ public class SkillService {
             return;
         }
         String trimmed = summary.trim();
-        long sentenceCount = java.util.Arrays.stream(trimmed.split("(?<=[.!?])\\s+"))
+        long sentenceCount = java.util.Arrays.stream(
+                trimmed.split("(?<=[.!?])(?=\\s+[A-Z])"))
                 .map(String::trim)
                 .filter(s -> !s.isBlank())
                 .count();
@@ -1040,10 +1069,11 @@ public class SkillService {
 
     private Optional<SkillRunResponse> tryCachedSkillRun(
             String skill, UUID userId, UUID userJobId, Boolean forceRefresh) {
+        // Job-scoped skill cache: skill_runs + expires_at (not AiEvalCacheService — that is eval-score only).
         if (userJobId == null || Boolean.TRUE.equals(forceRefresh) || !SkillRunCachePolicy.isCacheable(skill)) {
             return Optional.empty();
         }
-        return readTx.execute(status -> {
+        Optional<SkillRunResponse> txResult = readTx.execute(status -> {
             Optional<SkillRun> cached = skillRuns.findValidCachedRun(userId, userJobId, skill, Instant.now());
             if (cached.isEmpty()) {
                 return Optional.empty();
@@ -1051,6 +1081,7 @@ public class SkillService {
             log.info("Returning cached result for skill={} userJobId={}", skill, userJobId);
             return Optional.of(SkillRunResponse.result(skill, cached.get().getOutput()));
         });
+        return txResult != null ? txResult : Optional.empty();
     }
 
     private static boolean isBudgetDegradableSkill(String skill) {

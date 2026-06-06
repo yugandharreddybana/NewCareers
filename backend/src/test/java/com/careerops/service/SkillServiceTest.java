@@ -20,6 +20,7 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.test.util.ReflectionTestUtils;
 import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.TransactionDefinition;
 import org.springframework.transaction.support.AbstractPlatformTransactionManager;
 import org.springframework.transaction.support.DefaultTransactionStatus;
 
@@ -74,6 +75,9 @@ class SkillServiceTest {
             protected Object doGetTransaction() {
                 return new Object();
             }
+
+            @Override
+            protected void doBegin(Object transaction, TransactionDefinition definition) {}
 
             @Override
             protected void doCommit(DefaultTransactionStatus status) {}
@@ -137,7 +141,8 @@ class SkillServiceTest {
         cached.setExpiresAt(Instant.now().plusSeconds(3600));
 
         doNothing().when(consentService).validateAiConsent(userId);
-        when(conversations.findByUserIdAndStatus(userId, "pending_answer")).thenReturn(Collections.emptyList());
+        doNothing().when(conversations).deleteByUserIdAndSkillAndUserJobIdAndStatus(
+                eq(userId), eq(skill), eq(userJobId), eq("pending_answer"));
         when(skillRuns.findValidCachedRun(eq(userId), eq(userJobId), eq(skill), any(Instant.class)))
                 .thenReturn(Optional.of(cached));
 
@@ -160,7 +165,8 @@ class SkillServiceTest {
 
         ReflectionTestUtils.setField(skillService, "dailyTokenBudget", 500_000L);
         doNothing().when(consentService).validateAiConsent(userId);
-        when(conversations.findByUserIdAndStatus(userId, "pending_answer")).thenReturn(Collections.emptyList());
+        doNothing().when(conversations).deleteByUserIdAndSkillAndUserJobIdAndStatus(
+                eq(userId), eq(skill), eq(userJobId), eq("pending_answer"));
         when(tokenUsageService.hasExceededBudget(userId, 500_000L)).thenReturn(false);
         when(catalogSkills.handles(skill)).thenReturn(false);
         when(registry.handles(skill)).thenReturn(false);

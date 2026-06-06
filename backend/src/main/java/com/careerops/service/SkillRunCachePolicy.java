@@ -21,12 +21,7 @@ public final class SkillRunCachePolicy {
             "prep-interview",
             "apply",
             "outreach",
-            "tailor-resume",
-            "salary-negotiation",
-            "culture-fit",
-            "linkedin-optimize",
-            "cover-letter",
-            "skills-gap-plan"
+            "tailor-resume"
     );
 
     private SkillRunCachePolicy() {}

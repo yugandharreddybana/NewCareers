@@ -60,6 +60,7 @@ import cv from './routes/cv.routes.js';
 import billing from './routes/billing.routes.js';
 import usage from './routes/usage.routes.js';
 import consents from './routes/consents.routes.js';
+import userConsent from './routes/user.consent.routes.js';
 import account from './routes/account.routes.js';
 import publicRoutes from './routes/public.routes.js';
 import { forward } from './services/backendProxy.js';
@@ -333,6 +334,7 @@ app.use('/api/v1/cv', cv);
 app.use('/api/v1/billing', billing);
 app.use('/api/v1/usage', usage);
 app.use('/api/v1/consents', consents);
+app.use('/api/v1/user/consent', userConsent);
 app.use('/api/v1/account', account);
 app.use('/api/v1/public', publicRoutes); // Pass 6 #6.016 — unauthenticated stats
 

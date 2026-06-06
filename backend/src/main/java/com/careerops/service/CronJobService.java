@@ -49,6 +49,7 @@ public class CronJobService {
     private static final int AUDIT_LOG_RETAIN_DAYS = 365;
     private static final int PASSWORD_RESET_RETAIN_DAYS = 30;
     private static final int DELETED_USER_CONSENT_RETAIN_DAYS = 30;
+    private static final int SKILL_RUN_RETAIN_DAYS = 90;
     /** Number of days ahead to look for upcoming deadlines. */
     private static final int DEADLINE_LOOKAHEAD_DAYS = 2;
 
@@ -142,15 +143,18 @@ public class CronJobService {
             int refreshTokensDeleted = refreshTokens.deleteByExpiresAtBefore(now);
             int consentsDeleted = userConsents.deleteForUsersDeletedBefore(
                     now.minus(DELETED_USER_CONSENT_RETAIN_DAYS, ChronoUnit.DAYS));
+            int skillRunsDeleted = skillRuns.deleteByCreatedAtBefore(
+                    now.minus(SKILL_RUN_RETAIN_DAYS, ChronoUnit.DAYS));
 
             audit.log(null, "GDPR_RETENTION_CLEANUP", null, Map.of(
                     "auditLogsDeleted", auditDeleted,
                     "passwordResetsDeleted", passwordResetsDeleted,
                     "refreshTokensDeleted", refreshTokensDeleted,
-                    "userConsentsDeleted", consentsDeleted));
+                    "userConsentsDeleted", consentsDeleted,
+                    "skillRunsDeleted", skillRunsDeleted));
 
-            log.info("GDPR retention cleanup: audit={} passwordResets={} refreshTokens={} consents={}",
-                    auditDeleted, passwordResetsDeleted, refreshTokensDeleted, consentsDeleted);
+            log.info("GDPR retention cleanup: audit={} passwordResets={} refreshTokens={} consents={} skillRuns={}",
+                    auditDeleted, passwordResetsDeleted, refreshTokensDeleted, consentsDeleted, skillRunsDeleted);
         } catch (Exception e) {
             log.warn("GDPR retention cleanup failed: {}", e.getMessage());
             meterRegistry.counter("cron.job.failed", "job", "runGdprRetentionCleanup").increment();

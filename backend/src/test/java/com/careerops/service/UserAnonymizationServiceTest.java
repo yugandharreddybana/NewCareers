@@ -2,7 +2,11 @@ package com.careerops.service;
 
 import com.careerops.model.User;
 import com.careerops.model.UserProfile;
+import com.careerops.repository.AiTokenUsageRepository;
 import com.careerops.repository.AuditLogRepository;
+import com.careerops.repository.CareerMemoryRepository;
+import com.careerops.repository.SkillConversationRepository;
+import com.careerops.repository.SkillRunRepository;
 import com.careerops.repository.UserProfileRepository;
 import com.careerops.repository.UserRepository;
 import jakarta.servlet.http.HttpServletRequest;
@@ -36,6 +40,10 @@ class UserAnonymizationServiceTest {
     @Mock SupabaseStorageService storage;
     @Mock AuditLogService audit;
     @Mock AuditLogRepository auditLogs;
+    @Mock SkillRunRepository skillRuns;
+    @Mock AiTokenUsageRepository tokenUsage;
+    @Mock CareerMemoryRepository careerMemories;
+    @Mock SkillConversationRepository skillConversations;
     @Mock HttpServletRequest request;
 
     @InjectMocks UserAnonymizationService service;
@@ -67,14 +75,22 @@ class UserAnonymizationServiceTest {
         when(profiles.findByUserId(userId)).thenReturn(Optional.of(profile));
         when(users.save(any(User.class))).thenAnswer(inv -> inv.getArgument(0));
         when(profiles.save(any(UserProfile.class))).thenAnswer(inv -> inv.getArgument(0));
+        when(skillRuns.deleteAllByUserId(userId)).thenReturn(3);
+        when(skillConversations.deleteAllByUserId(userId)).thenReturn(1);
 
         service.anonymizeAndDelete(userId, request);
 
-        InOrder order = inOrder(authService, cvService, profiles, users, audit, auditLogs, storage);
+        InOrder order = inOrder(authService, cvService, profiles, users, skillRuns, tokenUsage,
+                careerMemories, skillConversations, audit, auditLogs, storage);
         order.verify(authService).revokeAllTokensForUser(userId);
         order.verify(cvService).deleteAllForUser(userId);
         order.verify(profiles).save(any(UserProfile.class));
         order.verify(users).save(any(User.class));
+        order.verify(skillRuns).deleteAllByUserId(userId);
+        order.verify(tokenUsage).deleteAllByUserId(userId);
+        order.verify(careerMemories).deleteByUserId(userId);
+        order.verify(skillConversations).deleteAllByUserId(userId);
+        order.verify(audit).log(eq(userId), eq("GDPR_ERASURE_COMPLETE"), eq(request), any(Map.class));
         order.verify(audit).log(eq(userId), eq("ACCOUNT_DELETED_GDPR"), eq(request), any(Map.class));
         order.verify(auditLogs).nullifyUserId(userId);
         order.verify(storage).purgeUserFiles(userId);

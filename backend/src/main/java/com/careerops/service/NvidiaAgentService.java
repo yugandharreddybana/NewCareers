@@ -1,9 +1,7 @@
 package com.careerops.service;
 
+import com.careerops.dto.SkillExecutionContext;
 import com.careerops.model.AgentResult;
-import com.careerops.repository.JobRepository;
-import com.careerops.repository.UserJobRepository;
-import com.careerops.repository.UserProfileRepository;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -24,7 +22,6 @@ import org.springframework.web.client.RestClient;
 import org.springframework.web.client.RestClientResponseException;
 
 import java.time.Duration;
-import java.util.Arrays;
 import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
@@ -125,10 +122,7 @@ public class NvidiaAgentService {
     private final ExecutorService     toolExecutor;
     private final TokenUsageService   tokenUsageService;
     private final UserConsentService  consentService;
-    private final UserProfileRepository profileRepository;
-    private final CvService cvService;
-    private final JobRepository jobRepository;
-    private final UserJobRepository userJobRepository;
+    private final SkillExecutionContextBuilder contextBuilder;
     private final MeterRegistry       meterRegistry;
 
     public NvidiaAgentService(SkillToolDispatcher dispatcher,
@@ -136,19 +130,13 @@ public class NvidiaAgentService {
                               CircuitBreakerRegistry circuitBreakerRegistry,
                               TokenUsageService tokenUsageService,
                               UserConsentService consentService,
-                              UserProfileRepository profileRepository,
-                              CvService cvService,
-                              JobRepository jobRepository,
-                              UserJobRepository userJobRepository,
+                              SkillExecutionContextBuilder contextBuilder,
                               MeterRegistry meterRegistry) {
         this.dispatcher        = dispatcher;
         this.mapper            = mapper;
         this.tokenUsageService = tokenUsageService;
         this.consentService    = consentService;
-        this.profileRepository  = profileRepository;
-        this.cvService          = cvService;
-        this.jobRepository      = jobRepository;
-        this.userJobRepository  = userJobRepository;
+        this.contextBuilder    = contextBuilder;
         this.meterRegistry     = meterRegistry;
 
         this.toolExecutor = Executors.newFixedThreadPool(10, r -> {
@@ -222,7 +210,8 @@ public class NvidiaAgentService {
 
     public AgentResult run(String systemPrompt, ArrayNode messages, UUID userId, UUID userJobId, String skillName) {
         consentService.validateAiConsent(userId);
-        String enrichedSystemPrompt = buildEnrichedSystemPrompt(systemPrompt, userId, userJobId);
+        SkillExecutionContext ctx = contextBuilder.build(userId, userJobId, skillName);
+        String enrichedSystemPrompt = systemPrompt + "\n\n" + ctx.toInlineContext();
         int effectiveMaxTokens     = resolveMaxTokens(skillName, maxTokens);
         int effectiveMaxIterations = resolveMaxIterations(skillName, maxIterations);
         String effectiveModel      = resolveModel(skillName, model);
@@ -328,46 +317,6 @@ public class NvidiaAgentService {
     }
 
     // ─── Request builder ─────────────────────────────────────────────────────
-
-    private String buildEnrichedSystemPrompt(String baseSystemPrompt, UUID userId, UUID userJobId) {
-        StringBuilder enriched = new StringBuilder(baseSystemPrompt);
-        enriched.append("\n\n=== PRE-LOADED CONTEXT (do NOT call read_profile, read_resume, or read_job — data is already here) ===\n");
-        try {
-            profileRepository.findByUserId(userId).ifPresent(p -> {
-                enriched.append("\n--- USER PROFILE ---\n");
-                if (p.getTargetRoles() != null) enriched.append("target_roles: ").append(Arrays.toString(p.getTargetRoles())).append("\n");
-                if (p.getTechStack() != null) enriched.append("tech_stack: ").append(Arrays.toString(p.getTechStack())).append("\n");
-                if (p.getLocation() != null) enriched.append("location: ").append(p.getLocation()).append("\n");
-                if (p.getSalaryMin() != null) enriched.append("salary_min: ").append(p.getSalaryMin()).append("\n");
-                if (p.getSalaryMax() != null) enriched.append("salary_max: ").append(p.getSalaryMax()).append("\n");
-                if (p.getExperienceLevel() != null) enriched.append("experience_level: ").append(p.getExperienceLevel()).append("\n");
-                if (p.getSponsorshipRequired() != null) enriched.append("sponsorship_required: ").append(p.getSponsorshipRequired()).append("\n");
-            });
-        } catch (Exception e) { log.warn("Could not pre-load profile for userId={}", userId); }
-        try {
-            String cv = cvService.activeCvText(userId);
-            if (cv != null && !cv.isBlank()) {
-                String truncatedCv = cv.length() > 6000 ? cv.substring(0, 6000) + "\n...[CV truncated]" : cv;
-                enriched.append("\n--- USER CV/RESUME ---\n").append(truncatedCv).append("\n");
-            }
-        } catch (Exception e) { log.warn("Could not pre-load CV for userId={}", userId); }
-        try {
-            if (userJobId != null) {
-                userJobRepository.findByIdAndUserId(userJobId, userId).ifPresent(uj ->
-                    jobRepository.findById(uj.getJobId()).ifPresent(j -> {
-                        enriched.append("\n--- JOB POSTING ---\n");
-                        enriched.append("title: ").append(j.getTitle()).append("\n");
-                        enriched.append("company: ").append(j.getCompany()).append("\n");
-                        enriched.append("location: ").append(j.getLocation()).append("\n");
-                        String desc = j.getDescription() != null ? j.getDescription() : "";
-                        String truncDesc = desc.length() > 3000 ? desc.substring(0, 3000) + "\n...[truncated]" : desc;
-                        enriched.append("description:\n").append(truncDesc).append("\n");
-                    })
-                );
-            }
-        } catch (Exception e) { log.warn("Could not pre-load job for userJobId={}", userJobId); }
-        return enriched.toString();
-    }
 
     private ObjectNode buildRequestBody(
             String systemPrompt,

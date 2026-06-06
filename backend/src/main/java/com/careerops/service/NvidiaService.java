@@ -19,6 +19,7 @@ import org.springframework.web.client.RestClient;
 import org.springframework.web.client.RestClientResponseException;
 
 import java.nio.charset.StandardCharsets;
+import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.Semaphore;
@@ -71,6 +72,15 @@ public class NvidiaService {
     /** TCP connect timeout to NVIDIA endpoint. */
     @Value("${nvidia.connect.timeout.ms:10000}")
     private int connectTimeoutMs;
+
+    private static final Map<String, Integer> SKILL_MAX_TOKENS = Map.of(
+            "tailor-resume", 5000,
+            "cover-letter",  1800,
+            "evaluate",      1200,
+            "research",      2500,
+            "prep-interview",2500,
+            "compare",       1500
+    );
 
     private Semaphore callSemaphore;
 
@@ -128,7 +138,7 @@ public class NvidiaService {
         if (apiKey == null || apiKey.isBlank()) {
             throw com.careerops.exception.ApiException.internalError("AI engine not configured (NVIDIA NIM)");
         }
-        ObjectNode body = buildBody(systemPrompt, userPrompt);
+        ObjectNode body = buildBody(systemPrompt, userPrompt, resolveSkillName(featureName));
         return callWithRetry(body, userId, featureName);
     }
 
@@ -148,7 +158,7 @@ public class NvidiaService {
         if (apiKey == null || apiKey.isBlank()) {
             throw com.careerops.exception.ApiException.internalError("AI engine not configured (NVIDIA NIM)");
         }
-        ObjectNode body = buildPlainBody(systemPrompt, userPrompt);
+        ObjectNode body = buildPlainBody(systemPrompt, userPrompt, resolveSkillName(featureName));
         return callWithRetry(body, userId, featureName);
     }
 
@@ -169,16 +179,26 @@ public class NvidiaService {
 
     // ─── Request builder ─────────────────────────────────────────────────────
 
-    private ObjectNode buildBody(String systemPrompt, String userPrompt) {
-        ObjectNode body = buildPlainBody(systemPrompt, userPrompt);
+    private static String resolveSkillName(String featureName) {
+        if (featureName == null) {
+            return "";
+        }
+        if (featureName.startsWith("skill-")) {
+            return featureName.substring("skill-".length());
+        }
+        return featureName;
+    }
+
+    private ObjectNode buildBody(String systemPrompt, String userPrompt, String skillName) {
+        ObjectNode body = buildPlainBody(systemPrompt, userPrompt, skillName);
         body.set("response_format", mapper.createObjectNode().put("type", "json_object"));
         return body;
     }
 
-    private ObjectNode buildPlainBody(String systemPrompt, String userPrompt) {
+    private ObjectNode buildPlainBody(String systemPrompt, String userPrompt, String skillName) {
         ObjectNode body = mapper.createObjectNode();
         body.put("model", model);
-        body.put("max_tokens", maxTokens);
+        body.put("max_tokens", SKILL_MAX_TOKENS.getOrDefault(skillName, 4096));
         ArrayNode messages = mapper.createArrayNode();
         messages.addObject().put("role", "system").put("content", systemPrompt);
         messages.addObject().put("role", "user").put("content", userPrompt);

@@ -1,11 +1,15 @@
 package com.careerops.service;
 
 import com.careerops.dto.GdprExportDtos.GdprUserDataExport;
+import com.careerops.dto.GdprExportDtos.SkillRunExport;
+import com.careerops.dto.GdprExportDtos.TokenUsageExport;
 import com.careerops.dto.GdprExportDtos.UserCvExport;
 import com.careerops.dto.GdprExportDtos.UserExport;
 import com.careerops.exception.ResourceNotFoundException;
 import com.careerops.model.User;
+import com.careerops.repository.AiTokenUsageRepository;
 import com.careerops.repository.AuditLogRepository;
+import com.careerops.repository.SkillRunRepository;
 import com.careerops.repository.UserConsentRepository;
 import com.careerops.repository.UserCvRepository;
 import com.careerops.repository.UserJobRepository;
@@ -34,6 +38,8 @@ public class GdprExportService {
     private final UserConsentRepository consents;
     private final UserJobRepository userJobs;
     private final AuditLogRepository auditLogs;
+    private final SkillRunRepository skillRuns;
+    private final AiTokenUsageRepository tokenUsage;
     private final AuditLogService audit;
     private final ObjectMapper objectMapper;
 
@@ -44,6 +50,8 @@ public class GdprExportService {
             UserConsentRepository consents,
             UserJobRepository userJobs,
             AuditLogRepository auditLogs,
+            SkillRunRepository skillRuns,
+            AiTokenUsageRepository tokenUsage,
             AuditLogService audit,
             ObjectMapper objectMapper) {
         this.users = users;
@@ -52,6 +60,8 @@ public class GdprExportService {
         this.consents = consents;
         this.userJobs = userJobs;
         this.auditLogs = auditLogs;
+        this.skillRuns = skillRuns;
+        this.tokenUsage = tokenUsage;
         this.audit = audit;
         this.objectMapper = objectMapper;
     }
@@ -65,6 +75,8 @@ public class GdprExportService {
         var jobRows = userJobs.findByUserIdOrderByDeliveredAtDesc(userId);
         var auditRows = auditLogs.findByUserIdOrderByCreatedAtDesc(userId);
         var consentRows = consents.findAllByUserIdOrderByAcceptedAtDesc(userId);
+        var skillRunRows = skillRuns.findAllByUserIdOrderByCreatedAtDesc(userId);
+        var tokenRows = tokenUsage.findByUserIdOrderByCreatedAtDesc(userId);
 
         GdprUserDataExport payload = new GdprUserDataExport(
                 Instant.now(),
@@ -73,13 +85,17 @@ public class GdprExportService {
                 cvRows.stream().map(UserCvExport::from).toList(),
                 jobRows,
                 auditRows,
-                consentRows);
+                consentRows,
+                skillRunRows.stream().map(SkillRunExport::from).toList(),
+                tokenRows.stream().map(TokenUsageExport::from).toList());
 
         audit.log(userId, "DATA_EXPORT_REQUESTED", request, Map.of(
                 "cvCount", cvRows.size(),
                 "jobCount", jobRows.size(),
                 "auditCount", auditRows.size(),
-                "consentCount", consentRows.size()));
+                "consentCount", consentRows.size(),
+                "skillRunCount", skillRunRows.size(),
+                "tokenUsageCount", tokenRows.size()));
 
         try {
             return objectMapper.writerWithDefaultPrettyPrinter().writeValueAsBytes(payload);

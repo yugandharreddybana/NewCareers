@@ -3,16 +3,22 @@ package com.careerops.service;
 import com.careerops.dto.ConsentDtos.ConsentStatusResponse;
 import com.careerops.dto.ConsentDtos.ConsentTypeStatus;
 import com.careerops.dto.ConsentDtos.SignupConsentsRequest;
+import com.careerops.dto.ConsentDtos.WithdrawAiConsentResult;
 import com.careerops.exception.ApiException;
+import com.careerops.model.User;
 import com.careerops.model.UserConsent;
 import com.careerops.model.UserConsent.ConsentType;
+import com.careerops.repository.SkillRunRepository;
 import com.careerops.repository.UserConsentRepository;
+import com.careerops.repository.UserRepository;
 import jakarta.servlet.http.HttpServletRequest;
 import org.jspecify.annotations.Nullable;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.time.Instant;
+import java.time.temporal.ChronoUnit;
 import java.util.Map;
 import java.util.UUID;
 
@@ -26,11 +32,21 @@ public class UserConsentService {
     private static final String AI_CONSENT_MESSAGE =
             "AI processing consent is required. Enable it in Account settings under Privacy.";
 
+    static final int SKILL_RUN_RETENTION_DAYS_ON_WITHDRAWAL = 30;
+
     private final UserConsentRepository repo;
+    private final UserRepository users;
+    private final SkillRunRepository skillRuns;
     private final AuditLogService audit;
 
-    public UserConsentService(UserConsentRepository repo, AuditLogService audit) {
+    public UserConsentService(
+            UserConsentRepository repo,
+            UserRepository users,
+            SkillRunRepository skillRuns,
+            AuditLogService audit) {
         this.repo = repo;
+        this.users = users;
+        this.skillRuns = skillRuns;
         this.audit = audit;
     }
 
@@ -129,6 +145,55 @@ public class UserConsentService {
             throw new ApiException(HttpStatus.BAD_REQUEST, "Unsupported consent type");
         }
         return recordConsent(userId, type, version, accepted, request);
+    }
+
+    /**
+     * GDPR Art. 7(3): dedicated AI withdrawal — append-only consent row, legacy column sync,
+     * and purge of skill_runs older than {@link #SKILL_RUN_RETENTION_DAYS_ON_WITHDRAWAL} days.
+     */
+    @Transactional
+    public WithdrawAiConsentResult withdrawAiConsent(UUID userId, @Nullable HttpServletRequest request) {
+        boolean hadConsent = hasConsent(userId, ConsentType.AI_PROCESSING);
+        UserConsent consentRow;
+
+        if (hadConsent) {
+            consentRow = recordConsent(
+                    userId,
+                    ConsentType.AI_PROCESSING,
+                    com.careerops.dto.ConsentDtos.CONSENT_VERSION,
+                    false,
+                    request);
+            syncLegacyAiConsentColumn(userId, false);
+        } else {
+            consentRow = repo.findFirstByUserIdAndConsentTypeOrderByAcceptedAtDesc(
+                            userId, ConsentType.AI_PROCESSING)
+                    .orElseGet(() -> UserConsent.builder()
+                            .userId(userId)
+                            .consentType(ConsentType.AI_PROCESSING)
+                            .version(com.careerops.dto.ConsentDtos.CONSENT_VERSION)
+                            .accepted(false)
+                            .acceptedAt(Instant.now())
+                            .build());
+        }
+
+        Instant cutoff = Instant.now().minus(SKILL_RUN_RETENTION_DAYS_ON_WITHDRAWAL, ChronoUnit.DAYS);
+        int skillRunsDeleted = skillRuns.deleteByUserIdAndCreatedAtBefore(userId, cutoff);
+
+        if (hadConsent) {
+            audit.log(userId, "AI_CONSENT_WITHDRAWN", request,
+                    Map.of(
+                            "version", com.careerops.dto.ConsentDtos.CONSENT_VERSION,
+                            "skillRunsDeleted", skillRunsDeleted));
+        }
+
+        return new WithdrawAiConsentResult(consentRow, skillRunsDeleted);
+    }
+
+    private void syncLegacyAiConsentColumn(UUID userId, boolean accepted) {
+        User user = users.findById(userId)
+                .orElseThrow(() -> new ApiException(HttpStatus.NOT_FOUND, "User not found"));
+        user.setAiProcessingConsent(accepted);
+        users.save(user);
     }
 
     private ConsentTypeStatus typeStatus(UUID userId, ConsentType type) {

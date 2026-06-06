@@ -34,7 +34,11 @@ export function PrivacySettingsSection() {
     accepted: boolean,
   ) => {
     try {
-      await consentApi.updateConsent(type, accepted);
+      if (type === 'AI_PROCESSING' && !accepted) {
+        await consentApi.withdrawAiConsent();
+      } else {
+        await consentApi.updateConsent(type, accepted);
+      }
       if (type === 'ANALYTICS') writeAnalyticsConsent(accepted);
       await load();
       toast.success('Preference saved');
