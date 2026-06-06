@@ -117,3 +117,11 @@ sequenceDiagram
 - **Deep link**: `/jobs/:id?tab=skills` from dashboard "Open skills coach" CTA.
 - **45s detail timeout**: `jobsApi.detail` uses extended axios timeout.
 - **Delete in flight**: Save/delete buttons disabled while `saving` true.
+- **Cached skill runs**: Repeat skill within TTL (24h / 48h tailor) returns stored `skill_runs` output without a new NVIDIA call unless `forceRefresh` is set.
+- **Skill completion toast/email**: Only notifiable skills (evaluate, research, prep-interview, tailor-resume, cover-letter, outreach) trigger completion notifications.
+- **No AI consent**: Skill start returns 403 — user must enable AI processing under `/account` privacy settings.
+
+## Related docs
+
+- [skills/PAGE.md](../skills/PAGE.md) — full skills coach page + backend cache policy
+- [shared/gdpr-data-storage.md](../shared/gdpr-data-storage.md) — AI data retention

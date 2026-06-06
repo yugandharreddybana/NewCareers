@@ -29,7 +29,7 @@ Static GDPR-oriented privacy policy for NewCareers job seekers in Ireland. Descr
 
 ## Auth and session
 
-N/A — public static page. Account data-export and consent controls referenced in copy live under protected `/account` settings.
+N/A — public static page. Account data-export, consent toggles, and AI withdrawal live under protected `/account` settings (`GET /account/export`, `DELETE /user/consent/ai`, `POST /account/delete`).
 
 ## API endpoints
 
@@ -81,5 +81,8 @@ sequenceDiagram
 
 ## Related docs
 
+- [account-settings/PAGE.md](../account-settings/PAGE.md) — export, consent, delete account
+- [shared/gdpr-data-storage.md](../shared/gdpr-data-storage.md) — technical storage map
+- [docs/GDPR.md](../../docs/GDPR.md) — internal GDPR reference
 - [shared/auth-infrastructure.md](../shared/auth-infrastructure.md)
 - [shared/route-guards.md](../shared/route-guards.md)

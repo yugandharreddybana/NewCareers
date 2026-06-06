@@ -9,7 +9,8 @@ Per-page documentation for the CareerOps frontend. Each folder contains `PAGE.md
 3. Cross-cutting docs in [shared/](./shared/):
    - [auth-infrastructure.md](./shared/auth-infrastructure.md) — cookies, refresh, axios, HMAC
    - [route-guards.md](./shared/route-guards.md) — GuestRoute, ProtectedRoute, redirects
-   - [gdpr-data-storage.md](./shared/gdpr-data-storage.md) — PostgreSQL schema, encryption, consent, retention, erasure
+   - [gdpr-data-storage.md](./shared/gdpr-data-storage.md) — PostgreSQL schema, encryption, consent, retention, erasure (June 2026)
+4. Internal GDPR summary: [docs/GDPR.md](../docs/GDPR.md)
 
 ## Diagram legend
 
@@ -25,6 +26,9 @@ When you change a page or its direct components, update the matching `pagesflow/
 |------|-------------|
 | `frontend/src/pages/Login.tsx` | `pagesflow/login/` |
 | `frontend/src/pages/AccountSettings.tsx` | `pagesflow/account-settings/` |
+| `frontend/src/components/gdpr/PrivacySettingsSection.tsx` | `pagesflow/account-settings/` + `shared/gdpr-data-storage.md` |
+| `backend/.../service/SkillService.java` | `pagesflow/skills/`, `pagesflow/job-detail/` |
+| `backend/.../UserConsentController.java` | `pagesflow/account-settings/`, `docs/GDPR.md` |
 | `frontend/src/components/auth/*` | Auth pages (`login`, `signup`, `forgot-password`) |
 | `frontend/src/components/onboarding/*` | `pagesflow/onboarding/` |
 

@@ -62,6 +62,13 @@ sequenceDiagram
   API-->>M: CareerMemory
 ```
 
+## GDPR / retention
+
+- Table: `careerops.career_memories` (one row per memory key per user)
+- Included in account erasure: `UserAnonymizationService` hard-deletes all rows for the user on account delete
+- AI consent required for skills that read memories (`AI_PROCESSING`)
+- See [shared/gdpr-data-storage.md](../shared/gdpr-data-storage.md)
+
 ## Edge cases
 
 - **Search response shapes:** Handles raw array or `{ results: [] }`; otherwise error toast.

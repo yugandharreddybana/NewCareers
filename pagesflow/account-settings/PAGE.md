@@ -48,9 +48,11 @@ Full profile and preference editor for signed-in, onboarded users. Consolidates 
 | Download CV | Button when CV on file | `GET /profile/cv/download` → open signed URL or blob |
 | Add/remove work or education | Buttons | Local form state only until save |
 | Forgot password | Link | `/forgot-password` with `state.email` |
-| Update consent | Toggle in `PrivacySettingsSection` | `POST /consents` |
-| Export my data | Button | `GET /account/export` → download JSON blob |
-| Delete account | Password or Google re-auth | `DELETE /account` → sign out |
+| Turn on marketing / analytics | Toggle in `PrivacySettingsSection` | `POST /consents` |
+| Turn off AI processing | Toggle off | `DELETE /user/consent/ai` → withdraws consent + purges `skill_runs` older than 30 days |
+| Turn on AI processing | Toggle on | `POST /consents` with `AI_PROCESSING` accepted |
+| Export my data | Button | `GET /account/export` → download `my-data.json` (includes skill runs + token usage) |
+| Delete account | Password or Google re-auth | `POST /account/delete` (or `DELETE /account`) → sign out |
 
 ## API endpoints
 
@@ -60,10 +62,11 @@ Full profile and preference editor for signed-in, onboarded users. Consolidates 
 | Save settings | `PUT /profile` | `PUT /profile` | `ProfileController` `PUT /profile` |
 | Upload CV | `POST /profile/cv` (multipart) | `POST /profile/cv` | `ProfileController` `POST /cv` |
 | Download CV | `GET /profile/cv/download` | `GET /profile/cv/download` | `ProfileController` `GET /cv/download` |
-| Get consents | `GET /consents` | `GET /consents` | Consent controller (proxied) |
-| Update consent | `POST /consents` | `POST /consents` | Consent controller (proxied) |
-| Export data | `GET /account/export` | `GET /account/export` | Account export (proxied) |
-| Delete account | `DELETE /account` | `DELETE /account` | Account deletion (proxied) |
+| Get consents | `GET /consents` | `GET /consents` | `ConsentController` `GET /consents` |
+| Update consent (marketing/analytics/AI on) | `POST /consents` | `POST /consents` | `ConsentController` `POST /consents` |
+| Withdraw AI consent | `DELETE /user/consent/ai` | `DELETE /user/consent/ai` | `UserConsentController` `DELETE /user/consent/ai` |
+| Export data | `GET /account/export` | `GET /account/export` | `AccountController` `GET /export` |
+| Delete account | `POST /account/delete` | `POST /account/delete` | `AccountController` `POST /delete` |
 
 ## File map
 
@@ -80,39 +83,38 @@ Full profile and preference editor for signed-in, onboarded users. Consolidates 
 
 | Role | Path |
 |------|------|
-| Routes | `middleware/src/routes/profile.routes.ts`, `account.routes.ts`, `consents.routes.ts` |
+| Routes | `middleware/src/routes/profile.routes.ts`, `account.routes.ts`, `consents.routes.ts`, `user.consent.routes.ts` |
 
 ### Backend
 
 | Role | Path |
 |------|------|
-| Controller | `backend/src/main/java/com/careerops/controller/ProfileController.java` |
+| Controllers | `ProfileController.java`, `AccountController.java`, `ConsentController.java`, `UserConsentController.java` |
+| Services | `UserConsentService.java`, `GdprExportService.java`, `UserAnonymizationService.java` |
 
 ## Sequence diagram
 
 ```mermaid
 sequenceDiagram
     participant Page as AccountSettings
-    participant Form as settingsProfileForm
-    participant FM as useFiltersMutation
-    participant Auth as AuthContext
+    participant Privacy as PrivacySettingsSection
     participant Axios as api
     participant MW as Middleware
-    participant Java as ProfileController
+    participant Java as AccountController
 
-    Page->>Axios: GET /profile
-    Axios->>MW: GET /api/v1/profile
-    MW->>Java: GET /api/profile
-    Java-->>Page: Profile
-    Page->>Form: profileToSettingsForm()
+    Page->>Axios: GET /profile, GET /consents
+    Axios->>MW: proxied
+    MW->>Java: Profile + Consent controllers
+    Java-->>Page: Profile + consent status
 
-    Page->>FM: mutateAsync(payload) on save
-    FM->>Axios: PUT /profile (optimistic cache)
-    Axios->>MW: PUT /api/v1/profile
-    MW->>Java: PUT /api/profile
-    Java-->>FM: updated Profile
-    Page->>Auth: updateProfile(payload)
-    Auth-->>Page: session user refreshed
+    Privacy->>Axios: DELETE /user/consent/ai (AI toggle off)
+    Axios->>MW: DELETE /api/v1/user/consent/ai
+    MW->>Java: UserConsentController.withdrawAi
+    Java-->>Privacy: skillRunsDeleted count
+
+    Privacy->>Axios: GET /account/export
+    MW->>Java: GdprExportService
+    Java-->>Privacy: my-data.json blob
 ```
 
 ## Edge cases
@@ -124,3 +126,10 @@ sequenceDiagram
 - **Email immutable**: Display only; password reset via separate flow.
 - **Google-only delete**: Requires Google re-auth token instead of password.
 - **Not onboarded**: Redirected to `/onboarding` by `ProtectedRoute`.
+- **AI consent off**: Dedicated withdrawal endpoint; does not use `POST /consents` with `accepted: false`.
+- **Account delete body**: `POST /account/delete` used by frontend (reliable JSON body); equivalent to `DELETE /account`.
+
+## Related docs
+
+- [shared/gdpr-data-storage.md](../shared/gdpr-data-storage.md) — database storage and erasure detail
+- [privacy/PAGE.md](../privacy/PAGE.md) — public policy (links here for exercise of rights)

@@ -51,6 +51,10 @@ These use **rolling windows** (not midnight reset).
 | Login attempts (middleware) | **5 per 15 minutes** | 15 minutes |
 | Other auth routes | **20 per 15 minutes** | 15 minutes |
 | Skill conversations | Expire after **30 minutes** idle | `skill.conversation.expire.minutes` |
+| Skill run cache (DB) | **24 hours** per job+skill ( **48 hours** for tailor-resume ) | `SkillRunCachePolicy`; stored in `skill_runs.expires_at` |
+| Skill runs (global retention) | **90 days** then purged | `CronJobService.runGdprRetentionCleanup` |
+| Skill runs (on AI consent withdraw) | Rows older than **30 days** purged | `DELETE /user/consent/ai` |
+| Job eval in-memory cache | **Disabled** (`AiEvalCacheService` no-op) | Use `user_jobs.score_breakdown` / `skill_runs` instead |
 | JWT access token | **15 minutes** | Refresh via auth flow |
 
 ---

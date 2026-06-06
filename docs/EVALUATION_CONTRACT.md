@@ -11,6 +11,8 @@ Legacy v1 rows without `schemaVersion` are displayed with a legacy badge in the 
 
 **Producers:** `JobDeliveryService` (daily + onboarding), `SkillService` evaluate skill (`source: skill_evaluate`).
 
+**Caching:** Persisted evaluate output is stored in `skill_runs` (24h `expires_at` TTL). `AiEvalCacheService` in-memory light/deep cache is disabled (no-op); feed/job-open paths should use `user_jobs.score_breakdown` or valid cached `skill_runs` rows.
+
 **Fixture:** `backend/src/test/resources/evaluation-v2-fixture.json` — used by `EvaluationReportValidatorTest`.
 
 Plugin prompts: [yugandharreddybana/career-ops-plugin](https://github.com/yugandharreddybana/career-ops-plugin) (synced into `career-ops-skills/evaluate/SKILL.md` with appended V2 JSON schema).

@@ -127,11 +127,16 @@ Legacy `users.ai_processing_consent` is **deprecated** (V114); `user_consents` i
 
 | Table | Content | Consent gate |
 |-------|---------|--------------|
-| `skill_runs` | AI skill outputs (JSON), TTL cache per skill | `AI_PROCESSING` |
+| `skill_runs` | AI skill outputs (JSON), TTL cache per skill (`SkillRunCachePolicy`: 24h default, 48h tailor-resume) | `AI_PROCESSING` |
 | `analytics_events` | Event type + JSONB metadata | `ANALYTICS` |
 | `onboarding_events` | Funnel telemetry | `ANALYTICS` |
-| `ai_token_usage` | Token counts per run | Operational; tied to `user_id` |
+| `ai_token_usage` | Token counts per run | Operational; tied to `user_id`; included in GDPR export |
 | `memory_embeddings` | Agent memory vectors | `AI_PROCESSING` |
+| `career_memories` | Agent memory CRUD (`/agent-memory`) | `AI_PROCESSING`; deleted on account erasure |
+
+### Job evaluation cache (`AiEvalCacheService`)
+
+In-memory light/deep eval cache (`eval::light::` / `eval::deep::` keys) was **removed**. Public methods are no-op stubs pending DB/Redis wiring. Job-card match scores and deep reports rely on `user_jobs.score_breakdown` and `skill_runs` DB cache instead.
 
 ### 7. Networking & outreach
 
@@ -267,6 +272,7 @@ sequenceDiagram
     Anon->>Anon: users.email → deleted_{uuid}@redacted.invalid
     Note over Anon: name → "Deleted User", clear password/google_sub, set deleted_at
     Anon->>AI: delete skill_runs, ai_token_usage, career_memories, skill_conversations
+    Anon->>Anon: audit GDPR_ERASURE_COMPLETE
     Anon->>Anon: audit ACCOUNT_DELETED_GDPR
     Anon->>Anon: audit_logs.nullifyUserId
     Anon->>Store: purgeUserFiles(userId prefix)
@@ -331,13 +337,15 @@ See also [mandatory-fields.md](../mandatory-fields.md).
 |---------|------|
 | Export | `backend/.../service/GdprExportService.java`, `dto/GdprExportDtos.java` |
 | Erasure | `backend/.../service/UserAnonymizationService.java` |
-| Consent | `backend/.../service/UserConsentService.java`, `controller/ConsentController.java` |
-| Account API | `backend/.../controller/AccountController.java` |
+| Consent | `UserConsentService.java`, `ConsentController.java`, `UserConsentController.java` |
+| Account API | `AccountController.java` |
+| Skill cache | `SkillRunCachePolicy.java`, `SkillRunRepository.java`, `SkillService.java` |
+| NVIDIA tokens | `NvidiaService.java` (`SKILL_MAX_TOKENS` per skill) |
 | Retention cron | `backend/.../service/CronJobService.java` |
 | CV purge | `backend/.../service/CvService.java`, `SupabaseStorageService.java` |
 | Migrations | `V113__user_consents.sql`, `V114__gdpr_ai_processing_consent.sql`, `V115__*`, `V116__user_keys.sql` |
 | UI | `frontend/src/components/gdpr/PrivacySettingsSection.tsx` |
-| Middleware proxy | `middleware/src/routes/account.routes.ts`, `consents.routes.ts` |
+| Middleware proxy | `account.routes.ts`, `consents.routes.ts`, `user.consent.routes.ts` |
 
 ---
 

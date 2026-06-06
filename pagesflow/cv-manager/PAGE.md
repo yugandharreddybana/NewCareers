@@ -71,3 +71,4 @@ sequenceDiagram
 - **List load failure:** Toast only; empty list possible.
 - **Upload error:** Red banner with message from `useFileUpload`.
 - **Distinct from Resume Versions:** `/resume-versions` tracks outcomes; `/cv` is the Skills input CV.
+- **Skills cache:** New upload or activate invalidates in-flight skill batches and clears `skill_runs` for the user on the backend (`CvService`); prior job-level cached outputs are not reused after CV change.

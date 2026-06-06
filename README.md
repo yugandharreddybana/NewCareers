@@ -104,6 +104,16 @@ All code quality fixes applied in structured batches:
 | Batch 5 | DX & Config | Vite chunk splitting, .env.example audit, tsconfig strict+, README |
 | Batch 6 | Code Quality | `any` elimination, error handling, dead code removal |
 
+## Documentation
+
+| Doc | Purpose |
+|-----|---------|
+| [docs/GDPR.md](docs/GDPR.md) | Internal GDPR reference (consent, export, erasure, retention) |
+| [pagesflow/shared/gdpr-data-storage.md](pagesflow/shared/gdpr-data-storage.md) | Table-level data storage map |
+| [pagesflow/README.md](pagesflow/README.md) | Per-page frontend flow docs |
+| [frontend/e2e/README.md](frontend/e2e/README.md) | Playwright E2E shared test profile |
+| [docs/EVALUATION_CONTRACT.md](docs/EVALUATION_CONTRACT.md) | Job evaluation JSON schema (v2) |
+
 ## Database Schema & Migrations
 
 All database schema migrations are managed via Flyway under `backend/src/main/resources/db/migration`. 

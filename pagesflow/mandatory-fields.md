@@ -243,4 +243,19 @@ curl http://localhost:4000/.well-known/jwks.json
 open http://localhost:5173
 ```
 
-See also: [`docs/LOCAL_ENV.md`](../docs/LOCAL_ENV.md), [`.env.example`](../.env.example), [`middleware/.env.example`](../middleware/.env.example), [`frontend/.env.example`](../frontend/.env.example).
+---
+
+## Playwright E2E (optional — `frontend/e2e`)
+
+| Variable | File | Default | Purpose |
+|----------|------|---------|---------|
+| `E2E_TEST_EMAIL` | `frontend/.env.local` | `test@newcareer.com` | Shared test account email |
+| `E2E_TEST_PASSWORD` | `frontend/.env.local` | `Test@1234` | Shared test account password |
+| `E2E_BASE_URL` | `frontend/.env.local` | `http://localhost:5173` | Vite dev server for Playwright |
+| `E2E_MIDDLEWARE_URL` | `frontend/.env.local` | `http://localhost:4000` | Middleware for `globalSetup` / stack health |
+
+Requires middleware + Java backend running. Flyway `V118` seeds the test user in local Postgres. See [`frontend/e2e/README.md`](../frontend/e2e/README.md).
+
+---
+
+See also: [`docs/LOCAL_ENV.md`](../docs/LOCAL_ENV.md), [`docs/GDPR.md`](../docs/GDPR.md), [`.env.example`](../.env.example), [`middleware/.env.example`](../middleware/.env.example), [`frontend/.env.example`](../frontend/.env.example).
