@@ -92,7 +92,7 @@ export default function Skills() {
 
   return (
     <>
-      <PageMeta title="AI Skills — CareerOps" />
+      <PageMeta title="AI Skills — NewCareers" />
       <div className="max-w-4xl mx-auto px-4 sm:px-6 py-8">
         <div className="mb-8">
           <h1 className="text-2xl font-bold text-slate-900 tracking-tight flex items-center gap-2">

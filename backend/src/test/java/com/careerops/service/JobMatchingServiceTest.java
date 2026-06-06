@@ -44,4 +44,29 @@ class JobMatchingServiceTest {
         assertThat(matches).hasSize(1);
         assertThat(matches.get(0).job().getTitle()).isEqualTo("Senior Frontend Engineer");
     }
+
+    @Test
+    @DisplayName("topN — Ireland-only listings excluded when profile has roles and stack")
+    void topN_excludesLocationOnlyMatches() {
+        UserProfile profile = new UserProfile();
+        profile.setTechStack(new String[]{"React"});
+        profile.setTargetRoles(new String[]{"Software Engineer"});
+
+        Job irelandOnly = Job.builder()
+                .title("Retail Store Manager")
+                .description("Customer service role in Dublin")
+                .location("Dublin, Ireland")
+                .build();
+        Job relevant = Job.builder()
+                .title("Software Engineer")
+                .description("React developer for product team")
+                .location("Dublin, Ireland")
+                .build();
+
+        List<JobMatchingService.ScoredJob> matches =
+                service.topN(List.of(irelandOnly, relevant), profile, 5);
+
+        assertThat(matches).hasSize(1);
+        assertThat(matches.get(0).job().getTitle()).isEqualTo("Software Engineer");
+    }
 }

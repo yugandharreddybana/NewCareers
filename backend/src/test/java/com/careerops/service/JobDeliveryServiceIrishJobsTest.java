@@ -21,6 +21,7 @@ import java.util.Optional;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.when;
 
 @ExtendWith(MockitoExtension.class)
@@ -36,6 +37,7 @@ class JobDeliveryServiceIrishJobsTest {
     @Mock DailyLimitService limits;
     @Mock JobMatchingService matcher;
     @Mock EvaluationReportValidator evaluationValidator;
+    @Mock ParallelJobEvaluationService parallelEval;
     @Mock AdzunaSource adzuna;
     @Mock IndeedRssSource indeed;
     @Mock IrishJobsSource irishJobs;
@@ -43,6 +45,7 @@ class JobDeliveryServiceIrishJobsTest {
     @Mock JobsIrelandSource jobsIreland;
     @Mock CompanyCareerSource companyPages;
     @Mock LinkedInPublicSource linkedInPublic;
+    @Mock JobFetchSettings fetchSettings;
 
     private JobDeliveryService delivery;
 
@@ -50,13 +53,16 @@ class JobDeliveryServiceIrishJobsTest {
 
     @BeforeEach
     void setUp() {
+        lenient().when(fetchSettings.maxAgeDays()).thenReturn(14);
         delivery = new JobDeliveryService(
             scrape, dedup, nvidia, prompts, profiles, userJobs, cvService, limits, matcher,
             new ObjectMapper(), org.mockito.Mockito.mock(PlatformTransactionManager.class),
             evaluationValidator,
             org.mockito.Mockito.mock(StructuredJobEvaluationBuilder.class),
             org.mockito.Mockito.mock(EvaluationReportEnrichmentService.class),
-            adzuna, indeed, irishJobs, jobsIe, jobsIreland, companyPages, linkedInPublic);
+            parallelEval,
+            adzuna, indeed, irishJobs, jobsIe, jobsIreland, companyPages, linkedInPublic,
+            fetchSettings);
     }
 
     @Test

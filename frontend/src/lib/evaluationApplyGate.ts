@@ -8,7 +8,7 @@ export function applyGate(applyScore?: number): { level: ApplyGateLevel; message
     };
   }
   if (applyScore >= 4) {
-    return { level: 'go', message: 'Meets CareerOps apply threshold (4.0/5).' };
+    return { level: 'go', message: 'Meets NewCareers apply threshold (4.0/5).' };
   }
   if (applyScore >= 3) {
     return { level: 'caution', message: 'Stretch role — improve gaps before applying.' };

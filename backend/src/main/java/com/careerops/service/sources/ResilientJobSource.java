@@ -42,14 +42,14 @@ public class ResilientJobSource implements JobSource {
     }
 
     @Override
-    public String sourceName() { return delegate.sourceName(); }
+    public String name() { return delegate.name(); }
 
     @Override
     public boolean isEnabled() { return delegate.isEnabled(); }
 
     @Override
     public List<JobListing> fetch(String keyword, String location, int maxAgeDays) {
-        String source = sourceName();
+        String source = name();
 
         // ── 1. Circuit breaker check ──────────────────────────────────────────────
         if (!circuitBreaker.allowCall()) {

@@ -53,17 +53,19 @@ const base = (overrides: Partial<Options>): ReturnType<typeof rateLimit> =>
     ...overrides,
   });
 
+const isNonProduction = process.env.NODE_ENV !== 'production';
+
 // 20 attempts / 15 min — general auth routes (signup, forgot, reset)
 export const authLimiter = base({
   windowMs: 15 * 60 * 1000,
-  max: 20,
+  max: isNonProduction ? 1000 : 20,
   message: { error: 'Too many auth attempts. Try again later.' },
 });
 
 // 5 attempts / 15 min — login only (brute-force protection)
 export const loginLimiter = base({
   windowMs: 15 * 60 * 1000,
-  max: 5,
+  max: isNonProduction ? 200 : 5,
   message: { error: 'Too many login attempts. Please try again after 15 minutes.' },
 });
 

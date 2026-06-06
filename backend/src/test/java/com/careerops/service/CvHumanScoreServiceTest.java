@@ -1,13 +1,13 @@
 package com.careerops.service;
 
+import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
-import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
-import com.careerops.service.CvHumanScoreService.CvScoreResult;
+
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -19,41 +19,29 @@ import static org.mockito.Mockito.when;
 class CvHumanScoreServiceTest {
 
     @Mock
+    private AiProviderRouter router;
+
+    @Mock
     private NvidiaService nvidia;
 
     private final ObjectMapper mapper = new ObjectMapper();
-
-    @InjectMocks
     private CvHumanScoreService service;
 
+    @org.junit.jupiter.api.BeforeEach
+    void setUp() {
+        service = new CvHumanScoreService(router, nvidia, mapper);
+    }
+
     @Test
-    @DisplayName("ATS score — returns value in 0–100 range")
-    void atsScore_inRange() throws Exception {
+    @DisplayName("score — returns overallScore in 0–100 range via router when NVIDIA off")
+    void score_inRange() throws Exception {
         String cv = "Experienced Java developer with Spring Boot and Microservices expertise.";
-        String jd = "Looking for Java Spring Boot developer with microservices experience.";
-        when(nvidia.generateJson(anyString(), anyString(), any(UUID.class), anyString()))
-                .thenReturn(mapper.readTree("{\"atsScore\":78,\"humanScore\":65,\"flaggedPhrases\":[]}"));
+        when(nvidia.isConfigured()).thenReturn(false);
+        when(router.routePrompt(anyString(), any(UUID.class), anyString()))
+                .thenReturn("{\"overallScore\":78,\"humanSummary\":\"Strong CV\"}");
 
-        CvScoreResult result = service.score(cv, jd, UUID.randomUUID());
+        JsonNode result = service.score(UUID.randomUUID(), cv);
 
-        assertThat(result.atsScore()).isBetween(0, 100);
-    }
-
-    @Test
-    @DisplayName("human score — returned correctly from NVIDIA response")
-    void humanScore_returnedCorrectly() throws Exception {
-        when(nvidia.generateJson(anyString(), anyString(), any(UUID.class), anyString()))
-                .thenReturn(mapper.readTree("{\"atsScore\":80,\"humanScore\":70,\"flaggedPhrases\":[]}"));
-
-        CvScoreResult result = service.score("cv text", "jd text", UUID.randomUUID());
-
-        assertThat(result.humanScore()).isEqualTo(70);
-    }
-
-    @Test
-    @DisplayName("empty CV — returns zero scores gracefully")
-    void emptyCv_returnsZeroScores() {
-        CvScoreResult result = service.score("", "some job description", UUID.randomUUID());
-        assertThat(result.atsScore()).isEqualTo(0);
+        assertThat(result.path("overallScore").asInt()).isBetween(0, 100);
     }
 }

@@ -21,7 +21,7 @@ public class LinkedInPublicSource implements JobSource {
 
     private static final Logger log = LoggerFactory.getLogger(LinkedInPublicSource.class);
 
-    @Override public String sourceName() { return "LinkedIn"; }
+    @Override public String name() { return "LinkedIn"; }
 
     @Override
     public List<JobListing> fetch(String keyword, String location, int maxAgeDays) {
@@ -54,7 +54,7 @@ public class LinkedInPublicSource implements JobSource {
                     if (cutoff != null && posted != null && posted.isBefore(cutoff)) continue;
                     JobListing j = new JobListing();
                     j.setTitle(title); j.setCompany(company); j.setLocation(locStr);
-                    j.setUrl(link); j.setSource(sourceName()); j.setPostedAt(posted);
+                    j.setUrl(link); j.setSource(name()); j.setPostedAt(posted);
                     results.add(j);
                 } catch (Exception e) { log.debug("LinkedIn card parse", e); }
             }

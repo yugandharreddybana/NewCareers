@@ -15,12 +15,10 @@ import java.io.IOException;
 import java.util.List;
 
 /**
- * Java only trusts userId injected by Node middleware on internal calls.
+ * Populates {@link org.springframework.security.core.context.SecurityContext} from the
+ * user id header injected by Node middleware on internal calls.
  *
- * Fix (Issue 4) — previously this skipped ALL /auth/** paths, which meant
- * /auth/logout received no authentication and @RequestAttribute("userId")
- * would be null at runtime (500).  Now only the 5 truly-public endpoints
- * are skipped; /auth/logout goes through normal trust-header validation.
+ * Request authenticity is verified upstream by {@link HmacVerificationFilter}.
  *
  * Public (unauthenticated) endpoints:
  *   POST /auth/register
@@ -42,30 +40,11 @@ public class InternalTrustFilter extends OncePerRequestFilter {
     @Value("${internal.trust.header}")
     private String trustHeader;
 
-    @Value("${internal.trust.secret}")
-    private String trustSecret;
-
-    @jakarta.annotation.PostConstruct
-    public void validateConfig() {
-        if (trustSecret == null || trustSecret.length() < 32 || trustSecret.equals("CHANGE_ME_LONG_RANDOM_STRING")) {
-            throw new IllegalStateException("FATAL: internal.trust.secret is too short or uses default value. " +
-                    "It must be at least 32 characters long for production security.");
-        }
-    }
-
-    private static final String SECRET_HEADER = "X-Internal-Secret";
-
     @Override
     protected void doFilterInternal(HttpServletRequest req, HttpServletResponse res, FilterChain chain)
             throws ServletException, IOException {
 
-        String path = req.getServletPath();
-        if (path == null || path.isEmpty()) {
-            path = req.getRequestURI().substring(req.getContextPath().length());
-        }
-        if (path != null && path.length() > 1 && path.endsWith("/")) {
-            path = path.substring(0, path.length() - 1);
-        }
+        String path = ServletPathNormalizer.normalize(req);
 
         // Allow truly-public endpoints through without auth
         if (publicPathPolicy.isPublic(path)) {
@@ -73,25 +52,7 @@ public class InternalTrustFilter extends OncePerRequestFilter {
             return;
         }
 
-        String secret = req.getHeader(SECRET_HEADER);
         String userId = req.getHeader(trustHeader);
-
-        boolean secretValid = false;
-        if (secret != null && trustSecret != null && secret.length() == trustSecret.length()) {
-            secretValid = java.security.MessageDigest.isEqual(
-                secret.getBytes(java.nio.charset.StandardCharsets.UTF_8),
-                trustSecret.getBytes(java.nio.charset.StandardCharsets.UTF_8)
-            );
-        }
-
-        if (!secretValid) {
-            logger.warn("Access denied in InternalTrustFilter on path=" + path + " from IP=" + req.getRemoteAddr());
-            incrementFailedTrustCounter();
-            res.setStatus(HttpServletResponse.SC_UNAUTHORIZED);
-            res.setContentType("application/json");
-            res.getWriter().write("{\"error\": \"Unauthorized: Invalid or missing secret\"}");
-            return;
-        }
 
         boolean userIdValid = false;
         if (userId != null && !userId.isBlank() && userId.length() <= 64) {

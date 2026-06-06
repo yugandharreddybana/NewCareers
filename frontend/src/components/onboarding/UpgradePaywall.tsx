@@ -13,7 +13,7 @@ interface UpgradePaywallProps {
 const COPY_VARIANTS: Record<string, { headline: string; subtext: string; cta: string }> = {
   control: {
     headline: 'Premium feature',
-    subtext: 'Upgrade your plan to unlock this and all other premium CareerOps features.',
+    subtext: 'Upgrade your plan to unlock this and all other premium NewCareers features.',
     cta: 'Upgrade to Premium',
   },
   value_focus: {
@@ -30,7 +30,7 @@ const COPY_VARIANTS: Record<string, { headline: string; subtext: string; cta: st
 
 const DEFAULT_COPY = {
   headline: 'Premium feature',
-  subtext: 'Upgrade your plan to unlock this and all other premium CareerOps features.',
+  subtext: 'Upgrade your plan to unlock this and all other premium NewCareers features.',
   cta: 'Upgrade to Premium',
 };
 

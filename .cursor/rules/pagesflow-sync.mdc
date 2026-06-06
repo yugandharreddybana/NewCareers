@@ -1,0 +1,40 @@
+---
+description: Keep pagesflow PAGE.md docs in sync when editing frontend pages
+globs: frontend/src/pages/**,frontend/src/components/auth/**,frontend/src/components/onboarding/**,frontend/src/components/notifications/**
+alwaysApply: false
+---
+
+# pagesflow documentation sync
+
+When you modify a routed page or its direct child components, update the matching `pagesflow/<folder>/PAGE.md` in the same change.
+
+## Route → folder mapping
+
+Use the index in `pagesflow/README.md`. Common mappings:
+
+| Source | Docs |
+|--------|------|
+| `pages/Login.tsx` | `pagesflow/login/PAGE.md` |
+| `pages/Signup.tsx` | `pagesflow/signup/PAGE.md` |
+| `pages/Onboarding.tsx` + `components/onboarding/*` | `pagesflow/onboarding/PAGE.md` |
+| `pages/ForgotPasswordPage.tsx` | `pagesflow/forgot-password/PAGE.md` |
+| `pages/AccountSettings.tsx` | `pagesflow/account-settings/PAGE.md` |
+| `pages/Dashboard.tsx` | `pagesflow/dashboard/PAGE.md` |
+| `components/notifications/*` | `pagesflow/notifications/PAGE.md` |
+
+## What to update in PAGE.md
+
+- Fields table (required vs optional, validation, position)
+- Actions and redirects
+- API endpoints (frontend → middleware → Java)
+- File map if paths changed
+- Mermaid sequence diagram if flow changed
+- Edge cases
+
+## Env changes
+
+If the page depends on new or changed env vars, also update `pagesflow/mandatory-fields.md`.
+
+## Template
+
+New pages: copy `pagesflow/_TEMPLATE.md` and add a row to `pagesflow/README.md`.

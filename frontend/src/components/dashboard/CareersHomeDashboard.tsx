@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import toast from 'react-hot-toast';
 import { useAuth } from '@/context/AuthContext';
@@ -6,13 +6,15 @@ import { PageMeta } from '@/components/PageMeta';
 import { DashboardTopNav } from '@/components/dashboard/DashboardTopNav';
 import { TopMatchCard } from '@/components/dashboard/TopMatchCard';
 import { SKILL_COUNT } from '@/lib/skillCatalog';
-import type { RecommendedJob } from '@/services/discoveryApi';
-import { useRecommendedJobs, useFetchLiveJobMutation, useJobsList } from '@/hooks/queries';
-import { onboardingApi, type OnboardingDeliveryStatus } from '@/services/api';
+import { useFetchLiveJobMutation, useJobsList } from '@/hooks/queries';
+import { onboardingApi, profileApi, type OnboardingDeliveryStatus } from '@/services/api';
 import { queryKeys } from '@/lib/queryKeys';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import type { JobCard } from '@/types';
+import { isApiError } from '@/types';
 import { normalizeJobCard } from '@/lib/normalizeJobCard';
+import { fetchJobsOrchestrated, pollPipelineJobSearch } from '@/lib/pipelineJobSearch';
+import { DashboardUserAnalytics } from '@/components/dashboard/DashboardUserAnalytics';
 import '@/styles/welcome-dashboard.css';
 
 export const WELCOME_PENDING_KEY = 'nc_welcome_pending';
@@ -80,19 +82,33 @@ const ACTIVE_DELIVERY_STAGES = new Set([
   'evaluating_jobs',
 ]);
 
+/** Never surface SQL / stack traces from delivery status to the dashboard. */
+function sanitizeDeliveryError(raw?: string | null): string | null {
+  if (!raw?.trim()) return null;
+  if (/duplicate key|constraint|jdbc|hibernate|insert into|org\.|sql\b/i.test(raw) || raw.length > 240) {
+    return 'Job matching hit a snag — try again in a moment.';
+  }
+  return raw;
+}
+
 function emptyMatchesMessage(
   delivery: OnboardingDeliveryStatus | undefined,
-  totalPipeline: number,
+  visibleMatches: number,
+  pipelineTotal: number,
+  minMatchHint?: number,
 ): string {
-  if (totalPipeline > 0) {
-    return `You have ${totalPipeline} role${totalPipeline === 1 ? '' : 's'} in your tracker — open the job board to view them.`;
+  if (visibleMatches > 0) {
+    return `You have ${visibleMatches} role${visibleMatches === 1 ? '' : 's'} matching your filters — open the job board to view them.`;
+  }
+  if (pipelineTotal > 0 && minMatchHint != null) {
+    return `${pipelineTotal} role${pipelineTotal === 1 ? '' : 's'} in your tracker are below your ${minMatchHint}% match threshold. Lower the minimum on Account settings or use Find Jobs Now.`;
   }
   if (!delivery || delivery.stage === 'idle') {
     return 'Job matching has not run yet. Finish onboarding (upload a CV on the last step) or use Run job matching below.';
   }
   if (delivery.stage === 'failed') {
     return (
-      delivery.error ??
+      sanitizeDeliveryError(delivery.error) ??
       delivery.message ??
       'Job matching could not find enough roles that pass your filters.'
     );
@@ -106,29 +122,13 @@ function emptyMatchesMessage(
   return 'No pipeline matches yet. Your onboarding job matching may still be processing, or live sources returned no roles that passed your filters.';
 }
 
-function recommendedToJobCard(job: RecommendedJob): JobCard {
-  const raw: Partial<JobCard> = {
-    userJobId: job.userJobId,
-    jobId: job.userJobId,
-    title: job.title,
-    company: job.company,
-    location: job.location,
-    matchPercent: job.matchPercent,
-    kanbanColumn: 'Discovered',
-    status: 'new',
-  };
-  if (job.salaryMin != null) raw.salaryMin = job.salaryMin;
-  if (job.salaryMax != null) raw.salaryMax = job.salaryMax;
-  if (job.currency) raw.currency = job.currency;
-  if (job.sourceName) raw.sourceName = job.sourceName;
-  return normalizeJobCard(raw);
-}
-
 type Props = {
   celebrate?: boolean;
+  /** Rendered after top matches, before user analytics (e.g. permit intelligence). */
+  beforeFastTrack?: ReactNode;
 };
 
-export function CareersHomeDashboard({ celebrate = false }: Props) {
+export function CareersHomeDashboard({ celebrate = false, beforeFastTrack }: Props) {
   const { user } = useAuth();
   const navigate = useNavigate();
   const matchesRef = useRef<HTMLDivElement>(null);
@@ -141,34 +141,59 @@ export function CareersHomeDashboard({ celebrate = false }: Props) {
     }
   }, [celebrate, queryClient]);
 
-  const {
-    data: recommended,
-    isLoading: matchesLoading,
-    isError: matchesQueryError,
-    refetch: refetchRecommended,
-  } = useRecommendedJobs({ enabled: Boolean(user) });
-  const { data: jobsList } = useJobsList({ enabled: Boolean(user) });
+  const { data: profile } = useQuery({
+    queryKey: queryKeys.profile.current(),
+    queryFn: () => profileApi.get(),
+    enabled: Boolean(user),
+  });
+  const { data: jobsList, isLoading: matchesLoading, isError: matchesQueryError, refetch: refetchJobs } =
+    useJobsList({ enabled: Boolean(user) });
   const fetchLive = useFetchLiveJobMutation();
   const [fetchError, setFetchError] = useState<string | null>(null);
   const [prependedJob, setPrependedJob] = useState<JobCard | null>(null);
+  const [matchingInFlight, setMatchingInFlight] = useState(false);
 
-  const jobsFromRecommended = (recommended ?? []).slice(0, 12).map(recommendedToJobCard);
+  /** Same filtered pipeline as /jobs (server applies profile minMatchPercent). */
   const jobsFromPipeline = (jobsList?.items ?? []).slice(0, 12);
-  const jobsFromCache =
-    jobsFromRecommended.length > 0 ? jobsFromRecommended : jobsFromPipeline;
   const jobs = prependedJob
-    ? [prependedJob, ...jobsFromCache.filter(j => j.userJobId !== prependedJob.userJobId)].slice(0, 12)
-    : jobsFromCache;
-  const totalPipeline = jobsList?.items?.length ?? 0;
+    ? [prependedJob, ...jobsFromPipeline.filter(j => j.userJobId !== prependedJob.userJobId)].slice(0, 12)
+    : jobsFromPipeline;
+  const visibleMatches = jobsList?.totalCount ?? jobsFromPipeline.length;
+  const pipelineTotal = jobsList?.pipelineTotal ?? visibleMatches;
 
   const showDeliveryStatus = Boolean(user) && !matchesLoading && jobs.length === 0;
+
+  const runMatching = useMutation({
+    mutationFn: () => onboardingApi.startDelivery(true),
+    onMutate: () => {
+      setMatchingInFlight(true);
+    },
+    onSuccess: (data) => {
+      const active = ['reading_cv', 'normalizing_cv', 'fetching_jobs', 'evaluating_jobs'].includes(
+        data.stage?.toLowerCase() ?? '',
+      );
+      toast.success(
+        active
+          ? 'Job matching started — this can take a few minutes.'
+          : (data.message || 'Job matching is already up to date.'),
+      );
+      void queryClient.invalidateQueries({ queryKey: queryKeys.onboarding.delivery() });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.jobs.all });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.discovery.all });
+    },
+    onError: (err: unknown) => {
+      setMatchingInFlight(false);
+      toast.error(isApiError(err) ? err.normalizedMessage : 'Could not start job matching.');
+    },
+  });
+
   const { data: deliveryStatus } = useQuery({
     queryKey: queryKeys.onboarding.delivery(),
     queryFn: () => onboardingApi.deliveryStatus(),
-    enabled: showDeliveryStatus,
+    enabled: showDeliveryStatus || matchingInFlight,
     refetchInterval: query => {
       const stage = query.state.data?.stage ?? '';
-      if (ACTIVE_DELIVERY_STAGES.has(stage)) {
+      if (ACTIVE_DELIVERY_STAGES.has(stage) || runMatching.isPending || matchingInFlight) {
         void queryClient.invalidateQueries({ queryKey: queryKeys.jobs.all });
         void queryClient.invalidateQueries({ queryKey: queryKeys.discovery.all });
         return 3000;
@@ -177,42 +202,70 @@ export function CareersHomeDashboard({ celebrate = false }: Props) {
     },
   });
 
-  const runMatching = useMutation({
-    mutationFn: () => onboardingApi.startDelivery(),
-    onSuccess: () => {
-      toast.success('Job matching started — refresh in a minute.');
-      void queryClient.invalidateQueries({ queryKey: queryKeys.onboarding.delivery() });
-      void queryClient.invalidateQueries({ queryKey: queryKeys.jobs.all });
-      void queryClient.invalidateQueries({ queryKey: queryKeys.discovery.all });
-    },
-    onError: (err: unknown) => {
-      const msg =
-        err && typeof err === 'object' && 'response' in err
-          ? (err as { response?: { data?: { message?: string } } }).response?.data?.message
-          : undefined;
-      toast.error(msg ?? 'Could not start job matching.');
-    },
-  });
+  const isMatchingActive =
+    runMatching.isPending
+    || matchingInFlight
+    || ACTIVE_DELIVERY_STAGES.has(deliveryStatus?.stage ?? '');
+
+  useEffect(() => {
+    const stage = deliveryStatus?.stage ?? '';
+    if (!matchingInFlight) return;
+    if (stage === 'ready' || stage === 'ready_partial' || stage === 'failed' || stage === 'idle') {
+      setMatchingInFlight(false);
+    }
+  }, [deliveryStatus?.stage, matchingInFlight]);
 
   const matchesError =
     fetchError
-    ?? (matchesQueryError && jobsFromCache.length === 0 ? 'Could not load your matches right now.' : null);
+    ?? (matchesQueryError && jobsFromPipeline.length === 0 ? 'Could not load your matches right now.' : null);
 
   const handleFetchJobs = async () => {
     setFetchError(null);
+    if (pipelineTotal === 0) {
+      setMatchingInFlight(true);
+      try {
+        await fetchJobsOrchestrated(5);
+        await refetchJobs();
+        toast.success('Job search complete — your matches are on the tracker.');
+      } catch (err: unknown) {
+        const msg = isApiError(err)
+          ? err.normalizedMessage
+          : err instanceof Error
+            ? err.message
+            : 'Could not run job search right now.';
+        setFetchError(msg);
+        toast.error(msg);
+      } finally {
+        setMatchingInFlight(false);
+      }
+      return;
+    }
     try {
       const job = await fetchLive.mutateAsync();
       if (job?.userJobId) {
         toast.success('New job found and added to your pipeline!');
         setPrependedJob(normalizeJobCard(job));
-        await refetchRecommended();
+        await refetchJobs();
       }
     } catch (err: unknown) {
-      let msg = 'Could not fetch jobs right now. Please try again later.';
-      if (err && typeof err === 'object') {
-        const axiosErr = err as { response?: { data?: { message?: string; error?: string } }; message?: string };
-        msg = axiosErr.response?.data?.message ?? axiosErr.response?.data?.error ?? axiosErr.message ?? msg;
+      if (isApiError(err) && err.status === 202) {
+        setMatchingInFlight(true);
+        try {
+          await pollPipelineJobSearch();
+          await refetchJobs();
+          toast.success('Job search started — your matches are loading.');
+        } catch (pollErr: unknown) {
+          const msg = pollErr instanceof Error ? pollErr.message : err.normalizedMessage;
+          setFetchError(msg);
+          toast.error(msg);
+        } finally {
+          setMatchingInFlight(false);
+        }
+        return;
       }
+      const msg = isApiError(err)
+        ? err.normalizedMessage
+        : 'Could not fetch jobs right now. Please try again later.';
       setFetchError(msg);
       toast.error(msg);
     }
@@ -299,12 +352,39 @@ export function CareersHomeDashboard({ celebrate = false }: Props) {
                 {matchesError}
               </p>
             )}
+            {isMatchingActive && jobs.length === 0 && (
+              <div
+                className="flex items-center justify-center gap-3 rounded-xl border border-primary/20 bg-primary/5 px-4 py-4 mb-4"
+                role="status"
+                aria-live="polite"
+              >
+                <span className="inline-block h-5 w-5 border-2 border-primary/30 border-t-primary rounded-full animate-spin shrink-0" />
+                <p className="font-body-sm text-on-surface">
+                  {deliveryStatus?.message || 'Matching jobs to your profile…'}
+                </p>
+              </div>
+            )}
             {!matchesLoading && jobs.length === 0 && (
               <div className="rounded-xl border border-dashed border-outline-variant bg-surface-container-low p-6 mb-4 text-center">
                 <p className="font-body-md text-on-surface-variant mb-3">
-                  {emptyMatchesMessage(deliveryStatus, totalPipeline)}
+                  {isMatchingActive
+                    ? (deliveryStatus?.message || 'Matching jobs to your profile…')
+                    : emptyMatchesMessage(
+                    deliveryStatus,
+                    visibleMatches,
+                    pipelineTotal,
+                    profile?.minMatchPercent ?? 70,
+                  )}
                 </p>
-                {totalPipeline > 0 && (
+                {pipelineTotal > 0 && visibleMatches === 0 && (
+                  <Link
+                    to="/account"
+                    className="inline-flex items-center gap-2 px-5 py-2.5 rounded-lg border border-outline-variant text-on-surface font-label-md hover:bg-surface-container-high mb-3 mr-2"
+                  >
+                    Adjust match threshold
+                  </Link>
+                )}
+                {visibleMatches > 0 && (
                   <Link
                     to="/jobs"
                     className="inline-flex items-center gap-2 px-5 py-2.5 rounded-lg border border-primary text-primary font-label-md hover:bg-primary/5 mb-3"
@@ -312,16 +392,21 @@ export function CareersHomeDashboard({ celebrate = false }: Props) {
                     Open job tracker
                   </Link>
                 )}
-                {totalPipeline === 0 && (
+                {pipelineTotal === 0 && (
                   <button
                     type="button"
                     onClick={() => void runMatching.mutate()}
-                    disabled={runMatching.isPending || ACTIVE_DELIVERY_STAGES.has(deliveryStatus?.stage ?? '')}
+                    disabled={isMatchingActive}
                     className="inline-flex items-center gap-2 px-5 py-2.5 rounded-lg border border-primary text-primary font-label-md hover:bg-primary/5 mb-3 mr-2 disabled:opacity-50"
                   >
-                    {runMatching.isPending || ACTIVE_DELIVERY_STAGES.has(deliveryStatus?.stage ?? '')
-                      ? 'Matching…'
-                      : 'Run job matching'}
+                    {isMatchingActive ? (
+                      <>
+                        <span className="inline-block h-4 w-4 border-2 border-primary/30 border-t-primary rounded-full animate-spin" />
+                        Matching…
+                      </>
+                    ) : (
+                      'Run job matching'
+                    )}
                   </button>
                 )}
                 <button
@@ -374,6 +459,12 @@ export function CareersHomeDashboard({ celebrate = false }: Props) {
             )}
           </div>
 
+          {beforeFastTrack}
+
+          <DashboardUserAnalytics />
+
+          {/*
+          ── Fast-Track to Success (disabled — replaced by DashboardUserAnalytics) ──
           <div
             className="bg-surface-container rounded-2xl p-8 md:p-12 welcome-stagger-in"
             style={{ animationDelay: '0.4s' }}
@@ -382,58 +473,10 @@ export function CareersHomeDashboard({ celebrate = false }: Props) {
               Your Fast-Track to Success
             </h2>
             <div className="grid grid-cols-1 md:grid-cols-3 gap-base md:gap-gutter">
-              <div className="flex flex-col items-center text-center p-6 bg-surface-container-lowest rounded-xl border border-outline-variant/50">
-                <div className="h-10 w-10 bg-primary text-on-primary rounded-full flex items-center justify-center mb-4 font-bold">
-                  1
-                </div>
-                <h4 className="font-headline-sm text-headline-sm mb-2 text-on-surface">
-                  Apply to First Job
-                </h4>
-                <p className="text-body-sm text-body-sm text-secondary">
-                  Don&apos;t wait. Candidates who apply in the first 24h are 3x more likely to be interviewed.
-                </p>
-                <Link
-                  to="/jobs"
-                  className="mt-4 text-primary font-label-md text-label-md hover:underline"
-                >
-                  Browse Jobs
-                </Link>
-              </div>
-
-              <div className="flex flex-col items-center text-center p-6 bg-surface-container-lowest rounded-xl border border-outline-variant/50">
-                <div className="h-10 w-10 bg-secondary-container text-on-secondary-container rounded-full flex items-center justify-center mb-4 font-bold">
-                  2
-                </div>
-                <h4 className="font-headline-sm text-headline-sm mb-2 text-on-surface">
-                  Refine your CV
-                </h4>
-                <p className="text-body-sm text-body-sm text-secondary">
-                  Our AI tool can help you tailor your resume specifically for the roles you matched with.
-                </p>
-                <Link to="/cv" className="mt-4 text-primary font-label-md text-label-md hover:underline">
-                  Optimise CV
-                </Link>
-              </div>
-
-              <div className="flex flex-col items-center text-center p-6 bg-surface-container-lowest rounded-xl border border-outline-variant/50">
-                <div className="h-10 w-10 bg-secondary-container text-on-secondary-container rounded-full flex items-center justify-center mb-4 font-bold">
-                  3
-                </div>
-                <h4 className="font-headline-sm text-headline-sm mb-2 text-on-surface">
-                  Complete Bio
-                </h4>
-                <p className="text-body-sm text-body-sm text-secondary">
-                  Adding a personal summary increases profile visibility to recruiters by up to 45%.
-                </p>
-                <Link
-                  to="/account"
-                  className="mt-4 text-primary font-label-md text-label-md hover:underline"
-                >
-                  Edit settings
-                </Link>
-              </div>
+              ... Apply to First Job / Refine CV / Complete Bio cards ...
             </div>
           </div>
+          */}
         </div>
       </main>
 

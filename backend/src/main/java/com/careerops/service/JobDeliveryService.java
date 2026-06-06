@@ -79,8 +79,7 @@ public class JobDeliveryService {
     private final CompanyCareerSource            companyPages;
     private final LinkedInPublicSource           linkedInPublic;
 
-    @Value("${jobs.cron.daily.count:3}")
-    private int cronShare;
+    private final JobFetchSettings fetchSettings;
 
     @Value("${jobs.gemini.prerank.pool:25}")
     private int preRankPool;
@@ -94,14 +93,8 @@ public class JobDeliveryService {
     @Value("${jobs.onboarding.discovery-pool-cap:200}")
     private int discoveryPoolCap;
 
-    @Value("${jobs.enforce-min-match-percent:false}")
-    private boolean enforceMinMatchPercent;
-
-    private int minMatchThreshold(UserProfile profile) {
-        if (!enforceMinMatchPercent) return 0;
-        return profile.getMinMatchPercent() == null
-            ? UserProfile.DEFAULT_MIN_MATCH_PERCENT
-            : profile.getMinMatchPercent();
+    private int profileMinMatchFloor(UserProfile profile) {
+        return JobProfileMatchPolicy.minMatchFloor(profile);
     }
 
     public JobDeliveryService(JobScrapeService scrape, DeduplicationService dedup,
@@ -120,7 +113,8 @@ public class JobDeliveryService {
                               JobsIeSource jobsIe,
                               JobsIrelandSource jobsIreland,
                               CompanyCareerSource companyPages,
-                              LinkedInPublicSource linkedInPublic) {
+                              LinkedInPublicSource linkedInPublic,
+                              JobFetchSettings fetchSettings) {
         this.scrape              = scrape;    this.dedup    = dedup;    this.nvidia   = nvidia;
         this.prompts             = prompts;   this.profiles = profiles; this.userJobs = userJobs;
         this.cvService           = cv;        this.limits   = limits;   this.matcher  = matcher;
@@ -133,14 +127,19 @@ public class JobDeliveryService {
         this.irishJobs           = irishJobs; this.jobsIe   = jobsIe;
         this.jobsIreland         = jobsIreland; this.companyPages = companyPages;
         this.linkedInPublic      = linkedInPublic;
+        this.fetchSettings       = fetchSettings;
         this.transactionTemplate = new TransactionTemplate(transactionManager);
+    }
+
+    private List<Job> applyDeliveryFilters(List<Job> raw, UserProfile profile) {
+        return JobDeliveryFilters.applyPipelineFilters(raw, fetchSettings.maxAgeDays(), profile);
     }
 
     /**
      * Unified live fetch: tries sources in profile-preference order.
-     * B1-G3: per-candidate AI scoring now goes through evaluateDeep().
+     * Uses structured local scoring (not evaluateDeep) so the request finishes within the HTTP timeout.
      */
-    @Transactional(timeout = 45)
+    @Transactional(timeout = 120)
     public JobCardResponse deliverOneLiveMatch(UUID userId) {
         UserProfile p = profiles.findByUserId(userId)
             .orElseThrow(() -> new ApiException(HttpStatus.BAD_REQUEST, "Complete your profile first"));
@@ -208,6 +207,9 @@ public class JobDeliveryService {
         }
         if (raw.isEmpty()) { errors.add(source.name() + " returned no jobs."); return null; }
 
+        raw = applyDeliveryFilters(raw, p);
+        if (raw.isEmpty()) { errors.add(source.name() + " returned no jobs after profile/location filters."); return null; }
+
         List<Job> deduped = dedup.dedupForPipelineDelivery(userId, raw);
         List<JobMatchingService.ScoredJob> ranked = matcher.topN(
             deduped.stream().filter(j -> j.getCompany() != null && !j.getCompany().isBlank()).toList(),
@@ -215,18 +217,17 @@ public class JobDeliveryService {
         if (ranked.isEmpty()) { errors.add(source.name() + " jobs didn't match profile filters."); return null; }
 
         ranked = prioritizeByProfileLocation(ranked, p);
-        int minPct = minMatchThreshold(p);
+        int minPct = profileMinMatchFloor(p);
 
         for (JobMatchingService.ScoredJob candidate : ranked) {
             Job j = candidate.job();
             if (userJobs.findByUserIdAndJobId(userId, j.getId()).isPresent()) continue;
 
-            // B1-G3: route through evaluateDeep() — cache-aware full evaluation
-            ParallelJobEvaluationService.ScoredResult deep =
-                    parallelEval.evaluateDeep(candidate, p, userId, sourceTag);
-            Scored scored = new Scored(j, deep.scoreBreakdown(), deep.matchPercent());
+            String cvText = cvService.activeCvText(userId);
+            Scored scored = structuredScore(userId, j, candidate, p, cvText, minPct, sourceTag);
 
-            if (enforceMinMatchPercent && scored.match() < minPct) continue;
+            if (!passesProfileMinMatch(scored.match(), p)) continue;
+            if (!titleMatchesDesiredRoles(p, j)) continue;
 
             boolean inserted = upsertUserJob(userId, scored);
             if (!inserted) continue;
@@ -255,7 +256,7 @@ public class JobDeliveryService {
             throw new ApiException(HttpStatus.SERVICE_UNAVAILABLE, "IrishJobs source unavailable.");
         UserProfile p = profiles.findByUserId(userId)
             .orElseThrow(() -> new ApiException(HttpStatus.BAD_REQUEST, "Complete onboarding first"));
-        List<Job> raw = fetchSourceWithTimeout(irishJobs, p);
+        List<Job> raw = applyDeliveryFilters(fetchSourceWithTimeout(irishJobs, p), p);
         if (raw.isEmpty())
             throw new ApiException(HttpStatus.SERVICE_UNAVAILABLE, "IrishJobs returned no listings right now.");
         log.info("User {} IrishJobs raw fetch: {} jobs", userId, raw.size());
@@ -266,71 +267,17 @@ public class JobDeliveryService {
     public FetchSummary deliver(UUID userId, int desiredCount) {
         UserProfile p = profiles.findByUserId(userId)
             .orElseThrow(() -> new ApiException(HttpStatus.BAD_REQUEST, "Complete onboarding first"));
-        List<Job> raw = collectOnePerSourceAndCompanies(userId, p);
+        List<Job> raw = applyDeliveryFilters(scrape.fetchRaw(p), p);
         logSourceMix(userId, raw);
         return deliverScored(userId, p, raw, desiredCount, "daily_delivery");
     }
 
-    private List<Job> collectOnePerSourceAndCompanies(UUID userId, UserProfile profile) {
-        List<Job> assembled = new ArrayList<>();
-        int minPct = minMatchThreshold(profile);
-        for (JobSource source : scrape.getSources()) {
-            if (!source.hasBudget()) { log.debug("Skipping source {} — no budget", source.name()); continue; }
-            try {
-                if (source == companyPages) {
-                    List<Job> companyMatches = fetchCompanyMatches(profile, minPct);
-                    assembled.addAll(companyMatches);
-                    log.info("User {} company career pages contributed {} candidates", userId, companyMatches.size());
-                    continue;
-                }
-                List<Job> fetched = fetchSourceWithTimeout(source, profile);
-                if (fetched.isEmpty()) continue;
-                List<Job> best = pickTopNewJobs(userId, profile, fetched, 1);
-                if (!best.isEmpty()) {
-                    assembled.addAll(best);
-                    log.info("User {} source {} contributed {}", userId, source.name(), best.get(0).getTitle());
-                }
-            } catch (Exception e) {
-                log.warn("collectOnePerSource failed for {}: {}", source.name(), e.getMessage());
-            }
-        }
-        return assembled;
+    private static boolean titleMatchesDesiredRoles(UserProfile profile, Job job) {
+        return job != null && JobDeliveryFilters.titleMatchesDesiredRoles(profile, job.getTitle());
     }
 
-    private List<Job> fetchCompanyMatches(UserProfile profile, int minPct) {
-        try {
-            return CompletableFuture
-                .supplyAsync(() -> companyPages.fetchProfileMatches(profile, enforceMinMatchPercent ? minPct : 0))
-                .orTimeout(120, java.util.concurrent.TimeUnit.SECONDS)
-                .exceptionally(ex -> { log.warn("Company career page scan timed out: {}", ex.getMessage()); return List.of(); })
-                .join();
-        } catch (Exception e) {
-            log.warn("Company career page scan failed: {}", e.getMessage());
-            return List.of();
-        }
-    }
-
-    private List<Job> pickTopNewJobs(UUID userId, UserProfile profile, List<Job> raw, int max) {
-        if (raw.isEmpty() || max <= 0) return List.of();
-        List<Job> deduped = dedup.dedupForPipelineDelivery(userId, raw);
-        if (deduped.isEmpty()) return List.of();
-        List<JobMatchingService.ScoredJob> ranked = matcher.topN(
-            deduped.stream().filter(j -> j.getCompany() != null && !j.getCompany().isBlank()).toList(),
-            profile, Math.max(max * 10, 15));
-        List<Job> out = new ArrayList<>();
-        for (JobMatchingService.ScoredJob candidate : ranked) {
-            if (out.size() >= max) break;
-            if (!isRoleOrStackRelevant(candidate)) continue;
-            out.add(candidate.job());
-        }
-        return out;
-    }
-
-    private static boolean isRoleOrStackRelevant(JobMatchingService.ScoredJob candidate) {
-        return candidate.reasons().stream().anyMatch(r -> {
-            String lower = r.toLowerCase(Locale.ROOT);
-            return lower.contains("role match") || lower.contains("stack keywords matched");
-        });
+    private static boolean passesProfileMinMatch(int matchPercent, UserProfile profile) {
+        return JobProfileMatchPolicy.meetsMinMatch(matchPercent, profile);
     }
 
     private static void logSourceMix(UUID userId, List<Job> raw) {
@@ -350,7 +297,7 @@ public class JobDeliveryService {
             throw new ApiException(HttpStatus.BAD_REQUEST, "Complete onboarding first");
         int remaining = limits.remaining(userId);
         if (remaining <= 0)
-            throw new ApiException(HttpStatus.TOO_MANY_REQUESTS, "Daily limit reached. Resets at midnight.");
+            throw new ApiException(HttpStatus.TOO_MANY_REQUESTS, JobFetchSettings.dailyLimitMessage());
         int target = Math.min(desiredCount, remaining);
 
         List<Job> deduped = dedup.dedupForPipelineDelivery(userId, raw);
@@ -362,12 +309,13 @@ public class JobDeliveryService {
         if (preRankedCandidates.isEmpty())
             return new FetchSummary(0, limits.getCount(userId), limits.max(), limits.remaining(userId));
 
-        int minPct = minMatchThreshold(p);
+        int minPct = profileMinMatchFloor(p);
         Set<String> companies = new HashSet<>();
         List<Scored> toPersist = new ArrayList<>();
 
         for (JobMatchingService.ScoredJob candidate : preRankedCandidates) {
             if (toPersist.size() >= target) break;
+            if (!titleMatchesDesiredRoles(p, candidate.job())) continue;
             Job j = candidate.job();
             if (userJobs.findByUserIdAndJobId(userId, j.getId()).isPresent()) continue;
             if (!companies.add(normalizeCompany(j.getCompany()))) continue;
@@ -377,7 +325,7 @@ public class JobDeliveryService {
                     parallelEval.evaluateDeep(candidate, p, userId, sourceTag);
             Scored scored = new Scored(j, deep.scoreBreakdown(), deep.matchPercent());
 
-            if (enforceMinMatchPercent && scored.match() < minPct) continue;
+            if (!passesProfileMinMatch(scored.match(), p)) continue;
             toPersist.add(scored);
         }
 
@@ -409,13 +357,13 @@ public class JobDeliveryService {
         if (cvService.activeCvText(userId).isBlank())
             throw new ApiException(HttpStatus.BAD_REQUEST, "Upload your CV before job matching");
 
-        List<Job> raw = scrape.fetchRaw(p);
+        List<Job> raw = applyDeliveryFilters(scrape.fetchRaw(p), p);
         logSourceMix(userId, raw);
         List<Job> deduped = dedup.dedupForPipelineDelivery(userId, raw);
         log.info("Onboarding user {} dedup pool size: {}", userId, deduped.size());
 
         String cvText = cvService.activeCvText(userId);
-        int minPct = minMatchThreshold(p);
+        int minPct = profileMinMatchFloor(p);
         int poolSaved = 0;
         if (persistDiscoveryPool && !deduped.isEmpty()) {
             // Onboarding pool: intentionally uses evaluationBuilder directly (not cache)
@@ -461,11 +409,12 @@ public class JobDeliveryService {
 
         for (JobMatchingService.ScoredJob rankedJob : ranked) {
             if (evaluated >= targetCount) break;
+            if (!titleMatchesDesiredRoles(p, rankedJob.job())) continue;
             Job j = rankedJob.job();
             try {
                 Scored scored = scoreOnboardingJob(j, rankedJob, p, cvText, systemPrompt, userId, minPct);
                 int match = scored.match();
-                if (enforceMinMatchPercent && match < minPct) continue;
+                if (!passesProfileMinMatch(match, p)) continue;
                 String companyKey = normalizeCompany(j.getCompany());
                 if (!companies.add(companyKey)) continue;
                 boolean inserted = transactionTemplate.execute(status -> upsertUserJob(userId, scored));
@@ -498,13 +447,27 @@ public class JobDeliveryService {
     // ── FIX DB-001: Atomic upsert ────────────────────────────────────────────
 
     private boolean upsertUserJob(UUID userId, Scored s) {
-        if (userJobs.findByUserIdAndJobId(userId, s.job().getId()).isPresent()) {
-            log.debug("[upsert] Skipping duplicate userId={} jobId={}", userId, s.job().getId());
+        UUID jobId = s.job().getId();
+        Optional<UserJob> active = userJobs.findByUserIdAndJobId(userId, jobId);
+        if (active.isPresent()) {
+            applyScoredToUserJob(active.get(), s);
+            userJobs.save(active.get());
+            log.debug("[upsert] Updated existing userId={} jobId={}", userId, jobId);
             return false;
+        }
+        if (userJobs.findRowIdByUserIdAndJobIdIncludingDeleted(userId, jobId).isPresent()) {
+            userJobs.reactivateSoftDeleted(userId, jobId);
+            Optional<UserJob> restored = userJobs.findByUserIdAndJobId(userId, jobId);
+            if (restored.isPresent()) {
+                applyScoredToUserJob(restored.get(), s);
+                userJobs.save(restored.get());
+                log.debug("[upsert] Restored soft-deleted userId={} jobId={}", userId, jobId);
+                return true;
+            }
         }
         try {
             UserJob uj = UserJob.builder()
-                .userId(userId).jobId(s.job().getId())
+                .userId(userId).jobId(jobId)
                 .matchPercent(s.match())
                 .aiScore(s.json().path("overallScore").asInt(s.match()))
                 .matchedSkills(toArr(s.json().path("matchedSkills")))
@@ -516,10 +479,40 @@ public class JobDeliveryService {
                 .build();
             userJobs.save(uj);
             return true;
-        } catch (org.springframework.dao.DataIntegrityViolationException dive) {
-            log.debug("[upsert] Concurrent insert for userId={} jobId={} — ignored", userId, s.job().getId());
-            return false;
+        } catch (RuntimeException ex) {
+            if (isDuplicateUserJob(ex)) {
+                log.debug("[upsert] Concurrent insert for userId={} jobId={} — ignored", userId, jobId);
+                return false;
+            }
+            throw ex;
         }
+    }
+
+    private static void applyScoredToUserJob(UserJob uj, Scored s) {
+        uj.setMatchPercent(s.match());
+        uj.setAiScore(s.json().path("overallScore").asInt(s.match()));
+        uj.setMatchedSkills(toArr(s.json().path("matchedSkills")));
+        uj.setUnmatchedSkills(toArr(s.json().path("unmatchedSkills")));
+        uj.setCvImprovementTips(toArr(s.json().path("cvImprovementTips")));
+        uj.setHumanSummary(s.json().path("humanSummary").asText(null));
+        uj.setVerdict(s.json().path("verdict").asText(null));
+        uj.setScoreBreakdown(s.json());
+        if (uj.getDeletedAt() != null) {
+            uj.setDeletedAt(null);
+        }
+    }
+
+    private static boolean isDuplicateUserJob(Throwable error) {
+        for (Throwable t = error; t != null; t = t.getCause()) {
+            if (t instanceof org.springframework.dao.DataIntegrityViolationException) {
+                return true;
+            }
+            String msg = t.getMessage();
+            if (msg != null && msg.contains("user_jobs_user_id_job_id_key")) {
+                return true;
+            }
+        }
+        return false;
     }
 
     /** @deprecated call upsertUserJob() directly */
@@ -538,11 +531,14 @@ public class JobDeliveryService {
         return newlySaved.size();
     }
 
-    public int cronShare() { return cronShare; }
+    public int batchSize() { return fetchSettings.batchSize(); }
 
     private String buildPrompt(Job j, UserProfile p, @Nullable String cv) {
+        String headline = p.getGoalTitle() != null && !p.getGoalTitle().isBlank()
+                ? p.getGoalTitle().trim() : "—";
         return String.format("""
             USER:
+            - Professional headline: %s
             - Target roles: %s
             - Tech stack: %s
             - Sectors: %s
@@ -560,6 +556,7 @@ public class JobDeliveryService {
             Description:
             %s
             """,
+            headline,
             arr(p.getTargetRoles()), arr(p.getTechStack()), arr(p.getSectors()),
             p.getLocation(), p.getSalaryMin(), p.getSalaryMax(),
             p.getSponsorshipRequired(), p.getMinMatchPercent(),
@@ -582,7 +579,8 @@ public class JobDeliveryService {
             Job j = rankedJob.job();
             JsonNode report = evaluationBuilder.build(userId, j, p, cvText, rankedJob, "onboarding_pool", "complete_local");
             Scored scored = toScored(j, report, "onboarding_pool");
-            if (enforceMinMatchPercent && scored.match() < minPct) continue;
+            if (!passesProfileMinMatch(scored.match(), p)) continue;
+            if (!titleMatchesDesiredRoles(p, j)) continue;
             boolean inserted = transactionTemplate.execute(status -> upsertUserJob(userId, scored));
             if (Boolean.TRUE.equals(inserted)) saved++;
         }
@@ -603,7 +601,7 @@ public class JobDeliveryService {
         }
         Scored scored = toScored(j, json, "onboarding_delivery");
         boolean partial = "partial".equals(scored.json().path("evaluationStatus").asText(null));
-        boolean belowMin = enforceMinMatchPercent && scored.match() < minPct;
+        boolean belowMin = !passesProfileMinMatch(scored.match(), p);
         if (onboardingHeuristicFallback && (partial || belowMin || !evaluationEnrichment.isCompleteReport(scored.json()))) {
             log.warn("Onboarding structured fallback for job {} after {} match {}% (min {}%)",
                 j.getId(), partial ? "partial" : "low", scored.match(), minPct);

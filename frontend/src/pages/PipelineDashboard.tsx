@@ -21,10 +21,10 @@ import { discoveryApi, SearchParams, SearchResult } from '@/services/discoveryAp
 import { queryKeys } from '@/lib/queryKeys';
 import {
   useFetchLiveJobMutation,
-  useFetchMoreJobsMutation,
   useAnalyticsSummary,
   useInfiniteJobsFeed,
 } from '@/hooks/queries';
+import { fetchJobsOrchestrated } from '@/lib/pipelineJobSearch';
 import { skillsApi } from '@/services/skillsApi';
 import { isApiError, JobCard } from '@/types';
 import { isCompareData, isTriageData, type CompareData, type TriageData } from '@/types/skills-data';
@@ -48,7 +48,7 @@ import {
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 
-const TOUR_KEY = 'careerops_dashboard_tour_done';
+const TOUR_KEY = 'NewCareers_dashboard_tour_done';
 const FEED_HEIGHT = 660; // 3 card rows
 
 export default function PipelineDashboard() {
@@ -70,7 +70,7 @@ export default function PipelineDashboard() {
 
   const firstPage = infiniteData?.pages[0];
   const dailyCount = firstPage?.dailyCount ?? 0;
-  const dailyLimit = firstPage?.dailyLimit ?? 15;
+  const dailyLimit = firstPage?.dailyLimit ?? 25;
 
   // D1 – correct ref type
   const feedRef = useRef<VirtualJobFeedHandle>(null);
@@ -79,8 +79,9 @@ export default function PipelineDashboard() {
   // D3 – stable renderCard so VirtualJobFeed itemData memo holds
   const renderCard = useCallback((job: JobCard) => <JobCardUI job={job} />, []);
 
-  const fetchMore = useFetchMoreJobsMutation();
   const fetchLive = useFetchLiveJobMutation();
+  const [fetchInFlight, setFetchInFlight] = useState(false);
+  const [fetchProgress, setFetchProgress] = useState<string | null>(null);
   const { data: analyticsStats, isLoading: statsLoading } = useAnalyticsSummary();
 
   const [search] = useState('');
@@ -135,16 +136,33 @@ export default function PipelineDashboard() {
 
   async function getMore() {
     const remaining = firstPage?.remaining ?? 0;
-    if (!remaining) return;
+    if (!remaining && allJobs.length > 0) return;
+    setFetchInFlight(true);
+    setFetchProgress(allJobs.length === 0 ? 'Starting full job search…' : 'Fetching jobs…');
     try {
-      const summary = await fetchMore.mutateAsync(Math.min(5, remaining));
-      toast.success(`${summary.delivered} new job${summary.delivered !== 1 ? 's' : ''} added`);
+      const count = allJobs.length === 0 ? 5 : Math.min(5, remaining || 5);
+      const result = await fetchJobsOrchestrated(count, status => {
+        setFetchProgress(status.message ?? 'Matching jobs to your profile…');
+      });
+      await queryClient.invalidateQueries({ queryKey: queryKeys.jobs.all });
+      if (result.fullSearch) {
+        toast.success('Job search complete — your evaluated matches are in the tracker.');
+        return;
+      }
+      toast.success(`${result.delivered} new job${result.delivered !== 1 ? 's' : ''} added`);
     } catch (e) {
-      toast.error(isApiError(e) ? e.normalizedMessage : 'Fetch failed');
+      toast.error(isApiError(e) ? e.normalizedMessage : e instanceof Error ? e.message : 'Fetch failed');
+    } finally {
+      setFetchInFlight(false);
+      setFetchProgress(null);
     }
   }
 
   async function handleFetchLiveJobs() {
+    if (allJobs.length === 0) {
+      await getMore();
+      return;
+    }
     try {
       const liveJob = await fetchLive.mutateAsync();
       toast.success(`Fetched: ${liveJob.title} at ${liveJob.company}!`);
@@ -260,15 +278,15 @@ export default function PipelineDashboard() {
           <SkillButton label="Triage" icon={<Zap size={15} className="mr-1.5" />}
             state={allJobs.length === 0 ? 'locked' : triageSkill.state} onClick={triageSkill.run}
             className="!rounded-xl !h-9 !text-xs" />
-          <button onClick={handleFetchLiveJobs} disabled={fetchLive.isPending}
+          <button onClick={handleFetchLiveJobs} disabled={fetchLive.isPending || fetchInFlight}
             className="flex items-center gap-2 h-9 px-4 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl font-semibold text-sm transition-all disabled:opacity-50 shadow-sm">
             <Sparkles size={14} className={fetchLive.isPending ? 'animate-spin' : ''} />
             {fetchLive.isPending ? 'Fetching…' : 'Fetch Live Jobs'}
           </button>
-          <button onClick={getMore} disabled={fetchMore.isPending || (firstPage?.remaining ?? 0) <= 0}
+          <button onClick={getMore} disabled={fetchInFlight || (allJobs.length > 0 && (firstPage?.remaining ?? 0) <= 0)}
             className="flex items-center gap-2 h-9 px-4 bg-emerald-500 hover:bg-emerald-600 text-white rounded-xl font-semibold text-sm transition-all disabled:opacity-50 shadow-sm">
-            <RotateCw size={14} className={fetchMore.isPending ? 'animate-spin' : ''} />
-            {fetchMore.isPending ? 'Scanning…' : 'Scan For New Jobs'}
+            <RotateCw size={14} className={fetchInFlight ? 'animate-spin' : ''} />
+            {fetchInFlight ? (fetchProgress ?? 'Scanning…') : 'Scan For New Jobs'}
           </button>
         </div>
       </section>
@@ -368,9 +386,9 @@ export default function PipelineDashboard() {
                   {activeFilters ? 'Try loosening the filters above.' : "You haven't scanned the market since creating your profile."}
                 </p>
                 {!activeFilters && (
-                  <button onClick={getMore} disabled={fetchMore.isPending || (firstPage?.remaining ?? 0) <= 0}
+                  <button onClick={getMore} disabled={fetchInFlight || (allJobs.length > 0 && (firstPage?.remaining ?? 0) <= 0)}
                     className="px-7 py-3 bg-slate-900 text-white rounded-xl font-bold text-sm hover:bg-slate-800 transition-all disabled:opacity-50">
-                    {fetchMore.isPending ? 'Scanning…' : 'Scan the Market Now'}
+                    {fetchInFlight ? (fetchProgress ?? 'Scanning…') : 'Scan the Market Now'}
                   </button>
                 )}
               </div>

@@ -49,6 +49,7 @@ public class WeeklyDigestService {
     private final SkillRunRepository      skillRuns;
     private final ResendEmailService      emailService;
     private final NotificationService     notificationService;
+    private final UserConsentService      consentService;
 
     @Value("${app.base-url:http://localhost:5173}")
     private String appBaseUrl;
@@ -58,13 +59,15 @@ public class WeeklyDigestService {
                                UserJobRepository userJobs,
                                SkillRunRepository skillRuns,
                                ResendEmailService emailService,
-                               NotificationService notificationService) {
+                               NotificationService notificationService,
+                               UserConsentService consentService) {
         this.profiles            = profiles;
         this.users               = users;
         this.userJobs            = userJobs;
         this.skillRuns           = skillRuns;
         this.emailService        = emailService;
         this.notificationService = notificationService;
+        this.consentService = consentService;
     }
 
     // ── Public entry-point (called by CronJobService) ───────────────────────
@@ -87,6 +90,9 @@ public class WeeklyDigestService {
 
     @Transactional(timeout = 10, readOnly = true)
     public boolean sendDigestForUser(UUID userId) {
+        if (!consentService.hasMarketingConsent(userId)) {
+            return false;
+        }
         // Step 1 — Resolve contact
         UserContact contact = resolveContact(userId);
         if (contact == null) return false;

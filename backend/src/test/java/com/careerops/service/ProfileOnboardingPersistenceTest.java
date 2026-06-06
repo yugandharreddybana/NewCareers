@@ -88,15 +88,14 @@ class ProfileOnboardingPersistenceTest {
             true,
             "Senior Engineer",
             null,
-            null,
-            null,
             true,
             "senior",
             work,
             edu,
             "Hybrid",
             "2 Days per week",
-            "2 weeks notice"
+            "2 weeks notice",
+            null
         );
 
         var response = profileService.upsert(userId, req, null);

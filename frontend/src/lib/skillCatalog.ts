@@ -16,7 +16,7 @@ export interface SkillCatalogItem {
   scopeHint?: string;
 }
 
-/** Canonical list of all 16 CareerOps skills (matches backend ALL_SKILLS + public/stats). */
+/** Canonical list of all 16 NewCareers skills (matches backend ALL_SKILLS + public/stats). */
 export const SKILL_CATALOG: SkillCatalogItem[] = [
   {
     id: 'evaluate',
@@ -24,7 +24,7 @@ export const SKILL_CATALOG: SkillCatalogItem[] = [
     icon: 'balance',
     description: 'View the AI evaluation from your daily job match — open for full detail.',
     tooltip:
-      'CareerOps evaluates each role automatically when jobs are delivered to your pipeline (daily fetch). Click to open the full report: strengths, gaps, CV fixes, positioning, compensation notes, and interview prep. You can download it as a PDF or run a fresh deep evaluation if needed.',
+      'NewCareers evaluates each role automatically when jobs are delivered to your pipeline (daily fetch). Click to open the full report: strengths, gaps, CV fixes, positioning, compensation notes, and interview prep. You can download it as a PDF or run a fresh deep evaluation if needed.',
     scope: 'job',
   },
   {
@@ -123,7 +123,7 @@ export const SKILL_CATALOG: SkillCatalogItem[] = [
     icon: 'document_scanner',
     description: 'Check your profile against this role before you apply.',
     tooltip:
-      'Audits your CareerOps profile (skills, experience, preferences) against this posting and surfaces mismatches early—missing keywords, weak areas, or misaligned seniority. Use it to decide whether to tailor your CV, update your profile, or skip roles that are a stretch.',
+      'Audits your NewCareers profile (skills, experience, preferences) against this posting and surfaces mismatches early—missing keywords, weak areas, or misaligned seniority. Use it to decide whether to tailor your CV, update your profile, or skip roles that are a stretch.',
     scope: 'profile',
   },
   {

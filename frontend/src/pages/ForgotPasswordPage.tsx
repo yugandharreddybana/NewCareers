@@ -1,11 +1,14 @@
 /**
  * Forgot password — email → 6-digit OTP → new password (end-to-end with backend).
  */
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import { OtpInput } from '@/components/auth/OtpInput';
 import { Link, useLocation } from 'react-router-dom';
 import { Loader2 } from 'lucide-react';
 import { useAuth } from '@/context/AuthContext';
 import { PageMeta } from '@/components/PageMeta';
+import { AuthPageShell } from '@/components/auth/AuthPageShell';
+import { legalPaths } from '@/lib/brand';
 import { isApiError } from '@/types';
 
 type Step = 'email' | 'verify' | 'done';
@@ -23,61 +26,6 @@ function getPasswordStrength(pw: string): { score: number; label: string } {
   if (/[^A-Za-z0-9]/.test(pw)) score++;
   const labels = ['', 'Too short', 'Weak', 'Fair', 'Strong'];
   return { score, label: labels[score] ?? '' };
-}
-
-function OtpInput({
-  value,
-  onChange,
-  disabled,
-}: {
-  value: string;
-  onChange: (v: string) => void;
-  disabled?: boolean;
-}) {
-  const inputsRef = useRef<(HTMLInputElement | null)[]>([]);
-  const digits = value.padEnd(6, ' ').split('').slice(0, 6);
-
-  const setDigit = (index: number, char: string) => {
-    const next = value.split('');
-    next[index] = char;
-    onChange(next.join('').replace(/\s/g, '').slice(0, 6));
-  };
-
-  return (
-    <div className="flex justify-center gap-2 sm:gap-3" role="group" aria-label="6-digit verification code">
-      {digits.map((d, i) => (
-        <input
-          key={i}
-          ref={el => {
-            inputsRef.current[i] = el;
-          }}
-          type="text"
-          inputMode="numeric"
-          autoComplete={i === 0 ? 'one-time-code' : 'off'}
-          maxLength={1}
-          disabled={disabled}
-          value={d.trim()}
-          aria-label={`Digit ${i + 1}`}
-          className="w-11 h-12 sm:w-12 sm:h-14 text-center text-lg font-semibold rounded border border-outline-variant bg-surface-container-lowest text-on-surface focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary disabled:opacity-60"
-          onChange={e => {
-            const v = e.target.value.replace(/\D/g, '').slice(-1);
-            setDigit(i, v);
-            if (v && i < 5) inputsRef.current[i + 1]?.focus();
-          }}
-          onKeyDown={e => {
-            if (e.key === 'Backspace' && !digits[i]?.trim() && i > 0) {
-              inputsRef.current[i - 1]?.focus();
-            }
-          }}
-          onPaste={e => {
-            e.preventDefault();
-            const pasted = e.clipboardData.getData('text').replace(/\D/g, '').slice(0, 6);
-            if (pasted) onChange(pasted);
-          }}
-        />
-      ))}
-    </div>
-  );
 }
 
 export default function ForgotPasswordPage() {
@@ -177,18 +125,27 @@ export default function ForgotPasswordPage() {
   };
 
   return (
-    <div className="bg-surface-container-low min-h-screen flex flex-col antialiased text-on-surface">
+    <AuthPageShell
+      footer={
+        <footer className="flex flex-col sm:flex-row items-center justify-between gap-4 text-on-surface-variant font-label-sm text-label-sm border-t border-outline-variant/50 pt-6">
+          <span>© {new Date().getFullYear()} NewCareers AI. All rights reserved.</span>
+          <div className="flex gap-4">
+            <Link to={legalPaths.privacy} className="hover:text-on-surface transition-colors">
+              Privacy Policy
+            </Link>
+            <Link to={legalPaths.terms} className="hover:text-on-surface transition-colors">
+              Terms of Service
+            </Link>
+            <Link to={legalPaths.help} className="hover:text-on-surface transition-colors">
+              Help Center
+            </Link>
+          </div>
+        </footer>
+      }
+    >
       <PageMeta title={step === 'done' ? 'Password updated' : 'Reset your password'} />
 
-      <header className="flex items-center justify-center px-6 py-5 md:px-10">
-        <Link to="/" className="font-headline-lg text-headline-lg text-primary font-bold tracking-tight">
-          NewCareers
-        </Link>
-      </header>
-
-      <main className="flex-1 flex flex-col items-center justify-center px-4 pb-12">
-        <div className="w-full max-w-[440px]">
-          <div className="bg-surface-container-lowest rounded-lg border border-outline-variant shadow-sm p-6 md:p-8 flex flex-col gap-6">
+      <div className="bg-surface-container-lowest rounded-lg border border-outline-variant shadow-sm p-6 md:p-8 flex flex-col gap-6">
             <div className="flex flex-col items-center text-center gap-3">
               <div className="w-12 h-12 rounded-lg bg-primary/10 flex items-center justify-center">
                 <span className="material-symbols-outlined text-primary text-[28px]" aria-hidden="true">
@@ -367,7 +324,7 @@ export default function ForgotPasswordPage() {
                 to="/login"
                 className="w-full flex items-center justify-center gap-2 py-3 px-4 rounded bg-primary hover:bg-primary/90 text-on-primary font-label-md transition-colors"
               >
-                Back to sign in
+                Sign in
                 <span className="material-symbols-outlined text-[18px]" aria-hidden="true">
                   arrow_forward
                 </span>
@@ -387,37 +344,20 @@ export default function ForgotPasswordPage() {
             )}
           </div>
 
-          <div className="flex items-center justify-center gap-6 mt-8 text-on-surface-variant">
-            <div className="flex items-center gap-1.5 font-label-sm text-label-sm uppercase tracking-wide">
-              <span className="material-symbols-outlined text-[16px]" aria-hidden="true">
-                verified_user
-              </span>
-              Secure SSL
-            </div>
-            <div className="flex items-center gap-1.5 font-label-sm text-label-sm uppercase tracking-wide">
-              <span className="material-symbols-outlined text-[16px]" aria-hidden="true">
-                lock
-              </span>
-              Encrypted
-            </div>
-          </div>
+      <div className="flex items-center justify-center gap-6 mt-8 text-on-surface-variant">
+        <div className="flex items-center gap-1.5 font-label-sm text-label-sm uppercase tracking-wide">
+          <span className="material-symbols-outlined text-[16px]" aria-hidden="true">
+            verified_user
+          </span>
+          Secure SSL
         </div>
-      </main>
-
-      <footer className="px-6 py-6 md:px-10 flex flex-col sm:flex-row items-center justify-between gap-4 text-on-surface-variant font-label-sm text-label-sm border-t border-outline-variant/50">
-        <span>© {new Date().getFullYear()} NewCareers AI. All rights reserved.</span>
-        <div className="flex gap-4">
-          <a href="/privacy" className="hover:text-on-surface transition-colors">
-            Privacy Policy
-          </a>
-          <a href="/terms" className="hover:text-on-surface transition-colors">
-            Terms of Service
-          </a>
-          <a href="/help" className="hover:text-on-surface transition-colors">
-            Help Center
-          </a>
+        <div className="flex items-center gap-1.5 font-label-sm text-label-sm uppercase tracking-wide">
+          <span className="material-symbols-outlined text-[16px]" aria-hidden="true">
+            lock
+          </span>
+          Encrypted
         </div>
-      </footer>
-    </div>
+      </div>
+    </AuthPageShell>
   );
 }

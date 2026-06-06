@@ -1,5 +1,63 @@
-# Career Ops — Playwright scraper sidecar (starts automatically; backend connects via SCRAPER_BASE_URL)
+# Career Ops — scraper sidecar + optional full stack (Postgres + backend)
+#
+# Encryption at rest (postgres service, profile "full"):
+#   - Local dev: unencrypted Docker volume is acceptable.
+#   - Production self-hosted: do not rely on this compose file alone — use managed
+#     Postgres with encrypt-at-rest (e.g. Supabase default) or enable TDE / encrypt
+#     the host volume (AWS EBS, Azure Disk, LUKS). Flyway enables pgcrypto on boot.
 services:
+  postgres:
+    image: postgres:16-alpine
+    profiles: ["full"]
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-careerops}
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-admin}
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres} -d ${POSTGRES_DB:-careerops}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  backend:
+    build: ./backend
+    profiles: ["full"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+      scraper:
+        condition: service_healthy
+    ports:
+      - "${BACKEND_PORT:-8080}:8080"
+    env_file:
+      - .env
+    environment:
+      SPRING_PROFILES_ACTIVE: ${SPRING_PROFILES_ACTIVE:-dev}
+      NVIDIA_API_KEY: ${NVIDIA_API_KEY:-}
+      DATABASE_URL: jdbc:postgresql://postgres:5432/${POSTGRES_DB:-careerops}
+      DATABASE_USERNAME: ${POSTGRES_USER:-postgres}
+      DATABASE_PASSWORD: ${POSTGRES_PASSWORD:-admin}
+      DB_HOST: postgres
+      DB_PORT: "5432"
+      DB_NAME: ${POSTGRES_DB:-careerops}
+      DB_USER: ${POSTGRES_USER:-postgres}
+      DB_PASSWORD: ${POSTGRES_PASSWORD:-admin}
+      PERMIT_INGEST_SCRIPT: /app/backend/ingest_permit_stats.py
+      PERMIT_XLSX_CACHE: /tmp/permits
+      TMPDIR: /tmp/permits
+      SCRAPER_BASE_URL: http://scraper:5500
+      SCRAPER_AUTO_START: "false"
+    volumes:
+      - ./backend/ingest_permit_stats.py:/app/backend/ingest_permit_stats.py:ro
+      - ./backend/requirements-ingest.txt:/app/backend/requirements-ingest.txt:ro
+      - permit_xlsx_cache:/tmp/permits
+    restart: unless-stopped
+
   scraper:
     build: ./scraper
     ports:
@@ -13,3 +71,7 @@ services:
       retries: 5
       start_period: 30s
     restart: unless-stopped
+
+volumes:
+  postgres_data:
+  permit_xlsx_cache:

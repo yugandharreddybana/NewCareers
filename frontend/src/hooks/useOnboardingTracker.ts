@@ -2,6 +2,7 @@
 // Usage: const { trackStep, trackFeature } = useOnboardingTracker();
 import { useCallback } from 'react';
 import { api as axios } from '@/services/api';
+import { hasAnalyticsConsent, resolveAnalyticsConsent } from '@/lib/cookieConsent';
 
 type OnboardingStep =
   | 'profile_complete'
@@ -20,23 +21,34 @@ type FeatureKey =
   | 'workspace'
   | 'interview_kit';
 
+async function analyticsAllowed(): Promise<boolean> {
+  if (hasAnalyticsConsent()) return true;
+  return resolveAnalyticsConsent();
+}
+
 export const useOnboardingTracker = () => {
   const trackStep = useCallback(
     (step: OnboardingStep, eventType: 'started' | 'completed' | 'dropped' = 'completed') => {
-      axios
-        .post('/onboarding/event', { type: 'onboarding', step, eventType })
-        .catch(() => {}); // analytics are non-fatal
+      void analyticsAllowed().then(ok => {
+        if (!ok) return;
+        axios
+          .post('/onboarding/event', { type: 'onboarding', step, eventType })
+          .catch(() => {});
+      });
     },
-    []
+    [],
   );
 
   const trackFeature = useCallback(
     (feature: FeatureKey, action: 'viewed' | 'first_use' | 'repeat_use' = 'first_use') => {
-      axios
-        .post('/onboarding/event', { type: 'feature', feature, action })
-        .catch(() => {});
+      void analyticsAllowed().then(ok => {
+        if (!ok) return;
+        axios
+          .post('/onboarding/event', { type: 'feature', feature, action })
+          .catch(() => {});
+      });
     },
-    []
+    [],
   );
 
   return { trackStep, trackFeature };

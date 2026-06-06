@@ -191,7 +191,7 @@ const CvManagerPage: React.FC = () => {
 
   return (
     <>
-      <PageMeta title="CV Manager — CareerOps" />
+      <PageMeta title="CV Manager — NewCareers" />
       <div className="max-w-3xl mx-auto px-4 sm:px-6 py-8 space-y-6">
 
         {/* Header */}

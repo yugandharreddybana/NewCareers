@@ -13,6 +13,7 @@ import org.springframework.validation.FieldError;
 import org.springframework.web.HttpMediaTypeNotSupportedException;
 import org.springframework.web.HttpRequestMethodNotSupportedException;
 import org.springframework.web.bind.MethodArgumentNotValidException;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 import org.springframework.web.context.request.WebRequest;
@@ -37,6 +38,36 @@ public class GlobalExceptionHandler {
     private static final Logger log = LoggerFactory.getLogger(GlobalExceptionHandler.class);
 
     // ─── Primary custom exception (used throughout the app) ─────────────────
+
+    @ExceptionHandler(ResourceNotFoundException.class)
+    public ResponseEntity<ErrorResponse> handleResourceNotFound(ResourceNotFoundException ex, WebRequest req) {
+        log.warn("Not found [{}]: {}", path(req), ex.getMessage());
+        return ResponseEntity.status(HttpStatus.NOT_FOUND).body(new ErrorResponse(
+                ex.getMessage(),
+                HttpStatus.NOT_FOUND.value(),
+                java.time.Instant.now(),
+                "NOT_FOUND",
+                path(req),
+                MDC.get("correlationId"),
+                null,
+                false
+        ));
+    }
+
+    @ExceptionHandler(ValidationException.class)
+    public ResponseEntity<ErrorResponse> handlePermitValidation(ValidationException ex, WebRequest req) {
+        log.warn("Validation [{}]: {}", path(req), ex.getMessage());
+        return ResponseEntity.badRequest().body(new ErrorResponse(
+                ex.getMessage(),
+                HttpStatus.BAD_REQUEST.value(),
+                java.time.Instant.now(),
+                "VALIDATION_ERROR",
+                path(req),
+                MDC.get("correlationId"),
+                null,
+                false
+        ));
+    }
 
     @ExceptionHandler(ApiException.class)
     public ResponseEntity<ErrorResponse> handleApiException(ApiException ex, WebRequest req) {
@@ -150,6 +181,16 @@ public class GlobalExceptionHandler {
         log.warn("Access denied [{}]", path(req));
         return ResponseEntity.status(HttpStatus.FORBIDDEN)
                 .body(error(HttpStatus.FORBIDDEN, "Access denied", "FORBIDDEN", req));
+    }
+
+    @ExceptionHandler(DataIntegrityViolationException.class)
+    public ResponseEntity<ErrorResponse> handleDataIntegrity(DataIntegrityViolationException ex, WebRequest req) {
+        log.warn("Data integrity [{}]: {}", path(req), ex.getMostSpecificCause().getMessage());
+        return ResponseEntity.status(HttpStatus.CONFLICT)
+                .body(error(HttpStatus.CONFLICT,
+                        "That record already exists. Refresh and try again.",
+                        "CONFLICT",
+                        req));
     }
 
     // ─── Catch-all (must be last) ────────────────────────────────────────

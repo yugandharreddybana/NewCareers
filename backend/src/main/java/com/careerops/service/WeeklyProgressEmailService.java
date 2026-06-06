@@ -73,6 +73,7 @@ public class WeeklyProgressEmailService {
     }
 
     private Map<String, Object> buildTemplateVars(
+            String toEmail,
             String firstName,
             WeeklyProgressSnapshot snap,
             UserStreak streak) {
@@ -98,7 +99,10 @@ public class WeeklyProgressEmailService {
         vars.put("recommendations", snap.getRecommendations());
 
         vars.put("appBaseUrl", appBaseUrl);
-        vars.put("unsubscribeUrl", appBaseUrl + "/unsubscribe?email=" + java.net.URLEncoder.encode("", java.nio.charset.StandardCharsets.UTF_8));
+        String encodedEmail = toEmail != null
+                ? java.net.URLEncoder.encode(toEmail, java.nio.charset.StandardCharsets.UTF_8)
+                : "";
+        vars.put("unsubscribeUrl", appBaseUrl + "/account#privacy");
         vars.put("year", Year.now().getValue());
 
         return vars;

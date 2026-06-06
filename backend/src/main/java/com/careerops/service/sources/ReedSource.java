@@ -41,7 +41,7 @@ public class ReedSource implements JobSource {
         this.mapper     = mapper;
     }
 
-    @Override public String sourceName() { return "Reed"; }
+    @Override public String name() { return "Reed"; }
     @Override public boolean isEnabled()  { return apiKey != null && !apiKey.isBlank(); }
 
     @Override
@@ -80,7 +80,7 @@ public class ReedSource implements JobSource {
 
                     JobListing j = new JobListing();
                     j.setTitle(title);   j.setCompany(company); j.setLocation(loc);
-                    j.setUrl(link);      j.setSource(sourceName()); j.setPostedAt(posted);
+                    j.setUrl(link);      j.setSource(name()); j.setPostedAt(posted);
                     results.add(j);
                 } catch (Exception e) {
                     log.debug("Reed item parse error", e);

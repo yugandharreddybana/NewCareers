@@ -74,12 +74,13 @@ export function useJobEvaluationProgress(userId: string | null | undefined) {
     }
   }, []);
 
-  const connect = useCallback(() => {
-    if (!userId) return;
+  const connect = useCallback((overrideUserId?: string) => {
+    const id = overrideUserId ?? userId;
+    if (!id) return;
     disconnect(); // clean up any previous connection
 
     const apiBase = (import.meta as any).env?.VITE_API_URL ?? '';
-    const url = `${apiBase}/api/jobs/evaluation-progress?userId=${userId}`;
+    const url = `${apiBase}/api/jobs/evaluation-progress?userId=${id}`;
 
     const es = new EventSource(url);
     eventSourceRef.current = es;

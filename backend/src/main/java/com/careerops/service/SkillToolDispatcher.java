@@ -46,8 +46,9 @@ import java.util.UUID;
 public class SkillToolDispatcher {
 
     private static final Logger log = LoggerFactory.getLogger(SkillToolDispatcher.class);
-    private static final int WEB_FETCH_MAX_CHARS = 4000;
-    private static final int TOOL_RESULT_MAX_CHARS = 12000;
+    private static final int WEB_FETCH_MAX_CHARS = 2500;
+    private static final int TOOL_RESULT_MAX_CHARS = 6000;
+    private static final int READ_RESUME_MAX_CHARS = 4000;
 
     @Value("${serpapi.api.key:#{null}}")
     private String serpApiKey;
@@ -145,7 +146,7 @@ public class SkillToolDispatcher {
             String cv = cvService.activeCvText(userId);
             if (cv == null || cv.isBlank())
                 return "No resume uploaded yet. The user needs to upload their CV in the settings.";
-            return truncate(cv, TOOL_RESULT_MAX_CHARS);
+            return truncate(cv, READ_RESUME_MAX_CHARS);
         } catch (Exception e) {
             log.warn("Could not fetch CV for userId={}: {}", userId, e.getMessage());
             return "Resume could not be loaded. Please ask the user to re-upload their CV.";
@@ -219,7 +220,7 @@ public class SkillToolDispatcher {
                     .header("User-Agent", "Mozilla/5.0 (compatible; CareerOps/1.0)")
                     .retrieve()
                     .bodyToMono(String.class)
-                    .timeout(Duration.ofSeconds(15))
+                    .timeout(Duration.ofSeconds(7))
                     .block();
             if (raw == null || raw.isBlank())
                 return "Page returned empty content.";
@@ -227,6 +228,10 @@ public class SkillToolDispatcher {
             doc.select("script, style, nav, footer, header, .cookie-banner, #cookie").remove();
             return truncate(doc.body().text(), WEB_FETCH_MAX_CHARS);
         } catch (Exception e) {
+            if (isTimeout(e)) {
+                log.warn("web_fetch timed out for url={}", url);
+                return "Page took too long to load. Use general knowledge or ask the user to paste the relevant section.";
+            }
             log.warn("web_fetch failed for url={}: {}", url, e.getMessage());
             return "Could not fetch the URL: " + e.getMessage() +
                     ". Please ask the user to paste the job description directly.";
@@ -251,7 +256,7 @@ public class SkillToolDispatcher {
                     .header("X-SerpAPI-Key", serpApiKey)
                     .retrieve()
                     .bodyToMono(String.class)
-                    .timeout(Duration.ofSeconds(20))
+                    .timeout(Duration.ofSeconds(10))
                     .block();
             if (response == null)
                 return "Search returned no results.";
@@ -351,6 +356,18 @@ public class SkillToolDispatcher {
         }
         sb.append("]");
         return sb.toString();
+    }
+
+    static boolean isTimeout(Throwable t) {
+        for (Throwable c = t; c != null; c = c.getCause()) {
+            if (c instanceof java.util.concurrent.TimeoutException) {
+                return true;
+            }
+            if (c.getClass().getName().contains("TimeoutException")) {
+                return true;
+            }
+        }
+        return false;
     }
 
     private static String truncate(String s, int max) {

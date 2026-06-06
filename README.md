@@ -44,7 +44,7 @@ npm install && npm run dev
 ```bash
 cd middleware
 cp .env.example .env
-# Edit .env: set JWT_PUBLIC_KEY, INTERNAL_TRUST_SECRET, JAVA_BACKEND_URL,
+# Edit .env: set JWT_PUBLIC_KEY, APP_INTERNAL_SECRET, JAVA_BACKEND_URL,
 # and the required Stripe keys
 npm install
 npm run dev
@@ -53,9 +53,8 @@ npm run dev
 ### 3. Java Backend
 ```bash
 cd backend
-# Copy src/main/resources/application.example.properties to application.properties
-# Set spring.datasource.*, JWT_PRIVATE_KEY, JWT_PUBLIC_KEY,
-# and INTERNAL_TRUST_SECRET
+# Copy repo-root .env.example to .env (secrets — never commit)
+# Set DATABASE_*, APP_INTERNAL_SECRET, APP_MASTER_KEK, JWT_*_PEM
 mvn spring-boot:run
 ```
 

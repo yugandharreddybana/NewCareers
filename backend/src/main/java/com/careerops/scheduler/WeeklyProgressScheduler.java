@@ -4,6 +4,8 @@ import com.careerops.model.UserStreak;
 import com.careerops.model.WeeklyProgressSnapshot;
 import com.careerops.repository.UserStreakRepository;
 import com.careerops.repository.WeeklyProgressSnapshotRepository;
+import com.careerops.repository.FeatureFlagRepository;
+import com.careerops.service.UserConsentService;
 import com.careerops.service.WeeklyProgressEmailService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -28,6 +30,8 @@ public class WeeklyProgressScheduler {
     private final WeeklyProgressSnapshotRepository snapshotRepo;
     private final UserStreakRepository streakRepo;
     private final WeeklyProgressEmailService progressEmailService;
+    private final UserConsentService consentService;
+    private final FeatureFlagRepository flagRepo;
 
     /**
      * This is the CANONICAL and sole source-of-truth scheduler for weekly performance progress emails.
@@ -35,6 +39,14 @@ public class WeeklyProgressScheduler {
     @Scheduled(cron = "0 0 8 * * MON", zone = "Europe/Dublin")
     public void generateAndSendWeeklyProgress() {
         log.info("[WeeklyProgressScheduler] Starting weekly progress email dispatch");
+
+        boolean digestEnabled = flagRepo.findByFlagKey("EMAIL_DIGEST_ENABLED")
+                .map(f -> Boolean.TRUE.equals(f.getEnabled()))
+                .orElse(true);
+        if (!digestEnabled) {
+            log.info("[WeeklyProgressScheduler] Skipped — EMAIL_DIGEST_ENABLED is off");
+            return;
+        }
 
         // Retrieve all snapshots for the current week (generated throughout the week
         // by on-demand calls to ProgressInsightService.generateSnapshot)
@@ -56,6 +68,10 @@ public class WeeklyProgressScheduler {
                 String firstName = snap.getUserFirstName();
 
                 if (toEmail == null || toEmail.isBlank()) {
+                    skipped++;
+                    continue;
+                }
+                if (!consentService.hasMarketingConsent(snap.getUserId())) {
                     skipped++;
                     continue;
                 }

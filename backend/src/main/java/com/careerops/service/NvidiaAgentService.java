@@ -1,6 +1,9 @@
 package com.careerops.service;
 
 import com.careerops.model.AgentResult;
+import com.careerops.repository.JobRepository;
+import com.careerops.repository.UserJobRepository;
+import com.careerops.repository.UserProfileRepository;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -21,6 +24,9 @@ import org.springframework.web.client.RestClient;
 import org.springframework.web.client.RestClientResponseException;
 
 import java.time.Duration;
+import java.util.Arrays;
+import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.*;
 
@@ -54,6 +60,38 @@ public class NvidiaAgentService {
     private static final Logger log = LoggerFactory.getLogger(NvidiaAgentService.class);
     private static final String BASE_URL = "https://integrate.api.nvidia.com/v1";
 
+    private static final Map<String, Integer> SKILL_MAX_TOKENS = Map.of(
+        "tailor-resume",   5000,
+        "cover-letter",    1800,
+        "evaluate",        1200,
+        "research",        2500,
+        "prep-interview",  2500,
+        "compare",         1500
+    );
+    private static final Map<String, Integer> SKILL_MAX_ITERATIONS = Map.of(
+        "tailor-resume",   8,
+        "cover-letter",    4,
+        "evaluate",        5,
+        "research",        7,
+        "prep-interview",  6,
+        "compare",         5
+    );
+    private static final Map<String, String> SKILL_MODEL_OVERRIDE = Map.of(
+        "evaluate",      "meta/llama-3.1-8b-instruct",
+        "cover-letter",  "meta/llama-3.1-8b-instruct"
+    );
+    private static final Map<String, Set<String>> SKILL_TOOLS = Map.of(
+        "tailor-resume",   Set.of("ask_user", "save_resume_html"),
+        "cover-letter",    Set.of("ask_user"),
+        "evaluate",        Set.of("ask_user"),
+        "research",        Set.of("web_search", "web_fetch", "ask_user"),
+        "prep-interview",  Set.of("web_search", "ask_user"),
+        "compare",         Set.of("read_evaluation", "ask_user")
+    );
+    private static final Set<String> DEFAULT_TOOLS = Set.of(
+        "web_search", "web_fetch", "ask_user"
+    );
+
     @Value("${nvidia.api.key:}")
     private String apiKey;
 
@@ -63,9 +101,11 @@ public class NvidiaAgentService {
     @Value("${nvidia.fallback.model:meta/llama-3.1-70b-instruct}")
     private String fallbackModel;
 
+    // legacy property; per-skill maps take precedence in run()
     @Value("${nvidia.max.tokens:8192}")
     private int maxTokens;
 
+    // legacy property; per-skill maps take precedence in run()
     @Value("${anthropic.max.tool.iterations:25}")
     private int maxIterations;
 
@@ -80,11 +120,15 @@ public class NvidiaAgentService {
     private final RestClient         restClient;
     private final SkillToolDispatcher dispatcher;
     private final ObjectMapper        mapper;
-    private final JsonNode            toolDefinitions;
+    private final JsonNode            allToolDefinitions;
     private final io.github.resilience4j.circuitbreaker.CircuitBreaker circuitBreaker;
     private final ExecutorService     toolExecutor;
     private final TokenUsageService   tokenUsageService;
     private final UserConsentService  consentService;
+    private final UserProfileRepository profileRepository;
+    private final CvService cvService;
+    private final JobRepository jobRepository;
+    private final UserJobRepository userJobRepository;
     private final MeterRegistry       meterRegistry;
 
     public NvidiaAgentService(SkillToolDispatcher dispatcher,
@@ -92,11 +136,19 @@ public class NvidiaAgentService {
                               CircuitBreakerRegistry circuitBreakerRegistry,
                               TokenUsageService tokenUsageService,
                               UserConsentService consentService,
+                              UserProfileRepository profileRepository,
+                              CvService cvService,
+                              JobRepository jobRepository,
+                              UserJobRepository userJobRepository,
                               MeterRegistry meterRegistry) {
         this.dispatcher        = dispatcher;
         this.mapper            = mapper;
         this.tokenUsageService = tokenUsageService;
         this.consentService    = consentService;
+        this.profileRepository  = profileRepository;
+        this.cvService          = cvService;
+        this.jobRepository      = jobRepository;
+        this.userJobRepository  = userJobRepository;
         this.meterRegistry     = meterRegistry;
 
         this.toolExecutor = Executors.newFixedThreadPool(10, r -> {
@@ -127,7 +179,7 @@ public class NvidiaAgentService {
             .requestFactory(factory)
             .build();
 
-        this.toolDefinitions = buildToolDefinitions();
+        this.allToolDefinitions = buildAllToolDefinitions();
     }
 
     @PreDestroy
@@ -141,23 +193,59 @@ public class NvidiaAgentService {
         return apiKey != null && !apiKey.isBlank();
     }
 
-    public AgentResult run(String systemPrompt, ArrayNode messages, UUID userId, UUID userJobId) {
+    static String normalizeSkillName(String skillName) {
+        return (skillName == null || skillName.isBlank()) ? null : skillName.trim();
+    }
+
+    static int resolveMaxTokens(String skillName, int configuredDefault) {
+        String key = normalizeSkillName(skillName);
+        return key == null ? 4096 : SKILL_MAX_TOKENS.getOrDefault(key, 4096);
+    }
+
+    static int resolveMaxIterations(String skillName, int configuredDefault) {
+        String key = normalizeSkillName(skillName);
+        return key == null ? 10 : SKILL_MAX_ITERATIONS.getOrDefault(key, 10);
+    }
+
+    static String resolveModel(String skillName, String defaultModel) {
+        String key = normalizeSkillName(skillName);
+        return key == null ? defaultModel : SKILL_MODEL_OVERRIDE.getOrDefault(key, defaultModel);
+    }
+
+    static Set<String> resolveAllowedTools(String skillName) {
+        String key = normalizeSkillName(skillName);
+        if (key == null) {
+            return DEFAULT_TOOLS;
+        }
+        return SKILL_TOOLS.getOrDefault(key, DEFAULT_TOOLS);
+    }
+
+    public AgentResult run(String systemPrompt, ArrayNode messages, UUID userId, UUID userJobId, String skillName) {
         consentService.validateAiConsent(userId);
+        String enrichedSystemPrompt = buildEnrichedSystemPrompt(systemPrompt, userId, userJobId);
+        int effectiveMaxTokens     = resolveMaxTokens(skillName, maxTokens);
+        int effectiveMaxIterations = resolveMaxIterations(skillName, maxIterations);
+        String effectiveModel      = resolveModel(skillName, model);
+
+        log.debug("NvidiaAgentService skill={} maxTokens={} maxIterations={} model={} allowedTools={}",
+            skillName, effectiveMaxTokens, effectiveMaxIterations, effectiveModel, resolveAllowedTools(skillName));
+
         if (!isConfigured()) {
             return AgentResult.error("AI engine not configured. Set NVIDIA_API_KEY in your environment.");
         }
         long deadline   = System.currentTimeMillis() + ((long) agentDeadlineSeconds * 1000);
         int  iterations = 0;
 
-        while (iterations < maxIterations) {
+        while (iterations < effectiveMaxIterations) {
             if (System.currentTimeMillis() > deadline) {
                 log.warn("NvidiaAgentService: deadline exceeded for userId={}", userId);
                 return AgentResult.error("The AI process took too long and was aborted. Please try again.");
             }
             iterations++;
-            log.debug("NvidiaAgentService iteration {}/{} for userId={}", iterations, maxIterations, userId);
+            log.debug("NvidiaAgentService iteration {}/{} for userId={}", iterations, effectiveMaxIterations, userId);
 
-            ObjectNode body = buildRequestBody(systemPrompt, messages);
+            ObjectNode body = buildRequestBody(
+                enrichedSystemPrompt, messages, effectiveMaxTokens, effectiveModel, skillName);
             JsonNode   response = callWithRetry(body, userId, "Skill Run");
             if (response == null) {
                 return AgentResult.error("AI engine is temporarily unavailable. Please try again.");
@@ -235,23 +323,69 @@ public class NvidiaAgentService {
             return AgentResult.error("Unexpected response from AI engine. Please try again.");
         }
 
-        log.warn("NvidiaAgentService: max iterations ({}) exceeded for userId={}", maxIterations, userId);
+        log.warn("NvidiaAgentService: max iterations ({}) exceeded for userId={}", effectiveMaxIterations, userId);
         return AgentResult.error("This skill is taking longer than expected. Please try again.");
     }
 
     // ─── Request builder ─────────────────────────────────────────────────────
 
-    private ObjectNode buildRequestBody(String systemPrompt, ArrayNode messages) {
+    private String buildEnrichedSystemPrompt(String baseSystemPrompt, UUID userId, UUID userJobId) {
+        StringBuilder enriched = new StringBuilder(baseSystemPrompt);
+        enriched.append("\n\n=== PRE-LOADED CONTEXT (do NOT call read_profile, read_resume, or read_job — data is already here) ===\n");
+        try {
+            profileRepository.findByUserId(userId).ifPresent(p -> {
+                enriched.append("\n--- USER PROFILE ---\n");
+                if (p.getTargetRoles() != null) enriched.append("target_roles: ").append(Arrays.toString(p.getTargetRoles())).append("\n");
+                if (p.getTechStack() != null) enriched.append("tech_stack: ").append(Arrays.toString(p.getTechStack())).append("\n");
+                if (p.getLocation() != null) enriched.append("location: ").append(p.getLocation()).append("\n");
+                if (p.getSalaryMin() != null) enriched.append("salary_min: ").append(p.getSalaryMin()).append("\n");
+                if (p.getSalaryMax() != null) enriched.append("salary_max: ").append(p.getSalaryMax()).append("\n");
+                if (p.getExperienceLevel() != null) enriched.append("experience_level: ").append(p.getExperienceLevel()).append("\n");
+                if (p.getSponsorshipRequired() != null) enriched.append("sponsorship_required: ").append(p.getSponsorshipRequired()).append("\n");
+            });
+        } catch (Exception e) { log.warn("Could not pre-load profile for userId={}", userId); }
+        try {
+            String cv = cvService.activeCvText(userId);
+            if (cv != null && !cv.isBlank()) {
+                String truncatedCv = cv.length() > 6000 ? cv.substring(0, 6000) + "\n...[CV truncated]" : cv;
+                enriched.append("\n--- USER CV/RESUME ---\n").append(truncatedCv).append("\n");
+            }
+        } catch (Exception e) { log.warn("Could not pre-load CV for userId={}", userId); }
+        try {
+            if (userJobId != null) {
+                userJobRepository.findByIdAndUserId(userJobId, userId).ifPresent(uj ->
+                    jobRepository.findById(uj.getJobId()).ifPresent(j -> {
+                        enriched.append("\n--- JOB POSTING ---\n");
+                        enriched.append("title: ").append(j.getTitle()).append("\n");
+                        enriched.append("company: ").append(j.getCompany()).append("\n");
+                        enriched.append("location: ").append(j.getLocation()).append("\n");
+                        String desc = j.getDescription() != null ? j.getDescription() : "";
+                        String truncDesc = desc.length() > 3000 ? desc.substring(0, 3000) + "\n...[truncated]" : desc;
+                        enriched.append("description:\n").append(truncDesc).append("\n");
+                    })
+                );
+            }
+        } catch (Exception e) { log.warn("Could not pre-load job for userJobId={}", userJobId); }
+        return enriched.toString();
+    }
+
+    private ObjectNode buildRequestBody(
+            String systemPrompt,
+            ArrayNode messages,
+            int effectiveMaxTokens,
+            String effectiveModel,
+            String skillName) {
         ObjectNode body = mapper.createObjectNode();
-        body.put("model", model);
-        body.put("max_tokens", maxTokens);
+        body.put("model", effectiveModel);
+        body.put("max_tokens", effectiveMaxTokens);
 
         ArrayNode fullMessages = mapper.createArrayNode();
         fullMessages.addObject().put("role", "system").put("content", systemPrompt);
         fullMessages.addAll(messages);
         body.set("messages", fullMessages);
 
-        body.set("tools", toolDefinitions);
+        Set<String> allowedTools = resolveAllowedTools(skillName);
+        body.set("tools", buildToolDefinitions(allowedTools));
         body.put("tool_choice", "auto");
         return body;
     }
@@ -279,7 +413,8 @@ public class NvidiaAgentService {
                             int    input  = usage.path("prompt_tokens").asInt(0);
                             int    output = usage.path("completion_tokens").asInt(0);
                             double cost   = (input + output) * 0.0000002;
-                            tokenUsageService.record(userId, feature, model, input, output, cost);
+                            String recordedModel = body.path("model").asText(model);
+                            tokenUsageService.record(userId, feature, recordedModel, input, output, cost);
                         }
                         return resp;
                     } catch (Exception e) {
@@ -301,8 +436,9 @@ public class NvidiaAgentService {
                     log.error("NVIDIA API key invalid (401)");
                     throw com.careerops.exception.ApiException.internalError("Invalid NVIDIA API key (401). Check your NVIDIA_API_KEY configuration.");
                 }
-                if (status == 404 && attempt == 1 && !model.equals(fallbackModel)) {
-                    log.warn("NVIDIA model {} not found (404), retrying with fallback {}", model, fallbackModel);
+                String requestModel = body.path("model").asText(model);
+                if (status == 404 && attempt == 1 && !requestModel.equals(fallbackModel)) {
+                    log.warn("NVIDIA model {} not found (404), retrying with fallback {}", requestModel, fallbackModel);
                     body.put("model", fallbackModel);
                     continue;
                 }
@@ -330,7 +466,21 @@ public class NvidiaAgentService {
 
     // ─── Tool definitions (OpenAI function-calling format) ────────────────────
 
-    private JsonNode buildToolDefinitions() {
+    private JsonNode buildToolDefinitions(Set<String> allowedTools) {
+        ArrayNode filtered = mapper.createArrayNode();
+        if (allToolDefinitions == null || !allToolDefinitions.isArray()) {
+            return filtered;
+        }
+        for (JsonNode tool : allToolDefinitions) {
+            String name = tool.path("function").path("name").asText("");
+            if (allowedTools.contains(name)) {
+                filtered.add(tool);
+            }
+        }
+        return filtered;
+    }
+
+    private JsonNode buildAllToolDefinitions() {
         try {
             String json = """
             [

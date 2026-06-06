@@ -17,8 +17,8 @@ const TESTIMONIALS = [
 ];
 
 const FALLBACK_TESTIMONIAL = {
-  text: 'CareerOps keeps my job search organised and focused.',
-  name: 'CareerOps Member',
+  text: 'NewCareers keeps my job search organised and focused.',
+  name: 'NewCareers Member',
   role: 'Active job seeker',
 };
 
@@ -40,7 +40,7 @@ export function AuthLayout({ children, title, subtitle, footer }: AuthLayoutProp
           <div className="w-9 h-9 bg-white/20 backdrop-blur-sm rounded-xl flex items-center justify-center border border-white/30">
             <Sparkles size={18} className="text-white" />
           </div>
-          <span className="font-bold text-xl text-white tracking-tight font-display">CareerOps</span>
+          <span className="font-bold text-xl text-white tracking-tight font-display">NewCareers</span>
         </Link>
 
         {/* Hero text */}
@@ -92,7 +92,7 @@ export function AuthLayout({ children, title, subtitle, footer }: AuthLayoutProp
             <div className="w-8 h-8 bg-brand-500 rounded-lg flex items-center justify-center shadow-brand">
               <Sparkles size={15} className="text-white" />
             </div>
-            <span className="font-bold text-base text-text-primary font-display">CareerOps</span>
+            <span className="font-bold text-base text-text-primary font-display">NewCareers</span>
           </Link>
 
           <div className="mb-7">

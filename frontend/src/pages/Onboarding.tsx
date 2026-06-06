@@ -1,29 +1,59 @@
-import { Fragment, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 
 import { useNavigate } from 'react-router-dom';
 
 import { useAuth } from '@/context/AuthContext';
+import {
+  readOnboardingVerification,
+  writeOnboardingVerification,
+} from '@/lib/onboardingVerification';
+import {
+  clearPendingSignup,
+  readPendingSignup,
+} from '@/lib/pendingSignup';
+import { OnboardingEmailVerificationModal } from '@/components/onboarding/OnboardingEmailVerificationModal';
+import {
+  completeOnboardingFinish,
+  messageForDeliveryStage,
+  overlayStatusForPhase,
+} from '@/lib/completeOnboardingFinish';
 import { useQueryClient } from '@tanstack/react-query';
 import { queryKeys } from '@/lib/queryKeys';
 
 import {
+  AUTH_LOGGED_OUT_EVENT,
   authApi,
   onboardingApi,
   profileApi,
   type OnboardingDeliveryStatus,
 } from '@/services/api';
 import { tokenStore } from '@/lib/tokenStore';
+import {
+  isAuthFailureError,
+  isOnboardingPath,
+  redirectOnSessionExpired,
+} from '@/lib/onboardingSession';
 
 import { PageMeta } from '@/components/PageMeta';
 
 import {
   PreferencesStep,
+  DEFAULT_WORK_SETTINGS,
+  mergeWorkSettings,
   type PreferencesStepValues,
 } from '@/components/onboarding/PreferencesStep';
-import { FieldLabel } from '@/components/onboarding/RequiredLabel';
 import { MonthYearField } from '@/components/onboarding/MonthYearField';
 import { buildOnboardingProfilePayload } from '@/lib/buildOnboardingProfilePayload';
+import { mapCvParseToOnboarding } from '@/lib/mapCvParseToOnboarding';
+import {
+  readOnboardingCvDraft,
+  writeOnboardingCvDraft,
+  clearOnboardingCvDraft,
+} from '@/lib/onboardingCvDraft';
+import { OnboardingPageShell } from '@/components/onboarding/OnboardingPageShell';
+import { OnboardingStepper } from '@/components/onboarding/OnboardingStepper';
+import { BasicInfoStep } from '@/components/onboarding/BasicInfoStep';
 import { JobSearchRadarLoader } from '@/components/onboarding/JobSearchRadarLoader';
 import { JobEvaluationProgressModal } from '@/components/JobEvaluationProgressModal';
 import { useJobEvaluationProgress } from '@/hooks/useJobEvaluationProgress';
@@ -45,21 +75,20 @@ import '@/styles/onboarding.css';
 
 
 
-const STEPS = ['Basic Info', 'Experience', 'Preferences'] as const;
-
 function defaultPreferences(): PreferencesStepValues {
   return {
     selectedRoles: [],
     selectedTech: [],
     workTypes: ['Full-time'],
-    workSettings: { remote: true, onsite: false, hybrid: false },
-    salaryMinK: 0,
+    workSettings: { ...DEFAULT_WORK_SETTINGS },
+    salaryMinK: 40,
     salaryMaxK: 80,
     salaryCurrency: 'EUR',
     availability: '2 weeks notice',
     cvFile: null,
     sponsorship: false,
     minMatchPercent: 60,
+    maxAgeDays: 7,
   };
 }
 
@@ -130,104 +159,6 @@ function emptyEducation(): EducationEntry {
     graduationYear: '',
 
   };
-
-}
-
-
-
-function OnboardingStepper({ activeStep }: { activeStep: number }) {
-
-  return (
-
-    <nav className="onboarding-stepper" aria-label="Onboarding progress">
-
-      <div className="onboarding-stepper__row">
-
-        {STEPS.map((label, index) => (
-
-          <Fragment key={label}>
-
-            {index > 0 && (
-
-              <div
-
-                className={`onboarding-stepper__connector ${activeStep >= index ? 'onboarding-stepper__connector--done' : ''}`}
-
-                aria-hidden="true"
-
-              />
-
-            )}
-
-            <div className="onboarding-stepper__col">
-
-              <div
-
-                className={`onboarding-stepper__dot ${
-
-                  index < activeStep
-
-                    ? 'onboarding-stepper__dot--completed'
-
-                    : index === activeStep
-
-                      ? 'onboarding-stepper__dot--active'
-
-                      : 'onboarding-stepper__dot--upcoming'
-
-                }`}
-
-              >
-
-                {index < activeStep ? (
-
-                  <span className="material-symbols-outlined" aria-hidden="true">
-
-                    check
-
-                  </span>
-
-                ) : (
-
-                  index + 1
-
-                )}
-
-              </div>
-
-              <span
-
-                className={`onboarding-stepper__label ${
-
-                  index < activeStep
-
-                    ? 'onboarding-stepper__label--completed'
-
-                    : index === activeStep
-
-                      ? 'onboarding-stepper__label--active'
-
-                      : 'onboarding-stepper__label--upcoming'
-
-                }`}
-
-              >
-
-                {label}
-
-              </span>
-
-            </div>
-
-          </Fragment>
-
-        ))}
-
-      </div>
-
-    </nav>
-
-  );
 
 }
 
@@ -555,7 +486,7 @@ function EducationPanel({
 
 export default function Onboarding() {
 
-  const { updateProfile, user } = useAuth();
+  const { updateProfile, signUp, user } = useAuth();
   const queryClient = useQueryClient();
   const { progress, progressPercent, connect } = useJobEvaluationProgress(user?.id ?? null);
   const [showModal, setShowModal] = useState(false);
@@ -600,24 +531,56 @@ export default function Onboarding() {
 
   }, [user, nav]);
 
+  const handleSessionExpiredOnOnboarding = useCallback(() => {
+    if (!isOnboardingPath()) return;
+    toast.error('Your sign-up session expired. Please start again from the sign-up page.');
+    redirectOnSessionExpired('/onboarding');
+  }, []);
 
+  useEffect(() => {
+    const onLoggedOut = () => {
+      if (!isOnboardingPath()) return;
+      toast.error('Your sign-up session expired. Please start again from the sign-up page.');
+    };
+    window.addEventListener(AUTH_LOGGED_OUT_EVENT, onLoggedOut);
+    return () => window.removeEventListener(AUTH_LOGGED_OUT_EVENT, onLoggedOut);
+  }, []);
 
   const [step, setStep] = useState(0);
+  const [step0Submitted, setStep0Submitted] = useState(false);
+  const [parsingCv, setParsingCv] = useState(false);
+  const [cvParseSummary, setCvParseSummary] = useState<{
+    rolesFound: number;
+    educationFound: number;
+    projectsFound: number;
+  } | null>(() => {
+    const draft = readOnboardingCvDraft();
+    return draft
+      ? {
+          rolesFound: draft.rolesFound,
+          educationFound: draft.educationFound,
+          projectsFound: draft.projectsFound,
+        }
+      : null;
+  });
+  const scrollRef = useRef<HTMLDivElement>(null);
 
   const [saving, setSaving] = useState(false);
   const [matchingOverlay, setMatchingOverlay] = useState(false);
   const [deliveryStatus, setDeliveryStatus] = useState<OnboardingDeliveryStatus | null>(null);
   const [deliveryFailed, setDeliveryFailed] = useState<string | null>(null);
+  const [verificationModalOpen, setVerificationModalOpen] = useState(false);
+  const [verificationResendsRemaining, setVerificationResendsRemaining] = useState(3);
 
-  const [fullName, setFullName] = useState(user?.name || '');
+  const [fullName, setFullName] = useState(
+    () => user?.name || readPendingSignup()?.name || '',
+  );
 
   const [headline, setHeadline] = useState('');
 
   const [experienceYears, setExperienceYears] = useState('');
 
   const [location, setLocation] = useState('Dublin, Ireland');
-
-
 
   const [workEntries, setWorkEntries] = useState<WorkEntry[]>([emptyWork()]);
 
@@ -627,9 +590,13 @@ export default function Onboarding() {
 
   const [preferences, setPreferences] = useState<PreferencesStepValues>(defaultPreferences);
 
-  function patchPreferences(patch: Partial<PreferencesStepValues>) {
-    setPreferences(prev => ({ ...prev, ...patch }));
-  }
+  const patchPreferences = useCallback((patch: Partial<PreferencesStepValues>) => {
+    setPreferences(prev => {
+      const next = { ...prev, ...patch };
+      next.workSettings = mergeWorkSettings(prev.workSettings, patch.workSettings);
+      return next;
+    });
+  }, []);
 
 
 
@@ -663,7 +630,10 @@ export default function Onboarding() {
     const deadline = Date.now() + DELIVERY_TIMEOUT_MS;
     while (Date.now() < deadline) {
       const status = await onboardingApi.deliveryStatus();
-      setDeliveryStatus(status);
+      setDeliveryStatus({
+        ...status,
+        message: messageForDeliveryStage(status.stage, status.message),
+      });
       if (status.ready || status.readyPartial) return;
       if (status.stage === 'failed') {
         throw new Error(
@@ -680,6 +650,7 @@ export default function Onboarding() {
   }
 
   function finishToDashboard() {
+    clearOnboardingCvDraft();
     setWelcomePendingFlag();
     setDeliveryFailed(null);
     setDeliveryStatus(null);
@@ -698,27 +669,18 @@ export default function Onboarding() {
     return () => window.clearTimeout(t);
   }, [progress.status]);
 
-  async function handleFinish() {
+  async function proceedFinish() {
     navigatedAfterEvalRef.current = false;
     setSaving(true);
     setMatchingOverlay(true);
     setDeliveryFailed(null);
-    setDeliveryStatus({
-      stage: 'reading_cv',
-      message: 'Saving your profile…',
-      evaluatedCount: 0,
-      targetCount: 10,
-      minRequired: 3,
-      jobsDiscovered: 0,
-      readyPartial: false,
-      ready: false,
-    });
+    setDeliveryStatus(overlayStatusForPhase('Preparing…'));
     let keepDeliveryOverlay = false;
 
     try {
-      await ensureFreshSession();
-
+      const pending = readPendingSignup();
       const p = preferences;
+
       if (!p.cvFile) {
         toast.error('Upload your CV to finish onboarding.');
         setMatchingOverlay(false);
@@ -732,27 +694,57 @@ export default function Onboarding() {
         p,
       );
 
-      await updateProfile(payload);
-      await profileApi.uploadCv(p.cvFile);
+      const registerName = fullName.trim() || pending?.name?.trim() || 'User';
+      const finishResult = await completeOnboardingFinish(
+        {
+          existingUser: user,
+          pending,
+          registerName,
+          profilePayload: payload,
+          cvFile: p.cvFile,
+        },
+        {
+          signUp,
+          clearPendingSignup,
+          ensureFreshSession,
+          updateProfile,
+          uploadCv: async file => { await profileApi.uploadCv(file); },
+          startDelivery: () => onboardingApi.startDelivery(),
+          onPhase: setDeliveryStatus,
+        },
+      );
+
+      if (!finishResult.ok) {
+        if (finishResult.reason === 'session_expired') {
+          handleSessionExpiredOnOnboarding();
+          return;
+        }
+        if (finishResult.reason === 'signup_failed') {
+          toast.error(finishResult.message ?? 'Could not create your account. Please try again.');
+          return;
+        }
+        if (finishResult.reason === 'missing_user_id') {
+          handleSessionExpiredOnOnboarding();
+          return;
+        }
+        if (finishResult.reason === 'missing_cv') {
+          toast.error('Upload your CV to finish onboarding.');
+          setMatchingOverlay(false);
+          return;
+        }
+      }
+
+      const evaluationUserId = finishResult.ok ? finishResult.evaluationUserId : '';
 
       setShowModal(true);
-      connect();
-
-      setDeliveryStatus({
-        stage: 'reading_cv',
-        message: 'Starting AI job matching…',
-        evaluatedCount: 0,
-        targetCount: 10,
-        minRequired: 3,
-        jobsDiscovered: 0,
-        readyPartial: false,
-        ready: false,
-      });
-
-      await onboardingApi.startDelivery();
+      connect(evaluationUserId);
       try {
         await pollDeliveryUntilReady();
       } catch (pollErr: unknown) {
+        if (isAuthFailureError(pollErr)) {
+          handleSessionExpiredOnOnboarding();
+          return;
+        }
         const pollMsg = pollErr instanceof Error ? pollErr.message : undefined;
         if (pollMsg?.includes('longer than expected')) {
           toast.error(pollMsg, { duration: 8000 });
@@ -782,6 +774,10 @@ export default function Onboarding() {
       finishToDashboard();
       return;
     } catch (err: unknown) {
+      if (isAuthFailureError(err)) {
+        handleSessionExpiredOnOnboarding();
+        return;
+      }
       const message =
         err && typeof err === 'object' && 'response' in err
           ? (err as { response?: { data?: { message?: string; error?: string } } }).response?.data
@@ -801,25 +797,146 @@ export default function Onboarding() {
     }
   }
 
+  async function handleFinish() {
+    const pending = readPendingSignup();
+    const p = preferences;
 
-
-  function handleBasicInfoSubmit(e: React.FormEvent) {
-
-    e.preventDefault();
-
-    if (fullName && location && experienceYears) {
-
-      setStep(1);
-
+    if (!p.cvFile) {
+      toast.error('Upload your CV to finish onboarding.');
+      return;
     }
 
+    if (pending && !readOnboardingVerification(pending.email)) {
+      setSaving(true);
+      try {
+        const registerName = fullName.trim() || pending.name?.trim() || 'User';
+        const firstName = registerName.split(/\s+/)[0];
+        const sendBody: { email: string; firstName?: string } = { email: pending.email };
+        if (firstName) sendBody.firstName = firstName;
+        const sent = await authApi.sendOnboardingVerificationOtp(sendBody);
+        setVerificationResendsRemaining(sent.resendsRemaining);
+        setVerificationModalOpen(true);
+      } catch (err: unknown) {
+        if (isAuthFailureError(err)) {
+          handleSessionExpiredOnOnboarding();
+          return;
+        }
+        const message =
+          err && typeof err === 'object' && 'normalizedMessage' in err
+            ? String((err as { normalizedMessage: string }).normalizedMessage)
+            : err instanceof Error
+              ? err.message
+              : 'Could not send verification code. Please try again.';
+        toast.error(message);
+      } finally {
+        setSaving(false);
+      }
+      return;
+    }
+
+    await proceedFinish();
+  }
+
+  function handleVerificationComplete(verificationId: string) {
+    const pending = readPendingSignup();
+    if (pending) {
+      writeOnboardingVerification(verificationId, pending.email);
+    }
+    setVerificationModalOpen(false);
+    void proceedFinish();
   }
 
 
 
-  const cardClass = `onboarding-card${
-    step === 1 ? ' onboarding-card--wide' : step === 2 ? ' onboarding-card--preferences' : ''
-  }`;
+  async function handleBasicInfoSubmit() {
+    if (!fullName.trim()) {
+      toast.error('Please enter your full name.');
+      return;
+    }
+    if (!preferences.cvFile) {
+      toast.error('Upload your CV to continue.');
+      return;
+    }
+
+    setParsingCv(true);
+    try {
+      const parsed = await authApi.parseOnboardingCv(preferences.cvFile);
+      const mapped = mapCvParseToOnboarding(parsed);
+
+      setWorkEntries(mapped.workEntries);
+      setEducationEntries(mapped.educationEntries);
+
+      if (!headline.trim() && parsed.headline?.trim()) {
+        setHeadline(parsed.headline.trim());
+      }
+
+      writeOnboardingCvDraft({
+        cvMarkdown: parsed.cvMarkdown,
+        rolesFound: parsed.rolesFound,
+        educationFound: parsed.educationFound,
+        projectsFound: parsed.projectsFound ?? 0,
+      });
+
+      setCvParseSummary({
+        rolesFound: parsed.rolesFound,
+        educationFound: parsed.educationFound,
+        projectsFound: parsed.projectsFound ?? 0,
+      });
+
+      if (parsed.rolesFound === 0) {
+        toast.error('We could not detect work experience in your CV. Please add it manually.');
+      }
+
+      setStep0Submitted(true);
+      setStep(1);
+      requestAnimationFrame(() => {
+        scrollRef.current?.scrollTo({ top: 0, behavior: 'smooth' });
+      });
+    } catch (err: unknown) {
+      if (isAuthFailureError(err)) {
+        handleSessionExpiredOnOnboarding();
+        return;
+      }
+      const message =
+        err && typeof err === 'object' && 'response' in err
+          ? (err as { response?: { data?: { message?: string; error?: string } } }).response?.data
+              ?.message ??
+            (err as { response?: { data?: { error?: string } } }).response?.data?.error
+          : err instanceof Error
+            ? err.message
+            : undefined;
+      toast.error(message ?? 'Could not read your CV. Try a different PDF or DOCX file.');
+    } finally {
+      setParsingCv(false);
+    }
+  }
+
+  const basicIdentityComplete = useMemo(
+    () => Boolean(fullName.trim() && experienceYears && location.trim()),
+    [fullName, experienceYears, location],
+  );
+
+  const profileCompleteness = useMemo(() => {
+    let pct = 0;
+    if (step0Submitted || step > 0) pct += 100 / 3;
+    if (step > 1) pct += 100 / 3;
+    if (saving || matchingOverlay) pct += 100 / 3;
+    return Math.min(100, Math.round(pct));
+  }, [step, step0Submitted, saving, matchingOverlay]);
+
+  function handleBasicInfoChange(patch: {
+    fullName?: string;
+    headline?: string;
+    experienceYears?: string;
+    location?: string;
+    cvFile?: File | null;
+  }) {
+    if (patch.fullName !== undefined) setFullName(patch.fullName);
+    if (patch.headline !== undefined) setHeadline(patch.headline);
+    if (patch.experienceYears !== undefined) setExperienceYears(patch.experienceYears);
+    if (patch.location !== undefined) setLocation(patch.location);
+    if (patch.cvFile !== undefined) patchPreferences({ cvFile: patch.cvFile });
+  }
 
 
 
@@ -850,255 +967,58 @@ export default function Onboarding() {
 
     <div className="onboarding-page">
 
-      <PageMeta title="Candidate Onboarding - NewCareers" />
+      <PageMeta title="CareerOps - Profile Setup" />
+
+      <OnboardingPageShell
+        activeStep={step}
+        profileCompleteness={profileCompleteness}
+        experienceYears={experienceYears}
+        step0Submitted={step0Submitted}
+      >
+        <div className="onboarding-shell__scroll" ref={scrollRef}>
+          <OnboardingStepper activeStep={step} basicIdentityComplete={basicIdentityComplete} />
+
+          {step === 0 && (
+            <BasicInfoStep
+              values={{
+                fullName,
+                headline,
+                experienceYears,
+                location,
+                cvFile: preferences.cvFile,
+              }}
+              onChange={handleBasicInfoChange}
+              onSubmit={() => void handleBasicInfoSubmit()}
+              parsingCv={parsingCv}
+            />
+          )}
 
 
 
-      <header className="onboarding-header">
+          {step === 1 && (
+            <>
+              <div className="onboarding-card__title onboarding-card__title--experience">
+                <h1>Tell us about your background</h1>
+                <p>Add your work experience and education to help us find the best roles for you.</p>
+              </div>
 
-        <div className="onboarding-header__inner">
-
-          <a
-
-            className="onboarding-logo"
-
-            href="/"
-
-            onClick={e => {
-
-              e.preventDefault();
-
-              nav('/');
-
-            }}
-
-          >
-
-            NewCareers
-
-          </a>
-
-        </div>
-
-      </header>
-
-
-
-      <main className="onboarding-main">
-
-        <div className={cardClass}>
-
-          <OnboardingStepper activeStep={step} />
-
-
-
-          <div className="onboarding-card__scroll">
-
-            {step === 0 && (
-
-              <>
-
-                <div className="onboarding-card__title">
-
-                  <h1>Let&apos;s build your professional profile</h1>
-
-                  <p>Tell us a bit about yourself to help us find the perfect match.</p>
-
+              {cvParseSummary && (cvParseSummary.rolesFound > 0 || cvParseSummary.educationFound > 0) && (
+                <div className="onboarding-parse-banner" role="status">
+                  <span className="material-symbols-outlined" aria-hidden="true">
+                    auto_awesome
+                  </span>
+                  <p>
+                    We found{' '}
+                    {cvParseSummary.rolesFound > 0
+                      ? `${cvParseSummary.rolesFound} role${cvParseSummary.rolesFound === 1 ? '' : 's'}`
+                      : 'no roles'}
+                    {cvParseSummary.educationFound > 0
+                      ? ` and ${cvParseSummary.educationFound} school${cvParseSummary.educationFound === 1 ? '' : 's'}`
+                      : ''}{' '}
+                    from your CV — review and edit below.
+                  </p>
                 </div>
-
-
-
-                <form className="onboarding-form" onSubmit={handleBasicInfoSubmit}>
-
-                  <div className="onboarding-field">
-
-                    <FieldLabel htmlFor="fullName" required>
-                      Full Name
-                    </FieldLabel>
-
-                    <input
-
-                      className="onboarding-input"
-
-                      id="fullName"
-
-                      name="fullName"
-
-                      placeholder="Jane Doe"
-
-                      type="text"
-
-                      value={fullName}
-
-                      required
-
-                      onChange={e => setFullName(e.target.value)}
-
-                    />
-
-                  </div>
-
-
-
-                  <div className="onboarding-field">
-
-                    <label htmlFor="headline">Professional Headline</label>
-
-                    <input
-
-                      className="onboarding-input"
-
-                      id="headline"
-
-                      name="headline"
-
-                      placeholder="e.g. Senior Product Designer"
-
-                      type="text"
-
-                      value={headline}
-
-                      onChange={e => setHeadline(e.target.value)}
-
-                    />
-
-                    <p className="hint">This will be the first thing employers see.</p>
-
-                  </div>
-
-
-
-                  <div className="onboarding-grid-2">
-
-                    <div className="onboarding-field">
-
-                      <FieldLabel htmlFor="experience" required>
-                        Years of Experience
-                      </FieldLabel>
-
-                      <div className="onboarding-field__relative">
-
-                        <select
-
-                          className="onboarding-select"
-
-                          id="experience"
-
-                          name="experience"
-
-                          value={experienceYears}
-
-                          required
-
-                          onChange={e => setExperienceYears(e.target.value)}
-
-                        >
-
-                          <option disabled value="">
-
-                            Select years
-
-                          </option>
-
-                          <option value="0-2">0-2 years</option>
-
-                          <option value="3-5">3-5 years</option>
-
-                          <option value="6-10">6-10 years</option>
-
-                          <option value="10+">10+ years</option>
-
-                        </select>
-
-                        <span className="material-symbols-outlined onboarding-field__icon onboarding-field__icon--right">
-
-                          expand_more
-
-                        </span>
-
-                      </div>
-
-                    </div>
-
-
-
-                    <div className="onboarding-field">
-
-                      <FieldLabel htmlFor="location" required>
-                        Current Location
-                      </FieldLabel>
-
-                      <div className="onboarding-field__relative">
-
-                        <span className="material-symbols-outlined onboarding-field__icon onboarding-field__icon--left">
-
-                          location_on
-
-                        </span>
-
-                        <input
-
-                          className="onboarding-input onboarding-input--with-icon-left"
-
-                          id="location"
-
-                          name="location"
-
-                          placeholder="City, Country"
-
-                          type="text"
-
-                          value={location}
-
-                          required
-
-                          onChange={e => setLocation(e.target.value)}
-
-                        />
-
-                      </div>
-
-                    </div>
-
-                  </div>
-
-
-
-                  <div className="onboarding-actions onboarding-actions--end">
-
-                    <button className="onboarding-btn-primary" type="submit">
-
-                      Continue
-
-                      <span className="material-symbols-outlined" aria-hidden="true">
-
-                        arrow_forward
-
-                      </span>
-
-                    </button>
-
-                  </div>
-
-                </form>
-
-              </>
-
-            )}
-
-
-
-            {step === 1 && (
-
-              <>
-
-                <div className="onboarding-card__title onboarding-card__title--experience">
-
-                  <h1>Tell us about your background</h1>
-
-                  <p>Add your work experience and education to help us find the best roles for you.</p>
-
-                </div>
+              )}
 
 
 
@@ -1220,54 +1140,55 @@ export default function Onboarding() {
 
 
 
-                  <div className="onboarding-actions">
+              <div className="onboarding-actions">
+                <button className="onboarding-btn-outline" type="button" onClick={() => setStep(0)}>
+                  Back
+                </button>
+                <button className="onboarding-btn-primary onboarding-btn-primary--full" type="submit">
+                  Continue
+                  <span className="material-symbols-outlined" aria-hidden="true">
+                    arrow_forward
+                  </span>
+                </button>
+              </div>
+            </form>
+            </>
+          )}
 
-                    <button className="onboarding-btn-outline" type="button" onClick={() => setStep(0)}>
-
-                      Back
-
-                    </button>
-
-                    <button className="onboarding-btn-primary" type="submit">
-
-                      Continue
-
-                      <span className="material-symbols-outlined" aria-hidden="true">
-
-                        arrow_forward
-
-                      </span>
-
-                    </button>
-
-                  </div>
-
-                </form>
-
-              </>
-
-            )}
-
-
-
-            {step === 2 && (
-              <PreferencesStep
-                values={preferences}
-                saving={saving}
-                onChange={patchPreferences}
-                onBack={() => setStep(1)}
-                onComplete={handleFinish}
-              />
-            )}
-
-
-          </div>
-
+          {step === 2 && (
+            <>
+              <div className="onboarding-card__title onboarding-card__title--preferences">
+                <h1>Job preferences</h1>
+                <p>
+                  Choose roles, skills, and filters so we only surface jobs that fit your profile — not
+                  random listings.
+                </p>
+              </div>
+              <form className="onboarding-form onboarding-form--preferences" onSubmit={e => e.preventDefault()}>
+                <PreferencesStep
+                  values={preferences}
+                  saving={saving}
+                  onChange={patchPreferences}
+                  onBack={() => setStep(1)}
+                  onComplete={handleFinish}
+                />
+              </form>
+            </>
+          )}
         </div>
-
-      </main>
-
+      </OnboardingPageShell>
     </div>
+
+      <OnboardingEmailVerificationModal
+        open={verificationModalOpen}
+        email={readPendingSignup()?.email ?? ''}
+        {...(fullName.trim()
+          ? { firstName: fullName.trim().split(/\s+/)[0] }
+          : {})}
+        initialResendsRemaining={verificationResendsRemaining}
+        onVerified={handleVerificationComplete}
+        onCancel={() => setVerificationModalOpen(false)}
+      />
     </>
   );
 

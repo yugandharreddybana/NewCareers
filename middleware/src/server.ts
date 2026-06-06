@@ -28,6 +28,14 @@ if (missingEnv.length) {
   process.exit(1);
 }
 
+const javaBackendUrl = process.env.JAVA_BACKEND_URL || '';
+if (javaBackendUrl.includes(':8100')) {
+  console.warn(
+    '[startup] JAVA_BACKEND_URL points at :8100 (H2 test profile). ' +
+      'For Postgres dev on :8080, set JAVA_BACKEND_URL=http://localhost:8080 in middleware/.env',
+  );
+}
+
 import auth from './routes/auth.routes.js';
 import profile from './routes/profile.routes.js';
 import jobs from './routes/jobs.routes.js';
@@ -51,7 +59,10 @@ import resumeVersions from './routes/resume-versions.routes.js';
 import cv from './routes/cv.routes.js';
 import billing from './routes/billing.routes.js';
 import usage from './routes/usage.routes.js';
+import consents from './routes/consents.routes.js';
+import account from './routes/account.routes.js';
 import publicRoutes from './routes/public.routes.js';
+import { forward } from './services/backendProxy.js';
 
 const app = express();
 
@@ -258,7 +269,7 @@ app.get('/health', async (_req, res) => {
   let backendOk = false;
   try {
     const javaBackendUrl = process.env.JAVA_BACKEND_URL || 'http://localhost:8080';
-    const resp = await axios.get(`${javaBackendUrl}/api/v1/health`, { timeout: 3000 });
+    const resp = await axios.get(`${javaBackendUrl}/api/health`, { timeout: 3000 });
     if (resp.status === 200) {
       backendOk = true;
     }
@@ -273,6 +284,28 @@ app.get('/health', async (_req, res) => {
   };
 
   return res.status(cachedHealth.ok ? 200 : 503).json(cachedHealth);
+});
+
+const jwksLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: 60,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: 'Slow down — too many requests.' },
+});
+
+app.get('/.well-known/jwks.json', jwksLimiter, async (_req, res, next) => {
+  try {
+    const r = await forward({ method: 'GET', path: '/.well-known/jwks.json' });
+    res.status(r.status);
+    const cacheControl = r.headers['cache-control'];
+    if (typeof cacheControl === 'string') {
+      res.setHeader('cache-control', cacheControl);
+    }
+    res.json(r.data);
+  } catch (e) {
+    next(e);
+  }
 });
 
 // ── Route mounting ────────────────────────────────────────────────────────────
@@ -299,6 +332,8 @@ app.use('/api/v1/resume-versions', resumeVersions);
 app.use('/api/v1/cv', cv);
 app.use('/api/v1/billing', billing);
 app.use('/api/v1/usage', usage);
+app.use('/api/v1/consents', consents);
+app.use('/api/v1/account', account);
 app.use('/api/v1/public', publicRoutes); // Pass 6 #6.016 — unauthenticated stats
 
 // ── Global error handler ─────────────────────────────────────────────────────────

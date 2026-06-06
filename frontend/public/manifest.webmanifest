@@ -1,6 +1,6 @@
 {
-  "name": "CareerOps",
-  "short_name": "CareerOps",
+  "name": "NewCareers",
+  "short_name": "NewCareers",
   "description": "AI-powered career intelligence platform",
   "display": "standalone",
   "start_url": "/dashboard",
@@ -29,7 +29,7 @@
       "sizes": "512x512",
       "type": "image/png",
       "form_factor": "narrow",
-      "label": "CareerOps Dashboard"
+      "label": "NewCareers Dashboard"
     }
   ],
   "shortcuts": [

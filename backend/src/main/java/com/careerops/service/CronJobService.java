@@ -2,8 +2,11 @@ package com.careerops.service;
 
 import com.careerops.model.ApplicationTask;
 import com.careerops.repository.ApplicationTaskRepository;
+import com.careerops.repository.AuditLogRepository;
 import com.careerops.repository.DailyFetchLogRepository;
+import com.careerops.repository.PasswordResetRepository;
 import com.careerops.repository.SkillRunRepository;
+import com.careerops.repository.UserConsentRepository;
 import com.careerops.repository.UserProfileRepository;
 import com.careerops.repository.UserRepository;
 import org.slf4j.Logger;
@@ -13,7 +16,9 @@ import org.springframework.stereotype.Service;
 
 import java.time.Instant;
 import java.time.LocalDate;
+import java.time.temporal.ChronoUnit;
 import java.util.List;
+import java.util.Map;
 import io.micrometer.core.instrument.MeterRegistry;
 import net.javacrumbs.shedlock.spring.annotation.SchedulerLock;
 import java.util.concurrent.ExecutorService;
@@ -27,9 +32,10 @@ import jakarta.annotation.PreDestroy;
  *
  * All cron schedules (Dublin timezone):
  *   02:00        — purgeExpiredRefreshTokens
- *   03:00        — pruneFetchLogs
+ *   03:00        — runGdprRetentionCleanup
+ *   03:15        — pruneFetchLogs
  *   07:50        — pruneSeenJobs
- *   08:00        — dailyJobRefresh
+ *   06:00        — dailyJobRefresh
  *   08:30        — sendDeadlineReminders   ← Phase 3 addition
  *   09:05        — dailyDigestEmail
  *   08:00 MON    — weeklyDigestEmail
@@ -40,6 +46,9 @@ public class CronJobService {
 
     private static final int SEEN_JOBS_RETAIN_DAYS  = 60;
     private static final int FETCH_LOG_RETAIN_DAYS  = 90;
+    private static final int AUDIT_LOG_RETAIN_DAYS = 365;
+    private static final int PASSWORD_RESET_RETAIN_DAYS = 30;
+    private static final int DELETED_USER_CONSENT_RETAIN_DAYS = 30;
     /** Number of days ahead to look for upcoming deadlines. */
     private static final int DEADLINE_LOOKAHEAD_DAYS = 2;
 
@@ -57,7 +66,11 @@ public class CronJobService {
     private final SkillRunRepository          skillRuns;
     private final MeterRegistry               meterRegistry;
     private final com.careerops.repository.RefreshTokenRepository refreshTokens;
- 
+    private final AuditLogRepository auditLogs;
+    private final PasswordResetRepository passwordResets;
+    private final UserConsentRepository userConsents;
+    private final AuditLogService audit;
+
     /** 3.067 — Bounded pool for parallel user job delivery */
     private final ExecutorService deliveryExecutor = Executors.newFixedThreadPool(10);
 
@@ -72,7 +85,11 @@ public class CronJobService {
                           com.careerops.repository.ReferralOutboxRepository referralOutbox,
                           SkillRunRepository skillRuns,
                           MeterRegistry meterRegistry,
-                          com.careerops.repository.RefreshTokenRepository refreshTokens) {
+                          com.careerops.repository.RefreshTokenRepository refreshTokens,
+                          AuditLogRepository auditLogs,
+                          PasswordResetRepository passwordResets,
+                          UserConsentRepository userConsents,
+                          AuditLogService audit) {
         this.delivery      = d;
         this.profiles      = p;
         this.digest        = digest;
@@ -87,6 +104,10 @@ public class CronJobService {
         this.skillRuns     = skillRuns;
         this.meterRegistry = meterRegistry;
         this.refreshTokens = refreshTokens;
+        this.auditLogs     = auditLogs;
+        this.passwordResets = passwordResets;
+        this.userConsents  = userConsents;
+        this.audit         = audit;
     }
 
     // ─── 02:00 — purge expired refresh tokens ─────────────────────────────────
@@ -105,9 +126,40 @@ public class CronJobService {
         }
     }
 
-    // ─── 03:00 — prune fetch logs ──────────────────────────────────────────────
+    // ─── 03:00 — GDPR retention cleanup ─────────────────────────────────────────
 
     @Scheduled(cron = "0 0 3 * * *", zone = "Europe/Dublin")
+    @SchedulerLock(name = "runGdprRetentionCleanup", lockAtMostFor = "30m", lockAtLeastFor = "2m")
+    @org.springframework.transaction.annotation.Transactional
+    public void runGdprRetentionCleanup() {
+        log.info("GDPR retention cleanup cron firing");
+        try {
+            Instant now = Instant.now();
+            int auditDeleted = auditLogs.deleteByCreatedAtBefore(
+                    now.minus(AUDIT_LOG_RETAIN_DAYS, ChronoUnit.DAYS));
+            int passwordResetsDeleted = passwordResets.deleteByCreatedAtBefore(
+                    now.minus(PASSWORD_RESET_RETAIN_DAYS, ChronoUnit.DAYS));
+            int refreshTokensDeleted = refreshTokens.deleteByExpiresAtBefore(now);
+            int consentsDeleted = userConsents.deleteForUsersDeletedBefore(
+                    now.minus(DELETED_USER_CONSENT_RETAIN_DAYS, ChronoUnit.DAYS));
+
+            audit.log(null, "GDPR_RETENTION_CLEANUP", null, Map.of(
+                    "auditLogsDeleted", auditDeleted,
+                    "passwordResetsDeleted", passwordResetsDeleted,
+                    "refreshTokensDeleted", refreshTokensDeleted,
+                    "userConsentsDeleted", consentsDeleted));
+
+            log.info("GDPR retention cleanup: audit={} passwordResets={} refreshTokens={} consents={}",
+                    auditDeleted, passwordResetsDeleted, refreshTokensDeleted, consentsDeleted);
+        } catch (Exception e) {
+            log.warn("GDPR retention cleanup failed: {}", e.getMessage());
+            meterRegistry.counter("cron.job.failed", "job", "runGdprRetentionCleanup").increment();
+        }
+    }
+
+    // ─── 03:15 — prune fetch logs ──────────────────────────────────────────────
+
+    @Scheduled(cron = "0 15 3 * * *", zone = "Europe/Dublin")
     @SchedulerLock(name = "pruneFetchLogs", lockAtMostFor = "15m", lockAtLeastFor = "2m")
     public void pruneFetchLogs() {
         log.info("Fetch-log prune cron firing");
@@ -135,9 +187,9 @@ public class CronJobService {
         }
     }
 
-    // ─── 08:00 — daily job delivery ───────────────────────────────────────────
+    // ─── 06:00 Dublin — daily job delivery ────────────────────────────────────
 
-    @Scheduled(cron = "0 0 8 * * *", zone = "Europe/Dublin")
+    @Scheduled(cron = "0 0 6 * * *", zone = "Europe/Dublin")
     @SchedulerLock(name = "dailyJobRefresh", lockAtMostFor = "1h", lockAtLeastFor = "5m")
     public void dailyJobRefresh() {
         // 3.090 — Add jitter to prevent thundering herd
@@ -145,7 +197,7 @@ public class CronJobService {
         catch (InterruptedException e) { Thread.currentThread().interrupt(); }
  
         log.info("Daily job delivery cron firing");
-        int share = delivery.cronShare();
+        int share = delivery.batchSize();
         var allProfiles = profiles.findAllByOnboardedTrue();
         
         // 3.067 — Parallelise delivery to prevent cron overlap using dedicated pool

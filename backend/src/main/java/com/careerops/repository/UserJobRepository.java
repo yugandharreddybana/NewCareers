@@ -7,6 +7,7 @@ import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.EntityGraph;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.JpaSpecificationExecutor;
+import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 import org.springframework.stereotype.Repository;
@@ -41,14 +42,14 @@ public interface UserJobRepository extends JpaRepository<UserJob, UUID>, JpaSpec
                    j.title          AS title,
                    j.company        AS company,
                    j.location       AS location,
-                   j.source         AS source,
-                   j.employmentType AS employmentType,
+                   j.sourceName     AS source,
+                   CAST(NULL AS string) AS employmentType,
                    uj.kanbanColumn  AS kanbanColumn,
                    uj.matchPercent  AS matchPercent,
                    uj.isFavorite    AS isFavorite,
-                   uj.isNew         AS isNew,
+                   false            AS isNew,
                    uj.deliveredAt   AS deliveredAt,
-                   j.salaryCurrency AS salaryCurrency,
+                   j.currency       AS salaryCurrency,
                    j.salaryMin      AS salaryMin,
                    j.salaryMax      AS salaryMax
             FROM UserJob uj
@@ -66,14 +67,14 @@ public interface UserJobRepository extends JpaRepository<UserJob, UUID>, JpaSpec
                    j.title          AS title,
                    j.company        AS company,
                    j.location       AS location,
-                   j.source         AS source,
-                   j.employmentType AS employmentType,
+                   j.sourceName     AS source,
+                   CAST(NULL AS string) AS employmentType,
                    uj.kanbanColumn  AS kanbanColumn,
                    uj.matchPercent  AS matchPercent,
                    uj.isFavorite    AS isFavorite,
-                   uj.isNew         AS isNew,
+                   false            AS isNew,
                    uj.deliveredAt   AS deliveredAt,
-                   j.salaryCurrency AS salaryCurrency,
+                   j.currency       AS salaryCurrency,
                    j.salaryMin      AS salaryMin,
                    j.salaryMax      AS salaryMax
             FROM UserJob uj
@@ -95,14 +96,14 @@ public interface UserJobRepository extends JpaRepository<UserJob, UUID>, JpaSpec
                    j.title          AS title,
                    j.company        AS company,
                    j.location       AS location,
-                   j.source         AS source,
-                   j.employmentType AS employmentType,
+                   j.sourceName     AS source,
+                   CAST(NULL AS string) AS employmentType,
                    uj.kanbanColumn  AS kanbanColumn,
                    uj.matchPercent  AS matchPercent,
                    uj.isFavorite    AS isFavorite,
-                   uj.isNew         AS isNew,
+                   false            AS isNew,
                    uj.deliveredAt   AS deliveredAt,
-                   j.salaryCurrency AS salaryCurrency,
+                   j.currency       AS salaryCurrency,
                    j.salaryMin      AS salaryMin,
                    j.salaryMax      AS salaryMax
             FROM UserJob uj
@@ -121,14 +122,14 @@ public interface UserJobRepository extends JpaRepository<UserJob, UUID>, JpaSpec
                    j.title          AS title,
                    j.company        AS company,
                    j.location       AS location,
-                   j.source         AS source,
-                   j.employmentType AS employmentType,
+                   j.sourceName     AS source,
+                   CAST(NULL AS string) AS employmentType,
                    uj.kanbanColumn  AS kanbanColumn,
                    uj.matchPercent  AS matchPercent,
                    uj.isFavorite    AS isFavorite,
-                   uj.isNew         AS isNew,
+                   false            AS isNew,
                    uj.deliveredAt   AS deliveredAt,
-                   j.salaryCurrency AS salaryCurrency,
+                   j.currency       AS salaryCurrency,
                    j.salaryMin      AS salaryMin,
                    j.salaryMax      AS salaryMax
             FROM UserJob uj
@@ -148,6 +149,24 @@ public interface UserJobRepository extends JpaRepository<UserJob, UUID>, JpaSpec
 
     @EntityGraph(attributePaths = {"job"})
     Optional<UserJob> findByUserIdAndJobId(UUID userId, UUID jobId);
+
+    /** Includes soft-deleted rows (bypasses {@code deleted_at IS NULL} entity filter). */
+    @Query(value = """
+            SELECT uj.id FROM careerops.user_jobs uj
+            WHERE uj.user_id = :userId AND uj.job_id = :jobId
+            LIMIT 1
+            """, nativeQuery = true)
+    Optional<UUID> findRowIdByUserIdAndJobIdIncludingDeleted(
+            @Param("userId") UUID userId,
+            @Param("jobId") UUID jobId);
+
+    @Modifying(clearAutomatically = true, flushAutomatically = true)
+    @Query(value = """
+            UPDATE careerops.user_jobs
+            SET deleted_at = NULL
+            WHERE user_id = :userId AND job_id = :jobId AND deleted_at IS NOT NULL
+            """, nativeQuery = true)
+    int reactivateSoftDeleted(@Param("userId") UUID userId, @Param("jobId") UUID jobId);
 
     boolean existsByUserIdAndJobId(UUID userId, UUID jobId);
 
@@ -172,6 +191,9 @@ public interface UserJobRepository extends JpaRepository<UserJob, UUID>, JpaSpec
     Double avgMatchPercentByUserId(@Param("userId") UUID userId);
 
     long countByUserIdAndScoreBreakdownIsNotNull(UUID userId);
+
+    List<UserJob> findTop3ByUserIdAndDeliveredAtAfterAndMatchPercentIsNotNullOrderByMatchPercentDesc(
+            UUID userId, Instant since);
 
     // ── Kanban column distribution ────────────────────────────────────────────
     @Query("SELECT uj.kanbanColumn, COUNT(uj) FROM UserJob uj WHERE uj.userId = :userId GROUP BY uj.kanbanColumn")
@@ -206,4 +228,37 @@ public interface UserJobRepository extends JpaRepository<UserJob, UUID>, JpaSpec
     @Deprecated
     @EntityGraph(attributePaths = {"job"})
     Page<UserJob> findByUserIdOrderByDeliveredAtDesc(UUID userId, Pageable pageable);
+
+    /** Used by skill refresh and internal batch flows. */
+    @Deprecated
+    @EntityGraph(attributePaths = {"job"})
+    List<UserJob> findByUserIdOrderByDeliveredAtDesc(UUID userId);
+
+    @EntityGraph(attributePaths = {"job"})
+    long countByUserIdAndDeletedAtIsNull(UUID userId);
+
+    @EntityGraph(attributePaths = {"job"})
+    @Query("""
+            SELECT uj FROM UserJob uj JOIN uj.job j
+            WHERE uj.userId = :userId
+              AND uj.deletedAt IS NULL
+              AND uj.matchPercent >= :minMatch
+            ORDER BY uj.matchPercent DESC NULLS LAST, j.postedAt DESC NULLS LAST
+            """)
+    Page<UserJob> findPipelineByUserIdMinMatchSorted(
+            @Param("userId") UUID userId,
+            @Param("minMatch") int minMatch,
+            Pageable pageable);
+
+    Page<UserJob> findByUserIdAndDeletedAtIsNullAndMatchPercentGreaterThanEqualOrderByDeliveredAtDesc(
+            UUID userId, int minMatchPercent, Pageable pageable);
+
+    @Modifying(clearAutomatically = true, flushAutomatically = true)
+    @Query("""
+            UPDATE UserJob uj
+            SET uj.deletedAt = :now
+            WHERE uj.userId = :userId
+              AND uj.deletedAt IS NULL
+            """)
+    int softDeleteAllByUserId(@Param("userId") UUID userId, @Param("now") Instant now);
 }

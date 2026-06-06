@@ -20,7 +20,7 @@ public interface SkillRunRepository extends JpaRepository<SkillRun, UUID> {
 
     /**
      * TTL-aware cache lookup.
-     * Returns the most recent run that is either not expired (expires_at IS NULL or in future).
+     * Returns the most recent non-expired run (expires_at must be set and in the future).
      * Secure: always scoped to userId + userJobId.
      */
     @Query("""
@@ -28,7 +28,8 @@ public interface SkillRunRepository extends JpaRepository<SkillRun, UUID> {
         WHERE sr.userId = :userId
           AND sr.userJobId = :userJobId
           AND sr.skill = :skill
-          AND (sr.expiresAt IS NULL OR sr.expiresAt > :now)
+          AND sr.expiresAt IS NOT NULL
+          AND sr.expiresAt > :now
         ORDER BY sr.createdAt DESC
         LIMIT 1
         """)

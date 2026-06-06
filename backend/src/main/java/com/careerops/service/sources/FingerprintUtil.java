@@ -10,6 +10,10 @@ public final class FingerprintUtil {
 
     private FingerprintUtil() {}
 
+    public static String of(String title, String company, String url) {
+        return fingerprint(title, company, url);
+    }
+
     public static String fingerprint(String title, String company, String url) {
         try {
             String raw = (title + "|").toLowerCase() + (company + "|").toLowerCase() + url.toLowerCase();

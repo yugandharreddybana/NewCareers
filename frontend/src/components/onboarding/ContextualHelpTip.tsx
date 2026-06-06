@@ -59,7 +59,7 @@ export const HELP_TIPS = {
   atsScore:
     'ATS score estimates how well your CV will pass automated screening. Aim for 70%+ to reach a human reviewer.',
   coverLetterTone:
-    'CareerOps adapts tone based on the company type and role seniority. You can regenerate with a different tone at any time.',
+    'NewCareers adapts tone based on the company type and role seniority. You can regenerate with a different tone at any time.',
   plannerTask:
     'These tasks are auto-generated based on your application status. Mark them complete as you go to keep your tracker accurate.',
   streakCount:

@@ -68,13 +68,13 @@ const ReferPage: React.FC = () => {
 
   return (
     <>
-      <PageMeta title="Refer a Friend — CareerOps" />
+      <PageMeta title="Refer a Friend — NewCareers" />
       <div className="max-w-2xl mx-auto px-4 sm:px-6 py-8 space-y-6">
 
         <div className="bg-gradient-to-br from-indigo-500 to-purple-600 rounded-2xl p-6 text-white text-center">
           <Gift size={32} className="mx-auto mb-3 opacity-90" />
           <h1 className="text-2xl font-bold">Refer a Friend</h1>
-          <p className="text-sm opacity-80 mt-2">Invite friends to CareerOps and earn <strong>1 free month of Pro</strong> for every friend who signs up and stays 7 days.</p>
+          <p className="text-sm opacity-80 mt-2">Invite friends to NewCareers and earn <strong>1 free month of Pro</strong> for every friend who signs up and stays 7 days.</p>
         </div>
 
         {stats && (
@@ -104,7 +104,7 @@ const ReferPage: React.FC = () => {
             </button>
           </div>
           <div className="flex gap-2">
-            <a href={referralLink ? `https://twitter.com/intent/tweet?text=${encodeURIComponent(`I'm using CareerOps to supercharge my job search with AI — join me! ${referralLink}`)}` : '#'}
+            <a href={referralLink ? `https://twitter.com/intent/tweet?text=${encodeURIComponent(`I'm using NewCareers to supercharge my job search with AI — join me! ${referralLink}`)}` : '#'}
               target="_blank" rel="noopener noreferrer"
               className="flex-1 py-2 border border-gray-300 rounded-lg text-xs text-gray-600 text-center hover:bg-gray-50 transition-colors">Share on X</a>
             <a href={referralLink ? `https://www.linkedin.com/sharing/share-offsite/?url=${encodeURIComponent(referralLink)}` : '#'}
@@ -151,7 +151,7 @@ const ReferPage: React.FC = () => {
         <div className="bg-indigo-50 border border-indigo-200 rounded-xl p-5">
           <h3 className="text-sm font-semibold text-indigo-800 mb-3">🎉 How it works</h3>
           <ol className="space-y-2">
-            {['Share your unique referral link or invite by email', 'Friend signs up and uses CareerOps for 7+ days', 'You get 1 free month of Pro automatically — no code needed'].map((s, i) => (
+            {['Share your unique referral link or invite by email', 'Friend signs up and uses NewCareers for 7+ days', 'You get 1 free month of Pro automatically — no code needed'].map((s, i) => (
               <li key={i} className="text-xs text-indigo-700 flex items-start gap-2"><span className="font-bold mt-0.5">{i + 1}.</span>{s}</li>
             ))}
           </ol>

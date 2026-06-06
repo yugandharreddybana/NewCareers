@@ -3,6 +3,7 @@ package com.careerops.service;
 import org.jspecify.annotations.Nullable;
 
 import com.careerops.dto.AuthDtos.*;
+import com.careerops.dto.ConsentDtos.SignupConsentsRequest;
 import com.careerops.exception.ApiException;
 import com.careerops.model.PasswordReset;
 import com.careerops.model.User;
@@ -26,6 +27,7 @@ import java.security.SecureRandom;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
 import java.util.Base64;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
@@ -45,8 +47,20 @@ public class AuthService {
 
     private static final Logger log = LoggerFactory.getLogger(AuthService.class);
 
-    /** Refresh token validity: 7 days. */
-    private static final long REFRESH_EXPIRY_DAYS = 7;
+    @org.springframework.beans.factory.annotation.Value("${auth.refresh.remember.days:30}")
+    private long refreshRememberDays;
+
+    @org.springframework.beans.factory.annotation.Value("${auth.refresh.session.days:1}")
+    private long refreshSessionDays;
+
+    @org.springframework.beans.factory.annotation.Value("${auth.login.word-captcha.required:false}")
+    private boolean loginWordCaptchaRequired;
+
+    @org.springframework.beans.factory.annotation.Value("${resend.dev-mode:false}")
+    private boolean resendDevMode;
+
+    @org.springframework.beans.factory.annotation.Value("${e2e.test.email:test@newcareer.com}")
+    private String e2eTestEmail;
 
     private final UserRepository users;
     private final UserProfileRepository profiles;
@@ -57,8 +71,12 @@ public class AuthService {
     private final AuditLogService audit;
     private final RefreshTokenRepository refreshTokens;
     private final CaptchaService captcha;
+    private final WordCaptchaService wordCaptcha;
     private final com.careerops.repository.ReferralOutboxRepository referralOutbox;
     private final GoogleOAuthService googleOAuth;
+    private final UserConsentService consentService;
+    private final UserKeyService userKeyService;
+    private final OnboardingEmailVerificationService onboardingVerification;
 
     public AuthService(UserRepository users,
             UserProfileRepository profiles,
@@ -69,8 +87,12 @@ public class AuthService {
             AuditLogService audit,
             RefreshTokenRepository refreshTokens,
             CaptchaService captcha,
+            WordCaptchaService wordCaptcha,
             com.careerops.repository.ReferralOutboxRepository referralOutbox,
-            GoogleOAuthService googleOAuth) {
+            GoogleOAuthService googleOAuth,
+            UserConsentService consentService,
+            UserKeyService userKeyService,
+            OnboardingEmailVerificationService onboardingVerification) {
         this.users = users;
         this.profiles = profiles;
         this.resets = resets;
@@ -80,22 +102,39 @@ public class AuthService {
         this.audit = audit;
         this.refreshTokens = refreshTokens;
         this.captcha = captcha;
+        this.wordCaptcha = wordCaptcha;
         this.referralOutbox = referralOutbox;
         this.googleOAuth = googleOAuth;
+        this.consentService = consentService;
+        this.userKeyService = userKeyService;
+        this.onboardingVerification = onboardingVerification;
     }
 
     // ─── Signup ────────────────────────────────────────────────────────────────
 
     @Transactional(timeout = 10)
-    public AuthResponse signup(SignupRequest req) {
-        checkPwnedPassword(req.password());
+    public AuthResponse signup(SignupRequest req, @Nullable HttpServletRequest request) {
+        if (req.consents() == null || !Boolean.TRUE.equals(req.consents().termsAccepted())) {
+            throw new ApiException(HttpStatus.BAD_REQUEST, "You must accept the Terms of Service");
+        }
+        String email = normalizeEmail(req.email());
+        checkPwnedPassword(req.password(), email, true);
         try {
+            if (req.emailVerificationId() == null) {
+                throw new ApiException(HttpStatus.BAD_REQUEST, "Email verification required.");
+            }
+            onboardingVerification.consumeForSignup(req.emailVerificationId(), email);
+
+            UUID userId = UUID.randomUUID();
             User u = users.save(User.builder()
+                    .id(userId)
                     .name(req.name())
                     .username(req.username())
-                    .email(req.email())
+                    .email(email)
                     .passwordHash(encoder.encode(req.password()))
+                    .emailVerifiedAt(Instant.now())
                     .build());
+            userKeyService.provisionForUser(userId);
 
             profiles.save(UserProfile.builder()
                     .userId(u.getId())
@@ -103,6 +142,7 @@ public class AuthService {
                     .freshnessHours(96)
                     .minMatchPercent(UserProfile.DEFAULT_MIN_MATCH_PERCENT)
                     .sponsorshipRequired(false)
+                    .openToRemote(true)
                     .onboarded(false)
                     .build());
 
@@ -112,9 +152,11 @@ public class AuthService {
                     .refereeName(u.getName())
                     .build());
 
-            audit.log(u.getId(), "SIGNUP", Map.of("email", u.getEmail()));
+            consentService.recordSignupConsents(u.getId(), req.consents(), request);
 
-            String rawRefresh = issueRefreshToken(u, null);
+            audit.log(u.getId(), "SIGNUP", request, Map.of("email", u.getEmail()));
+
+            String rawRefresh = issueRefreshToken(u, null, false);
             return new AuthResponse(jwt.issue(u.getId().toString(), u.getEmail()), rawRefresh, toDto(u, false));
         } catch (org.springframework.dao.DataIntegrityViolationException e) {
             // 3.003 — Handle race condition where another request created the user between
@@ -148,7 +190,7 @@ public class AuthService {
                 }
                 users.save(u);
             } else {
-                u = createGoogleUser(identity);
+                u = createGoogleUser(identity, httpRequest, req.consents());
             }
         }
 
@@ -160,9 +202,17 @@ public class AuthService {
         return createAuthResponse(u, httpRequest);
     }
 
-    private User createGoogleUser(GoogleOAuthService.GoogleIdentity identity) {
+    private User createGoogleUser(
+            GoogleOAuthService.GoogleIdentity identity,
+            @Nullable HttpServletRequest httpRequest,
+            @Nullable SignupConsentsRequest consents) {
+        if (consents == null || !Boolean.TRUE.equals(consents.termsAccepted())) {
+            throw new ApiException(HttpStatus.BAD_REQUEST, "You must accept the Terms of Service");
+        }
         try {
+            UUID userId = UUID.randomUUID();
             User u = users.save(User.builder()
+                    .id(userId)
                     .name(identity.name())
                     .username(allocateUsername(identity.email()))
                     .email(identity.email())
@@ -171,6 +221,7 @@ public class AuthService {
                     .googleSub(identity.sub())
                     .emailVerifiedAt(Instant.now())
                     .build());
+            userKeyService.provisionForUser(userId);
 
             profiles.save(UserProfile.builder()
                     .userId(u.getId())
@@ -178,6 +229,7 @@ public class AuthService {
                     .freshnessHours(96)
                     .minMatchPercent(UserProfile.DEFAULT_MIN_MATCH_PERCENT)
                     .sponsorshipRequired(false)
+                    .openToRemote(true)
                     .onboarded(false)
                     .build());
 
@@ -186,13 +238,20 @@ public class AuthService {
                     .refereeName(u.getName())
                     .build());
 
-            audit.log(u.getId(), "GOOGLE_SIGNUP", Map.of("email", u.getEmail()));
+            consentService.recordSignupConsents(u.getId(), consents, httpRequest);
+
+            audit.log(u.getId(), "GOOGLE_SIGNUP", httpRequest, Map.of("email", u.getEmail()));
             return u;
         } catch (org.springframework.dao.DataIntegrityViolationException e) {
-            return users.findByGoogleSub(identity.sub())
+            User existing = users.findByGoogleSub(identity.sub())
                     .or(() -> users.findByEmail(identity.email()))
                     .orElseThrow(() -> new ApiException(HttpStatus.CONFLICT,
                             "Could not create account. Please try again."));
+            if (consents != null && !consentService.hasConsent(existing.getId(),
+                    com.careerops.model.UserConsent.ConsentType.ESSENTIAL)) {
+                consentService.recordSignupConsents(existing.getId(), consents, httpRequest);
+            }
+            return existing;
         }
     }
 
@@ -221,7 +280,7 @@ public class AuthService {
 
     @Transactional(timeout = 10)
     public AuthResponse login(LoginRequest req, @Nullable HttpServletRequest httpRequest) {
-        String lookupEmail = req.email() != null ? req.email().toLowerCase() : "";
+        String lookupEmail = normalizeEmail(req.email());
         User u = users.findByEmail(lookupEmail).orElse(null);
 
         // 3.002 — Brute-force protection: check lockout BEFORE password check
@@ -231,13 +290,13 @@ public class AuthService {
                     "Account is temporarily locked due to excessive failed attempts. Please try again in 15 minutes.");
         }
 
-        // 3.002 — Expose Captcha challenge after 3 failures
-        if (u != null && u.getFailedLoginAttempts() >= 3) {
+        // Jumbled word CAPTCHA — required in prod/staging; skipped in local dev
+        if (loginWordCaptchaRequired) {
             if (req.captchaToken() == null || req.captchaToken().isBlank()) {
                 throw new ApiException(HttpStatus.UNAUTHORIZED, "Captcha verification required", true);
             }
-            if (!captcha.verify(req.captchaToken())) {
-                throw new ApiException(HttpStatus.UNAUTHORIZED, "Invalid captcha token", true);
+            if (!wordCaptcha.verifyToken(req.captchaToken())) {
+                throw new ApiException(HttpStatus.UNAUTHORIZED, "Invalid captcha. Please try again.", true);
             }
         }
 
@@ -252,7 +311,7 @@ public class AuthService {
         boolean passwordMatches = encoder.matches(req.password(), hashToVerify);
 
         if (u == null || !passwordMatches) {
-            boolean captchaRequired = false;
+            boolean captchaRequired = loginWordCaptchaRequired;
             if (u != null) {
                 // 3.002 — Atomic increment ensures tracking even if login() rolls back
                 users.incrementFailedAttempts(u.getEmail());
@@ -267,9 +326,6 @@ public class AuthService {
                     audit.log(u.getId(), "ACCOUNT_LOCKED", httpRequest,
                             Map.of("reason", "Too many failed attempts", "count", attempts));
                 }
-                if (attempts >= 3) {
-                    captchaRequired = true;
-                }
             }
             throw new ApiException(HttpStatus.UNAUTHORIZED, "Invalid credentials", captchaRequired);
         }
@@ -278,7 +334,7 @@ public class AuthService {
         users.resetFailedAttempts(u.getEmail());
 
         audit.log(u.getId(), "LOGIN", httpRequest);
-        return createAuthResponse(u, httpRequest);
+        return createAuthResponse(u, httpRequest, Boolean.TRUE.equals(req.rememberMe()));
     }
 
     /**
@@ -286,18 +342,23 @@ public class AuthService {
      * Used by login, refresh, and rotation after password change.
      */
     @Transactional(timeout = 10)
-    public AuthResponse createAuthResponse(User u, @Nullable HttpServletRequest request) {
+    public AuthResponse createAuthResponse(User u, @Nullable HttpServletRequest request, boolean rememberMe) {
         boolean onboarded = profiles.findByUserId(u.getId())
-                .map(UserProfile::getOnboarded).orElse(false);
+                .map(OnboardingStatusResolver::isOnboarded).orElse(false);
 
-        String rawRefresh = issueRefreshToken(u, request);
+        String rawRefresh = issueRefreshToken(u, request, rememberMe);
         return new AuthResponse(jwt.issue(u.getId().toString(), u.getEmail()), rawRefresh, toDto(u, onboarded));
+    }
+
+    @Transactional(timeout = 10)
+    public AuthResponse createAuthResponse(User u, @Nullable HttpServletRequest request) {
+        return createAuthResponse(u, request, false);
     }
 
     /** Overload kept for backward-compat or non-request contexts. */
     @Transactional(timeout = 10)
     public AuthResponse createAuthResponse(User u) {
-        return createAuthResponse(u, null);
+        return createAuthResponse(u, null, false);
     }
 
     /**
@@ -333,11 +394,13 @@ public class AuthService {
 
         audit.log(u.getId(), "TOKEN_REFRESH", httpRequest);
 
-        String newRawRefresh = issueRefreshToken(u, httpRequest);
+        boolean rememberMe = rt.getExpiresAt().isAfter(
+                Instant.now().plus(refreshSessionDays, ChronoUnit.DAYS));
+        String newRawRefresh = issueRefreshToken(u, httpRequest, rememberMe);
         String newAccessToken = jwt.issue(u.getId().toString(), u.getEmail());
 
         boolean onboarded = profiles.findByUserId(u.getId())
-                .map(UserProfile::getOnboarded).orElse(false);
+                .map(OnboardingStatusResolver::isOnboarded).orElse(false);
 
         return new AuthResponse(newAccessToken, newRawRefresh, toDto(u, onboarded));
     }
@@ -368,7 +431,7 @@ public class AuthService {
 
     @Transactional(timeout = 10)
     public void forgot(ForgotRequest req) {
-        String lookupEmail = req.email() != null ? req.email().toLowerCase() : "";
+        String lookupEmail = normalizeEmail(req.email());
         User u = users.findByEmail(lookupEmail).orElse(null);
         if (u == null)
             return;
@@ -392,15 +455,18 @@ public class AuthService {
         }
 
         String otp = generateSixDigitOtp();
+        String firstName = u.getName() != null && !u.getName().isBlank()
+                ? u.getName().split("\\s+")[0]
+                : null;
         PasswordReset pr = PasswordReset.builder()
                 .userId(u.getId())
-                .email(req.email())
+                .email(lookupEmail)
                 .otpHash(sha256(otp))
                 .expiresAt(Instant.now().plus(15, ChronoUnit.MINUTES))
                 .used(false)
                 .build();
         resets.save(pr);
-        email.sendOtp(req.email(), otp);
+        email.sendOtp(lookupEmail, otp, firstName);
     }
 
     private String generateSixDigitOtp() {
@@ -412,7 +478,7 @@ public class AuthService {
     @Transactional(timeout = 10)
     public void verifyOtp(VerifyOtpRequest req) {
         checkPwnedPassword(req.newPassword());
-        String lookupEmail = req.email() != null ? req.email().toLowerCase() : "";
+        String lookupEmail = normalizeEmail(req.email());
         User u = users.findByEmail(lookupEmail)
                 .orElseThrow(() -> new ApiException(HttpStatus.NOT_FOUND, "User not found"));
 
@@ -461,18 +527,19 @@ public class AuthService {
 
     // ─── Internal helpers ──────────────────────────────────────────────────────
 
-    private String issueRefreshToken(User u, @Nullable HttpServletRequest request) {
+    private String issueRefreshToken(User u, @Nullable HttpServletRequest request, boolean rememberMe) {
         byte[] bytes = new byte[48];
         new SecureRandom().nextBytes(bytes);
         String raw = Base64.getUrlEncoder().withoutPadding().encodeToString(bytes);
         String hashed = sha256(raw);
 
         String deviceInfo = request != null ? request.getHeader("User-Agent") : "unknown";
+        long days = rememberMe ? refreshRememberDays : refreshSessionDays;
 
         RefreshToken rt = RefreshToken.builder()
                 .userId(u.getId())
                 .tokenHash(hashed)
-                .expiresAt(Instant.now().plus(REFRESH_EXPIRY_DAYS, ChronoUnit.DAYS))
+                .expiresAt(Instant.now().plus(days, ChronoUnit.DAYS))
                 .deviceInfo(deviceInfo)
                 .build();
         refreshTokens.save(rt);
@@ -512,14 +579,21 @@ public class AuthService {
         }
 
         boolean onboarded = profiles.findByUserId(u.getId())
-                .map(UserProfile::getOnboarded)
+                .map(OnboardingStatusResolver::isOnboarded)
                 .orElse(false);
 
         return toDto(u, onboarded);
     }
 
     private void checkPwnedPassword(String password) {
+        checkPwnedPassword(password, null, false);
+    }
+
+    private void checkPwnedPassword(String password, @Nullable String email, boolean allowE2eBypass) {
         if (password == null || password.isBlank()) {
+            return;
+        }
+        if (allowE2eBypass && email != null && isDevE2eEmail(email)) {
             return;
         }
         try {
@@ -562,6 +636,20 @@ public class AuthService {
         } catch (Exception e) {
             log.warn("Pwned Password API check failed (failing-open): {}", e.getMessage());
         }
+    }
+
+    private boolean isDevE2eEmail(String email) {
+        if (!resendDevMode || email == null || email.isBlank()) {
+            return false;
+        }
+        String norm = normalizeEmail(email);
+        String configured = e2eTestEmail == null ? "" : e2eTestEmail.trim().toLowerCase(Locale.ROOT);
+        return norm.endsWith("@careerops.test")
+                || (!configured.isEmpty() && norm.equals(configured));
+    }
+
+    static String normalizeEmail(String email) {
+        return email == null ? "" : email.trim().toLowerCase(Locale.ROOT);
     }
 
     private static String sha256(String s) {

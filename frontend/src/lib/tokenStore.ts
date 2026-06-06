@@ -34,6 +34,8 @@ const LEGACY_KEYS = ['co_token', 'co_refresh', 'co_user'] as const;
 
 let accessToken: string | null = null;
 let refreshToken: string | null = null;
+/** True when refresh token lives in HttpOnly cookie (Remember me). */
+let refreshViaCookie = false;
 
 const listeners = new Set<(t: string | null) => void>();
 
@@ -94,14 +96,35 @@ export const tokenStore = {
 
   hasRefresh(): boolean { return refreshToken !== null; },
 
+  /** Refresh may be available via HttpOnly cookie after Remember me login. */
+  hasRefreshOrCookie(): boolean { return refreshToken !== null || refreshViaCookie; },
+
+  setRefreshViaCookie(enabled: boolean): void {
+    refreshViaCookie = enabled;
+    if (enabled) {
+      this.setRefresh(null);
+    }
+  },
+
+  usesCookieRefresh(): boolean { return refreshViaCookie; },
+
   /** Atomic write of both tokens after login / signup / silent refresh. */
   set(access: string, refresh: string): void {
+    refreshViaCookie = false;
     this.setAccess(access);
     this.setRefresh(refresh);
   },
 
+  /** Remember-me login: access in memory, refresh in HttpOnly cookie. */
+  setAccessOnly(access: string): void {
+    refreshViaCookie = true;
+    this.setAccess(access);
+    this.setRefresh(null);
+  },
+
   /** Atomic clear on logout / unrecoverable session error. */
   clear(): void {
+    refreshViaCookie = false;
     this.setAccess(null);
     this.setRefresh(null);
     evictLegacyKeys();

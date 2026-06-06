@@ -16,7 +16,7 @@ import java.util.UUID;
 public class DailyLimitService {
 
     private final DailyFetchLogRepository repo;
-    @Value("${jobs.max.per.user.per.day:10}")
+    @Value("${jobs.daily.cap:${jobs.max.per.user.per.day:25}}")
     private int maxPerDay;
 
     public DailyLimitService(DailyFetchLogRepository repo) { this.repo = repo; }
@@ -43,7 +43,6 @@ public class DailyLimitService {
 
     public void assertCanFetch(UUID userId) {
         if (getCount(userId) >= maxPerDay)
-            throw new ApiException(HttpStatus.TOO_MANY_REQUESTS,
-                "Daily limit of " + maxPerDay + " jobs reached. Resets at midnight.");
+            throw new ApiException(HttpStatus.TOO_MANY_REQUESTS, JobFetchSettings.dailyLimitMessage());
     }
 }

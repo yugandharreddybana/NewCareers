@@ -254,7 +254,7 @@ export const DASHBOARD_TOUR_STEPS: TourStep[] = [
   {
     targetId:  'dashboard-search-bar',
     title:     'Search for roles',
-    body:      'Start by searching for a job title or company. CareerOps analyses match strength and surfaces the best opportunities for your profile.',
+    body:      'Start by searching for a job title or company. NewCareers analyses match strength and surfaces the best opportunities for your profile.',
     placement: 'bottom',
   },
   {
@@ -266,7 +266,7 @@ export const DASHBOARD_TOUR_STEPS: TourStep[] = [
   {
     targetId:  'dashboard-planner-card',
     title:     'Application Planner',
-    body:      'CareerOps auto-generates your next actions for every job. Never miss a follow-up or deadline.',
+    body:      'NewCareers auto-generates your next actions for every job. Never miss a follow-up or deadline.',
     placement: 'top',
   },
   {

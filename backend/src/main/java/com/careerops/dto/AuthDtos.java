@@ -1,7 +1,10 @@
 package com.careerops.dto;
 
+import com.careerops.dto.ConsentDtos.SignupConsentsRequest;
+import jakarta.validation.Valid;
 import jakarta.validation.constraints.Email;
 import jakarta.validation.constraints.NotBlank;
+import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.Size;
 import jakarta.validation.constraints.Pattern;
 
@@ -14,18 +17,60 @@ public class AuthDtos {
         @NotBlank @Size(max = 100) String name,
         @NotBlank @Size(max = 100) @Pattern(regexp = "^[a-zA-Z0-9._-]{3,30}$") String username,
         @NotBlank @Email @Size(max = 254) String email,
-        @NotBlank @Size(min = 8, max = 128) @Pattern(regexp = "^(?=.*[a-z])(?=.*[A-Z])(?=.*\\d).{8,128}$") String password
+        @NotBlank @Size(min = 8, max = 128) @Pattern(regexp = "^(?=.*[a-z])(?=.*[A-Z])(?=.*\\d).{8,128}$") String password,
+        @Valid @NotNull SignupConsentsRequest consents,
+        java.util.UUID emailVerificationId
     ) {}
+
+    public record OnboardingCheckEmailRequest(
+        @NotBlank @Email @Size(max = 254) String email
+    ) {}
+
+    public record OnboardingCheckEmailResponse(boolean available) {}
+
+    public record OnboardingSendOtpRequest(
+        @NotBlank @Email @Size(max = 254) String email,
+        @Size(max = 100) String firstName
+    ) {}
+
+    public record OnboardingResendOtpRequest(
+        @NotBlank @Email @Size(max = 254) String email
+    ) {}
+
+    public record OnboardingVerifyEmailRequest(
+        @NotBlank @Email @Size(max = 254) String email,
+        @NotBlank @Pattern(regexp = "^\\d{6}$", message = "OTP must be a 6-digit code") String otp,
+        String captchaToken
+    ) {}
+
+    public record OnboardingOtpSentResponse(int resendsRemaining, int retryAfterSeconds) {}
+
+    public record OnboardingVerificationResponse(java.util.UUID verificationId) {}
 
     public record LoginRequest(
         @NotBlank @Email String email,
         @NotBlank String password,
-        String captchaToken
+        String captchaToken,
+        Boolean rememberMe
+    ) {}
+
+    /** Jumbled character CAPTCHA — GET /auth/captcha/challenge */
+    public record WordCaptchaLetter(
+        String character,
+        int rotate,
+        int translateY,
+        String color
+    ) {}
+
+    public record WordCaptchaChallengeResponse(
+        String challengeId,
+        java.util.List<WordCaptchaLetter> letters
     ) {}
 
     /** Body for POST /auth/google — Google Identity Services ID token (JWT). */
     public record GoogleAuthRequest(
-        @NotBlank @Size(min = 100, max = 8192) String idToken
+        @NotBlank @Size(min = 100, max = 8192) String idToken,
+        @Valid SignupConsentsRequest consents
     ) {}
 
     public record ForgotRequest(
@@ -75,5 +120,39 @@ public class AuthDtos {
         String token,
         String refreshToken,
         UserDto user
+    ) {}
+
+    // ── Onboarding CV parse (stateless, pre-signup) ─────────────────────
+
+    public record OnboardingCvParseWorkEntry(
+        String jobTitle,
+        String companyName,
+        String startDate,
+        String endDate,
+        boolean current,
+        String description
+    ) {}
+
+    public record OnboardingCvParseEducationEntry(
+        String schoolName,
+        String degree,
+        String fieldOfStudy,
+        String graduationYear
+    ) {}
+
+    public record OnboardingCvParseProjectEntry(
+        String title,
+        String description
+    ) {}
+
+    public record OnboardingCvParseResponse(
+        String cvMarkdown,
+        String headline,
+        java.util.List<OnboardingCvParseWorkEntry> workExperience,
+        java.util.List<OnboardingCvParseEducationEntry> education,
+        java.util.List<OnboardingCvParseProjectEntry> projects,
+        int rolesFound,
+        int educationFound,
+        int projectsFound
     ) {}
 }

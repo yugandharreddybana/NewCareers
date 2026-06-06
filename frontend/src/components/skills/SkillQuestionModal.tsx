@@ -147,7 +147,7 @@ export function SkillQuestionModal({
 
         {/* Hint */}
         <p className="mt-3 text-xs text-gray-400 text-center">
-          You can skip this question — CareerOps will continue with available information.
+          You can skip this question — NewCareers will continue with available information.
         </p>
       </div>
     </div>

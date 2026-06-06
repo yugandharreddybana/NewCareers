@@ -104,7 +104,7 @@ const PlannerPage: React.FC = () => {
 
   return (
     <>
-      <PageMeta title="Planner — CareerOps" />
+      <PageMeta title="Planner — NewCareers" />
       <div className="max-w-3xl mx-auto px-4 sm:px-6 py-8 space-y-6">
 
         <div className="flex items-start justify-between">

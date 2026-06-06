@@ -22,7 +22,7 @@ public class JobsIeSource implements JobSource {
     private static final Logger log = LoggerFactory.getLogger(JobsIeSource.class);
     private static final String BASE = "https://www.jobs.ie/job-search/";
 
-    @Override public String sourceName() { return "Jobs.ie"; }
+    @Override public String name() { return "Jobs.ie"; }
 
     @Override
     public List<JobListing> fetch(String keyword, String location, int maxAgeDays) {
@@ -50,7 +50,7 @@ public class JobsIeSource implements JobSource {
                     if (title.isBlank()) continue;
                     JobListing j = new JobListing();
                     j.setTitle(title); j.setCompany(company); j.setLocation(loc);
-                    j.setUrl(link); j.setSource(sourceName()); j.setPostedAt(posted);
+                    j.setUrl(link); j.setSource(name()); j.setPostedAt(posted);
                     results.add(j);
                 } catch (Exception e) { log.debug("Jobs.ie card parse", e); }
             }

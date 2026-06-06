@@ -27,7 +27,7 @@ public class IndeedRssSource implements JobSource {
     private static final DateTimeFormatter RFC822 =
             DateTimeFormatter.ofPattern("EEE, dd MMM yyyy HH:mm:ss Z", Locale.ENGLISH);
 
-    @Override public String sourceName() { return "Indeed"; }
+    @Override public String name() { return "Indeed"; }
 
     @Override
     public List<JobListing> fetch(String keyword, String location, int maxAgeDays) {
@@ -56,7 +56,7 @@ public class IndeedRssSource implements JobSource {
                     if (cutoff != null && posted != null && posted.isBefore(cutoff)) continue;
                     JobListing j = new JobListing();
                     j.setTitle(title); j.setCompany(company); j.setLocation(loc);
-                    j.setUrl(link); j.setSource(sourceName()); j.setPostedAt(posted);
+                    j.setUrl(link); j.setSource(name()); j.setPostedAt(posted);
                     results.add(j);
                 } catch (Exception e) { log.debug("Indeed item parse", e); }
             }

@@ -729,7 +729,7 @@ export function JobEvaluationModal({
 
               <p className="font-body-md text-body-md text-on-surface-variant mb-4">
 
-                This role does not have a stored evaluation yet. CareerOps runs evaluation automatically when
+                This role does not have a stored evaluation yet. NewCareers runs evaluation automatically when
 
                 new jobs are delivered to your pipeline each day.
 

@@ -1,6 +1,7 @@
 package com.careerops.service.sources;
 
 import com.careerops.model.JobListing;
+import com.careerops.model.UserProfile;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.slf4j.Logger;
@@ -13,7 +14,10 @@ import org.springframework.web.util.UriComponentsBuilder;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
+import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Locale;
+import java.util.Set;
 
 /**
  * Adzuna job board adapter.
@@ -27,6 +31,22 @@ import java.util.List;
 public class AdzunaSource implements JobSource {
 
     private static final Logger log = LoggerFactory.getLogger(AdzunaSource.class);
+
+    private static final Set<String> IRELAND_LOCATION_HINTS = Set.of(
+        "dublin", "cork", "galway", "limerick", "waterford", "kilkenny",
+        "kildare", "wicklow", "wexford", "meath", "louth", "mayo", "sligo",
+        "tipperary", "donegal", "clare", "kerry", "laois", "leitrim",
+        "longford", "monaghan", "offaly", "roscommon", "cavan", "carlow",
+        "westmeath", "bray", "drogheda", "letterkenny", "naas", "athlone"
+    );
+
+    private static final Set<String> NON_REPUBLIC_IRELAND_HINTS = Set.of(
+        "northern ireland", "england", "scotland", "wales",
+        "united kingdom", ", uk", "uk,",
+        "county antrim", "county armagh", "county down",
+        "county londonderry", "county tyrone", "county fermanagh",
+        "belfast"
+    );
 
     private final JobApiHttpClient httpClient;
     private final ObjectMapper     mapper;
@@ -46,7 +66,7 @@ public class AdzunaSource implements JobSource {
         this.mapper     = mapper;
     }
 
-    @Override public String sourceName() { return "Adzuna"; }
+    @Override public String name() { return "Adzuna"; }
     @Override public boolean isEnabled()  { return appId != null && !appId.isBlank(); }
 
     @Override
@@ -90,7 +110,7 @@ public class AdzunaSource implements JobSource {
 
                     JobListing j = new JobListing();
                     j.setTitle(title);   j.setCompany(company); j.setLocation(loc);
-                    j.setUrl(link);      j.setSource(sourceName()); j.setPostedAt(posted);
+                    j.setUrl(link);      j.setSource(name()); j.setPostedAt(posted);
                     results.add(j);
                 } catch (Exception e) {
                     log.debug("Adzuna item parse error", e);
@@ -101,5 +121,50 @@ public class AdzunaSource implements JobSource {
             log.warn("Adzuna fetch failed: {}", e.getMessage());
         }
         return results;
+    }
+
+    static List<String> resolveCountryOrder(String configuredCountryCode, boolean irelandProfile) {
+        String normalized = normalizeCountry(configuredCountryCode);
+        LinkedHashSet<String> order = new LinkedHashSet<>();
+        if (irelandProfile) {
+            order.add("ie");
+            order.add("gb");
+        }
+        order.add(normalized);
+        return new ArrayList<>(order);
+    }
+
+    static boolean prefersIreland(UserProfile profile) {
+        if (profile == null) return false;
+        String location = joinLocations(profile);
+        if (location.isBlank()) return false;
+        String s = location.toLowerCase(Locale.ROOT);
+        if (s.contains("ireland")) return true;
+        return IRELAND_LOCATION_HINTS.stream().anyMatch(s::contains);
+    }
+
+    static boolean isRepublicOfIrelandLocation(String location) {
+        if (location == null || location.isBlank()) return false;
+        String s = location.toLowerCase(Locale.ROOT).trim();
+        if (NON_REPUBLIC_IRELAND_HINTS.stream().anyMatch(s::contains)) return false;
+
+        if (s.contains("remote") && s.contains("ireland")) return true;
+        if (IRELAND_LOCATION_HINTS.stream().anyMatch(s::contains)) return true;
+        if (s.equals("ireland") || s.equals("republic of ireland")) return true;
+        if (s.contains("ireland")) {
+            return !s.contains("ireland,");
+        }
+        return false;
+    }
+
+    private static String joinLocations(UserProfile profile) {
+        if (profile == null) return "";
+        String goal = profile.getGoalLocation() == null ? "" : profile.getGoalLocation().trim();
+        String base = profile.getLocation() == null ? "" : profile.getLocation().trim();
+        return (goal + " " + base).trim();
+    }
+
+    private static String normalizeCountry(String raw) {
+        return (raw == null || raw.isBlank()) ? "gb" : raw.toLowerCase(Locale.ROOT);
     }
 }

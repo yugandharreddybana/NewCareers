@@ -84,12 +84,13 @@ class ScrapeResponse(BaseModel):
 class PlaywrightJobScrapeRequest(BaseModel):
     url: str
     timeout: Optional[int] = 45
+    location: Optional[str] = "Remote"
 
 
 class PlaywrightJobItem(BaseModel):
     title: str
     url: str
-    location: str = "Ireland"
+    location: Optional[str] = "Remote"
 
 
 class PlaywrightJobScrapeResponse(BaseModel):
@@ -170,7 +171,7 @@ async def scrape_jobs_playwright(body: PlaywrightJobScrapeRequest):
                         if key in seen:
                             continue
                         seen.add(key)
-                        jobs.append({"title": title, "url": url, "location": "Ireland"})
+                        jobs.append({"title": title, "url": url, "location": body.location or "Remote"})
                         if len(jobs) >= 25:
                             break
                     except Exception:

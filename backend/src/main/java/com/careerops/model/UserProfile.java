@@ -1,10 +1,13 @@
 package com.careerops.model;
 
-import io.hypersistence.utils.hibernate.type.array.StringArrayType;
+import com.careerops.persistence.FieldEncryptionListener;
+import com.fasterxml.jackson.annotation.JsonIgnore;
 import io.hypersistence.utils.hibernate.type.json.JsonType;
 import jakarta.persistence.*;
 import lombok.*;
+import org.hibernate.annotations.JdbcTypeCode;
 import org.hibernate.annotations.Type;
+import org.hibernate.type.SqlTypes;
 
 import java.time.Instant;
 import java.util.ArrayList;
@@ -17,6 +20,7 @@ import java.util.UUID;
  *        goal_location, open_to_remote
  */
 @Entity
+@EntityListeners(FieldEncryptionListener.class)
 @Table(name = "user_profiles", schema = "careerops",
        uniqueConstraints = @UniqueConstraint(columnNames = "user_id"))
 @Getter @Setter @NoArgsConstructor @AllArgsConstructor @Builder
@@ -34,18 +38,19 @@ public class UserProfile {
     @Column(name = "user_id", nullable = false, unique = true)
     private UUID userId;
 
+    @JsonIgnore
     @OneToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "user_id", insertable = false, updatable = false)
     private User user;
 
     // ── Existing matching prefs ──────────────────────────────────────────
 
-    @Type(StringArrayType.class)
-    @Column(name = "target_roles", columnDefinition = "text array")
+    @JdbcTypeCode(SqlTypes.ARRAY)
+    @Column(name = "target_roles", columnDefinition = "text[]")
     private String[] targetRoles;
 
-    @Type(StringArrayType.class)
-    @Column(name = "tech_stack", columnDefinition = "text array")
+    @JdbcTypeCode(SqlTypes.ARRAY)
+    @Column(name = "tech_stack", columnDefinition = "text[]")
     private String[] techStack;
 
     private String location;
@@ -55,8 +60,8 @@ public class UserProfile {
     @Builder.Default
     @Column(name = "salary_currency") private String salaryCurrency = "EUR";
 
-    @Type(StringArrayType.class)
-    @Column(name = "sectors", columnDefinition = "text array")
+    @JdbcTypeCode(SqlTypes.ARRAY)
+    @Column(name = "sectors", columnDefinition = "text[]")
     private String[] sectors;
 
     @Column(name = "freshness_hours")   private Integer freshnessHours;
@@ -78,10 +83,11 @@ public class UserProfile {
 
     // ── Section 10: Career Goal fields ──────────────────────────────────
 
-    @Column(name = "goal_title",      length = 200) private String  goalTitle;
-    @Column(name = "goal_salary_min")               private Integer goalSalaryMin;
-    @Column(name = "goal_salary_max")               private Integer goalSalaryMax;
-    @Column(name = "goal_location",   length = 100) private String  goalLocation;
+    @Column(name = "goal_title") private String goalTitle;
+    @JdbcTypeCode(SqlTypes.ARRAY)
+    @Column(name = "work_types", columnDefinition = "text[]")
+    private String[] workTypes;
+    @Column(name = "goal_location") private String goalLocation;
     @Column(name = "open_to_remote")                private Boolean openToRemote;
 
     // ── Onboarding: experience & work preferences ───────────────────────
@@ -108,6 +114,10 @@ public class UserProfile {
     @Column(name = "availability", length = 64)
     private String availability;
 
+    /** Career domain for permit analytics (TECH, HEALTHCARE, FINANCE, …). */
+    @Column(name = "job_domain", length = 32)
+    private String jobDomain;
+
     /** First onboarding job-delivery progress (stage, counts, message). */
     @Type(JsonType.class)
     @Column(name = "onboarding_delivery", columnDefinition = "jsonb")
@@ -115,8 +125,18 @@ public class UserProfile {
 
     @Column(name = "updated_at") private Instant updatedAt;
 
-    @PrePersist @PreUpdate
-    void touch() { updatedAt = Instant.now(); }
+    @PrePersist
+    void onPersist() {
+        if (openToRemote == null) {
+            openToRemote = true;
+        }
+        updatedAt = Instant.now();
+    }
+
+    @PreUpdate
+    void onUpdate() {
+        updatedAt = Instant.now();
+    }
 
     // ── Embedded value object ────────────────────────────────────────────
 

@@ -147,6 +147,9 @@ public class JobRecommendationService {
     private List<Object[]> queryCandidates(UUID userId, ProfileData profile) {
         // Salary hard-filter: exclude jobs where salary_max is known AND below user's minimum
         int salaryMin = profile.salaryMin() != null ? profile.salaryMin() : 0;
+        int minMatch = profile.minMatchPercent() != null && profile.minMatchPercent() > 0
+                ? profile.minMatchPercent()
+                : com.careerops.model.UserProfile.DEFAULT_MIN_MATCH_PERCENT;
         return em.createNativeQuery("""
                 SELECT uj.id, j.title, j.company, j.location,
                        uj.match_percent, uj.matched_skills,
@@ -155,8 +158,10 @@ public class JobRecommendationService {
                 FROM careerops.user_jobs uj
                 JOIN careerops.jobs j ON j.id = uj.job_id
                 WHERE uj.user_id         = :userId
+                  AND uj.deleted_at      IS NULL
                   AND uj.kanban_column   = 'Discovered'
                   AND uj.match_percent   IS NOT NULL
+                  AND uj.match_percent   >= :minMatch
                   AND (:salaryMin        = 0
                        OR j.salary_max   IS NULL
                        OR j.salary_max   >= :salaryMin)
@@ -165,6 +170,7 @@ public class JobRecommendationService {
                 """)
                 .setParameter("userId",    userId)
                 .setParameter("salaryMin", salaryMin)
+                .setParameter("minMatch",  minMatch)
                 .getResultList();
     }
 
@@ -226,7 +232,8 @@ public class JobRecommendationService {
                     SELECT location,
                            salary_min,
                            sponsorship_required,
-                           array_to_string(target_roles, ',')
+                           array_to_string(target_roles, ','),
+                           min_match_percent
                     FROM careerops.user_profiles
                     WHERE user_id = :userId
                     """)
@@ -238,11 +245,13 @@ public class JobRecommendationService {
             Boolean  sponsorship = row[2] instanceof Boolean b ? b       : null;
             String[] targetRoles = row[3] instanceof String  t && !t.isBlank()
                                    ? t.split(",") : new String[0];
+            Integer  minMatch    = row[4] instanceof Number  m ? m.intValue() : null;
 
-            return new ProfileData(location, salaryMin, sponsorship, targetRoles);
+            return new ProfileData(location, salaryMin, sponsorship, targetRoles, minMatch);
         } catch (Exception e) {
             log.warn("Could not load profile for user {}: {}", userId, e.getMessage());
-            return new ProfileData(null, null, null, new String[0]);
+            return new ProfileData(null, null, null, new String[0],
+                    com.careerops.model.UserProfile.DEFAULT_MIN_MATCH_PERCENT);
         }
     }
 
@@ -338,6 +347,7 @@ public class JobRecommendationService {
         String   location,
         Integer  salaryMin,
         Boolean  sponsorshipRequired,
-        String[] targetRoles
+        String[] targetRoles,
+        Integer  minMatchPercent
     ) {}
 }

@@ -23,6 +23,7 @@
    - **Service Role key** (Settings → API → service_role)
    - **Database password** (set during project creation)
    - **DB host** (`db.xyz.supabase.co`)
+5. **Encryption at rest:** Supabase enables **Encrypt at Rest** by default (no action needed). After Flyway runs, confirm `pgcrypto` is present (`SELECT extname FROM pg_extension WHERE extname = 'pgcrypto'`). Set `APP_ENCRYPTION_KEY` for application-layer PII encryption (`openssl rand -base64 32`).
 
 ---
 
@@ -41,29 +42,15 @@
 ## Step 3 — Java Backend
 
 ```bash
-cd career-ops/backend
+cd career-ops
 
-# Copy and fill the properties file
-cp src/main/resources/application.example.properties \
-   src/main/resources/application.properties
+# Copy and fill secrets (gitignored — never commit)
+cp .env.example .env
+# Required: APP_INTERNAL_SECRET, APP_MASTER_KEK, JWT_PRIVATE_KEY_PEM, JWT_PUBLIC_KEY_PEM,
+# DATABASE_URL, DATABASE_PASSWORD (and optional API keys)
 ```
 
-Edit `application.properties` — replace every `YOUR_*` and `CHANGE_ME_*`:
-
-```properties
-spring.datasource.url=jdbc:postgresql://db.YOUR-PROJECT.supabase.co:5432/postgres
-spring.datasource.password=YOUR_DB_PASSWORD
-internal.trust.secret=some-long-random-string-keep-same-as-middleware
-jwt.private-key=base64-pkcs8-private-key
-jwt.public-key=base64-spki-public-key
-gemini.api.key=AIza...
-adzuna.app.id=abc123
-adzuna.app.key=xyz789
-reed.api.key=reed-key
-resend.api.key=re_...
-supabase.url=https://xyz.supabase.co
-supabase.service.key=eyJ...
-```
+Java loads repo-root `.env` automatically (`spring.config.import` in `application.properties`). Do **not** put secrets in `application.properties`.
 
 Start the backend:
 ```bash
@@ -81,8 +68,9 @@ Test: `curl http://localhost:8080/health` → `{"ok":true}`
 cd career-ops/middleware
 
 cp .env.example .env
-# Edit .env — fill JWT_PUBLIC_KEY (matches the Java public key),
-# INTERNAL_TRUST_SECRET (same as Java), and Stripe keys
+# Edit .env — fill JWT_PUBLIC_KEY (matches Java RS256 public key),
+# APP_INTERNAL_SECRET (same as Java .env), and Stripe keys.
+# JWKS for external integrators: GET http://localhost:4000/.well-known/jwks.json
 
 npm install
 npm run dev
@@ -177,10 +165,28 @@ To customise a skill's behaviour, edit the corresponding `SKILL.md` and restart 
 
 ## Production checklist
 
+### Encryption at rest
+
+**Supabase (managed Postgres)**
+
+- [ ] Confirm **Encrypt at Rest** under Project Settings → Infrastructure (enabled by default)
+- [ ] After first backend boot and Flyway: `SELECT extname FROM pg_extension WHERE extname = 'pgcrypto';`
+- [ ] Set `APP_ENCRYPTION_KEY` in production (`openssl rand -base64 32`) for app-layer PII fields
+
+**Self-hosted Postgres**
+
+- [ ] Enable **Transparent Data Encryption (TDE)** if your distribution supports it, **or** encrypt underlying storage (AWS EBS, Azure Disk, LUKS)
+- [ ] Run Flyway migrations (`pgcrypto` is enabled automatically in V64/V72)
+- [ ] Set `APP_ENCRYPTION_KEY` the same as the Supabase path
+
+Full detail: [`docs/GDPR.md`](GDPR.md) — Encryption at rest.
+
 - [ ] Set `COOKIE_SECURE=true` and serve over HTTPS
 - [ ] Set `COOKIE_SAMESITE=strict`
 - [ ] Add `cors.allowed.origins` to your production frontend URL
-- [ ] Use a secrets manager (Vault / AWS Secrets Manager) — never commit `.env` or `application.properties`
+- [ ] Use a secrets manager — never commit `.env` or secret values in `application.properties`
+- [ ] **AWS Secrets Manager (optional):** create secret `careerops/prod` (or set `AWS_SECRETS_MANAGER_NAME`) with JSON keys matching env names (`APP_INTERNAL_SECRET`, `JWT_PRIVATE_KEY_PEM`, `APP_MASTER_KEK`, …); run with `SPRING_PROFILES_ACTIVE=prod` and IAM role allowing `secretsmanager:GetSecretValue`
+- [ ] **HashiCorp Vault:** map secret paths to env vars at deploy time (no Spring Vault client in v1)
 - [ ] Enable Supabase RLS policies (already enabled by `schema.sql`)
 - [ ] Set `spring.jpa.hibernate.ddl-auto=none` in production
 - [ ] Point Java cron timezone to `Europe/Dublin` (already set)

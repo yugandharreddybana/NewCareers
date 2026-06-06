@@ -1,10 +1,16 @@
+CREATE TABLE IF NOT EXISTS careerops.user_keys (
+    user_id UUID PRIMARY KEY,
+    encrypted_dek CLOB NOT NULL,
+    created_at TIMESTAMP WITH TIME ZONE NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS careerops.user_profiles (
     id UUID PRIMARY KEY,
     version BIGINT DEFAULT 0,
     user_id UUID NOT NULL UNIQUE,
     target_roles VARCHAR ARRAY,
     tech_stack VARCHAR ARRAY,
-    location VARCHAR(255),
+    location CLOB,
     salary_min INTEGER,
     salary_max INTEGER,
     salary_currency VARCHAR(16) DEFAULT 'EUR',
@@ -14,10 +20,10 @@ CREATE TABLE IF NOT EXISTS careerops.user_profiles (
     sponsorship_required BOOLEAN,
     onboarded BOOLEAN,
     portfolio_items JSON,
-    goal_title VARCHAR(200),
+    goal_title CLOB,
     goal_salary_min INTEGER,
     goal_salary_max INTEGER,
-    goal_location VARCHAR(100),
+    goal_location CLOB,
     open_to_remote BOOLEAN,
     experience_level VARCHAR(32),
     work_experience JSON DEFAULT '[]',

@@ -3,7 +3,7 @@ package com.careerops.controller;
 import com.careerops.dto.MockInterviewDtos.InterviewKitRequest;
 import com.careerops.dto.MockInterviewDtos.InterviewKitResponse;
 import com.careerops.service.MockInterviewService;
-import com.careerops.util.SecurityUtil;
+import com.careerops.util.AuthUtil;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import lombok.RequiredArgsConstructor;
@@ -43,7 +43,7 @@ public class MockInterviewController {
                description = "Blocking. Use /interview-kit/async to avoid gateway timeouts.")
     public ResponseEntity<InterviewKitResponse> generateKit(
             @Valid @RequestBody InterviewKitRequest request) {
-        UUID userId = SecurityUtil.currentUserId();
+        UUID userId = AuthUtil.currentUserId();
         log.info("[MockInterview] Sync kit request userId={}", userId);
         InterviewKitResponse kit = mockInterviewService.generateInterviewKit(userId, request);
         return ResponseEntity.ok(kit);
@@ -62,7 +62,7 @@ public class MockInterviewController {
                description = "Returns 202 immediately. Poll GET /interview-kit/result/{jobId}.")
     public ResponseEntity<Void> generateKitAsync(
             @Valid @RequestBody InterviewKitRequest request) {
-        UUID   userId = SecurityUtil.currentUserId();
+        UUID   userId = AuthUtil.currentUserId();
         String jobId  = UUID.randomUUID().toString();
         log.info("[MockInterview] Async kit request userId={} jobId={}", userId, jobId);
         mockInterviewService.generateInterviewKitAsync(userId, request, jobId);
@@ -79,7 +79,7 @@ public class MockInterviewController {
     @PreAuthorize("isAuthenticated()")
     @Operation(summary = "Poll async interview kit result")
     public ResponseEntity<InterviewKitResponse> getKitResult(@PathVariable String jobId) {
-        UUID                 userId = SecurityUtil.currentUserId();
+        UUID                 userId = AuthUtil.currentUserId();
         InterviewKitResponse result = mockInterviewService.getKitResult(jobId, userId);
         if (result == null) {
             return ResponseEntity.accepted().build();

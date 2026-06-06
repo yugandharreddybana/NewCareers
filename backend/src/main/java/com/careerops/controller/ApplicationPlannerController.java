@@ -3,7 +3,7 @@ package com.careerops.controller;
 import com.careerops.dto.ApplicationPlannerDtos.PlanRequest;
 import com.careerops.dto.ApplicationPlannerDtos.PlanResponse;
 import com.careerops.service.ApplicationPlannerService;
-import com.careerops.util.SecurityUtil;
+import com.careerops.util.AuthUtil;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import lombok.RequiredArgsConstructor;
@@ -42,7 +42,7 @@ public class ApplicationPlannerController {
                description = "Blocking call — use /plan/async for long-running plans to avoid gateway timeouts.")
     public ResponseEntity<PlanResponse> generatePlan(
             @Valid @RequestBody PlanRequest request) {
-        UUID userId = SecurityUtil.currentUserId();
+        UUID userId = AuthUtil.currentUserId();
         log.info("[Planner] Sync plan request userId={}", userId);
         PlanResponse plan = plannerService.generatePlan(userId, request);
         return ResponseEntity.ok(plan);
@@ -61,7 +61,7 @@ public class ApplicationPlannerController {
                description = "Returns 202 immediately. Poll GET /plan/result/{jobId} for the result.")
     public ResponseEntity<Void> generatePlanAsync(
             @Valid @RequestBody PlanRequest request) {
-        UUID   userId = SecurityUtil.currentUserId();
+        UUID   userId = AuthUtil.currentUserId();
         String jobId  = UUID.randomUUID().toString();
         log.info("[Planner] Async plan request userId={} jobId={}", userId, jobId);
         plannerService.generatePlanAsync(userId, request, jobId);
@@ -78,7 +78,7 @@ public class ApplicationPlannerController {
     @PreAuthorize("isAuthenticated()")
     @Operation(summary = "Poll async plan result")
     public ResponseEntity<PlanResponse> getPlanResult(@PathVariable String jobId) {
-        UUID         userId = SecurityUtil.currentUserId();
+        UUID         userId = AuthUtil.currentUserId();
         PlanResponse result = plannerService.getPlanResult(jobId, userId);
         if (result == null) {
             return ResponseEntity.accepted().build();

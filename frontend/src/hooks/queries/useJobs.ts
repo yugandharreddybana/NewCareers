@@ -75,7 +75,7 @@ export function useInfiniteJobsFeed(
         nextPage:   res.hasMore ? (pageParam as number) + 1 : null,
         totalCount: res.totalCount ?? res.items.length,
         dailyCount: res.dailyCount ?? 0,
-        dailyLimit: res.dailyLimit ?? 15,
+        dailyLimit: res.dailyLimit ?? 25,
         remaining:  res.remaining ?? 0,
       };
     },
@@ -132,6 +132,17 @@ export function useFetchLiveJobMutation() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: () => jobsApi.fetchLive(),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: queryKeys.jobs.all });
+      void qc.invalidateQueries({ queryKey: queryKeys.discovery.all });
+    },
+  });
+}
+
+export function useClearPipelineMutation() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: () => jobsApi.clearPipeline(),
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: queryKeys.jobs.all });
       void qc.invalidateQueries({ queryKey: queryKeys.discovery.all });

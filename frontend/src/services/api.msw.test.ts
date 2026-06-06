@@ -12,7 +12,7 @@ describe('service layer MSW integration', () => {
     ]);
 
     expect(stats).toEqual({ jobs: 0, users: 0, skills: 14 });
-    expect(user.email).toBe('dev@careerops.ie');
+    expect(user.email).toBe('dev@NewCareers.ie');
     expect(jobs.items).toHaveLength(1);
     expect(jobs.items[0]?.userJobId).toBe(CANONICAL_MOCK_JOB_IDS.userJobId);
   });

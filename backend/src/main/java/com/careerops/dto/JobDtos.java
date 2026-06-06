@@ -56,7 +56,19 @@ public class JobDtos {
         }
     }
 
-    public record FetchSummary(int delivered, int dailyCount, int dailyLimit, int remaining) {}
+    @com.fasterxml.jackson.annotation.JsonInclude(com.fasterxml.jackson.annotation.JsonInclude.Include.NON_NULL)
+    public record FetchSummary(
+            int delivered,
+            int dailyCount,
+            int dailyLimit,
+            int remaining,
+            Boolean fullSearchStarted,
+            String message
+    ) {
+        public FetchSummary(int delivered, int dailyCount, int dailyLimit, int remaining) {
+            this(delivered, dailyCount, dailyLimit, remaining, null, null);
+        }
+    }
 
     @org.springframework.validation.annotation.Validated
     @io.swagger.v3.oas.annotations.media.Schema(description = "Request to update a job's kanban column and status")
@@ -78,7 +90,9 @@ public class JobDtos {
         long totalCount,
         int page,
         int size,
-        boolean hasMore
+        boolean hasMore,
+        /** All non-deleted pipeline jobs (including below profile min-match %). */
+        long pipelineTotal
     ) {
         /** Backward-compatible constructor for tests and call sites that omit pagination fields. */
         public JobListResponse(
@@ -86,7 +100,7 @@ public class JobDtos {
             int dailyCount,
             int dailyLimit,
             int remaining) {
-            this(items, dailyCount, dailyLimit, remaining, items.size(), 0, items.size(), false);
+            this(items, dailyCount, dailyLimit, remaining, items.size(), 0, items.size(), false, items.size());
         }
     }
 

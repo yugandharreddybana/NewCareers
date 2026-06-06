@@ -35,6 +35,7 @@ public class AnalyticsService {
         List.of("Discovered", "Saved", "Applied", "Interview", "Offer", "Rejected");
 
     private final AnalyticsEventRepository analyticsRepo;
+    private final UserConsentService consentService;
 
     @PersistenceContext
     private EntityManager em;
@@ -43,8 +44,9 @@ public class AnalyticsService {
     private final java.util.concurrent.BlockingQueue<AnalyticsEvent> eventBuffer = new java.util.concurrent.LinkedBlockingQueue<>(1000);
     private final java.util.concurrent.ScheduledExecutorService scheduler = java.util.concurrent.Executors.newSingleThreadScheduledExecutor();
 
-    public AnalyticsService(AnalyticsEventRepository analyticsRepo) {
+    public AnalyticsService(AnalyticsEventRepository analyticsRepo, UserConsentService consentService) {
         this.analyticsRepo = analyticsRepo;
+        this.consentService = consentService;
         // Start background flush worker
         scheduler.scheduleAtFixedRate(this::flushEvents, 5, 5, java.util.concurrent.TimeUnit.SECONDS);
     }
@@ -63,6 +65,9 @@ public class AnalyticsService {
      * Prevents blocking the caller or losing data during DB hiccups.
      */
     public void trackEvent(UUID userId, String eventType, Map<String, Object> metadata) {
+        if (!consentService.hasAnalyticsConsent(userId)) {
+            return;
+        }
         AnalyticsEvent event = new AnalyticsEvent(userId, eventType, metadata);
         if (!eventBuffer.offer(event)) {
             log.warn("Analytics buffer full, dropping event: {}", eventType);

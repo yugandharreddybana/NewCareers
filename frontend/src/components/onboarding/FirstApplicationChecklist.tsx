@@ -14,7 +14,7 @@ interface ChecklistStep {
 
 const INITIAL_STEPS: ChecklistStep[] = [
   { key: 'profile_complete',  label: 'Complete your profile',          description: 'Add skills, experience and job preferences.',          href: '/profile' },
-  { key: 'first_job_saved',   label: 'Save your first job',            description: 'Find a role and save it to your CareerOps board.',      href: '/' },
+  { key: 'first_job_saved',   label: 'Save your first job',            description: 'Find a role and save it to your NewCareers board.',      href: '/' },
   { key: 'first_skill_run',   label: 'Run your first AI skill',        description: 'Generate a tailored CV or cover letter for that role.', href: '/' },
   { key: 'planner_viewed',    label: 'Check your Application Planner', description: 'Review auto-generated next steps for your job.',        href: '/' },
   { key: 'first_application', label: 'Submit your first application',  description: 'Mark a job as applied to unlock progress tracking.',    href: '/' },

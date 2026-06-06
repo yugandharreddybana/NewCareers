@@ -64,13 +64,6 @@ public class SkillService {
 
     private static final Logger log = LoggerFactory.getLogger(SkillService.class);
 
-    /** TTL cache for Phase 1 skills only */
-    private static final Map<String, Integer> CACHE_TTL_DAYS = Map.of(
-        "evaluate",       7,
-        "research",       1,
-        "prep-interview", 3
-    );
-
     /** Human-readable display names for the Phase 1 skills shown in notifications/emails. */
     private static final Map<String, String> SKILL_DISPLAY_NAMES = Map.of(
         "evaluate",       "CV Evaluation",
@@ -106,6 +99,7 @@ public class SkillService {
     private final UserJobSkillMatchService       skillMatchService;
     private final TailorResumeBuilderService     tailorResumeBuilder;
     private final SkillMdExecutorService      skillMdExecutor;
+    private final UserConsentService          consentService;
     private final TransactionTemplate           readTx;
     private final TransactionTemplate           writeTx;
 
@@ -146,6 +140,7 @@ public class SkillService {
             UserJobSkillMatchService skillMatchService,
             TailorResumeBuilderService tailorResumeBuilder,
             SkillMdExecutorService skillMdExecutor,
+            UserConsentService consentService,
             PlatformTransactionManager transactionManager) {
         this.nvidia               = nvidia;
         this.prompts              = prompts;
@@ -172,6 +167,7 @@ public class SkillService {
         this.skillMatchService = skillMatchService;
         this.tailorResumeBuilder = tailorResumeBuilder;
         this.skillMdExecutor = skillMdExecutor;
+        this.consentService = consentService;
         this.readTx = new TransactionTemplate(transactionManager);
         this.readTx.setReadOnly(true);
         this.readTx.setTimeout(10);
@@ -190,9 +186,18 @@ public class SkillService {
         log.info("startSkill: skill={}, userId={}, userJobId={}, forceRefresh={}",
                 skill, userId, userJobId, req.forceRefresh());
 
+        if (!catalogSkills.handles(skill)) {
+            consentService.validateAiConsent(userId);
+        }
+
         clearStaleConversation(userId, skill, userJobId);
         if (Boolean.TRUE.equals(req.forceRefresh())) {
             invalidateSkillCache(userId, userJobId, skill);
+        }
+
+        Optional<SkillRunResponse> cached = tryCachedSkillRun(skill, userId, userJobId, req.forceRefresh());
+        if (cached.isPresent()) {
+            return cached.get();
         }
 
         // Daily token budget check — skills with deterministic/local fallback still run degraded
@@ -234,17 +239,6 @@ public class SkillService {
         // Tailor CV: dedicated writer pipeline (plan → section rewrite), not generic agent tools
         if ("tailor-resume".equals(skill) && userJobId != null) {
             return runDedicatedTailorResume(userId, userJobId, req);
-        }
-
-        // Step 4: Unified SKILL.md execution (replaces generic agent tool loop)
-        if (userJobId != null && CACHE_TTL_DAYS.containsKey(skill)
-                && !Boolean.TRUE.equals(req.forceRefresh())) {
-            Optional<SkillRun> cached = readTx.execute(status ->
-                    skillRuns.findValidCachedRun(userId, userJobId, skill, Instant.now()));
-            if (cached != null && cached.isPresent()) {
-                log.debug("Cache hit for skill={}, userId={}", skill, userId);
-                return SkillRunResponse.result(skill, cached.get().getOutput());
-            }
         }
 
         return runSkillMdExecution(skill, userId, userJobId, req);
@@ -686,16 +680,6 @@ public class SkillService {
      * even when the agent omits fields or only calls save_resume_html.
      */
     private SkillRunResponse runDedicatedTailorResume(UUID userId, UUID userJobId, SkillStartRequest req) {
-        boolean forceRefresh = req != null && Boolean.TRUE.equals(req.forceRefresh());
-        if (!forceRefresh && userJobId != null && CACHE_TTL_DAYS.containsKey("tailor-resume")) {
-            Optional<SkillRun> cached = readTx.execute(status ->
-                skillRuns.findValidCachedRun(userId, userJobId, "tailor-resume", Instant.now()));
-            if (cached != null && cached.isPresent()) {
-                log.debug("Cache hit for tailor-resume userId={}", userId);
-                return SkillRunResponse.result("tailor-resume", cached.get().getOutput());
-            }
-        }
-
         String cvText = loadBaselineCv(userId);
         UserProfile profile = loadProfile(userId);
         Job job = loadJob(userJobId);
@@ -708,8 +692,8 @@ public class SkillService {
 
         try {
             ObjectNode built = tailorResumeBuilder.build(userId, profile, job, cvText, "dedicated");
-            JsonNode output = normalizeTailorResumeOutput(built, userId, userJobId);
-            output = enrichTailorResumeOutput(output, userId, userJobId, null);
+            JsonNode output = normalizeTailorResumeOutput(built, userId, userJobId, true);
+            output = enrichTailorResumeOutput(output, userId, userJobId, null, true);
             if (output instanceof ObjectNode outNode) {
                 tailorResumeBuilder.attachRenderedPreview(outNode, profile, userId, job);
                 output = outNode;
@@ -751,6 +735,11 @@ public class SkillService {
     }
 
     private JsonNode normalizeTailorResumeOutput(JsonNode output, UUID userId, UUID userJobId) {
+        return normalizeTailorResumeOutput(output, userId, userJobId, false);
+    }
+
+    private JsonNode normalizeTailorResumeOutput(
+            JsonNode output, UUID userId, UUID userJobId, boolean fromDedicatedPipeline) {
         com.fasterxml.jackson.databind.node.ObjectNode out = output != null && output.isObject()
                 ? (com.fasterxml.jackson.databind.node.ObjectNode) output.deepCopy()
                 : mapper.createObjectNode();
@@ -768,9 +757,12 @@ public class SkillService {
                 || sectionsNode.isEmpty()
                 || sectionsNode.size() < 2
                 || !hasExperienceSection(sectionsNode);
-        if (thinSections && userJobId != null && !TailorResumeQuality.isSubstantiallyTailored(out)) {
+        if (!fromDedicatedPipeline
+                && thinSections
+                && userJobId != null
+                && !TailorResumeQuality.isSubstantiallyTailored(out)) {
             mergeTailorFromBuilder(out, userId, userJobId, baseline);
-        } else if (summary.isBlank() && !baseline.isBlank()) {
+        } else if (!fromDedicatedPipeline && summary.isBlank() && !baseline.isBlank()) {
             out.put("summary", tailorResumeBuilder.build(
                     userId, loadProfile(userId), loadJob(userJobId), baseline, "normalize")
                 .path("summary").asText(""));
@@ -791,7 +783,9 @@ public class SkillService {
         }
         if (out.path("sections").isArray() && out.path("sections").size() > 0) {
             tailorResumeBuilder.attachRenderedPreview(out, profile, userId, job);
-        } else if (out.path("resumeHtml").asText("").isBlank() && userJobId != null) {
+        } else if (!fromDedicatedPipeline
+                && out.path("resumeHtml").asText("").isBlank()
+                && userJobId != null) {
             ObjectNode built = tailorResumeBuilder.build(
                     userId, profile, loadJob(userJobId), baseline, "normalize");
             out.put("resumeHtml", built.path("resumeHtml").asText(""));
@@ -899,6 +893,15 @@ public class SkillService {
             UUID userId,
             UUID userJobId,
             TailorResumePendingStore.Pending pendingResume) {
+        return enrichTailorResumeOutput(raw, userId, userJobId, pendingResume, false);
+    }
+
+    private JsonNode enrichTailorResumeOutput(
+            JsonNode raw,
+            UUID userId,
+            UUID userJobId,
+            TailorResumePendingStore.Pending pendingResume,
+            boolean skipHumanScore) {
         com.fasterxml.jackson.databind.node.ObjectNode out = raw != null && raw.isObject()
                 ? (com.fasterxml.jackson.databind.node.ObjectNode) raw.deepCopy()
                 : mapper.createObjectNode();
@@ -919,21 +922,19 @@ public class SkillService {
         if (!tailoredForScore.isBlank()) {
             cvText = tailoredForScore;
         }
-        if (!cvText.isBlank()) {
-            String jobText = fetchJobDescriptionText(userJobId);
-            CvHumanScoreService.CvScoreResult scores =
-                    cvHumanScoreService.score(cvText, jobText, userId);
-            out.put("atsScore", scores.atsScore());
-            out.put("humanScore", scores.humanScore());
-            com.fasterxml.jackson.databind.node.ArrayNode flagged = mapper.createArrayNode();
-            for (CvHumanScoreService.FlaggedPhrase fp : scores.flaggedPhrases()) {
-                com.fasterxml.jackson.databind.node.ObjectNode row = mapper.createObjectNode();
-                row.put("phrase", fp.phrase());
-                row.put("context", fp.context());
-                row.put("suggestedRewrite", fp.suggestedRewrite());
-                flagged.add(row);
+        if (!skipHumanScore && !cvText.isBlank()) {
+            JsonNode scores = cvHumanScoreService.score(userId, cvText);
+            if (!scores.has("error")) {
+                if (scores.has("overallScore") && scores.path("overallScore").asInt(0) > 0) {
+                    out.put("humanScore", scores.path("overallScore").asInt());
+                }
+                if (scores.has("atsScore") && scores.path("atsScore").asInt(0) > 0) {
+                    out.put("atsScore", scores.path("atsScore").asInt());
+                }
+                if (scores.has("flaggedPhrases") && scores.get("flaggedPhrases").isArray()) {
+                    out.set("flaggedPhrases", scores.get("flaggedPhrases"));
+                }
             }
-            out.set("flaggedPhrases", flagged);
         }
         if (pendingResume != null) {
             out.put("resumeReady", true);
@@ -1034,8 +1035,22 @@ public class SkillService {
     }
 
     private @Nullable Instant computeExpiry(String skill) {
-        Integer days = CACHE_TTL_DAYS.get(skill);
-        return days != null ? Instant.now().plus(days, ChronoUnit.DAYS) : null;
+        return SkillRunCachePolicy.computeExpiry(skill);
+    }
+
+    private Optional<SkillRunResponse> tryCachedSkillRun(
+            String skill, UUID userId, UUID userJobId, Boolean forceRefresh) {
+        if (userJobId == null || Boolean.TRUE.equals(forceRefresh) || !SkillRunCachePolicy.isCacheable(skill)) {
+            return Optional.empty();
+        }
+        return readTx.execute(status -> {
+            Optional<SkillRun> cached = skillRuns.findValidCachedRun(userId, userJobId, skill, Instant.now());
+            if (cached.isEmpty()) {
+                return Optional.empty();
+            }
+            log.info("Returning cached result for skill={} userJobId={}", skill, userJobId);
+            return Optional.of(SkillRunResponse.result(skill, cached.get().getOutput()));
+        });
     }
 
     private static boolean isBudgetDegradableSkill(String skill) {

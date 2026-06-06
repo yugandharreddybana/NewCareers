@@ -10,8 +10,10 @@ import type {
   RunAllSkillsResponse,
 } from '@/types/skills';
 
-const SKILL_TIMEOUT_MS    = 180_000;
-const RUN_ALL_TIMEOUT_MS  = 600_000;
+const SKILL_TIMEOUT_MS           = 180_000;
+/** Tailor CV runs one large NVIDIA pass; allow up to 7 minutes end-to-end. */
+const TAILOR_RESUME_TIMEOUT_MS   = 420_000;
+const RUN_ALL_TIMEOUT_MS         = 600_000;
 const PDF_TIMEOUT_MS      = 60_000;
 const PDF_BUNDLE_TIMEOUT  = 120_000;
 
@@ -30,11 +32,13 @@ async function withFreshSessionRetry<T>(request: () => Promise<T>): Promise<T> {
 }
 
 export const skillsApi = {
-  start: (req: SkillStartRequest): Promise<SkillRunResponse> =>
-    api.post<SkillRunResponse>('/skills/start', req, {
-      timeout: SKILL_TIMEOUT_MS,
-      skipGlobalLoader: true,
-    }).then(r => r.data),
+  start: (req: SkillStartRequest): Promise<SkillRunResponse> => {
+    const timeout =
+      req.skillName === 'tailor-resume' ? TAILOR_RESUME_TIMEOUT_MS : SKILL_TIMEOUT_MS;
+    return api
+      .post<SkillRunResponse>('/skills/start', req, { timeout, skipGlobalLoader: true })
+      .then(r => r.data);
+  },
 
   outreachDraft: (userJobId: string, channel = 'linkedin', tone = 'professional') =>
     api
@@ -152,7 +156,7 @@ export const skillsApi = {
         { responseType: 'blob', timeout: PDF_BUNDLE_TIMEOUT },
       ),
     );
-    triggerDownload(asPdfBlob(response.data), 'careerops-complete-pack.pdf');
+    triggerDownload(asPdfBlob(response.data), 'NewCareers-complete-pack.pdf');
   },
 
   downloadResumePdf: async (userJobId: string): Promise<void> => {

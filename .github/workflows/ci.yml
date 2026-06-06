@@ -89,7 +89,7 @@ jobs:
           cache: 'maven'
 
       - name: Build and Verify with Maven
-        run: mvn -B verify -DskipITs=false
+        run: mvn -B verify -Dmaven.test.skip=false -DskipTests=false -DskipITs=false
 
       - name: Upload JaCoCo Coverage Report
         uses: actions/upload-artifact@v4

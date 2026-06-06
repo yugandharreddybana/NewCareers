@@ -11,6 +11,7 @@ import {
   TrendingUp, Target, MessageSquare, Award,
   BarChart2, RefreshCw, ChevronRight,
 } from 'lucide-react';
+import { IrishPermitIntelligenceSection } from '@/components/permit-analytics/IrishPermitIntelligenceSection';
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 interface DailyPoint { date: string; applications: number; responses: number; }
@@ -236,7 +237,7 @@ const AnalyticsPage: React.FC = () => {
 
   return (
     <>
-      <PageMeta title="Analytics — CareerOps" />
+      <PageMeta title="Analytics — NewCareers" />
       <div className="max-w-5xl mx-auto px-4 sm:px-6 py-8 space-y-6">
 
         {/* Header */}
@@ -348,12 +349,14 @@ const AnalyticsPage: React.FC = () => {
             <Award size={20} className="text-emerald-600 shrink-0" />
             <div>
               <p className="text-sm font-semibold text-emerald-800">You've received {s.offers} offer{s.offers > 1 ? 's' : ''}! 🎉</p>
-              <p className="text-xs text-emerald-600 mt-0.5">That puts you in the top 10% of active job seekers on CareerOps.</p>
+              <p className="text-xs text-emerald-600 mt-0.5">That puts you in the top 10% of active job seekers on NewCareers.</p>
             </div>
           </div>
         )}
 
       </div>
+
+      <IrishPermitIntelligenceSection />
     </>
   );
 };

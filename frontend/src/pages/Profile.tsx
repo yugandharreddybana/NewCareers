@@ -146,7 +146,7 @@ const ProfilePage: React.FC = () => {
 
   return (
     <>
-      <PageMeta title="My Profile — CareerOps" />
+      <PageMeta title="My Profile — NewCareers" />
       <div className="max-w-3xl mx-auto px-4 sm:px-6 py-8">
 
         {/* Header */}
@@ -260,6 +260,12 @@ const ProfilePage: React.FC = () => {
               onChange={v => setProfile(p => p ? { ...p, sectors: v } : p)}
               placeholder="e.g. Fintech, SaaS"
             />
+            <TagInput
+              label="Work Types"
+              tags={profile?.workTypes ?? []}
+              onChange={v => setProfile(p => p ? { ...p, workTypes: v } : p)}
+              placeholder="e.g. Full-time, Contract"
+            />
           </Section>
 
           {/* Salary */}
@@ -269,8 +275,8 @@ const ProfilePage: React.FC = () => {
                 <label className="block text-xs font-medium text-gray-600 mb-1.5">Min (£/yr)</label>
                 <input
                   type="number"
-                  value={profile?.goalSalaryMin ?? ''}
-                  onChange={e => setProfile(p => p ? { ...p, goalSalaryMin: Number(e.target.value) } : p)}
+                  value={profile?.salaryMin ?? ''}
+                  onChange={e => setProfile(p => p ? { ...p, salaryMin: Number(e.target.value) } : p)}
                   placeholder="60000"
                   className="w-full px-3 py-2.5 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400"
                 />
@@ -279,8 +285,8 @@ const ProfilePage: React.FC = () => {
                 <label className="block text-xs font-medium text-gray-600 mb-1.5">Max (£/yr)</label>
                 <input
                   type="number"
-                  value={profile?.goalSalaryMax ?? ''}
-                  onChange={e => setProfile(p => p ? { ...p, goalSalaryMax: Number(e.target.value) } : p)}
+                  value={profile?.salaryMax ?? ''}
+                  onChange={e => setProfile(p => p ? { ...p, salaryMax: Number(e.target.value) } : p)}
                   placeholder="90000"
                   className="w-full px-3 py-2.5 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400"
                 />

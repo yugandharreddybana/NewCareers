@@ -1,11 +1,13 @@
 package com.careerops.model;
 
+import com.fasterxml.jackson.annotation.JsonIgnore;
 import com.fasterxml.jackson.databind.JsonNode;
-import io.hypersistence.utils.hibernate.type.array.StringArrayType;
 import io.hypersistence.utils.hibernate.type.json.JsonBinaryType;
 import jakarta.persistence.*;
 import lombok.*;
+import org.hibernate.annotations.JdbcTypeCode;
 import org.hibernate.annotations.Type;
+import org.hibernate.type.SqlTypes;
 
 import java.time.Instant;
 import java.util.UUID;
@@ -29,6 +31,7 @@ public class UserJob {
     @Column(name = "user_id", nullable = false) private UUID userId;
     @Column(name = "job_id",  nullable = false) private UUID jobId;
 
+    @JsonIgnore
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "job_id", insertable = false, updatable = false)
     private Job job;
@@ -37,16 +40,16 @@ public class UserJob {
     @Column(name = "match_percent") private Integer matchPercent;
     @Column(name = "is_favorite") @Builder.Default private boolean isFavorite = false;
 
-    @Type(StringArrayType.class)
-    @Column(name = "matched_skills", columnDefinition = "text array")
+    @JdbcTypeCode(SqlTypes.ARRAY)
+    @Column(name = "matched_skills", columnDefinition = "text[]")
     private String[] matchedSkills;
 
-    @Type(StringArrayType.class)
-    @Column(name = "unmatched_skills", columnDefinition = "text array")
+    @JdbcTypeCode(SqlTypes.ARRAY)
+    @Column(name = "unmatched_skills", columnDefinition = "text[]")
     private String[] unmatchedSkills;
 
-    @Type(StringArrayType.class)
-    @Column(name = "cv_improvement_tips", columnDefinition = "text array")
+    @JdbcTypeCode(SqlTypes.ARRAY)
+    @Column(name = "cv_improvement_tips", columnDefinition = "text[]")
     private String[] cvImprovementTips;
 
     @Basic(fetch = FetchType.LAZY)

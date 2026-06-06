@@ -1,5 +1,5 @@
 // ============================================================
-// CareerOps Skill Types
+// NewCareers Skill Types
 // Mirrors SkillRunResponse.java exactly
 // ============================================================
 

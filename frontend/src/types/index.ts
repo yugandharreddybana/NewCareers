@@ -18,8 +18,12 @@ export interface ApiError extends Error {
   normalizedMessage: string;
   /** HTTP status code, if available */
   status?: number;
+  /** Backend requests CAPTCHA on next login attempt */
+  captchaRequired?: boolean;
+  /** Seconds until a rate-limited action can be retried */
+  retryAfterSeconds?: number;
   response?: {
-    data?: { error?: string; message?: string; details?: unknown[] };
+    data?: { error?: string; message?: string; details?: unknown[]; captchaRequired?: boolean };
     status?: number;
   };
 }
@@ -83,8 +87,7 @@ export interface Profile {
   activeCvId?: string | null;
   portfolioItems?: PortfolioItem[];
   goalTitle?: string;
-  goalSalaryMin?: number;
-  goalSalaryMax?: number;
+  workTypes?: string[];
   goalLocation?: string;
   openToRemote?: boolean;
   experienceLevel?: string;
@@ -106,6 +109,8 @@ export interface Profile {
   hybridOnsiteDays?: string;
   completenessScore?: number;
   version?: number;
+  /** Career domain for Irish permit analytics (TECH, HEALTHCARE, …). */
+  jobDomain?: string;
 }
 
 export const KANBAN_COLUMNS = [
@@ -148,6 +153,8 @@ export interface JobDetail extends JobCard {
 }
 
 export interface JobsListResponse {
+  /** All active pipeline jobs, including those below min-match filter. */
+  pipelineTotal?: number;
   items: JobCard[];
   dailyCount: number;
   dailyLimit: number;
@@ -163,6 +170,9 @@ export interface FetchSummary {
   dailyCount: number;
   dailyLimit: number;
   remaining: number;
+  /** True when POST /jobs/fetch started full scrape + AI evaluation (empty pipeline). */
+  fullSearchStarted?: boolean;
+  message?: string;
 }
 
 export interface DailyQuota {

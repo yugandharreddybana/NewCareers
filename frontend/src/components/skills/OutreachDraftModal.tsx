@@ -101,7 +101,7 @@ export function OutreachDraftModal({ open, onClose, job }: Props) {
                     text={
                       contact.formats.coldEmailBody
                         ? `Subject: ${contact.formats.coldEmailSubject ?? ''}\n\n${contact.formats.coldEmailBody}`
-                        : undefined
+                        : ''
                     }
                     onCopy={copy}
                   />

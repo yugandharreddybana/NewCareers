@@ -9,16 +9,17 @@ import { PipelineSkillActions } from '@/components/kanban/PipelineSkillActions';
 import { DashboardTopNav } from '@/components/dashboard/DashboardTopNav';
 import {
   useJobsList,
-  useFetchMoreJobsMutation,
   useKanbanPatchMutation,
 } from '@/hooks/queries/useJobs';
+import { useQuery } from '@tanstack/react-query';
 import { useAuth } from '@/context/AuthContext';
-import { isApiError, type FetchSummary, type JobCard } from '@/types';
+import { isApiError, type JobCard } from '@/types';
+import { fetchJobsOrchestrated } from '@/lib/pipelineJobSearch';
 import { JobSourceBadge } from '@/components/ui/JobSourceBadge';
 import { ConfirmModal } from '@/components/ui/ConfirmModal';
 import { sourceLabel } from '@/lib/jobSource';
 import { formatPulledAt } from '@/lib/utils';
-import { jobsApi } from '@/services/api';
+import { jobsApi, profileApi } from '@/services/api';
 import { queryKeys } from '@/lib/queryKeys';
 
 type ViewMode = 'board' | 'list';
@@ -49,8 +50,19 @@ const Kanban: React.FC = () => {
     enabled: Boolean(user),
   });
   const jobs = jobsData?.items ?? [];
-  const fetchMore = useFetchMoreJobsMutation();
+  const dailyCount = jobsData?.dailyCount ?? 0;
+  const dailyLimit = jobsData?.dailyLimit ?? 25;
+  const remaining = jobsData?.remaining ?? dailyLimit;
+  const atDailyCap = remaining <= 0;
   const kanbanPatch = useKanbanPatchMutation();
+  const [fetchInFlight, setFetchInFlight] = useState(false);
+  const [fetchProgress, setFetchProgress] = useState<string | null>(null);
+  const { data: profile } = useQuery({
+    queryKey: queryKeys.profile.current(),
+    queryFn: () => profileApi.get(),
+    enabled: Boolean(user),
+  });
+  const minMatch = profile?.minMatchPercent ?? 60;
 
   const [viewMode, setViewMode] = useState<ViewMode>('board');
   const [listQuery, setListQuery] = useState('');
@@ -59,29 +71,52 @@ const Kanban: React.FC = () => {
   const [optimisticJobs, setOptimisticJobs] = useState<JobCard[] | null>(null);
   const [jobToDelete, setJobToDelete] = useState<JobCard | null>(null);
   const [deletePending, setDeletePending] = useState(false);
-
   const pipelineTotal = jobsData?.totalCount ?? jobs.length;
 
-  const boardJobs = useMemo(() => optimisticJobs ?? jobs, [optimisticJobs, jobs]);
-
-  // Min-match list filter disabled for now — show all pipeline roles (role/source filters only).
-  // const [listMinMatch, setListMinMatch] = useState(0);
-  // const matchesMinFilter = useCallback(
-  //   (job: JobCard) => (job.matchPercent ?? 0) >= listMinMatch,
-  //   [listMinMatch],
-  // );
+  const boardJobs = useMemo(() => {
+    const base = optimisticJobs ?? jobs;
+    return base.filter(j => (j.matchPercent ?? 0) >= minMatch);
+  }, [optimisticJobs, jobs, minMatch]);
 
   const handleFetchJobs = async () => {
+    if (atDailyCap) {
+      toast.error(
+        `You have reached your daily limit of ${dailyLimit} jobs. Come back tomorrow.`,
+      );
+      return;
+    }
+    setFetchInFlight(true);
+    setFetchProgress(pipelineTotal === 0 ? 'Starting full job search…' : 'Fetching jobs…');
     try {
-      const summary = (await fetchMore.mutateAsync(10)) as FetchSummary;
-      const n = summary.delivered ?? 0;
+      const result = await fetchJobsOrchestrated(5, status => {
+        setFetchProgress(status.message ?? 'Matching jobs to your profile…');
+      });
+      await qc.invalidateQueries({ queryKey: queryKeys.jobs.all });
+      await qc.invalidateQueries({ queryKey: queryKeys.onboarding.delivery() });
+      if (result.fullSearch) {
+        toast.success('Job search complete — your evaluated matches are in the tracker.');
+        return;
+      }
+      const n = result.delivered;
       if (n > 0) {
         toast.success(`Added ${n} job${n === 1 ? '' : 's'} from all sources.`);
         return;
       }
       toast('No new roles for your profile right now. Try broadening target roles or check back later.');
     } catch (e) {
-      toast.error(isApiError(e) ? e.normalizedMessage : 'Failed to fetch jobs');
+      const msg = isApiError(e)
+        ? e.normalizedMessage
+        : e instanceof Error
+          ? e.message
+          : 'Failed to fetch jobs';
+      toast.error(
+        isApiError(e) && e.status === 429
+          ? `You have reached your daily limit of ${dailyLimit} jobs. Come back tomorrow.`
+          : msg,
+      );
+    } finally {
+      setFetchInFlight(false);
+      setFetchProgress(null);
     }
   };
 
@@ -155,18 +190,23 @@ const Kanban: React.FC = () => {
                 Manage and track your career progression through the funnel.
                 {pipelineTotal > 0 && (
                   <span className="block mt-1 text-sm">
-                    {pipelineTotal} role{pipelineTotal === 1 ? '' : 's'} in your pipeline.
+                    {pipelineTotal} role{pipelineTotal === 1 ? '' : 's'} at {minMatch}%+ match (your profile setting).
+                  </span>
+                )}
+                {pipelineTotal === 0 && (
+                  <span className="block mt-1 text-sm">
+                    Showing roles that meet your {minMatch}% minimum match. Fetch jobs to scan all sources.
                   </span>
                 )}
               </p>
             </div>
-            <div className="flex flex-row flex-wrap items-center gap-2 sm:gap-3">
-              <PipelineSkillActions />
-              <div className="bg-surface-container-low p-1 rounded-lg flex border border-outline-variant">
+            <div className="flex flex-nowrap items-center gap-2 sm:gap-3 w-full lg:w-auto overflow-x-auto pb-0.5">
+              <PipelineSkillActions className="shrink-0" />
+              <div className="bg-surface-container-low p-1 rounded-lg flex border border-outline-variant shrink-0">
                 <button
                   type="button"
                   onClick={() => setViewMode('board')}
-                  className={`px-3 py-1.5 flex items-center gap-2 rounded-md font-label-md text-label-md transition-colors ${
+                  className={`px-3 py-1.5 flex items-center gap-2 rounded-md font-label-md text-label-md transition-colors whitespace-nowrap ${
                     viewMode === 'board'
                       ? 'bg-surface-container-lowest text-primary shadow-sm'
                       : 'text-on-surface-variant hover:text-on-surface'
@@ -178,7 +218,7 @@ const Kanban: React.FC = () => {
                 <button
                   type="button"
                   onClick={() => setViewMode('list')}
-                  className={`px-3 py-1.5 flex items-center gap-2 rounded-md font-label-md text-label-md transition-colors ${
+                  className={`px-3 py-1.5 flex items-center gap-2 rounded-md font-label-md text-label-md transition-colors whitespace-nowrap ${
                     viewMode === 'list'
                       ? 'bg-surface-container-lowest text-primary shadow-sm'
                       : 'text-on-surface-variant hover:text-on-surface'
@@ -188,19 +228,30 @@ const Kanban: React.FC = () => {
                   List
                 </button>
               </div>
-              <button
-                type="button"
-                onClick={() => void handleFetchJobs()}
-                disabled={fetchMore.isPending}
-                className="px-4 py-1.5 flex items-center gap-2 rounded-md font-label-md text-label-md transition-colors bg-primary text-on-primary hover:bg-primary/90 disabled:opacity-50"
-              >
-                {fetchMore.isPending ? (
-                  <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
+              <div className="flex flex-col items-end gap-1 shrink-0">
+                <span className="text-xs text-on-surface-variant whitespace-nowrap">
+                  {dailyCount} of {dailyLimit} jobs loaded today
+                </span>
+                {atDailyCap ? (
+                  <p className="text-xs text-on-surface-variant max-w-[220px] text-right">
+                    You have reached your daily limit of {dailyLimit} jobs. Come back tomorrow.
+                  </p>
                 ) : (
-                  <span className="material-symbols-outlined text-[18px]">download</span>
+                  <button
+                    type="button"
+                    onClick={() => void handleFetchJobs()}
+                    disabled={fetchInFlight}
+                    className="px-4 py-1.5 flex items-center gap-2 rounded-md font-label-md text-label-md transition-colors bg-primary text-on-primary hover:bg-primary/90 disabled:opacity-50 whitespace-nowrap"
+                  >
+                    {fetchInFlight ? (
+                      <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                    ) : (
+                      <span className="material-symbols-outlined text-[18px]">download</span>
+                    )}
+                    {fetchInFlight ? 'Matching…' : 'Fetch Jobs'}
+                  </button>
                 )}
-                {fetchMore.isPending ? 'Fetching...' : 'Fetch Jobs'}
-              </button>
+              </div>
             </div>
           </section>
 
@@ -220,16 +271,26 @@ const Kanban: React.FC = () => {
                   </button>
                 </div>
               )}
-              {!isError && boardJobs.length === 0 && (
+              {fetchInFlight && fetchProgress && (
+                <div
+                  className="flex items-center gap-3 rounded-xl border border-primary/20 bg-primary/5 px-4 py-4 mb-4"
+                  role="status"
+                  aria-live="polite"
+                >
+                  <span className="inline-block h-5 w-5 border-2 border-primary/30 border-t-primary rounded-full animate-spin shrink-0" />
+                  <p className="text-sm text-on-surface">{fetchProgress}</p>
+                </div>
+              )}
+              {!isError && boardJobs.length === 0 && !fetchInFlight && (
                 <div className="rounded-xl border border-outline-variant bg-surface-container-low px-6 py-10 text-center">
                   <p className="font-headline-sm text-on-surface mb-2">No jobs in your tracker yet</p>
                   <p className="text-sm text-on-surface-variant mb-4 max-w-md mx-auto">
-                    Finish onboarding job matching or fetch live roles from Irish boards and LinkedIn.
+                    Fetch jobs to search boards, evaluate matches with AI, and fill your tracker.
                   </p>
                   <button
                     type="button"
                     onClick={() => void handleFetchJobs()}
-                    disabled={fetchMore.isPending}
+                    disabled={fetchInFlight || atDailyCap}
                     className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-primary text-on-primary text-sm font-medium hover:bg-primary/90 disabled:opacity-50"
                   >
                     <span className="material-symbols-outlined text-[18px]">download</span>

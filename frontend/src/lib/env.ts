@@ -42,3 +42,15 @@ export const SENTRY_DSN: string | undefined = env.VITE_SENTRY_DSN;
 export const GOOGLE_CLIENT_ID: string = String(env.VITE_GOOGLE_CLIENT_ID ?? '').trim();
 
 export const GOOGLE_AUTH_ENABLED: boolean = GOOGLE_CLIENT_ID.length > 0;
+
+/** Google reCAPTCHA v2 site key (pairs with captcha.secret on Java). */
+export const RECAPTCHA_SITE_KEY: string = String(env.VITE_RECAPTCHA_SITE_KEY ?? '').trim();
+
+export const CAPTCHA_ENABLED: boolean = RECAPTCHA_SITE_KEY.length > 0;
+
+/**
+ * Login jumbled-word CAPTCHA — on in production builds; off in dev unless
+ * VITE_LOGIN_CAPTCHA_REQUIRED=true (pairs with auth.login.word-captcha.required on Java).
+ */
+export const LOGIN_WORD_CAPTCHA_REQUIRED: boolean =
+  IS_PROD || env.VITE_LOGIN_CAPTCHA_REQUIRED === 'true';

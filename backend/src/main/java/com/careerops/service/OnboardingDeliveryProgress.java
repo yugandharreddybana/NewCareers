@@ -1,16 +1,25 @@
 package com.careerops.service;
 
-import java.util.List;
+import com.careerops.dto.OnboardingDeliveryDtos.Stage;
 
-public class OnboardingDeliveryProgress {
-    private int totalFetched;
-    private int totalMatched;
-    private List<String> sourceNames;
+/**
+ * Mutable progress snapshot written to user_profiles.onboarding_delivery.
+ */
+public record OnboardingDeliveryProgress(
+    Stage stage,
+    String message,
+    int evaluatedCount,
+    int targetCount,
+    int minRequired,
+    int jobsDiscovered,
+    String error
+) {
+    public boolean readyPartial() {
+        return evaluatedCount >= minRequired
+            && (stage == Stage.ready_partial || stage == Stage.ready || stage == Stage.evaluating_jobs);
+    }
 
-    public int getTotalFetched() { return totalFetched; }
-    public void setTotalFetched(int totalFetched) { this.totalFetched = totalFetched; }
-    public int getTotalMatched() { return totalMatched; }
-    public void setTotalMatched(int totalMatched) { this.totalMatched = totalMatched; }
-    public List<String> getSourceNames() { return sourceNames; }
-    public void setSourceNames(List<String> sourceNames) { this.sourceNames = sourceNames; }
+    public boolean ready() {
+        return stage == Stage.ready || (stage == Stage.ready_partial && evaluatedCount >= targetCount);
+    }
 }

@@ -14,9 +14,13 @@ import java.util.UUID;
 @Repository
 public interface UserRepository extends JpaRepository<User, UUID> {
 
-    boolean existsByEmail(String email);
+    @Query("SELECT CASE WHEN COUNT(u) > 0 THEN true ELSE false END FROM User u WHERE lower(u.email) = lower(:email)")
+    boolean existsByEmail(@org.springframework.data.repository.query.Param("email") String email);
+
     boolean existsByUsername(String username);
-    Optional<User> findByEmail(String email);
+
+    @Query("SELECT u FROM User u WHERE lower(u.email) = lower(:email)")
+    Optional<User> findByEmail(@org.springframework.data.repository.query.Param("email") String email);
     Optional<User> findByGoogleSub(String googleSub);
     boolean existsByGoogleSub(String googleSub);
 

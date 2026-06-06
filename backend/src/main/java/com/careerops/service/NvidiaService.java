@@ -18,6 +18,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.web.client.RestClient;
 import org.springframework.web.client.RestClientResponseException;
 
+import java.nio.charset.StandardCharsets;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.Semaphore;
@@ -196,15 +197,17 @@ public class NvidiaService {
             acquired = true;
             for (int attempt = 1; attempt <= maxAttempts; attempt++) {
                 try {
-                    String raw = meterRegistry.timer("ai.nvidia.call", "feature", featureName)
+                    byte[] rawBytes = meterRegistry.timer("ai.nvidia.call", "feature", featureName)
                         .record(() -> restClient.post()
                             .uri("/chat/completions")
                             .header("Authorization", "Bearer " + apiKey)
                             .body(body.toString())
                             .retrieve()
-                            .body(String.class));
+                            .body(byte[].class));
 
-                    if (raw == null) return "{}";
+                    String raw = rawBytes == null ? null
+                            : new String(rawBytes, StandardCharsets.UTF_8);
+                    if (raw == null || raw.isBlank()) return "{}";
                     JsonNode resp = mapper.readTree(raw);
 
                     JsonNode usage = resp.path("usage");

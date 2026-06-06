@@ -128,8 +128,8 @@ public class ProfileValidator {
         if (profile.getPortfolioItems() != null && !profile.getPortfolioItems().isEmpty()) score += WEIGHT_PORTFOLIO;
 
         boolean hasGoalTitle  = profile.getGoalTitle()     != null && !profile.getGoalTitle().isBlank();
-        boolean hasGoalSalary = profile.getGoalSalaryMin() != null && profile.getGoalSalaryMax() != null
-                             && profile.getGoalSalaryMin() > 0     && profile.getGoalSalaryMax() > 0;
+        boolean hasGoalSalary = profile.getSalaryMin() != null && profile.getSalaryMax() != null
+                             && profile.getSalaryMin() > 0     && profile.getSalaryMax() > 0;
         if (hasGoalTitle && hasGoalSalary) score += WEIGHT_CAREER_GOAL;
 
         return Math.min(score, 100);

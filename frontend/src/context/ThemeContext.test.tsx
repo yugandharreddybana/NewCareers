@@ -10,7 +10,7 @@ describe('ThemeProvider', () => {
   });
 
   it('always applies light mode and clears any stored dark preference', async () => {
-    window.localStorage.setItem('careerops-theme', 'dark');
+    window.localStorage.setItem('NewCareers-theme', 'dark');
 
     render(
       <ThemeProvider>
@@ -22,6 +22,6 @@ describe('ThemeProvider', () => {
       expect(document.documentElement.classList.contains('dark')).toBe(false);
     });
     expect(document.documentElement.dataset.theme).toBe('light');
-    expect(window.localStorage.getItem('careerops-theme')).toBe('light');
+    expect(window.localStorage.getItem('NewCareers-theme')).toBe('light');
   });
 });

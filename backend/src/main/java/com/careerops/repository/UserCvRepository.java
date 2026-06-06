@@ -13,4 +13,6 @@ public interface UserCvRepository extends JpaRepository<UserCv, UUID> {
 
     /** Single active CV — used by AI matching / skill scoring services */
     Optional<UserCv> findFirstByUserIdAndIsActiveTrueOrderByUploadedAtDesc(UUID userId);
+
+    void deleteByUserId(UUID userId);
 }

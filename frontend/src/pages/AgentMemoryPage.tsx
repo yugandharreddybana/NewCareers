@@ -269,7 +269,7 @@ const AgentMemoryPage = () => {
 
   return (
     <>
-      <PageMeta title="Agent Memory - CareerOps" />
+      <PageMeta title="Agent Memory - NewCareers" />
       <div className="max-w-3xl mx-auto px-4 sm:px-6 py-8 space-y-6">
         <div>
           <h1 className="text-2xl font-semibold text-gray-900">Agent Memory</h1>

@@ -21,8 +21,8 @@ public class OpenApiConfig {
         final String securitySchemeName = "bearerAuth";
         return new OpenAPI()
                 .info(new Info()
-                        .title("CareerOps API")
-                        .description("Backend API for CareerOps application — security hardened and type-safe.")
+                        .title("NewCareers API")
+                        .description("Backend API for NewCareers application — security hardened and type-safe.")
                         .version("1.0.0"))
                 .addSecurityItem(new SecurityRequirement().addList(securitySchemeName))
                 .components(new Components()

@@ -64,7 +64,7 @@ const ProgressPage: React.FC = () => {
 
   if (!weekly || !streaks) return (
     <>
-      <PageMeta title="Progress — CareerOps" />
+      <PageMeta title="Progress — NewCareers" />
       <div className="max-w-3xl mx-auto px-4 sm:px-6 py-8">
         <div className="bg-white border border-gray-200 rounded-xl p-6 text-center space-y-3">
           <h1 className="text-lg font-semibold text-gray-900">Progress unavailable</h1>
@@ -83,7 +83,7 @@ const ProgressPage: React.FC = () => {
 
   return (
     <>
-      <PageMeta title="Progress — CareerOps" />
+      <PageMeta title="Progress — NewCareers" />
       <div className="max-w-3xl mx-auto px-4 sm:px-6 py-8 space-y-6">
         <div className="flex items-center justify-between">
           <div>

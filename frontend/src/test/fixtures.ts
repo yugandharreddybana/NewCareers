@@ -31,7 +31,7 @@ export const MOCK_USER: User = {
   id: CANONICAL_MOCK_JOB_IDS.userId,
   name: 'Dev User',
   username: 'devuser',
-  email: 'dev@careerops.ie',
+  email: 'dev@NewCareers.ie',
   onboarded: true,
   role: 'ADMIN',
 };

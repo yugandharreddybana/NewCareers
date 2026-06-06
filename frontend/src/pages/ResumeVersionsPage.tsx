@@ -224,7 +224,7 @@ const ResumeVersionsPage = () => {
 
   return (
     <>
-      <PageMeta title="Resume Versions - CareerOps" />
+      <PageMeta title="Resume Versions - NewCareers" />
       <div className="max-w-3xl mx-auto px-4 sm:px-6 py-8 space-y-6">
         <div className="flex items-start justify-between gap-4">
           <div>

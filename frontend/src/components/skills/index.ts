@@ -1,5 +1,5 @@
 /**
- * Barrel export for all CareerOps skill components.
+ * Barrel export for all NewCareers skill components.
  * Import from '@/components/skills' rather than deep paths.
  *
  * Usage:

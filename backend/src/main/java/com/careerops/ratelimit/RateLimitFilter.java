@@ -22,8 +22,6 @@ import org.springframework.web.servlet.mvc.method.annotation.RequestMappingHandl
 
 import java.io.IOException;
 import java.time.Duration;
-import java.util.Set;
-
 /**
  * Task 131 — per-userId in-memory rate limiter using Bucket4j.
  *
@@ -32,8 +30,8 @@ import java.util.Set;
  *    request attribute populated by InternalTrustFilter, with configured
  *    trust-header fallback for direct internal calls.
  *  - Public endpoints (register, login, forgot-password, reset-password,
- *    refresh, health) are excluded — they have their own brute-force
- *    protections in AuthService.
+ *    refresh, health) are excluded from per-user limiting.
+ *  - Auth login/register IP brute-force limits live in {@link IpRateLimitFilter}.
  *  - When the bucket is empty the filter returns HTTP 429 with:
  *      - Header  Retry-After: <seconds until next token>
  *      - Body    { "error": "Too many requests …", "status": 429, "timestamp": "..." }
@@ -49,20 +47,7 @@ public class RateLimitFilter extends OncePerRequestFilter {
 
     private static final String LEGACY_USER_ID_HEADER = "X-User-Id";
 
-    private static final Set<String> IP_LIMITED_PATHS = Set.of(
-        "/auth/login",
-        "/auth/register",
-        "/auth/forgot-password",
-        "/auth/google"
-    );
-
     private final com.github.benmanes.caffeine.cache.Cache<String, Bucket> buckets =
-        com.github.benmanes.caffeine.cache.Caffeine.newBuilder()
-            .maximumSize(100_000)
-            .expireAfterAccess(Duration.ofHours(1))
-            .build();
-
-    private final com.github.benmanes.caffeine.cache.Cache<String, Bucket> ipBuckets =
         com.github.benmanes.caffeine.cache.Caffeine.newBuilder()
             .maximumSize(100_000)
             .expireAfterAccess(Duration.ofHours(1))
@@ -117,14 +102,6 @@ public class RateLimitFilter extends OncePerRequestFilter {
         }
     }
 
-    private String getClientIp(HttpServletRequest req) {
-        String xf = req.getHeader("X-Forwarded-For");
-        if (xf != null && !xf.isBlank()) {
-            return xf.split(",")[0].trim();
-        }
-        return req.getRemoteAddr();
-    }
-
     @Override
     protected void doFilterInternal(HttpServletRequest req,
                                     HttpServletResponse res,
@@ -135,24 +112,6 @@ public class RateLimitFilter extends OncePerRequestFilter {
         String path = req.getServletPath();
         if (path == null || path.isEmpty()) {
             path = req.getRequestURI().substring(req.getContextPath().length());
-        }
-
-        // IP-based rate limit for sensitive public endpoints
-        if (IP_LIMITED_PATHS.contains(path)) {
-            String ip = getClientIp(req);
-            Bucket ipBucket = ipBuckets.get(ip, id ->
-                Bucket.builder()
-                    .addLimit(Bandwidth.builder()
-                        .capacity(10)
-                        .refillGreedy(10, Duration.ofMinutes(1))
-                        .initialTokens(10)
-                        .build())
-                    .build()
-            );
-            if (!ipBucket.tryConsume(1)) {
-                sendTooManyRequestsResponse(res, ip, path, 1);
-                return;
-            }
         }
 
         // Exempt public endpoints

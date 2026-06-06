@@ -12,7 +12,11 @@ import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
 
+import com.careerops.support.OnboardingVerificationTestSupport;
+
+import java.util.HashMap;
 import java.util.Map;
+import java.util.UUID;
 
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
@@ -30,7 +34,6 @@ class JobsRecommendedIntegrationTest {
     @Autowired MockMvc mockMvc;
     @Autowired ObjectMapper objectMapper;
 
-    private static final String INTERNAL_SECRET = "test-internal-trust-secret-minimum-32-characters-long";
     private static final String INTERNAL_USER_ID_HEADER = "X-Internal-User-Id";
 
     @Test
@@ -40,7 +43,7 @@ class JobsRecommendedIntegrationTest {
 
         mockMvc.perform(
                 get("/jobs/recommended")
-                    .header("X-Internal-Secret", INTERNAL_SECRET)
+                    .with(com.careerops.security.InternalRequestHeaders.hmac("GET", "/jobs/recommended", new byte[0]))
                     .header(INTERNAL_USER_ID_HEADER, userId))
             .andExpect(status().isOk())
             .andExpect(jsonPath("$").isArray());
@@ -50,14 +53,20 @@ class JobsRecommendedIntegrationTest {
     @DisplayName("GET /jobs/recommended returns 200 for newly registered user")
     void recommendedForNewUser() throws Exception {
         String email = "rec_test_" + System.currentTimeMillis() + "@careerops.test";
+        UUID verificationId = OnboardingVerificationTestSupport.verifyEmailForTest(
+                mockMvc, objectMapper, email);
+        Map<String, Object> registerBody = new HashMap<>();
+        registerBody.put("name", "Rec Test");
+        registerBody.put("username", "rec" + System.currentTimeMillis());
+        registerBody.put("email", email);
+        registerBody.put("password", "N0tPwned!" + System.currentTimeMillis());
+        registerBody.put("emailVerificationId", verificationId.toString());
+        registerBody.put("consents", OnboardingVerificationTestSupport.defaultSignupConsents());
+
         MvcResult reg = mockMvc.perform(
                 post("/auth/register")
                     .contentType(MediaType.APPLICATION_JSON)
-                    .content(objectMapper.writeValueAsString(Map.of(
-                        "name", "Rec Test",
-                        "username", "rec" + System.currentTimeMillis(),
-                        "email", email,
-                        "password", "N0tPwned!" + System.currentTimeMillis()))))
+                    .content(objectMapper.writeValueAsString(registerBody)))
             .andExpect(status().isOk())
             .andReturn();
 
@@ -66,7 +75,7 @@ class JobsRecommendedIntegrationTest {
 
         mockMvc.perform(
                 get("/jobs/recommended")
-                    .header("X-Internal-Secret", INTERNAL_SECRET)
+                    .with(com.careerops.security.InternalRequestHeaders.hmac("GET", "/jobs/recommended", new byte[0]))
                     .header(INTERNAL_USER_ID_HEADER, userId))
             .andExpect(status().isOk())
             .andExpect(jsonPath("$").isArray());

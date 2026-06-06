@@ -1,9 +1,13 @@
 package com.careerops.service;
 
+import com.careerops.model.Job;
 import com.careerops.model.JobListing;
+import com.careerops.model.UserProfile;
 import com.careerops.service.sources.JobSource;
+import com.careerops.service.sources.ResilientJobSource;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.stereotype.Service;
 
@@ -37,16 +41,57 @@ public class JobScrapeService {
     private static final int SOURCE_TIMEOUT_SECONDS = 35;
 
     private final List<JobSource> sources;
+    private final List<JobSource> deliverySources;
     private final DeduplicationService deduplicationService;
     private final Executor scraperExecutor;
 
     public JobScrapeService(
             @Qualifier("resilientSources") List<JobSource> sources,
+            ObjectProvider<JobSource> allSources,
             DeduplicationService deduplicationService,
             @Qualifier("scraperExecutor") Executor scraperExecutor) {
         this.sources              = sources;
+        this.deliverySources      = allSources.stream()
+                .filter(s -> !(s instanceof ResilientJobSource))
+                .collect(Collectors.toList());
         this.deduplicationService = deduplicationService;
         this.scraperExecutor      = scraperExecutor;
+    }
+
+    /** Sources used by {@link JobDeliveryService} (profile-driven {@link Job} fetch). */
+    public List<JobSource> getSources() {
+        return List.copyOf(deliverySources);
+    }
+
+    public List<Job> fetchRaw(UserProfile profile) {
+        if (profile == null) return List.of();
+        log.info("Parallel Job fetch across {} delivery sources for userId={}",
+                deliverySources.size(), profile.getUserId());
+
+        List<CompletableFuture<List<Job>>> futures = deliverySources.stream()
+                .filter(JobSource::hasBudget)
+                .map(s -> {
+                    long timeoutSec = s instanceof com.careerops.service.sources.company.CompanyCareerSource ? 120 : 25;
+                    return CompletableFuture.supplyAsync(() -> {
+                        try {
+                            return s.fetch(profile);
+                        } catch (Exception e) {
+                            log.warn("Source '{}' failed: {}", s.sourceName(), e.getMessage());
+                            return Collections.<Job>emptyList();
+                        }
+                    }, scraperExecutor)
+                            .orTimeout(timeoutSec, TimeUnit.SECONDS)
+                            .exceptionally(ex -> {
+                                log.warn("Source '{}' timed out: {}", s.sourceName(), ex.getMessage());
+                                return Collections.emptyList();
+                            });
+                })
+                .toList();
+
+        return futures.stream()
+                .map(CompletableFuture::join)
+                .flatMap(List::stream)
+                .toList();
     }
 
     /**

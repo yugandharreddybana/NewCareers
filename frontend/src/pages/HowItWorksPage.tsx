@@ -4,7 +4,7 @@ export default function HowItWorksPage() {
   return (
     <div style={{ maxWidth: 860, margin: '0 auto', padding: '2rem 1.5rem', fontFamily: 'inherit' }}>
       <h1 style={{ fontSize: '2rem', fontWeight: 800, marginBottom: '0.5rem' }}>
-        📖 How CareerOps Works
+        📖 How NewCareers Works
       </h1>
       <p style={{ color: '#6b7280', marginBottom: '2.5rem' }}>
         A complete, transparent explanation of every step — from creating your account to the AI
@@ -14,7 +14,7 @@ export default function HowItWorksPage() {
       {/* ─── 1. Onboarding ──────────────────────────────────────────────── */}
       <Section title="1. Onboarding" icon="🚀">
         <p>
-          When you sign up, CareerOps walks you through a 3-step onboarding wizard:
+          When you sign up, NewCareers walks you through a 3-step onboarding wizard:
         </p>
         <ol>
           <li>
@@ -45,7 +45,7 @@ export default function HowItWorksPage() {
       {/* ─── 2. Job Sources ─────────────────────────────────────────────── */}
       <Section title="2. Job Sources" icon="🌐">
         <p>
-          CareerOps aggregates jobs from <strong>14+ sources simultaneously</strong>, all in Ireland
+          NewCareers aggregates jobs from <strong>14+ sources simultaneously</strong>, all in Ireland
           (or remote-friendly):
         </p>
         <table style={tableStyle}>
@@ -134,7 +134,7 @@ export default function HowItWorksPage() {
             </tr>
           </thead>
           <tbody>
-            <Tr cells={['Daily Job Scan', 'Every day at 06:00 UTC', 'Scrapes all sources for each active user and delivers new matching jobs']} />
+            <Tr cells={['Daily Job Scan', 'Every day at 06:00 (Europe/Dublin)', 'Scrapes all sources for each active user and delivers up to 5 new matching jobs']} />
             <Tr cells={['Weekly Digest Email', 'Every Monday 07:00 UTC', 'Sends a summary email of the top 10 new matches from the past week']} />
             <Tr cells={['Deduplication Cleanup', 'Every day at 02:00 UTC', 'Removes duplicate or expired job listings from the database']} />
             <Tr cells={['Skill Conversation Cleanup', 'Every day at 03:00 UTC', 'Purges AI skill-gap conversation history older than 30 days']} />

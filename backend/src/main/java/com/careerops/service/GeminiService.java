@@ -109,14 +109,9 @@ public class GeminiService {
      * Async variant — now truly non-blocking (3.052).
      */
     public CompletableFuture<String> generateAsync(String systemPrompt, String userPrompt) {
-        return CompletableFuture.supplyAsync(() -> {
-            try {
-                return generate(systemPrompt, userPrompt);
-            } catch (Exception e) {
-                log.warn("Gemini async call failed: {}", e.getMessage());
-                return "{\"error\":\"Async call failed\"}";
-            }
-        });
+        throw new com.careerops.exception.ApiException(
+                org.springframework.http.HttpStatus.FORBIDDEN,
+                "AI calls require an authenticated user context");
     }
 
     /** Async variant that resolves directly to a parsed JsonNode (3.052). */
@@ -134,36 +129,9 @@ public class GeminiService {
     }
 
     public String generate(String systemPrompt, String userPrompt) {
-        if (stubMode) {
-            log.info("GeminiService: Stub mode active for generate. Returning mock response.");
-            return "{\"match\": true, \"score\": 85, \"reasons\": [\"Strong matching experience\"]}";
-        }
-        if (key == null || key.isBlank()) {
-            log.error("GeminiService: API key not configured");
-            throw com.careerops.exception.ApiException.internalError("AI engine not configured (Gemini)");
-        }
-        Map<String,Object> body = Map.of(
-            "systemInstruction", Map.of("parts", List.of(Map.of("text", systemPrompt))),
-            "contents", List.of(Map.of("role","user","parts", List.of(Map.of("text", userPrompt)))),
-            "generationConfig", Map.of("temperature", 0.4, "responseMimeType","application/json")
-        );
-        try {
-            JsonNode resp = client.post()
-                .uri("/{m}:generateContent?key={k}", model, key)
-                .header("Content-Type","application/json")
-                .body(body)
-                .retrieve().body(JsonNode.class);
-            if (resp == null) return "{}";
-            
-            JsonNode parts = resp.path("candidates").path(0).path("content").path("parts");
-            if (parts.isArray() && parts.size() > 0) return parts.get(0).path("text").asText("{}");
-            return "{}";
-        } catch (Exception e) {
-            String msg = e.getMessage() == null ? "Unknown error" : e.getMessage();
-            String sanitized = msg.replaceAll("key=[^&\\s]+", "key=***");
-            log.warn("Gemini call failed: {}", sanitized);
-            return mapper.createObjectNode().put("error", sanitized).toString();
-        }
+        throw new com.careerops.exception.ApiException(
+                org.springframework.http.HttpStatus.FORBIDDEN,
+                "AI calls require an authenticated user context");
     }
 
     /** Convenience parse to JsonNode. Falls back to text-wrapped node on parse failure. */

@@ -23,11 +23,12 @@ import { HelmetProvider } from 'react-helmet-async';
 import { GoogleOAuthProvider } from '@react-oauth/google';
 import { AuthProvider } from './context/AuthContext';
 import { GOOGLE_CLIENT_ID } from './lib/env';
-import { ProtectedRoute, AdminRoute, GuestRoute } from './components/ProtectedRoute';
+import { ProtectedRoute, AdminRoute, GuestRoute, OnboardingRoute } from './components/ProtectedRoute';
 import { PageLoader } from './components/LoadingSpinner';
 import { ApiLoadingOverlay } from './components/ApiLoadingOverlay';
 import { ExperimentProvider } from './context/ExperimentContext';
 import { ErrorBoundary, RouteFallback } from './components/ErrorBoundary';
+import { CookieConsentBanner } from './components/gdpr/CookieConsentBanner';
 
 // ── lazy() with a `.preload()` method for hover-warming chunks ─────────────
 type Importable<T extends ComponentType<any>> = () => Promise<{ default: T }>;
@@ -49,6 +50,10 @@ const ForgotPasswordPage = withPreload(() => import('./pages/ForgotPasswordPage'
 const ResetPasswordPage  = withPreload(() => import('./pages/ResetPasswordPage'));
 const Onboarding         = withPreload(() => import('./pages/Onboarding'));
 const GetStarted         = withPreload(() => import('./pages/GetStarted'));
+const PrivacyPolicyPage  = withPreload(() => import('./pages/legal/PrivacyPolicyPage'));
+const TermsOfServicePage = withPreload(() => import('./pages/legal/TermsOfServicePage'));
+const HelpPage           = withPreload(() => import('./pages/legal/HelpPage'));
+const AccessibilityPage  = withPreload(() => import('./pages/legal/AccessibilityPage'));
 
 // ── Protected pages ────────────────────────────────────────────────────────
 const Dashboard            = withPreload(() => import('./pages/Dashboard'));
@@ -108,6 +113,7 @@ export const App: React.FC = () => (
         <AuthProvider>
           <ExperimentProvider>
             <ApiLoadingOverlay />
+            <CookieConsentBanner />
             {/* Top-level Suspense catches the very first paint. */}
             <Suspense fallback={<PageLoader />}>
               <Routes>
@@ -124,10 +130,22 @@ export const App: React.FC = () => (
                 {/* Legacy /register → /signup so old emails still work. */}
                 <Route path="/register"         element={<Navigate to="/signup" replace />} />
                 <Route path="/get-started"      element={<RouteWithBoundary label="Get started"><GetStarted /></RouteWithBoundary>} />
+                <Route path="/privacy"          element={<RouteWithBoundary label="Privacy policy"><PrivacyPolicyPage /></RouteWithBoundary>} />
+                <Route path="/terms"            element={<RouteWithBoundary label="Terms of service"><TermsOfServicePage /></RouteWithBoundary>} />
+                <Route path="/help"             element={<RouteWithBoundary label="Help"><HelpPage /></RouteWithBoundary>} />
+                <Route path="/accessibility"    element={<RouteWithBoundary label="Accessibility"><AccessibilityPage /></RouteWithBoundary>} />
+                <Route path="/legal/privacy"    element={<Navigate to="/privacy" replace />} />
+                <Route path="/legal/terms"      element={<Navigate to="/terms" replace />} />
+                <Route path="/legal/help"       element={<Navigate to="/help" replace />} />
+                <Route path="/legal/accessibility" element={<Navigate to="/accessibility" replace />} />
+
+                {/* Onboarding — account created on finish; guests need deferred signup */}
+                <Route element={<OnboardingRoute />}>
+                  <Route path="/onboarding"       element={<RouteWithBoundary label="Onboarding"><Onboarding /></RouteWithBoundary>} />
+                </Route>
 
                 {/* ── Protected routes ────────────────────────────────────── */}
                 <Route element={<ProtectedRoute />}>
-                  <Route path="/onboarding"       element={<RouteWithBoundary label="Onboarding"><Onboarding /></RouteWithBoundary>} />
                   <Route path="/welcome"          element={<RouteWithBoundary label="Welcome"><WelcomeDashboard /></RouteWithBoundary>} />
                   <Route path="/dashboard"        element={<RouteWithBoundary label="Dashboard"><Dashboard /></RouteWithBoundary>} />
                   <Route path="/pipeline"        element={<RouteWithBoundary label="Job pipeline"><PipelineDashboard /></RouteWithBoundary>} />

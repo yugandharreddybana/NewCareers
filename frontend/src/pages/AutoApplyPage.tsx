@@ -100,7 +100,7 @@ const toRunRecord = (run: ApplicationRun): AutoApplyRun => ({
   id: run.id,
   userJobId: run.userJobId,
   jobTitle: `Job ${run.userJobId.slice(0, 8)}`,
-  company: 'CareerOps tracked application',
+  company: 'NewCareers tracked application',
   status: normalizeRunStatus(run.status),
   steps: run.steps,
   startedAt: run.createdAt,
@@ -354,7 +354,7 @@ const AutoApplyPage = () => {
 
   return (
     <>
-      <PageMeta title="Auto-Apply - CareerOps" />
+      <PageMeta title="Auto-Apply - NewCareers" />
       <div className="max-w-3xl mx-auto px-4 sm:px-6 py-8 space-y-6">
         <div className="flex items-start justify-between">
           <div>

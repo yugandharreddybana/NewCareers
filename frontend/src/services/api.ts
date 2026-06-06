@@ -25,6 +25,7 @@
  */
 import axios, { AxiosError, AxiosRequestConfig, InternalAxiosRequestConfig } from 'axios';
 import toast from 'react-hot-toast';
+import { redirectOnSessionExpired } from '@/lib/onboardingSession';
 import { tokenStore } from '@/lib/tokenStore';
 import { reportError } from '@/lib/telemetry';
 import { API_V1_URL, DEV_BYPASS } from '@/lib/env';
@@ -35,15 +36,73 @@ import type { User, Profile, KanbanColumn, JobCard, JobDetail, JobsListResponse 
 import { normalizeJobCard, normalizeJobDetail } from '@/lib/normalizeJobCard';
 
 // ── Typed request bodies ────────────────────────────────────────────────────
+interface SignupConsentsBody {
+  termsAccepted: boolean;
+  aiProcessingAccepted: boolean;
+  marketingAccepted: boolean;
+  analyticsAccepted: boolean;
+}
+
 interface SignupBody {
   name: string;
   username: string;
   email: string;
   password: string;
+  consents: SignupConsentsBody;
+  emailVerificationId?: string;
 }
+
+interface OnboardingOtpSentResponse {
+  resendsRemaining: number;
+  retryAfterSeconds: number;
+}
+
+interface OnboardingVerificationResponse {
+  verificationId: string;
+}
+
+export interface OnboardingCvParseResponse {
+  cvMarkdown: string;
+  headline?: string;
+  workExperience: Array<{
+    jobTitle: string;
+    companyName: string;
+    startDate: string;
+    endDate: string;
+    current: boolean;
+    description: string;
+  }>;
+  education: Array<{
+    schoolName: string;
+    degree: string;
+    fieldOfStudy: string;
+    graduationYear: string;
+  }>;
+  projects?: Array<{
+    title: string;
+    description: string;
+  }>;
+  rolesFound: number;
+  educationFound: number;
+  projectsFound?: number;
+}
+export interface WordCaptchaLetter {
+  character: string;
+  rotate: number;
+  translateY: number;
+  color: string;
+}
+
+export interface WordCaptchaChallenge {
+  challengeId: string;
+  letters: WordCaptchaLetter[];
+}
+
 interface LoginBody {
   email: string;
   password: string;
+  rememberMe?: boolean;
+  captchaToken?: string;
 }
 interface AuthResponse {
   user: User;
@@ -87,7 +146,12 @@ api.interceptors.request.use((config: InternalAxiosRequestConfig) => {
   }
 
   const token = tokenStore.getAccess();
-  if (token && !isJwtExpired(token) && config.headers) {
+  if (
+    token &&
+    !isJwtExpired(token) &&
+    config.headers &&
+    !isPublicAuthApiPath(config.url)
+  ) {
     config.headers['Authorization'] = `Bearer ${token}`;
   }
 
@@ -138,35 +202,109 @@ const PUBLIC_PATHS_FRONTEND = new Set([
   '/forgot-password',
   '/reset-password',
   '/get-started',
+  '/onboarding',
+  '/privacy',
+  '/terms',
+  '/help',
+  '/accessibility',
 ]);
 
-async function readErrorMessage(err: AxiosError): Promise<string | undefined> {
+/** Pre-auth API routes — must not attach Bearer tokens or trigger silent refresh on 401. */
+export const PUBLIC_AUTH_API_PATHS = new Set([
+  '/auth/register',
+  '/auth/login',
+  '/auth/captcha/challenge',
+  '/auth/forgot-password',
+  '/auth/reset-password',
+  '/auth/onboarding/check-email',
+  '/auth/onboarding/send-verification-otp',
+  '/auth/onboarding/resend-verification-otp',
+  '/auth/onboarding/verify-email',
+  '/auth/onboarding/parse-cv',
+]);
+
+const PRE_AUTH_PAGES = new Set([
+  '/signup',
+  '/login',
+  '/register',
+  '/forgot-password',
+  '/reset-password',
+]);
+
+export function isPublicAuthApiPath(url: string | undefined): boolean {
+  if (!url) return false;
+  const normalized = url.startsWith('/api/v1/')
+    ? url.replace(/^\/api\/v1\//, '/')
+    : url.startsWith('/api/')
+      ? url.replace(/^\/api\//, '/')
+      : url;
+  return PUBLIC_AUTH_API_PATHS.has(normalized);
+}
+
+/** Skip /auth/me probe on signup/login and deferred-signup onboarding when no session exists. */
+export function shouldSkipInitialSessionProbe(): boolean {
+  if (typeof window === 'undefined') return false;
+
+  const access = tokenStore.getAccess();
+  const hasValidAccess = Boolean(access && !isJwtExpired(access));
+  if (hasValidAccess) return false;
+
+  const path = window.location.pathname;
+  if (PRE_AUTH_PAGES.has(path)) {
+    return !tokenStore.hasRefreshOrCookie();
+  }
+
+  if (path === '/onboarding' && !tokenStore.hasRefreshOrCookie()) {
+    return true;
+  }
+
+  return false;
+}
+
+interface ErrorBody {
+  error?: string;
+  message?: string;
+  captchaRequired?: boolean;
+}
+
+async function readErrorBody(err: AxiosError): Promise<ErrorBody> {
   const data = err.response?.data;
   if (data && typeof data === 'object' && !(data instanceof Blob)) {
-    const body = data as { error?: string; message?: string };
-    return body.error ?? body.message;
+    return data as ErrorBody;
   }
   if (data instanceof Blob) {
     try {
       const text = await data.text();
-      const json = JSON.parse(text) as { error?: string; message?: string };
-      return json.error ?? json.message;
+      return JSON.parse(text) as ErrorBody;
     } catch {
       /* not JSON */
     }
   }
-  return undefined;
+  return {};
+}
+
+/** Persist tokens after login / refresh — refresh may live in HttpOnly cookie. */
+function applyAuthResponse(data: AuthResponse, rememberMe?: boolean): void {
+  if (data.token && data.refreshToken) {
+    tokenStore.set(data.token, data.refreshToken);
+    return;
+  }
+  if (data.token) {
+    tokenStore.setAccessOnly(data.token);
+    if (rememberMe) tokenStore.setRefreshViaCookie(true);
+    return;
+  }
+  if (data.refreshToken) tokenStore.setRefresh(data.refreshToken);
 }
 
 async function refreshAccessToken(): Promise<string> {
-  const refresh = tokenStore.getRefresh();
-  if (!refresh) {
+  const sessionRefresh = tokenStore.getRefresh();
+  if (!sessionRefresh && !tokenStore.usesCookieRefresh()) {
     throw new Error('Your session expired. Please sign in again.');
   }
-
   const resp = await axios.post(
     `${API_V1_URL}/auth/refresh`,
-    { refreshToken: refresh },
+    sessionRefresh ? { refreshToken: sessionRefresh } : {},
     {
       withCredentials: true,
       timeout: 30_000,
@@ -177,15 +315,9 @@ async function refreshAccessToken(): Promise<string> {
     },
   );
 
-  const data = resp.data as { token?: string; refreshToken?: string };
-  if (data.token && data.refreshToken) {
-    tokenStore.set(data.token, data.refreshToken);
-  } else if (data.refreshToken) {
-    tokenStore.setRefresh(data.refreshToken);
-    tokenStore.setAccess(null);
-  } else if (data.token) {
-    tokenStore.setAccess(data.token);
-  }
+  const data = resp.data as AuthResponse;
+  const rememberViaCookie = !data.refreshToken && Boolean(data.token);
+  applyAuthResponse(data, rememberViaCookie);
 
   const access = data.token ?? tokenStore.getAccess();
   if (!access) {
@@ -201,10 +333,6 @@ export async function ensureFreshSession(): Promise<void> {
 
   const access = tokenStore.getAccess();
   if (access && !isJwtExpired(access)) return;
-
-  if (!tokenStore.hasRefresh()) {
-    throw new Error('Your session expired. Please sign in again.');
-  }
 
   if (isRefreshing) {
     return new Promise<void>((resolve, reject) => {
@@ -223,22 +351,18 @@ export async function ensureFreshSession(): Promise<void> {
     processQueue(error, null);
     tokenStore.clear();
     emit(AUTH_LOGGED_OUT_EVENT);
-    redirectToLoginIfNeeded();
+    redirectOnAuthFailure();
     throw error;
   } finally {
     isRefreshing = false;
   }
 }
 
-function redirectToLoginIfNeeded(): void {
+function redirectOnAuthFailure(): void {
   if (typeof window === 'undefined') return;
   const here = window.location.pathname;
-  if (PUBLIC_PATHS_FRONTEND.has(here)) return;
-  const target = '/login?reason=session_expired';
-  const current = `${window.location.pathname}${window.location.search}`;
-  if (current === target) return;
-  window.history.replaceState({ reason: 'session_expired' }, '', target);
-  window.dispatchEvent(new PopStateEvent('popstate'));
+  if (PUBLIC_PATHS_FRONTEND.has(here) && here !== '/onboarding') return;
+  redirectOnSessionExpired(here);
 }
 
 // ── Response interceptor: 401 → silent refresh, 429 → toast, others → normalise ──
@@ -255,7 +379,8 @@ api.interceptors.response.use(
       err.response?.status === 401 &&
       !retriedConfigs.has(originalRequest) &&
       originalRequest.url !== '/auth/refresh' &&
-      originalRequest.url !== '/auth/login';
+      originalRequest.url !== '/auth/login' &&
+      !isPublicAuthApiPath(originalRequest.url);
 
     // 429 → user-facing toast
     if (err.response?.status === 429) {
@@ -264,9 +389,22 @@ api.interceptors.response.use(
         err.response?.data?.error ||
         err.response?.data?.message ||
         'Too many requests — please slow down.';
-      toast.error(msg, { id: 'rate-limit', duration: 4000 });
-      (err as AxiosError & { normalizedMessage: string }).normalizedMessage = msg;
-      return Promise.reject(err);
+      const retryHeader = err.response?.headers?.['retry-after'];
+      const retryAfterSeconds = typeof retryHeader === 'string'
+        ? Number.parseInt(retryHeader, 10)
+        : undefined;
+      const enriched429 = err as AxiosError & {
+        normalizedMessage: string;
+        retryAfterSeconds?: number;
+      };
+      enriched429.normalizedMessage = msg;
+      if (retryAfterSeconds !== undefined && Number.isFinite(retryAfterSeconds) && retryAfterSeconds > 0) {
+        enriched429.retryAfterSeconds = retryAfterSeconds;
+      }
+      if (!originalRequest?.skipGlobalLoader) {
+        toast.error(msg, { id: 'rate-limit', duration: 4000 });
+      }
+      return Promise.reject(enriched429);
     }
 
   if (isRefreshableRequest) {
@@ -274,13 +412,6 @@ api.interceptors.response.use(
       // Release the original request's loader before retry — otherwise the retry
       // opens a second track and the first id never clears (infinite overlay).
       endApiLoading(originalRequest);
-
-      if (!tokenStore.hasRefresh()) {
-        tokenStore.clear();
-        emit(AUTH_LOGGED_OUT_EVENT);
-        redirectToLoginIfNeeded();
-        return Promise.reject(err);
-      }
 
       try {
         const access = await (async () => {
@@ -298,7 +429,7 @@ api.interceptors.response.use(
             processQueue(refreshError, null);
             tokenStore.clear();
             emit(AUTH_LOGGED_OUT_EVENT);
-            redirectToLoginIfNeeded();
+            redirectOnAuthFailure();
             throw refreshError;
           } finally {
             isRefreshing = false;
@@ -319,10 +450,11 @@ api.interceptors.response.use(
     endApiLoading(originalRequest);
 
     // For any other error, attach a normalised message + report 5xx to telemetry.
-    const normalized = (await readErrorMessage(err))
-      || err.message
-      || 'Request failed';
-    (err as AxiosError & { normalizedMessage: string }).normalizedMessage = normalized;
+    const errorBody = await readErrorBody(err);
+    const normalized = errorBody.error ?? errorBody.message ?? err.message ?? 'Request failed';
+    const enriched = err as AxiosError & { normalizedMessage: string; captchaRequired?: boolean };
+    enriched.normalizedMessage = normalized;
+    if (errorBody.captchaRequired) enriched.captchaRequired = true;
 
     const isCorsFailure = normalized.includes('CORS:') || err.code === 'ERR_NETWORK';
     if (err.response && err.response.status >= 500 && !isCorsFailure) {
@@ -352,17 +484,28 @@ export const authApi = {
     return r.data;
   },
 
+  getWordCaptchaChallenge: (): Promise<WordCaptchaChallenge> =>
+    api
+      .get<WordCaptchaChallenge>('/auth/captcha/challenge', { skipGlobalLoader: true })
+      .then(r => r.data),
+
   login: async (b: LoginBody): Promise<AuthResponse> => {
-    const r = await api.post<AuthResponse>('/auth/login', b);
-    if (r.data.token)        tokenStore.setAccess(r.data.token);
-    if (r.data.refreshToken) tokenStore.setRefresh(r.data.refreshToken);
+    const r = await api.post<AuthResponse>('/auth/login', b, { skipGlobalLoader: true });
+    applyAuthResponse(r.data, b.rememberMe);
     return r.data;
   },
 
-  google: async (idToken: string): Promise<AuthResponse> => {
-    const r = await api.post<AuthResponse>('/auth/google', { idToken });
-    if (r.data.token)        tokenStore.setAccess(r.data.token);
-    if (r.data.refreshToken) tokenStore.setRefresh(r.data.refreshToken);
+  google: async (
+    idToken: string,
+    rememberMe?: boolean,
+    consents?: SignupConsentsBody,
+  ): Promise<AuthResponse> => {
+    const r = await api.post<AuthResponse>(
+      '/auth/google',
+      { idToken, rememberMe: Boolean(rememberMe), consents },
+      { skipGlobalLoader: true },
+    );
+    applyAuthResponse(r.data, rememberMe);
     return r.data;
   },
 
@@ -383,10 +526,50 @@ export const authApi = {
   me: (): Promise<User> => api.get<User>('/auth/me').then(r => r.data),
 
   forgotPassword: (email: string): Promise<void> =>
-    api.post<void>('/auth/forgot-password', { email }).then(r => r.data),
+    api
+      .post<void>('/auth/forgot-password', { email }, { skipGlobalLoader: true })
+      .then(r => r.data),
 
   resetPassword: (b: { email: string; otp: string; newPassword: string }): Promise<void> =>
-    api.post<void>('/auth/reset-password', b).then(r => r.data),
+    api
+      .post<void>('/auth/reset-password', b, { skipGlobalLoader: true })
+      .then(r => r.data),
+
+  checkSignupEmail: (email: string): Promise<{ available: boolean }> =>
+    api
+      .post<{ available: boolean }>('/auth/onboarding/check-email', { email }, { skipGlobalLoader: true })
+      .then(r => r.data),
+
+  sendOnboardingVerificationOtp: (b: { email: string; firstName?: string }): Promise<OnboardingOtpSentResponse> =>
+    api
+      .post<OnboardingOtpSentResponse>('/auth/onboarding/send-verification-otp', b, { skipGlobalLoader: true })
+      .then(r => r.data),
+
+  resendOnboardingVerificationOtp: (email: string): Promise<OnboardingOtpSentResponse> =>
+    api
+      .post<OnboardingOtpSentResponse>(
+        '/auth/onboarding/resend-verification-otp',
+        { email },
+        { skipGlobalLoader: true },
+      )
+      .then(r => r.data),
+
+  verifyOnboardingEmail: (b: {
+    email: string;
+    otp: string;
+    captchaToken?: string;
+  }): Promise<OnboardingVerificationResponse> =>
+    api
+      .post<OnboardingVerificationResponse>('/auth/onboarding/verify-email', b, { skipGlobalLoader: true })
+      .then(r => r.data),
+
+  parseOnboardingCv: (file: File): Promise<OnboardingCvParseResponse> => {
+    const fd = new FormData();
+    fd.append('file', file);
+    return api
+      .post<OnboardingCvParseResponse>('/auth/onboarding/parse-cv', fd, { skipGlobalLoader: true })
+      .then(r => r.data);
+  },
 };
 
 // ── Profile API ───────────────────────────────────────────────────────────
@@ -451,8 +634,10 @@ export type OnboardingDeliveryStatus = {
 };
 
 export const onboardingApi = {
-  startDelivery: (): Promise<{ stage: string; message: string }> =>
-    api.post('/onboarding/delivery/start').then(r => r.data),
+  startDelivery: (restart = false): Promise<{ stage: string; message: string }> =>
+    api
+      .post('/onboarding/delivery/start', null, { params: restart ? { restart: true } : undefined })
+      .then(r => r.data),
   deliveryStatus: (): Promise<OnboardingDeliveryStatus> =>
     api.get<OnboardingDeliveryStatus>('/onboarding/delivery/status').then(r => r.data),
 };
@@ -475,7 +660,7 @@ export const jobsApi = {
     let meta: JobsListResponse = {
       items: [],
       dailyCount: 0,
-      dailyLimit: 15,
+      dailyLimit: 25,
       remaining: 0,
       totalCount: 0,
       page: 0,
@@ -513,7 +698,7 @@ export const jobsApi = {
         loaderMessage: 'Loading job description…',
       })
       .then(r => normalizeJobDetail(r.data)),
-  fetch: (count = 10) =>
+  fetch: (count = 5) =>
     api
       .post('/jobs/fetch', null, {
         params: { count },
@@ -545,6 +730,9 @@ export const jobsApi = {
     api.post<import('@/types').JobCard>('/jobs/fetch-indeed-live', null, { timeout: 60_000 }).then(r => r.data),
   delete: (userJobId: string) =>
     api.delete(`/jobs/${userJobId}`).then(() => undefined),
+  /** Soft-delete every job in the user's pipeline. */
+  clearPipeline: () =>
+    api.delete('/jobs/pipeline').then(() => undefined),
   recommended: () => api.get('/jobs/recommended').then(r => r.data),
   limits: () => api.get('/jobs/limits').then(r => r.data),
   stats: () => api.get('/jobs/stats').then(r => r.data),

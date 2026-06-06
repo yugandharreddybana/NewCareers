@@ -12,6 +12,8 @@ import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
+import com.careerops.model.UserConsent.ConsentType;
+
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
 import java.util.List;
@@ -30,6 +32,8 @@ public class JobDigestService {
     private final UserJobRepository     userJobs;
     private final JobRepository         jobs;
     private final ResendEmailService    email;
+    private final UserConsentService    consentService;
+    private final com.careerops.repository.FeatureFlagRepository flagRepo;
 
     @Value("${app.base-url:http://localhost:5173}")
     private String appBaseUrl;
@@ -41,20 +45,34 @@ public class JobDigestService {
                             UserRepository users,
                             UserJobRepository userJobs,
                             JobRepository jobs,
-                            ResendEmailService email) {
+                            ResendEmailService email,
+                            UserConsentService consentService,
+                            com.careerops.repository.FeatureFlagRepository flagRepo) {
         this.profiles = profiles;
         this.users    = users;
         this.userJobs = userJobs;
         this.jobs     = jobs;
         this.email    = email;
+        this.consentService = consentService;
+        this.flagRepo = flagRepo;
     }
 
     public void sendDigestsForAllUsers() {
+        boolean digestEnabled = flagRepo.findByFlagKey("EMAIL_DIGEST_ENABLED")
+                .map(com.careerops.model.FeatureFlag::getEnabled)
+                .orElse(true);
+        if (!digestEnabled) {
+            log.info("Email digests disabled via EMAIL_DIGEST_ENABLED flag");
+            return;
+        }
+
         Instant since = Instant.now().minus(24, ChronoUnit.HOURS);
 
         for (var profile : profiles.findAllByOnboardedTrue()) {
             UUID userId = profile.getUserId();
             try {
+                if (!consentService.hasConsent(userId, ConsentType.MARKETING)) continue;
+
                 var user = users.findById(userId).orElse(null);
                 if (user == null) continue;
 

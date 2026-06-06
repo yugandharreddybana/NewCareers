@@ -31,10 +31,6 @@ function applyDevUser(req: Request): void {
   const trustHeader = process.env.INTERNAL_TRUST_HEADER || 'X-Internal-User-Id';
   req.headers[trustHeader] = req.userId;
   req.headers[trustHeader.toLowerCase()] = req.userId;
-  if (process.env.INTERNAL_TRUST_SECRET) {
-    req.headers['X-Internal-Secret'] = process.env.INTERNAL_TRUST_SECRET;
-    req.headers['x-internal-secret'] = process.env.INTERNAL_TRUST_SECRET;
-  }
 }
 
 // F5 fix: augment Express Request so downstream route handlers are typed
@@ -94,10 +90,6 @@ export function authGuard(req: Request, res: Response, next: NextFunction): void
       const trustHeader = process.env.INTERNAL_TRUST_HEADER || 'X-Internal-User-Id';
       req.headers[trustHeader] = req.userId;
       req.headers[trustHeader.toLowerCase()] = req.userId;
-      if (process.env.INTERNAL_TRUST_SECRET) {
-        req.headers['X-Internal-Secret'] = process.env.INTERNAL_TRUST_SECRET;
-        req.headers['x-internal-secret'] = process.env.INTERNAL_TRUST_SECRET;
-      }
 
       return next();
     } catch (err) {

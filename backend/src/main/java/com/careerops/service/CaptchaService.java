@@ -23,8 +23,12 @@ public class CaptchaService {
         this.secret = secret;
     }
 
+    public boolean isConfigured() {
+        return secret != null && !secret.isBlank() && !secret.startsWith("YOUR_");
+    }
+
     public boolean verify(String token) {
-        if (secret == null || secret.isBlank() || secret.startsWith("YOUR_")) {
+        if (!isConfigured()) {
             log.warn("Captcha secret not configured. Allowing all requests in dev mode.");
             return true;
         }

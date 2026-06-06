@@ -6,7 +6,6 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.lang.Nullable;
 import org.springframework.stereotype.Component;
 
@@ -40,21 +39,18 @@ public class StructuredJobEvaluationBuilder {
     private final JobMatchingService jobMatcher;
     private final EvaluationReportValidator evaluationValidator;
     private final ObjectMapper mapper;
-    private final boolean enforceMinMatchPercent;
 
     public StructuredJobEvaluationBuilder(
             CvSkillExtractionService skillExtraction,
             UserJobSkillMatchService skillMatchService,
             JobMatchingService jobMatcher,
             EvaluationReportValidator evaluationValidator,
-            ObjectMapper mapper,
-            @Value("${jobs.enforce-min-match-percent:false}") boolean enforceMinMatchPercent) {
+            ObjectMapper mapper) {
         this.skillExtraction = skillExtraction;
         this.skillMatchService = skillMatchService;
         this.jobMatcher = jobMatcher;
         this.evaluationValidator = evaluationValidator;
         this.mapper = mapper;
-        this.enforceMinMatchPercent = enforceMinMatchPercent;
     }
 
     public JsonNode build(
@@ -71,12 +67,6 @@ public class StructuredJobEvaluationBuilder {
 
         int preRank = scored != null ? scored.score() : 50;
         int match = Math.min(95, Math.max(0, preRank));
-        if (enforceMinMatchPercent) {
-            int minPct = profile.getMinMatchPercent() == null
-                ? UserProfile.DEFAULT_MIN_MATCH_PERCENT
-                : profile.getMinMatchPercent();
-            match = Math.min(95, Math.max(minPct, match));
-        }
 
         UserJobSkillMatchService.SkillMatch skillMatch = skillMatchService.compute(profile, cvText, job);
         List<String> skills = skillMatch.userSkills();
@@ -203,21 +193,28 @@ public class StructuredJobEvaluationBuilder {
             List<String> matched, List<String> unmatched) {
         String title = safe(job.getTitle());
         String company = safe(job.getCompany());
+        String headline = profile.getGoalTitle() != null && !profile.getGoalTitle().isBlank()
+                ? profile.getGoalTitle().trim() : null;
         if (matched.isEmpty()) {
-            return "Limited overlap between your CV/profile and "
+            String base = "Limited overlap between your CV/profile and "
                 + title + " at " + company + " (" + match + "%). Review gaps before investing application time.";
+            return headline != null ? "Headline: " + headline + ". " + base : base;
         }
-        return "Your background aligns with " + matched.size() + " core signals for "
+        String base = "Your background aligns with " + matched.size() + " core signals for "
             + title + " at " + company + " (" + match + "%). "
             + (unmatched.isEmpty()
                 ? "No major stack gaps detected in the posting text."
                 : unmatched.size() + " profile skills need stronger evidence in your CV.");
+        return headline != null ? "Headline: " + headline + ". " + base : base;
     }
 
     private static String executiveSummary(Job job, UserProfile profile, int match,
             List<String> matched, List<String> unmatched,
             @Nullable JobMatchingService.ScoredJob scored) {
         StringBuilder sb = new StringBuilder();
+        if (profile.getGoalTitle() != null && !profile.getGoalTitle().isBlank()) {
+            sb.append("Headline: ").append(profile.getGoalTitle().trim()).append(". ");
+        }
         sb.append(safe(job.getTitle())).append(" at ").append(safe(job.getCompany()));
         sb.append(" scores ").append(match).append("% against your profile");
         if (profile.getLocation() != null && !profile.getLocation().isBlank()) {

@@ -28,7 +28,7 @@ const AUTO_RUN_SKILLS = new Set<SkillName>([
 ]);
 
 /**
- * useSkill — state machine hook for running CareerOps skills.
+ * useSkill — state machine hook for running NewCareers skills.
  *
  * State transitions:
  *   idle → loading → done           (happy path)

@@ -19,7 +19,7 @@ import java.util.UUID;
 
 /**
  * Tailor CV via the bundled {@code career-ops-skills/tailor-resume/SKILL.md} instructions
- * (loaded through {@link SkillPromptLibrary}) — plan (Steps 0–2) then full rewrite (Step 3).
+ * (loaded through {@link SkillPromptLibrary}) — one NVIDIA pass (Steps 0–3).
  */
 @Service
 public class TailorResumeAiService {
@@ -52,7 +52,7 @@ public class TailorResumeAiService {
     }
 
     public boolean isAvailable() {
-        return nvidia != null;
+        return nvidia != null && nvidia.isConfigured();
     }
 
     /**
@@ -83,17 +83,11 @@ public class TailorResumeAiService {
             List<String> gaps = CvSkillCanonical.dedupeCanonical(
                 skillExtraction.gapsInJob(userSkills, jd));
 
-            JsonNode plan = generatePlan(userId, profile, job, cv, jd, matched, gaps, parsedSections);
             ObjectNode tailored = generateTailoredCv(
-                userId, profile, job, cv, jd, matched, gaps, parsedSections, plan);
+                userId, profile, job, cv, jd, matched, gaps, parsedSections);
             if (!TailorResumeQuality.isSubstantiallyTailored(tailored)) {
                 log.warn("AI tailor output too similar to baseline for userId={} job={}", userId, job.getTitle());
                 return Optional.empty();
-            }
-            if (plan != null && plan.has("tailoringPlan")) {
-                tailored.put("tailoringPlan", plan.path("tailoringPlan").asText(""));
-            } else if (plan != null && plan.has("tailoringPlanText")) {
-                tailored.put("tailoringPlan", plan.path("tailoringPlanText").asText(""));
             }
             tailored.put("mode", "ai_skill_md");
             return Optional.of(tailored);
@@ -110,51 +104,6 @@ public class TailorResumeAiService {
         return skillPrompts.buildBackendSkillSystemPrompt("tailor-resume", userId);
     }
 
-    private JsonNode generatePlan(
-            UUID userId,
-            UserProfile profile,
-            Job job,
-            String cv,
-            String jd,
-            List<String> matched,
-            List<String> gaps,
-            List<CvMarkdownSections.Section> sections) {
-        String system = skillSystemPrompt(userId)
-            + """
-
-            ---
-            ## PHASE A — PLAN ONLY (execute SKILL.md Steps 0, 1, and 2)
-
-            Do NOT write the full CV yet. Complete:
-            - Step 0: understand profile + CV + this job posting
-            - Step 1: extract 15–20 ATS keywords from the JD (exact phrases from requirements)
-            - Step 2: detect language/locale (A4 vs Letter) for the final CV
-
-            Then produce a tailoring plan: gap analysis, which sections to stress, how to reorder
-            experience bullets by JD priority, and keyword placement strategy.
-
-            Return **valid JSON only** (no markdown fences):
-            {
-              "tailoringPlan": "2-4 paragraphs as required by the skill",
-              "topKeywords": ["15-20 ATS keywords from Step 1"],
-              "matchedFromCv": ["skills already evidenced in CV"],
-              "gapsToClose": ["JD requirements weak in CV — only if adjacent proof may exist"],
-              "locale": "A4 or Letter per Step 2",
-              "sectionStrategies": [
-                {"sectionName": "Professional Summary|Work Experience|Skills|...", "strategy": "...", "priority": 1}
-              ],
-              "experienceBulletOrder": "per-role reorder instructions (most JD-relevant bullets first)"
-            }
-            """;
-
-        String user = buildContextBlock(profile, job, cv, jd, matched, gaps)
-            + "\n\nCV sections detected:\n"
-            + sectionOutline(sections)
-            + "\n\nExecute PHASE A now. Return the plan JSON only.";
-
-        return nvidia.generateJson(system, user, userId, "tailor-resume-plan");
-    }
-
     private ObjectNode generateTailoredCv(
             UUID userId,
             UserProfile profile,
@@ -163,15 +112,16 @@ public class TailorResumeAiService {
             String jd,
             List<String> matched,
             List<String> gaps,
-            List<CvMarkdownSections.Section> parsedSections,
-            JsonNode plan) {
+            List<CvMarkdownSections.Section> parsedSections) {
         String system = skillSystemPrompt(userId)
             + """
 
             ---
-            ## PHASE B — WRITE THE TAILORED CV (execute SKILL.md Step 3 strictly)
+            ## TAILOR CV — STEPS 0–3 IN ONE RESPONSE
 
-            You have a tailoring plan from Phase A. Now build the full resume content:
+            Complete SKILL.md Steps 0–2 internally (profile + JD, 15–20 ATS keywords, locale),
+            then write the full tailored CV (Step 3). Include a clear `tailoringPlan` field
+            (2–4 paragraphs: gap analysis, section emphasis, bullet reorder strategy).
 
             1. Work through **each section** listed in the USER message in order.
             2. For **Professional Summary**: exactly three sentences (Who you are / Key skills / Value) per SKILL.md.
@@ -193,24 +143,24 @@ public class TailorResumeAiService {
             Mirror JD language exactly. Irish English. No banned AI clichés from the skill.
 
             Return **valid JSON only** (no markdown fences). This API does not use tools — return:
+            - tailoringPlan: string (Steps 0–2 synthesis — required)
             - summary: string (same 3-sentence block as Professional Summary section)
             - keywordsAdded: string[] (keywords woven in from Step 1)
             - sections: [{ name, original, rewritten, rationale }] — one entry per source section;
               Professional Summary first; Experience must include Key Achievements blocks per SKILL.md
             - warnings: string[] (honest gaps, missing metrics, etc.)
-            - tailoringPlan: optional short recap of Phase A (if not already in plan)
 
             The server builds HTML from this JSON. Do not return raw HTML.
             """;
 
         String user = buildContextBlock(profile, job, cv, jd, matched, gaps)
-            + "\n\n--- PHASE A TAILORING PLAN (follow this) ---\n"
-            + (plan != null ? plan.toString() : "{}")
+            + "\n\nCV sections detected:\n"
+            + sectionOutline(parsedSections)
             + "\n\n--- SECTIONS TO REWRITE (copy each `original` verbatim; write new `rewritten`) ---\n"
             + sectionsPayload(parsedSections)
-            + "\n\nExecute PHASE B now. Return the JSON only.";
+            + "\n\nExecute Steps 0–3 now. Return the JSON only.";
 
-        JsonNode raw = nvidia.generateJson(system, user, userId, "tailor-resume-write");
+        JsonNode raw = nvidia.generateJson(system, user, userId, "tailor-resume");
         return mergeParsedSections(raw, parsedSections, cv);
     }
 

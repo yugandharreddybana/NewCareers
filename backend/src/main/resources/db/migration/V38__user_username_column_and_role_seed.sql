@@ -46,9 +46,14 @@ END$$;
 DO $$
 BEGIN
     IF NOT EXISTS (
-        SELECT 1 FROM pg_constraint;
+        SELECT 1 FROM pg_constraint
+         WHERE conname = 'chk_users_role'
+           AND conrelid = 'careerops.users'::regclass
+    ) THEN
+        ALTER TABLE users ADD CONSTRAINT chk_users_role
+            CHECK (role IN ('USER', 'ADMIN'));
     END IF;
-END$$;
+END $$;
 
 -- ── 3. Helpful index on email lower-case for case-insensitive lookups ────
 CREATE UNIQUE INDEX IF NOT EXISTS idx_users_email_lower

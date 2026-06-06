@@ -32,7 +32,8 @@ router.get('/stats', async (req, res, next) => {
 
 router.post('/fetch', fetchLimiter, async (req, res, next) => {
   try {
-    const count = Math.max(1, Math.min(10, Number(req.query.count) || 5));
+    const dailyCap = Math.max(1, Number(process.env.JOBS_DAILY_CAP) || 25);
+    const count = Math.max(1, Math.min(dailyCap, Number(req.query.count) || 5));
     const r = await forward({
       method: 'POST', path: '/jobs/fetch',
       userId: req.userId, params: { count }
@@ -102,6 +103,17 @@ router.get('/recommended', async (req, res, next) => {
 // ── Section 7 — Task 74: GET /api/jobs/search ────────────────────────────
 // Forwards query params: q, location, minSalary, maxSalary,
 // sponsorship, remote, page, size  — all optional.
+
+router.delete('/pipeline', async (req, res, next) => {
+  try {
+    const r = await forward({
+      method: 'DELETE',
+      path: '/jobs/pipeline',
+      userId: req.userId,
+    });
+    bubble(r, res);
+  } catch (e) { next(e); }
+});
 
 router.get('/search', async (req, res, next) => {
   try {

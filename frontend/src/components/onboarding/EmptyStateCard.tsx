@@ -37,21 +37,21 @@ export const EMPTY_STATES = {
     icon: '🔍',
     title: 'No jobs saved yet',
     description:
-      'Search for a role and save it to your board. CareerOps will calculate your match score and generate a full application kit in seconds.',
+      'Search for a role and save it to your board. NewCareers will calculate your match score and generate a full application kit in seconds.',
     ctaLabel: 'Search for jobs',
   },
   planner: {
     icon: '📋',
     title: 'No tasks yet',
     description:
-      'Once you save and apply to jobs, CareerOps will auto-generate your next actions — follow-up reminders, prep tasks, and deadline alerts.',
+      'Once you save and apply to jobs, NewCareers will auto-generate your next actions — follow-up reminders, prep tasks, and deadline alerts.',
     ctaLabel: 'Save your first job',
   },
   networking: {
     icon: '🤝',
     title: 'No contacts added',
     description:
-      'Add recruiters, hiring managers, or alumni you want to reach out to. CareerOps will track interactions and suggest when to follow up.',
+      'Add recruiters, hiring managers, or alumni you want to reach out to. NewCareers will track interactions and suggest when to follow up.',
     ctaLabel: 'Add a contact',
   },
   progress: {

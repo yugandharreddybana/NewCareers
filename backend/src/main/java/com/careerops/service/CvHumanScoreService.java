@@ -14,12 +14,8 @@ import java.util.UUID;
  *
  * Produces a human-readable quality score for a CV.
  *
- * B2-G2 FIX: Previously called ClaudeDirectService.generateJson() directly,
- * bypassing the AI provider router and gaining no Gemini-first failover or
- * unified metrics. Now routes through AiProviderRouter.routePrompt() so:
- *   - Primary:  GeminiService  (cheap, fast)
- *   - Fallback: ClaudeDirectService (reliable)
- *   - Metrics:  AiProviderMetricsService tracks success/failure for both
+ * When NVIDIA is configured, scores via NvidiaService (same stack as tailor-resume).
+ * Otherwise routes through AiProviderRouter (Gemini primary, Claude fallback).
  */
 @Service
 @Slf4j
@@ -40,11 +36,13 @@ public class CvHumanScoreService {
         No markdown, no explanation outside the JSON.
         """;
 
-    private final AiProviderRouter router;   // B2-G2: route through Gemini-first failover
-    private final ObjectMapper     mapper;
+    private final AiProviderRouter router;
+    private final NvidiaService nvidia;
+    private final ObjectMapper mapper;
 
-    public CvHumanScoreService(AiProviderRouter router, ObjectMapper mapper) {
+    public CvHumanScoreService(AiProviderRouter router, NvidiaService nvidia, ObjectMapper mapper) {
         this.router = router;
+        this.nvidia = nvidia;
         this.mapper = mapper;
     }
 
@@ -65,8 +63,13 @@ public class CvHumanScoreService {
             """.formatted(trim(cvText, 8000));
 
         try {
-            String raw = router.routePrompt(SYSTEM_PROMPT + "\n\n" + prompt, userId, "cv-human-score");
-            JsonNode result = JsonExtractor.extract(raw, mapper);
+            JsonNode result;
+            if (nvidia.isConfigured()) {
+                result = nvidia.generateJson(SYSTEM_PROMPT, prompt, userId, "cv-human-score");
+            } else {
+                String raw = router.routePrompt(SYSTEM_PROMPT + "\n\n" + prompt, userId, "cv-human-score");
+                result = JsonExtractor.extract(raw, mapper);
+            }
             if (result.isMissingNode() || result.isNull()) {
                 log.warn("[CvHumanScore] AI returned empty/null for userId={}", userId);
                 return buildErrorResponse("AI returned an empty response");

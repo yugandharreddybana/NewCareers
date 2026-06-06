@@ -78,6 +78,7 @@ public class ClaudeDirectService {
      * Raw text call — returns Claude's response as a plain string.
      */
     public String generate(String systemPrompt, String userPrompt, UUID userId, String featureName) {
+        consentService.validateAiConsent(userId);
         if (apiKey == null || apiKey.isBlank() || apiKey.startsWith("YOUR_")) {
             log.error("ClaudeDirectService: Anthropic API key not configured");
             // 3.074 — Throw exception instead of returning silent stub data

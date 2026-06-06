@@ -471,6 +471,14 @@ body {
   max-width: 400px;
 }
 
+/* Login page — invisible Google overlay fills custom button shell */
+.login-google-overlay > div,
+.login-google-overlay iframe {
+  width: 100% !important;
+  height: 52px !important;
+  min-height: 52px;
+}
+
 /* Material Symbols (NewCareers onboarding / auth) */
 .material-symbols-outlined {
   font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24;

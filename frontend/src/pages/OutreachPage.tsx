@@ -297,7 +297,7 @@ const OutreachPage = () => {
 
   return (
     <>
-      <PageMeta title="Outreach - CareerOps" />
+      <PageMeta title="Outreach - NewCareers" />
       {showModal && (
         <CreateCampaignModal
           templates={templates}

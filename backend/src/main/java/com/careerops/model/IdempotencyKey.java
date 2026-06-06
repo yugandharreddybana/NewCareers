@@ -11,7 +11,7 @@ import java.util.UUID;
  * Stores the result of POST operations to prevent duplicate processing on retries.
  */
 @Entity
-@Table(name = "idempotency_keys")
+@Table(name = "idempotency_keys", schema = "careerops")
 @Getter
 @Setter
 @NoArgsConstructor

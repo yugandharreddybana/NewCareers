@@ -1,30 +1,30 @@
 package com.careerops.controller;
 
+import com.careerops.exception.ApiException;
 import com.careerops.model.User;
 import com.careerops.repository.UserRepository;
-import com.careerops.service.AdminService;
 import com.careerops.service.AuthService;
+import com.careerops.service.GdprExportService;
+import com.careerops.service.GoogleOAuthService;
+import com.careerops.service.UserAnonymizationService;
 import com.careerops.util.AuthUtil;
+import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
-import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.Size;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.http.HttpHeaders;
+import org.springframework.http.HttpStatus;
+import org.springframework.http.MediaType;
+import org.springframework.http.ResponseEntity;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.UUID;
-import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * Account settings endpoints (separate from ProfileController which handles
  * public-facing profile data).
- *
- * CORS Policy:
- * - Allowed Origins: from ${cors.allowed.origins}
- * - Methods: GET, POST, PUT, PATCH, DELETE, OPTIONS
- * - Headers: Content-Type, Authorization, X-Requested-With, X-CSRF-Token, X-Internal-Secret, X-Internal-User-Id
- * - Exposed: X-RateLimit-Remaining, X-RateLimit-Reset, Retry-After
  */
 @RestController
 @RequestMapping("/account")
@@ -33,32 +33,23 @@ import java.util.concurrent.ConcurrentHashMap;
 @Slf4j
 public class AccountController {
 
-    private final UserRepository       userRepository;
-    private final PasswordEncoder      passwordEncoder;
-    private final AuthService          authService;
-    private final AdminService          adminService;
-
-    private static final ConcurrentHashMap<UUID, Integer> deleteAttempts = new ConcurrentHashMap<>();
-
-    // ── DTOs ─────────────────────────────────────────────────────────────
+    private final UserRepository userRepository;
+    private final PasswordEncoder passwordEncoder;
+    private final AuthService authService;
+    private final GdprExportService gdprExportService;
+    private final UserAnonymizationService anonymizationService;
+    private final GoogleOAuthService googleOAuth;
 
     record ChangePasswordRequest(
-        @NotBlank String currentPassword,
-        @NotBlank @Size(min = 8, max = 128) String newPassword
+        @jakarta.validation.constraints.NotBlank String currentPassword,
+        @jakarta.validation.constraints.NotBlank @Size(min = 8, max = 128) String newPassword
     ) {}
 
     record DeleteAccountRequest(
-        @NotBlank String password
+        String password,
+        @Size(min = 100, max = 8192) String idToken
     ) {}
 
-    // ── Change password ───────────────────────────────────────────────────
-
-    /**
-     * PATCH /api/account/password
-     * Verifies the current password before setting the new one.
-     * Returns 400 if the current password is wrong.
-     * Returns 204 on success.
-     */
     @PatchMapping("/password")
     public com.careerops.dto.AuthDtos.AuthResponse changePassword(
             @RequestBody @Valid ChangePasswordRequest req
@@ -69,63 +60,82 @@ public class AccountController {
                 .orElseThrow(() -> new IllegalStateException("User not found"));
 
         if (user.getPasswordHash() == null || user.getPasswordHash().isBlank()) {
-            throw com.careerops.exception.ApiException.badRequest(
+            throw ApiException.badRequest(
                     "This account uses Google Sign-In and has no password to change");
         }
         if (!passwordEncoder.matches(req.currentPassword(), user.getPasswordHash())) {
-            throw com.careerops.exception.ApiException.badRequest("Incorrect current password");
+            throw ApiException.badRequest("Incorrect current password");
         }
 
         user.setPasswordHash(passwordEncoder.encode(req.newPassword()));
         userRepository.save(user);
 
-        // Invalidate other sessions, but provide fresh tokens for the current one
         authService.revokeAllTokensForUser(userId);
-        var authResponse = authService.createAuthResponse(user);
-
-        return authResponse;
+        return authService.createAuthResponse(user);
     }
 
-    // ── Delete account ──────────────────────────────────────────────────────
+    @GetMapping(value = "/export", produces = MediaType.APPLICATION_JSON_VALUE)
+    public ResponseEntity<byte[]> exportAccount(HttpServletRequest httpRequest) {
+        UUID userId = AuthUtil.currentUserId();
+        byte[] json = gdprExportService.exportUserDataJson(userId, httpRequest);
+        return ResponseEntity.ok()
+                .header(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=\"my-data.json\"")
+                .contentType(MediaType.APPLICATION_JSON)
+                .body(json);
+    }
 
     /**
-     * DELETE /api/account
-     * Requires the user to confirm their password before deletion.
-     * Cascades via DB foreign keys: user_jobs, skill_runs, cv_documents,
-     * notifications, user_profiles, refresh_tokens all deleted automatically.
-     * Returns 204 on success.
+     * DELETE /account — anonymizes PII, purges files, revokes tokens.
+     * Password accounts require password confirmation; Google accounts require a fresh idToken.
+     *
+     * POST /account/delete — same semantics; used where HTTP clients omit DELETE bodies (axios, Playwright).
      */
     @DeleteMapping
-    @ResponseStatus(org.springframework.http.HttpStatus.NO_CONTENT)
+    @ResponseStatus(HttpStatus.NO_CONTENT)
     public void deleteAccount(
-            @RequestBody @Valid DeleteAccountRequest req
+            @RequestBody @Valid DeleteAccountRequest req,
+            HttpServletRequest httpRequest
     ) {
+        performAccountDeletion(req, httpRequest);
+    }
+
+    @PostMapping("/delete")
+    @ResponseStatus(HttpStatus.NO_CONTENT)
+    public void deleteAccountPost(
+            @RequestBody @Valid DeleteAccountRequest req,
+            HttpServletRequest httpRequest
+    ) {
+        performAccountDeletion(req, httpRequest);
+    }
+
+    private void performAccountDeletion(DeleteAccountRequest req, HttpServletRequest httpRequest) {
         UUID userId = AuthUtil.currentUserId();
 
         User user = userRepository.findById(userId)
                 .orElseThrow(() -> new IllegalStateException("User not found"));
 
         if (user.getPasswordHash() == null || user.getPasswordHash().isBlank()) {
-            throw com.careerops.exception.ApiException.badRequest(
-                    "Google accounts must be deleted via support or link a password first");
-        }
-        if (!passwordEncoder.matches(req.password(), user.getPasswordHash())) {
-            log.warn("Failed delete-account attempt for userId={} at {}", userId, java.time.Instant.now());
-            int attempts = deleteAttempts.compute(userId, (k, v) -> v == null ? 1 : v + 1);
-            if (attempts >= 5) {
-                user.setDeletedAt(java.time.Instant.now()); // Lock/Soft delete
-                userRepository.save(user);
-                throw com.careerops.exception.ApiException.badRequest("Account locked due to excessive failed attempts");
+            verifyGoogleReauth(user, req.idToken());
+        } else {
+            if (req.password() == null || req.password().isBlank()) {
+                throw ApiException.badRequest("Password confirmation is required");
             }
-            throw com.careerops.exception.ApiException.badRequest("Incorrect password");
+            if (!passwordEncoder.matches(req.password(), user.getPasswordHash())) {
+                log.warn("Failed delete-account attempt for userId={} at {}", userId, java.time.Instant.now());
+                throw ApiException.badRequest("Incorrect password");
+            }
         }
 
-        // Reset on successful confirmation
-        deleteAttempts.remove(userId);
+        anonymizationService.anonymizeAndDelete(userId, httpRequest);
+    }
 
-        // Invalidate all refresh tokens first (belt + suspenders on top of cascade)
-        authService.revokeAllTokensForUser(userId);
-
-        adminService.softDeleteUser(userId);
+    private void verifyGoogleReauth(User user, String idToken) {
+        if (idToken == null || idToken.isBlank()) {
+            throw ApiException.badRequest("Google re-authentication is required to delete this account");
+        }
+        GoogleOAuthService.GoogleIdentity identity = googleOAuth.verifyIdToken(idToken);
+        if (user.getGoogleSub() == null || !user.getGoogleSub().equals(identity.sub())) {
+            throw ApiException.badRequest("Google account does not match the signed-in user");
+        }
     }
 }

@@ -39,6 +39,8 @@ export type SettingsFormState = {
   activeCvFileName: string | null;
   activeCvId: string | null;
   minMatchPercent: number;
+  freshnessHours: number;
+  jobDomain?: string;
 };
 
 export function emptyWorkEntry(): OnboardingWorkEntry {
@@ -75,8 +77,8 @@ export function defaultSettingsForm(user: User | null): SettingsFormState {
 }
 
 export function profileToSettingsForm(profile: Profile, user: User | null): SettingsFormState {
-  const salaryMin = profile.salaryMin ?? profile.goalSalaryMin ?? 60_000;
-  const salaryMax = profile.salaryMax ?? profile.goalSalaryMax ?? 120_000;
+  const salaryMin = profile.salaryMin ?? 60_000;
+  const salaryMax = profile.salaryMax ?? 120_000;
 
   const work =
     profile.workExperience && profile.workExperience.length > 0
@@ -131,6 +133,8 @@ export function profileToSettingsForm(profile: Profile, user: User | null): Sett
     activeCvFileName: profile.activeCvFileName ?? null,
     activeCvId: profile.activeCvId ?? null,
     minMatchPercent: profile.minMatchPercent ?? 60,
+    freshnessHours: profile.freshnessHours ?? 168,
+    ...(profile.jobDomain ? { jobDomain: profile.jobDomain } : {}),
   };
 }
 
@@ -140,6 +144,7 @@ export function settingsFormToPayload(form: SettingsFormState): UpdateProfilePay
     headline: form.goalTitle,
     experienceYears: form.experienceYears,
     location: form.location || form.goalLocation,
+    ...(form.jobDomain ? { jobDomain: form.jobDomain } : {}),
   };
 
   const work: OnboardingWorkInput[] = form.workExperience;
@@ -157,6 +162,7 @@ export function settingsFormToPayload(form: SettingsFormState): UpdateProfilePay
     cvFile: null,
     sponsorship: form.sponsorship,
     minMatchPercent: form.minMatchPercent,
+    maxAgeDays: Math.round(form.freshnessHours / 24) || 7,
   };
 
   const { onboarded: _ignored, ...payload } = buildOnboardingProfilePayload(

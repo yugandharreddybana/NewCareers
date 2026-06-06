@@ -94,12 +94,6 @@ public class ProfileService {
             throw new ApiException(HttpStatus.BAD_REQUEST, "Salary minimum (" + min + ") cannot be greater than maximum (" + max + ")");
         }
 
-        Integer gMin = req.goalSalaryMin() != null ? req.goalSalaryMin() : profile.getGoalSalaryMin();
-        Integer gMax = req.goalSalaryMax() != null ? req.goalSalaryMax() : profile.getGoalSalaryMax();
-        if (gMin != null && gMax != null && gMin > gMax) {
-            throw new ApiException(HttpStatus.BAD_REQUEST, "Goal salary minimum (" + gMin + ") cannot be greater than maximum (" + gMax + ")");
-        }
-
         if (req.name() != null && !req.name().isBlank()) {
             var user = users.findById(userId)
                 .orElseThrow(() -> new ApiException(HttpStatus.NOT_FOUND, "User not found"));
@@ -107,7 +101,7 @@ public class ProfileService {
             users.save(user);
         }
 
-        if (req.targetRoles()        != null) profile.setTargetRoles(req.targetRoles());
+        if (req.targetRoles()        != null) profile.setTargetRoles(expandRoleAliases(req.targetRoles()));
         if (req.techStack()          != null) profile.setTechStack(req.techStack());
         if (req.location()           != null) profile.setLocation(req.location());
         if (req.salaryMin()          != null) profile.setSalaryMin(req.salaryMin());
@@ -118,8 +112,7 @@ public class ProfileService {
         if (req.minMatchPercent()    != null) profile.setMinMatchPercent(req.minMatchPercent());
         if (req.sponsorshipRequired()!= null) profile.setSponsorshipRequired(req.sponsorshipRequired());
         if (req.goalTitle()          != null) profile.setGoalTitle(req.goalTitle());
-        if (req.goalSalaryMin()      != null) profile.setGoalSalaryMin(req.goalSalaryMin());
-        if (req.goalSalaryMax()      != null) profile.setGoalSalaryMax(req.goalSalaryMax());
+
         if (req.goalLocation()       != null) profile.setGoalLocation(req.goalLocation());
         if (req.openToRemote()       != null) profile.setOpenToRemote(req.openToRemote());
         if (req.experienceLevel() != null) {
@@ -135,6 +128,12 @@ public class ProfileService {
         if (req.remotePolicy()       != null) profile.setRemotePolicy(req.remotePolicy());
         if (req.hybridOnsiteDays()   != null) profile.setHybridOnsiteDays(req.hybridOnsiteDays());
         if (req.availability()       != null) profile.setAvailability(req.availability());
+        if (req.jobDomain() != null) {
+            String domain = req.jobDomain().trim().toUpperCase();
+            if (!domain.isBlank()) {
+                profile.setJobDomain(domain);
+            }
+        }
 
         boolean wasOnboarded = Boolean.TRUE.equals(profile.getOnboarded());
         if (Boolean.TRUE.equals(req.onboarded())) {
@@ -158,9 +157,9 @@ public class ProfileService {
 
     public StatsResponse stats(UUID userId) {
         long total      = userJobs.countByUserId(userId);
-        long applied    = userJobs.countByUserIdAndKanbanColumn(userId, "Applied");
-        long interviews = userJobs.countByUserIdAndKanbanColumn(userId, "Interview");
-        long offers     = userJobs.countByUserIdAndKanbanColumn(userId, "Offer");
+        long applied    = userJobs.countByUserIdAndColumn(userId, "Applied");
+        long interviews = userJobs.countByUserIdAndColumn(userId, "Interview");
+        long offers     = userJobs.countByUserIdAndColumn(userId, "Offer");
         double avgMatch = userJobs.avgMatchPercentForUser(userId);
         return new StatsResponse(total, applied, interviews, offers, 
                 Math.round(avgMatch * 10.0) / 10.0);
@@ -337,7 +336,7 @@ public class ProfileService {
             activeCvFileName,
             activeCvId,
             p.getPortfolioItems(),
-            p.getGoalTitle(), p.getGoalSalaryMin(), p.getGoalSalaryMax(),
+            p.getGoalTitle(),
             p.getGoalLocation(), p.getOpenToRemote(),
             p.getExperienceLevel(),
             p.getWorkExperience() != null ? p.getWorkExperience() : List.of(),
@@ -345,7 +344,8 @@ public class ProfileService {
             p.getRemotePolicy(), p.getHybridOnsiteDays(), p.getAvailability(),
             atsKeywords.toArray(new String[0]),
             score,
-            p.getVersion()
+            p.getVersion(),
+            p.getJobDomain()
         );
     }
 
@@ -366,5 +366,34 @@ public class ProfileService {
         if (p.getOpenToRemote()   != null)                                      score += 10;
         if (p.getSponsorshipRequired() != null)                                 score += 10;
         return Math.min(score, 100);
+    }
+
+    private String[] expandRoleAliases(String[] roles) {
+        if (roles == null || roles.length == 0) return roles;
+
+        List<String> expanded = new java.util.ArrayList<>();
+        java.util.Set<String> seen = new java.util.LinkedHashSet<>();
+
+        for (String role : roles) {
+            if (role == null || role.isBlank()) continue;
+
+            String trimmed = role.trim();
+            if (seen.add(trimmed.toLowerCase())) {
+                expanded.add(trimmed);
+            }
+
+            String alias = null;
+            if (trimmed.toLowerCase().contains(" developer")) {
+                alias = trimmed.replaceAll("(?i) developer", " Engineer");
+            } else if (trimmed.toLowerCase().contains(" engineer")) {
+                alias = trimmed.replaceAll("(?i) engineer", " Developer");
+            }
+
+            if (alias != null && seen.add(alias.toLowerCase())) {
+                expanded.add(alias);
+            }
+        }
+
+        return expanded.toArray(new String[0]);
     }
 }

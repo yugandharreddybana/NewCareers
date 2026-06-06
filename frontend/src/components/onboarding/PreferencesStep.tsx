@@ -1,7 +1,8 @@
-import { useCallback, useId, useMemo, useRef, useState } from 'react';
+import { useCallback, useId, useMemo, useState } from 'react';
 import toast from 'react-hot-toast';
 import { SectionLabel } from '@/components/onboarding/RequiredLabel';
 import { MinMatchPercentField } from '@/components/onboarding/MinMatchPercentField';
+import { CvUploadDropzone } from '@/components/onboarding/CvUploadDropzone';
 
 export const SUGGESTED_ROLES = [
   'Senior Product Designer',
@@ -41,6 +42,25 @@ export type WorkSettings = {
   onsite: boolean;
   hybrid: boolean;
 };
+
+export const DEFAULT_WORK_SETTINGS: WorkSettings = {
+  remote: true,
+  onsite: false,
+  hybrid: false,
+};
+
+/** Ensures all work-setting keys exist after partial patches or missing state. */
+export function mergeWorkSettings(
+  prev: WorkSettings | undefined,
+  patch?: Partial<WorkSettings>,
+): WorkSettings {
+  return { ...DEFAULT_WORK_SETTINGS, ...prev, ...patch };
+}
+
+export function hasWorkSetting(settings: WorkSettings | undefined): boolean {
+  const s = mergeWorkSettings(settings);
+  return s.remote || s.onsite || s.hybrid;
+}
 
 export type PreferencesStepValues = {
   selectedRoles: string[];
@@ -94,6 +114,7 @@ function ToggleChip({
 function ChipSection({
   title,
   required,
+  hint,
   options,
   selected,
   onToggle,
@@ -105,6 +126,7 @@ function ChipSection({
 }: {
   title: string;
   required?: boolean;
+  hint?: string;
   options: readonly string[];
   selected: string[];
   onToggle: (value: string) => void;
@@ -123,7 +145,8 @@ function ChipSection({
   return (
     <section className="onboarding-pref-section">
       {required ? <SectionLabel required>{title}</SectionLabel> : <SectionLabel>{title}</SectionLabel>}
-      <div className="onboarding-chip-row">
+      {hint ? <p className="onboarding-pref-hint onboarding-pref-hint--tight">{hint}</p> : null}
+      <div className="onboarding-chip-row onboarding-chip-row--tags">
         {options.map(option => (
           <ToggleChip
             key={option}
@@ -142,43 +165,43 @@ function ChipSection({
             onToggle={() => onToggle(entry)}
           />
         ))}
-        <div className="onboarding-chip-custom">
-          <label className="sr-only" htmlFor={inputId}>
-            {customPlaceholder}
-          </label>
-          <input
-            id={inputId}
-            className="onboarding-chip-custom__input"
-            type="text"
-            value={customValue}
-            placeholder={customPlaceholder}
-            onChange={e => onCustomChange(e.target.value)}
-            onKeyDown={e => {
-              if (e.key === 'Enter') {
-                e.preventDefault();
-                onAddCustom();
-              }
-            }}
-          />
-          <button
-            id={addId}
-            type="button"
-            className="onboarding-chip-custom__add"
-            disabled={!canAdd}
-            aria-label={`Add ${customPlaceholder.replace(/\.\.\.$/,'')}`}
-            onClick={onAddCustom}
-          >
-            <span className="material-symbols-outlined" aria-hidden="true">
-              add
-            </span>
-          </button>
-        </div>
+      </div>
+      <div className="onboarding-chip-add-row">
+        <label className="sr-only" htmlFor={inputId}>
+          {customPlaceholder}
+        </label>
+        <input
+          id={inputId}
+          className="onboarding-chip-custom__input flex-1 min-w-0"
+          type="text"
+          value={customValue}
+          placeholder={customPlaceholder}
+          onChange={e => onCustomChange(e.target.value)}
+          onKeyDown={e => {
+            if (e.key === 'Enter') {
+              e.preventDefault();
+              onAddCustom();
+            }
+          }}
+        />
+        <button
+          id={addId}
+          type="button"
+          className="onboarding-chip-custom__add"
+          disabled={!canAdd}
+          aria-label={`Add ${customPlaceholder.replace(/\.\.\.$/, '')}`}
+          onClick={onAddCustom}
+        >
+          <span className="material-symbols-outlined" aria-hidden="true">
+            add
+          </span>
+        </button>
       </div>
     </section>
   );
 }
 
-const SALARY_FLOOR_K = 0;
+const SALARY_FLOOR_K = 20;
 const SALARY_CEILING_K = 300;
 const SALARY_GAP_K = 5;
 
@@ -190,7 +213,122 @@ function clampSalaryRange(minK: number, maxK: number): { minK: number; maxK: num
   return { minK: min, maxK: max };
 }
 
-// ── Max Age Days slider ────────────────────────────────────────────────────────
+function salarySymbol(currency: string): string {
+  if (currency === 'USD') return '$';
+  if (currency === 'GBP') return '£';
+  return '€';
+}
+
+function SalaryRangeField({
+  minK,
+  maxK,
+  currency,
+  onChange,
+}: {
+  minK: number;
+  maxK: number;
+  currency: string;
+  onChange: (patch: { salaryMinK?: number; salaryMaxK?: number; salaryCurrency?: string }) => void;
+}) {
+  const sym = salarySymbol(currency);
+  const label = `${sym}${minK}k – ${sym}${maxK}k`;
+
+  const setMin = (v: number) => {
+    const next = clampSalaryRange(v, maxK);
+    onChange({ salaryMinK: next.minK, salaryMaxK: next.maxK });
+  };
+  const setMax = (v: number) => {
+    const next = clampSalaryRange(minK, v);
+    onChange({ salaryMinK: next.minK, salaryMaxK: next.maxK });
+  };
+
+  const minPct = ((minK - SALARY_FLOOR_K) / (SALARY_CEILING_K - SALARY_FLOOR_K)) * 100;
+  const maxPct = ((maxK - SALARY_FLOOR_K) / (SALARY_CEILING_K - SALARY_FLOOR_K)) * 100;
+
+  return (
+    <section className="onboarding-pref-section">
+      <div className="onboarding-salary-header">
+        <SectionLabel>Salary expectations (annual)</SectionLabel>
+        <div className="onboarding-salary-header__value">
+          <span className="onboarding-salary-header__range">{label}</span>
+          <select
+            className="onboarding-salary-currency"
+            value={currency}
+            aria-label="Salary currency"
+            onChange={e => onChange({ salaryCurrency: e.target.value })}
+          >
+            <option value="EUR">EUR</option>
+            <option value="USD">USD</option>
+            <option value="GBP">GBP</option>
+          </select>
+        </div>
+      </div>
+      <div className="onboarding-salary-controls">
+        <div className="onboarding-salary-slider">
+          <div className="onboarding-salary-slider__track-wrap" aria-hidden="true">
+            <div className="onboarding-salary-slider__track-bg" />
+            <div
+              className="onboarding-salary-slider__track-fill"
+              style={{ left: `${minPct}%`, width: `${Math.max(0, maxPct - minPct)}%` }}
+            />
+          </div>
+          <input
+            type="range"
+            className="onboarding-salary-slider__input"
+            min={SALARY_FLOOR_K}
+            max={SALARY_CEILING_K}
+            step={5}
+            value={minK}
+            aria-label="Minimum salary in thousands"
+            onChange={e => setMin(Number(e.target.value))}
+          />
+          <input
+            type="range"
+            className="onboarding-salary-slider__input"
+            min={SALARY_FLOOR_K}
+            max={SALARY_CEILING_K}
+            step={5}
+            value={maxK}
+            aria-label="Maximum salary in thousands"
+            onChange={e => setMax(Number(e.target.value))}
+            style={{ zIndex: 3 }}
+          />
+        </div>
+        <div className="onboarding-salary-manual">
+          <div className="onboarding-salary-manual__field">
+            <label className="onboarding-salary-manual__label" htmlFor="pref-salary-min">
+              Minimum (k)
+            </label>
+            <input
+              id="pref-salary-min"
+              type="number"
+              className="onboarding-salary-manual__input"
+              min={SALARY_FLOOR_K}
+              max={SALARY_CEILING_K}
+              value={minK}
+              onChange={e => setMin(Number(e.target.value) || SALARY_FLOOR_K)}
+            />
+          </div>
+          <div className="onboarding-salary-manual__field">
+            <label className="onboarding-salary-manual__label" htmlFor="pref-salary-max">
+              Maximum (k)
+            </label>
+            <input
+              id="pref-salary-max"
+              type="number"
+              className="onboarding-salary-manual__input"
+              min={SALARY_FLOOR_K}
+              max={SALARY_CEILING_K}
+              value={maxK}
+              onChange={e => setMax(Number(e.target.value) || SALARY_FLOOR_K)}
+            />
+          </div>
+        </div>
+      </div>
+    </section>
+  );
+}
+
 function MaxAgeDaysField({
   value,
   onChange,
@@ -203,48 +341,69 @@ function MaxAgeDaysField({
     value === 1
       ? 'Posted today only'
       : value <= 3
-      ? `Posted within last ${value} days`
-      : value === 7
-      ? 'Posted within last week'
-      : value === 14
-      ? 'Posted within last 2 weeks'
-      : value === 30
-      ? 'Posted within last month'
-      : `Posted within last ${value} days`;
+        ? `Posted within the last ${value} days`
+        : value === 7
+          ? 'Posted within the last week'
+          : value === 14
+            ? 'Posted within the last 2 weeks'
+            : value === 30
+              ? 'Posted within the last month'
+              : `Posted within the last ${value} days`;
 
   return (
     <section className="onboarding-pref-section">
-      <SectionLabel>Job Freshness</SectionLabel>
-      <p className="onboarding-hint" style={{ marginBottom: '0.5rem' }}>
-        Only show jobs posted within a certain number of days. Default is 7 days.
+      <SectionLabel>Job freshness</SectionLabel>
+      <p className="onboarding-pref-hint onboarding-pref-hint--tight">
+        We only pull listings from job boards within this window.
       </p>
-      <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
+      <div className="onboarding-freshness">
         <input
           id={id}
+          className="onboarding-freshness__range"
           type="range"
           min={1}
           max={30}
           step={1}
           value={value}
           onChange={e => onChange(Number(e.target.value))}
-          style={{ flex: 1 }}
           aria-label="Maximum job age in days"
         />
-        <span
-          style={{
-            minWidth: '2.2rem',
-            textAlign: 'center',
-            fontWeight: 700,
-            fontSize: '1.1rem',
-            color: 'var(--color-primary, #7c3aed)',
-          }}
-        >
+        <span className="onboarding-freshness__badge" aria-hidden="true">
           {value}d
         </span>
       </div>
-      <p style={{ marginTop: '0.25rem', fontSize: '0.85rem', color: 'var(--color-text-muted, #888)' }}>
-        {label}
-      </p>
+      <p className="onboarding-freshness__caption">{label}</p>
+    </section>
+  );
+}
+
+function WorkSettingField({
+  settings,
+  onChange,
+}: {
+  settings: WorkSettings | undefined;
+  onChange: (next: WorkSettings) => void;
+}) {
+  const safe = mergeWorkSettings(settings);
+  const items: { key: keyof WorkSettings; label: string }[] = [
+    { key: 'remote', label: 'Remote' },
+    { key: 'hybrid', label: 'Hybrid' },
+    { key: 'onsite', label: 'On-site' },
+  ];
+
+  return (
+    <section className="onboarding-pref-section">
+      <SectionLabel>Work setting</SectionLabel>
+      <div className="onboarding-chip-row">
+        {items.map(({ key, label }) => (
+          <ToggleChip
+            key={key}
+            label={label}
+            selected={!!safe[key]}
+            onToggle={() => onChange({ ...safe, [key]: !safe[key] })}
+          />
+        ))}
+      </div>
     </section>
   );
 }
@@ -258,7 +417,6 @@ export function PreferencesStep({
 }: PreferencesStepProps) {
   const [customRole, setCustomRole] = useState('');
   const [customTech, setCustomTech] = useState('');
-  const fileRef = useRef<HTMLInputElement>(null);
 
   const toggleRole = useCallback(
     (r: string) =>
@@ -304,152 +462,179 @@ export function PreferencesStep({
     [values.workTypes, onChange],
   );
 
-  const handleFileChange = useCallback(
-    (e: React.ChangeEvent<HTMLInputElement>) => {
-      const file = e.target.files?.[0] ?? null;
-      if (file && file.size > 5 * 1024 * 1024) {
-        toast.error('CV must be under 5 MB');
-        return;
-      }
-      onChange({ cvFile: file });
-    },
-    [onChange],
-  );
+  const handleComplete = useCallback(() => {
+    if (!hasWorkSetting(values.workSettings)) {
+      toast.error('Select at least one work setting (Remote, On-site, or Hybrid).');
+      return;
+    }
+    onComplete();
+  }, [values.workSettings, onComplete]);
 
-  const canProceed = values.selectedRoles.length > 0;
+  const canProceed = values.selectedRoles.length > 0 && values.cvFile != null;
+  const summaryParts = [
+    values.selectedRoles.length > 0 ? `${values.selectedRoles.length} role${values.selectedRoles.length === 1 ? '' : 's'}` : null,
+    values.selectedTech.length > 0 ? `${values.selectedTech.length} skill${values.selectedTech.length === 1 ? '' : 's'}` : null,
+    values.cvFile ? 'CV ready' : 'CV required',
+  ].filter(Boolean);
 
   return (
     <div className="onboarding-step onboarding-preferences">
-      <ChipSection
-        title="Desired Roles"
-        required
-        options={SUGGESTED_ROLES}
-        selected={values.selectedRoles}
-        onToggle={toggleRole}
-        customValue={customRole}
-        onCustomChange={setCustomRole}
-        onAddCustom={addCustomRole}
-        customPlaceholder="Add custom role..."
-      />
+      <p className="onboarding-pref-summary" aria-live="polite">
+        {summaryParts.join(' · ')}
+      </p>
 
-      <ChipSection
-        title="Tech Stack"
-        options={SUGGESTED_TECH}
-        selected={values.selectedTech}
-        onToggle={toggleTech}
-        customValue={customTech}
-        onCustomChange={setCustomTech}
-        onAddCustom={addCustomTech}
-        customPlaceholder="Add technology..."
-      />
+      <div className="onboarding-pref-card">
+        <h2 className="onboarding-pref-card__title">
+          <span className="material-symbols-outlined" aria-hidden="true">
+            work
+          </span>
+          What you&apos;re looking for
+        </h2>
+        <ChipSection
+          title="Desired roles"
+          required
+          hint="Pick at least one — we use these to search job boards and rank matches."
+          options={SUGGESTED_ROLES}
+          selected={values.selectedRoles}
+          onToggle={toggleRole}
+          customValue={customRole}
+          onCustomChange={setCustomRole}
+          onAddCustom={addCustomRole}
+          customPlaceholder="Add custom role..."
+        />
+        <ChipSection
+          title="Tech stack"
+          hint="Skills we look for in job descriptions (optional but improves accuracy)."
+          options={SUGGESTED_TECH}
+          selected={values.selectedTech}
+          onToggle={toggleTech}
+          customValue={customTech}
+          onCustomChange={setCustomTech}
+          onAddCustom={addCustomTech}
+          customPlaceholder="Add technology..."
+          chipTone="gap"
+        />
+        <SalaryRangeField
+          minK={values.salaryMinK}
+          maxK={values.salaryMaxK}
+          currency={values.salaryCurrency}
+          onChange={onChange}
+        />
+      </div>
 
-      {/* ── Job Freshness ─────────────────────────── */}
-      <MaxAgeDaysField
-        value={values.maxAgeDays ?? 7}
-        onChange={v => onChange({ maxAgeDays: v })}
-      />
-
-      {/* ── Min Match % ──────────────────────────── */}
-      <MinMatchPercentField
-        value={values.minMatchPercent}
-        onChange={v => onChange({ minMatchPercent: v })}
-      />
-
-      {/* ── Work Types ───────────────────────────── */}
-      <section className="onboarding-pref-section">
-        <SectionLabel>Work Type</SectionLabel>
-        <div className="onboarding-chip-row">
-          {WORK_TYPE_OPTIONS.map(t => (
-            <ToggleChip
-              key={t}
-              label={t}
-              selected={values.workTypes.includes(t)}
-              onToggle={() => toggleWorkType(t)}
-            />
-          ))}
-        </div>
-      </section>
-
-      {/* ── Work Setting ─────────────────────────── */}
-      <section className="onboarding-pref-section">
-        <SectionLabel>Work Setting</SectionLabel>
-        <div className="onboarding-chip-row">
-          {(['remote', 'onsite', 'hybrid'] as const).map(key => (
-            <ToggleChip
-              key={key}
-              label={key.charAt(0).toUpperCase() + key.slice(1)}
-              selected={values.workSettings[key]}
-              onToggle={() =>
-                onChange({ workSettings: { ...values.workSettings, [key]: !values.workSettings[key] } })
-              }
-            />
-          ))}
-        </div>
-      </section>
-
-      {/* ── CV Upload ────────────────────────────── */}
-      <section className="onboarding-pref-section">
-        <SectionLabel>Upload CV / Resume</SectionLabel>
-        <div className="onboarding-cv-upload">
-          <button
-            type="button"
-            className="onboarding-btn onboarding-btn--outline"
-            onClick={() => fileRef.current?.click()}
-          >
-            <span className="material-symbols-outlined">upload_file</span>
-            {values.cvFile ? values.cvFile.name : 'Choose file (PDF / DOCX, max 5 MB)'}
-          </button>
-          <input
-            ref={fileRef}
-            type="file"
-            accept=".pdf,.doc,.docx"
-            className="sr-only"
-            onChange={handleFileChange}
-          />
-        </div>
-      </section>
-
-      {/* ── Visa Sponsorship ─────────────────────── */}
-      <section className="onboarding-pref-section">
-        <label className="onboarding-toggle-row">
-          <span>I require visa sponsorship</span>
+      <div className="onboarding-pref-card">
+        <h2 className="onboarding-pref-card__title">
+          <span className="material-symbols-outlined" aria-hidden="true">
+            tune
+          </span>
+          How you want to work
+        </h2>
+        <section className="onboarding-pref-section">
+          <SectionLabel>Work type</SectionLabel>
+          <div className="onboarding-chip-row">
+            {WORK_TYPE_OPTIONS.map(t => (
+              <ToggleChip
+                key={t}
+                label={t}
+                selected={values.workTypes.includes(t)}
+                onToggle={() => toggleWorkType(t)}
+              />
+            ))}
+          </div>
+        </section>
+        <WorkSettingField
+          settings={values.workSettings}
+          onChange={workSettings => onChange({ workSettings })}
+        />
+        <section className="onboarding-pref-section">
+          <SectionLabel>Availability</SectionLabel>
+          <div className="onboarding-chip-row">
+            {AVAILABILITY_OPTIONS.map(a => (
+              <ToggleChip
+                key={a}
+                label={a}
+                selected={values.availability === a}
+                onToggle={() => onChange({ availability: values.availability === a ? '' : a })}
+              />
+            ))}
+          </div>
+        </section>
+        <label className="onboarding-sponsorship">
           <input
             type="checkbox"
             checked={values.sponsorship}
             onChange={e => onChange({ sponsorship: e.target.checked })}
           />
+          <span>
+            <strong>I require visa sponsorship</strong>
+            <span>We&apos;ll prioritise employers who sponsor work permits when possible.</span>
+          </span>
         </label>
-      </section>
+      </div>
 
-      {/* ── Availability ─────────────────────────── */}
-      <section className="onboarding-pref-section">
-        <SectionLabel>Availability</SectionLabel>
-        <div className="onboarding-chip-row">
-          {AVAILABILITY_OPTIONS.map(a => (
-            <ToggleChip
-              key={a}
-              label={a}
-              selected={values.availability === a}
-              onToggle={() => onChange({ availability: values.availability === a ? '' : a })}
-            />
-          ))}
+      <div className="onboarding-pref-card">
+        <h2 className="onboarding-pref-card__title">
+          <span className="material-symbols-outlined" aria-hidden="true">
+            psychology
+          </span>
+          Matching rules
+        </h2>
+        <MaxAgeDaysField value={values.maxAgeDays ?? 7} onChange={v => onChange({ maxAgeDays: v })} />
+        <MinMatchPercentField
+          value={values.minMatchPercent}
+          onChange={v => onChange({ minMatchPercent: v })}
+        />
+      </div>
+
+      {values.cvFile ? (
+        <div className="onboarding-pref-cv-ready" role="status">
+          <span className="material-symbols-outlined text-primary" aria-hidden="true">
+            check_circle
+          </span>
+          <div>
+            <p className="onboarding-pref-cv-ready__title">CV ready for matching</p>
+            <p className="onboarding-pref-cv-ready__name">{values.cvFile.name}</p>
+          </div>
         </div>
-      </section>
+      ) : (
+        <div className="onboarding-pref-card onboarding-pref-card--accent">
+          <section className="onboarding-pref-section">
+            <SectionLabel required>Upload CV / resume</SectionLabel>
+            <p className="onboarding-pref-hint onboarding-pref-hint--tight">
+              Go back to Basic Identity to upload your CV, or add it here. PDF or DOCX, max 5 MB.
+            </p>
+            <CvUploadDropzone
+              file={values.cvFile}
+              onFile={f => onChange({ cvFile: f })}
+              id="cvUploadPreferences"
+              variant="hero"
+              showLabel={false}
+            />
+          </section>
+        </div>
+      )}
 
-      {/* ── Actions ──────────────────────────────── */}
       <div className="onboarding-actions">
-        <button type="button" className="onboarding-btn onboarding-btn--back" onClick={onBack}>
+        <button type="button" className="onboarding-btn-outline" onClick={onBack} disabled={saving}>
           Back
         </button>
         <button
           type="button"
-          className="onboarding-btn onboarding-btn--primary"
+          className="onboarding-btn-primary onboarding-btn-primary--full"
           disabled={!canProceed || saving}
-          onClick={onComplete}
+          onClick={handleComplete}
         >
-          {saving ? 'Saving…' : 'Find My Jobs'}
+          {saving ? 'Creating your account…' : 'Complete profile'}
+          {!saving && (
+            <span className="material-symbols-outlined" aria-hidden="true">
+              radar
+            </span>
+          )}
         </button>
       </div>
+      {!values.cvFile && (
+        <p className="onboarding-pref-footer-hint">Upload your CV to enable job matching.</p>
+      )}
     </div>
   );
 }

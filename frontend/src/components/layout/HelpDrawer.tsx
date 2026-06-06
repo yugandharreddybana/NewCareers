@@ -19,7 +19,7 @@ export default function HelpDrawer({ open, onClose }: Props) {
       <div className="flex-1 bg-black/30" onClick={onClose} />
       <aside className="w-full sm:w-[440px] bg-white shadow-2xl overflow-y-auto">
         <div className="p-5 border-b border-slate-100 flex items-center">
-          <h2 className="text-lg font-semibold">CareerOps Skills</h2>
+          <h2 className="text-lg font-semibold">NewCareers Skills</h2>
           <button className="ml-auto btn btn-ghost text-sm" onClick={onClose}>Close</button>
         </div>
         <div className="p-5 space-y-4">

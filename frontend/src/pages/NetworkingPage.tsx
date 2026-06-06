@@ -127,7 +127,7 @@ const NetworkingPage: React.FC = () => {
 
   return (
     <>
-      <PageMeta title="Networking — CareerOps" />
+      <PageMeta title="Networking — NewCareers" />
       {showModal && <AddContactModal onClose={() => setShowModal(false)} onAdd={c => setContacts(prev => [c, ...prev])} />}
       <div className="max-w-3xl mx-auto px-4 sm:px-6 py-8 space-y-6">
 

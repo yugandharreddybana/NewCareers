@@ -1,5 +1,6 @@
 package com.careerops.model;
 
+import com.careerops.persistence.FieldEncryptionListener;
 import jakarta.persistence.*;
 import lombok.*;
 import java.time.Instant;
@@ -16,7 +17,7 @@ import java.util.UUID;
  * deterministic backfill so existing rows continue to validate.
  */
 @Entity
-@EntityListeners(AuditEntityListener.class)
+@EntityListeners({AuditEntityListener.class, FieldEncryptionListener.class})
 @Table(name = "users", schema = "careerops")
 @org.hibernate.annotations.SQLRestriction("deleted_at IS NULL")
 @Getter @Setter @NoArgsConstructor @AllArgsConstructor @Builder

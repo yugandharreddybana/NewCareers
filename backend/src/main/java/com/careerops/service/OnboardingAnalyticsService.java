@@ -23,6 +23,7 @@ public class OnboardingAnalyticsService {
     private final OnboardingEventRepository onboardingRepo;
     private final FeatureAdoptionEventRepository featureRepo;
     private final ObjectMapper mapper;
+    private final UserConsentService consentService;
 
     @Transactional(timeout = 10, readOnly = true)
     public List<String> getCompletedSteps(UUID userId) {
@@ -31,6 +32,9 @@ public class OnboardingAnalyticsService {
 
     @Transactional(timeout = 10)
     public void trackOnboardingStep(UUID userId, String step, String eventType, Map<String, Object> metadata) {
+        if (!consentService.hasAnalyticsConsent(userId)) {
+            return;
+        }
         try {
             onboardingRepo.save(OnboardingEvent.builder()
                 .userId(userId)
@@ -45,6 +49,9 @@ public class OnboardingAnalyticsService {
 
     @Transactional(timeout = 10)
     public void trackFeatureAdoption(UUID userId, String feature, String action, Map<String, Object> metadata) {
+        if (!consentService.hasAnalyticsConsent(userId)) {
+            return;
+        }
         try {
             featureRepo.save(FeatureAdoptionEvent.builder()
                 .userId(userId)

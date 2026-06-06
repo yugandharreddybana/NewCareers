@@ -1,21 +1,9 @@
 /**
- * auth.routes.ts — authentication endpoints
- *
- * A5 fix: reset-password route body shape corrected.
- *   Old validators expected: { email, otp, newPassword }
- *   Frontend authApi.resetPassword sends:  { token, password }
- *   The Java backend contract is:           { token, password }
- *   Fixed validators now match the actual contract.
- *
- * G1 fix (Batch 7a): /auth/me now properly verifies the JWT via authGuard
- *   and proxies to Java /auth/me to confirm session validity.
- *   Old implementation only checked if the cookie existed — any token
- *   (expired, tampered, fabricated) would pass the check.
- *
- * All other routes (signup, login, refresh, logout, forgot-password)
- * are unchanged.
+ * auth.routes.ts — authentication endpoints with HttpOnly refresh cookies.
  */
 import express from 'express';
+import multer from 'multer';
+import FormData from 'form-data';
 import { body } from 'express-validator';
 import { forward } from '../services/backendProxy.js';
 import { checkValidation, trimStrings } from '../sanitize.js';
@@ -24,93 +12,212 @@ import { authGuard } from '../authGuard.js';
 import { verifySessionToken } from '../jwtVerification.js';
 
 const router = express.Router();
-const COOKIE = process.env.COOKIE_NAME || 'co_session';
 
-const cookieOpts = () => ({
-  httpOnly: true,
-  secure: process.env.NODE_ENV === 'production',
-  sameSite: (process.env.COOKIE_SAMESITE || 'strict') as 'strict' | 'lax' | 'none',
-  maxAge: 7 * 24 * 60 * 60 * 1000,
-  path: '/'
+const cvUpload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 5 * 1024 * 1024 },
+  fileFilter: (_req, f, cb) => {
+    const ok = /\.(pdf|docx)$/i.test(f.originalname);
+    if (ok) cb(null, true);
+    else cb(new Error('Only PDF or DOCX'));
+  },
 });
 
-// Apply CSRF protection to all auth state-changing routes
+function clientIp(req: express.Request): string | undefined {
+  return (typeof req.headers['x-forwarded-for'] === 'string'
+    ? req.headers['x-forwarded-for']
+    : undefined) || req.ip;
+}
+
+function clientForwardHeaders(req: express.Request): Record<string, string> {
+  const ua = req.headers['user-agent'];
+  return typeof ua === 'string' ? { 'user-agent': ua } : {};
+}
+const COOKIE = process.env.COOKIE_NAME || 'co_session';
+const REFRESH_COOKIE = 'co_refresh';
+const REMEMBER_FLAG = 'co_remember';
+
+const ACCESS_COOKIE_MS = 15 * 60 * 1000;
+const REMEMBER_REFRESH_MS = 30 * 24 * 60 * 60 * 1000;
+
+const baseCookieOpts = () => ({
+  httpOnly: true,
+  secure: process.env.NODE_ENV === 'production',
+  sameSite: (process.env.COOKIE_SAMESITE || 'lax') as 'strict' | 'lax' | 'none',
+  path: '/',
+});
+
+const accessCookieOpts = () => ({
+  ...baseCookieOpts(),
+  maxAge: ACCESS_COOKIE_MS,
+});
+
+const rememberRefreshCookieOpts = () => ({
+  ...baseCookieOpts(),
+  maxAge: REMEMBER_REFRESH_MS,
+});
+
+const sessionRefreshCookieOpts = () => baseCookieOpts();
+
+type AuthPayload = {
+  token?: string;
+  refreshToken?: string;
+  user?: unknown;
+};
+
+function resolveRememberMe(req: express.Request, explicit?: boolean): boolean {
+  if (typeof explicit === 'boolean') return explicit;
+  return req.cookies?.[REMEMBER_FLAG] === '1';
+}
+
+function issueAuthCookies(
+  res: express.Response,
+  data: AuthPayload,
+  rememberMe: boolean,
+) {
+  if (data.token) {
+    res.cookie(COOKIE, data.token, accessCookieOpts());
+  }
+  if (!data.refreshToken) {
+    return;
+  }
+  if (rememberMe) {
+    res.cookie(REFRESH_COOKIE, data.refreshToken, rememberRefreshCookieOpts());
+    res.cookie(REMEMBER_FLAG, '1', rememberRefreshCookieOpts());
+  } else {
+    res.cookie(REFRESH_COOKIE, data.refreshToken, sessionRefreshCookieOpts());
+    res.clearCookie(REMEMBER_FLAG, baseCookieOpts());
+  }
+}
+
+function authJsonResponse(
+  res: express.Response,
+  data: AuthPayload,
+  rememberMe: boolean,
+) {
+  issueAuthCookies(res, data, rememberMe);
+  if (rememberMe) {
+    return res.json({ token: data.token, user: data.user });
+  }
+  return res.json({
+    token: data.token,
+    user: data.user,
+    refreshToken: data.refreshToken,
+  });
+}
+
+function clearAuthCookies(res: express.Response) {
+  const clear = baseCookieOpts();
+  res.clearCookie(COOKIE, clear);
+  res.clearCookie(REFRESH_COOKIE, clear);
+  res.clearCookie(REMEMBER_FLAG, clear);
+}
+
 router.use(csrfGuard);
 
-// ── Signup ─────────────────────────────────────────────────────────────────
 router.post('/signup',
   authLimiter, trimStrings,
   body('name').isString().isLength({ min: 1 }),
   body('username').isString().isLength({ min: 3, max: 32 }),
   body('email').isEmail().normalizeEmail(),
   body('password').isString().isLength({ min: 8 }),
-  checkValidation,
-  async (req, res, next) => {
-    try {
-      const r = await forward({ method: 'POST', path: '/auth/register', data: req.body });
-      if (r.status >= 400) return res.status(r.status).json(r.data);
-      res.cookie(COOKIE, r.data.token, cookieOpts());
-      res.json({ token: r.data.token, user: r.data.user, refreshToken: r.data.refreshToken });
-    } catch (e) { next(e); }
-  });
-
-// ── Google Sign-In (GIS ID token) ─────────────────────────────────────────
-router.post('/google',
-  authLimiter, trimStrings,
-  body('idToken').isString().isLength({ min: 100, max: 8192 }),
-  checkValidation,
-  async (req, res, next) => {
-    try {
-      const r = await forward({ method: 'POST', path: '/auth/google', data: req.body });
-      if (r.status >= 400) return res.status(r.status).json(r.data);
-      res.cookie(COOKIE, r.data.token, cookieOpts());
-      res.json({ token: r.data.token, user: r.data.user, refreshToken: r.data.refreshToken });
-    } catch (e) { next(e); }
-  });
-
-// ── Login ──────────────────────────────────────────────────────────────────
-router.post('/login',
-  loginLimiter, trimStrings,
-  body('email').isEmail().normalizeEmail(),
-  body('password').isString().isLength({ min: 8 }),
-  checkValidation,
-  async (req, res, next) => {
-    try {
-      const r = await forward({ method: 'POST', path: '/auth/login', data: req.body });
-      if (r.status >= 400) return res.status(r.status).json(r.data);
-      res.cookie(COOKIE, r.data.token, cookieOpts());
-      res.json({ token: r.data.token, user: r.data.user, refreshToken: r.data.refreshToken });
-    } catch (e) { next(e); }
-  });
-
-// ── Refresh ────────────────────────────────────────────────────────────────
-router.post('/refresh',
-  authLimiter, trimStrings,
-  body('refreshToken').isString().isLength({ min: 10 }),
+  body('emailVerificationId').optional().isUUID(),
   checkValidation,
   async (req, res, next) => {
     try {
       const r = await forward({
         method: 'POST',
-        path: '/auth/refresh',
-        data: { refreshToken: req.body.refreshToken },
+        path: '/auth/register',
+        data: req.body,
+        ip: clientIp(req),
+        headers: clientForwardHeaders(req),
       });
       if (r.status >= 400) return res.status(r.status).json(r.data);
-      res.cookie(COOKIE, r.data.token, cookieOpts());
-      res.json({ token: r.data.token, refreshToken: r.data.refreshToken, user: r.data.user });
+      authJsonResponse(res, r.data as AuthPayload, false);
     } catch (e) { next(e); }
   });
 
-// ── Logout ─────────────────────────────────────────────────────────────────
-// No authGuard — it used to inject a dev user when the JWT was already cleared.
-// Always clear co_session; revoke server-side only when a valid JWT is present.
-router.post('/logout', async (req, res, next) => {
-  const clearOpts = {
-    path: '/',
-    httpOnly: true,
-    secure: process.env.NODE_ENV === 'production',
-    sameSite: (process.env.COOKIE_SAMESITE || 'strict') as 'strict' | 'lax' | 'none',
-  };
+router.post('/google',
+  authLimiter, trimStrings,
+  body('idToken').isString().isLength({ min: 100, max: 8192 }),
+  body('rememberMe').optional().isBoolean(),
+  checkValidation,
+  async (req, res, next) => {
+    try {
+      const rememberMe = Boolean(req.body.rememberMe);
+      const r = await forward({
+        method: 'POST',
+        path: '/auth/google',
+        data: { idToken: req.body.idToken },
+        ip: clientIp(req),
+        headers: clientForwardHeaders(req),
+      });
+      if (r.status >= 400) return res.status(r.status).json(r.data);
+      authJsonResponse(res, r.data as AuthPayload, rememberMe);
+    } catch (e) { next(e); }
+  });
+
+router.get('/captcha/challenge',
+  authLimiter,
+  async (_req, res, next) => {
+    try {
+      const r = await forward({
+        method: 'GET',
+        path: '/auth/captcha/challenge',
+      });
+      if (r.status >= 400) return res.status(r.status).json(r.data);
+      return res.json(r.data);
+    } catch (e) { next(e); }
+  });
+
+router.post('/login',
+  loginLimiter, trimStrings,
+  body('email').isEmail().normalizeEmail(),
+  body('password').isString().isLength({ min: 8 }),
+  body('captchaToken').optional().isString(),
+  body('rememberMe').optional().isBoolean(),
+  checkValidation,
+  async (req, res, next) => {
+    try {
+      const rememberMe = Boolean(req.body.rememberMe);
+      const r = await forward({
+        method: 'POST',
+        path: '/auth/login',
+        data: req.body,
+        ip: clientIp(req),
+        headers: clientForwardHeaders(req),
+      });
+      if (r.status >= 400) return res.status(r.status).json(r.data);
+      authJsonResponse(res, r.data as AuthPayload, rememberMe);
+    } catch (e) { next(e); }
+  });
+
+router.post('/refresh',
+  authLimiter,
+  async (req, res, next) => {
+    try {
+      const cookieRefresh = req.cookies?.[REFRESH_COOKIE] as string | undefined;
+      const bodyRefresh = req.body?.refreshToken as string | undefined;
+      const refreshToken = bodyRefresh || cookieRefresh;
+      if (!refreshToken || refreshToken.length < 10) {
+        return res.status(401).json({ error: 'Refresh token required' });
+      }
+      const rememberMe = resolveRememberMe(req);
+      const r = await forward({
+        method: 'POST',
+        path: '/auth/refresh',
+        data: { refreshToken },
+      });
+      if (r.status >= 400) return res.status(r.status).json(r.data);
+      authJsonResponse(res, r.data as AuthPayload, rememberMe);
+    } catch (e) { next(e); }
+  });
+
+router.post('/logout', async (req, res) => {
+  const clearOpts = baseCookieOpts();
+  const refreshToken =
+    (req.body?.refreshToken as string | undefined)
+    || (req.cookies?.[REFRESH_COOKIE] as string | undefined);
 
   let userId: string | undefined;
   const bearer = req.headers.authorization?.startsWith('Bearer ')
@@ -126,7 +233,7 @@ router.post('/logout', async (req, res, next) => {
         ? '00000000-0000-0000-0000-000000000001'
         : payload.sub;
     } catch {
-      // Expired or invalid — still clear the cookie below.
+      /* expired */
     }
   }
 
@@ -136,22 +243,121 @@ router.post('/logout', async (req, res, next) => {
         method: 'POST',
         path: '/auth/logout',
         userId,
-        data: {},
+        data: refreshToken ? { refreshToken } : {},
         headers: { 'Content-Type': 'application/json' },
       });
       if (r.status >= 400) {
-        console.warn(`Backend logout returned ${r.status}; clearing cookie anyway`);
+        console.warn(`Backend logout returned ${r.status}; clearing cookies anyway`);
       }
     }
-    res.clearCookie(COOKIE, clearOpts);
-    res.json({ ok: true });
-  } catch (e) {
-    res.clearCookie(COOKIE, clearOpts);
-    res.json({ ok: true });
+  } catch {
+    /* still clear cookies */
   }
+  clearAuthCookies(res);
+  res.json({ ok: true });
 });
 
-// ── Forgot Password ────────────────────────────────────────────────────────
+router.post('/onboarding/check-email',
+  authLimiter, trimStrings,
+  body('email').isEmail().normalizeEmail(),
+  checkValidation,
+  async (req, res, next) => {
+    try {
+      const r = await forward({
+        method: 'POST',
+        path: '/auth/onboarding/check-email',
+        data: req.body,
+        ip: clientIp(req),
+        headers: clientForwardHeaders(req),
+      });
+      if (r.status >= 400) return res.status(r.status).json(r.data ?? {});
+      res.status(200).json(r.data ?? { available: true });
+    } catch (e) { next(e); }
+  });
+
+router.post('/onboarding/send-verification-otp',
+  authLimiter, trimStrings,
+  body('email').isEmail().normalizeEmail(),
+  body('firstName').optional().isString().isLength({ max: 100 }),
+  checkValidation,
+  async (req, res, next) => {
+    try {
+      const r = await forward({
+        method: 'POST',
+        path: '/auth/onboarding/send-verification-otp',
+        data: req.body,
+        ip: clientIp(req),
+        headers: clientForwardHeaders(req),
+      });
+      if (r.status >= 400) return res.status(r.status).json(r.data ?? {});
+      res.status(202).json(r.data ?? { resendsRemaining: 3, retryAfterSeconds: 0 });
+    } catch (e) { next(e); }
+  });
+
+router.post('/onboarding/resend-verification-otp',
+  authLimiter, trimStrings,
+  body('email').isEmail().normalizeEmail(),
+  checkValidation,
+  async (req, res, next) => {
+    try {
+      const r = await forward({
+        method: 'POST',
+        path: '/auth/onboarding/resend-verification-otp',
+        data: req.body,
+        ip: clientIp(req),
+        headers: clientForwardHeaders(req),
+      });
+      if (r.status === 429) {
+        return res.status(429).json(r.data ?? { error: 'Please wait before requesting a new code.' });
+      }
+      if (r.status >= 400) return res.status(r.status).json(r.data ?? {});
+      res.status(202).json(r.data ?? { resendsRemaining: 0, retryAfterSeconds: 0 });
+    } catch (e) { next(e); }
+  });
+
+router.post('/onboarding/verify-email',
+  authLimiter, trimStrings,
+  body('email').isEmail().normalizeEmail(),
+  body('otp').isString().matches(/^\d{6}$/),
+  body('captchaToken').optional().isString(),
+  checkValidation,
+  async (req, res, next) => {
+    try {
+      const r = await forward({
+        method: 'POST',
+        path: '/auth/onboarding/verify-email',
+        data: req.body,
+        ip: clientIp(req),
+        headers: clientForwardHeaders(req),
+      });
+      if (r.status >= 400) return res.status(r.status).json(r.data ?? {});
+      res.status(200).json(r.data ?? {});
+    } catch (e) { next(e); }
+  });
+
+router.post('/onboarding/parse-cv',
+  authLimiter,
+  cvUpload.single('file'),
+  async (req, res, next) => {
+    try {
+      if (!req.file) return res.status(400).json({ error: 'Upload your CV to continue' });
+      const fd = new FormData();
+      fd.append('file', req.file.buffer, {
+        filename: req.file.originalname,
+        contentType: req.file.mimetype,
+      });
+      const r = await forward({
+        method: 'POST',
+        path: '/auth/onboarding/parse-cv',
+        data: fd,
+        headers: fd.getHeaders(),
+        ip: clientIp(req),
+      });
+      if (r.status >= 400) return res.status(r.status).json(r.data ?? {});
+      res.status(200).json(r.data ?? {});
+    } catch (e) { next(e); }
+  });
+
 router.post('/forgot-password',
   authLimiter, trimStrings,
   body('email').isEmail().normalizeEmail(),
@@ -167,12 +373,11 @@ router.post('/forgot-password',
       }
       res.status(202).json({ message: 'If that email exists in our system, we have sent a reset OTP.' });
     } catch (e) {
-      console.error('Forgot-password backend error:', e.message);
+      console.error('Forgot-password backend error:', (e as Error).message);
       res.status(202).json({ message: 'If that email exists in our system, we have sent a reset OTP.' });
     }
   });
 
-// ── Reset Password (OTP + new password) ────────────────────────────────────
 router.post('/reset-password',
   authLimiter, trimStrings,
   body('email').isEmail().normalizeEmail(),
@@ -195,11 +400,6 @@ router.post('/reset-password',
     } catch (e) { next(e); }
   });
 
-// ── Session Check ──────────────────────────────────────────────────────────
-// G1 fix (Batch 7a): authGuard validates + decodes the JWT before this handler
-// runs. If the token is missing, expired, or tampered the guard returns 401
-// before we reach here. We then proxy to Java /auth/me to confirm the
-// server-side session is still valid and return the live user object.
 router.get('/me',
   authGuard,
   async (req, res, next) => {

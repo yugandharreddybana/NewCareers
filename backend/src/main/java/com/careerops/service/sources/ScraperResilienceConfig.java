@@ -83,9 +83,9 @@ public class ScraperResilienceConfig {
                 .filter(s -> !(s instanceof ResilientJobSource))
                 .map(raw -> {
                     ScraperCircuitBreaker cb = new ScraperCircuitBreaker(
-                            raw.sourceName(), failureThreshold, openDurationMs, successThreshold);
+                            raw.name(), failureThreshold, openDurationMs, successThreshold);
                     log.info("[ResilienceConfig] Wrapping '{}' — failThreshold={} openDurationMs={}",
-                            raw.sourceName(), failureThreshold, openDurationMs);
+                            raw.name(), failureThreshold, openDurationMs);
                     return (JobSource) new ResilientJobSource(
                             raw, cb, sourceRateLimiter, healthRegistry);
                 })

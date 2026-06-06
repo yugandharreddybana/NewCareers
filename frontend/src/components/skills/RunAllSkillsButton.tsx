@@ -12,7 +12,7 @@ interface Props {
 }
 
 /**
- * Button that runs all 9 CareerOps skills for a job in one click.
+ * Button that runs all 9 NewCareers skills for a job in one click.
  * Shows live progress count and a Download All PDF button on completion.
  */
 export function RunAllSkillsButton({ userJobId, onComplete }: Props) {

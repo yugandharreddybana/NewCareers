@@ -7,6 +7,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.stereotype.Component;
+import org.springframework.web.reactive.function.client.WebClient;
 
 /**
  * Thin HTTP utility used by all scrapers for raw GET requests.
@@ -30,6 +31,11 @@ public class JobApiHttpClient {
 
     public JobApiHttpClient(@Qualifier("sharedHttpClient") OkHttpClient sharedHttpClient) {
         this.httpClient = sharedHttpClient;
+    }
+
+    /** WebClient rooted at {@code baseUrl} for JSON APIs (The Muse, Twin AI, etc.). */
+    public WebClient createClient(String baseUrl) {
+        return WebClient.builder().baseUrl(baseUrl).build();
     }
 
     /** GET with default User-Agent. Returns empty string on error. */

@@ -10,6 +10,7 @@ export type OnboardingBasicInfo = {
   headline: string;
   experienceYears: string;
   location: string;
+  jobDomain?: string;
 };
 
 export type OnboardingWorkInput = {
@@ -90,10 +91,13 @@ export function buildOnboardingProfilePayload(
 
   return {
     name: trimmedName,
+    ...(basic.jobDomain?.trim()
+      ? { jobDomain: basic.jobDomain.trim().toUpperCase() }
+      : {}),
     ...(trimmedHeadline ? { goalTitle: trimmedHeadline } : {}),
     targetRoles,
     techStack: [...preferences.selectedTech],
-    sectors: [...preferences.workTypes],
+    workTypes: [...preferences.workTypes],
     location: trimmedLocation || 'Dublin',
     salaryMin: preferences.salaryMinK * 1000,
     salaryMax: preferences.salaryMaxK * 1000,
@@ -102,6 +106,7 @@ export function buildOnboardingProfilePayload(
     experienceLevel: EXPERIENCE_YEARS_TO_LEVEL[basic.experienceYears] ?? 'mid',
     sponsorshipRequired: preferences.sponsorship,
     minMatchPercent: preferences.minMatchPercent,
+    freshnessHours: Math.max(24, (preferences.maxAgeDays ?? 7) * 24),
     openToRemote: preferences.workSettings.remote || preferences.workSettings.hybrid,
     remotePolicy: deriveRemotePolicy(preferences.workSettings),
     workExperience: mapWorkExperience(workEntries),

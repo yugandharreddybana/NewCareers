@@ -91,7 +91,7 @@ export default function Sidebar() {
                 transition={{ duration: 0.15 }}
                 className="font-bold text-[15px] tracking-tight text-white whitespace-nowrap overflow-hidden"
               >
-                CareerOps
+                NewCareers
               </motion.span>
             )}
           </AnimatePresence>

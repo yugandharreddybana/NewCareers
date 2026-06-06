@@ -87,7 +87,7 @@ export default defineConfig({
       '/api': {
         target: 'http://localhost:4000',
         changeOrigin: true,
-        cookieDomainRewrite: 'localhost',
+        // Do not force Domain=localhost — breaks when dev server is opened via 127.0.0.1 or LAN IP.
       },
     },
   },

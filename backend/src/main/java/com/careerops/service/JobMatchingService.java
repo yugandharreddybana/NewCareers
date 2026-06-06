@@ -8,6 +8,7 @@ import java.time.Clock;
 import java.time.Instant;
 
 import java.util.*;
+import java.util.Locale;
 import java.util.stream.Collectors;
 
 /**
@@ -43,10 +44,37 @@ public class JobMatchingService {
     public List<ScoredJob> topN(List<Job> jobs, UserProfile profile, int n) {
         return jobs.stream()
             .map(j -> score(j, profile))
-            .filter(s -> s.score() >= 10)
+            .filter(s -> isRelevantForProfile(s, profile))
             .sorted(Comparator.comparingInt(ScoredJob::score).reversed())
             .limit(n)
             .collect(Collectors.toList());
+    }
+
+    /**
+     * When the user set target roles or tech stack, require at least one signal in the
+     * job title/description — otherwise Ireland-only location scoring floods the pipeline.
+     */
+    public static boolean isRelevantForProfile(ScoredJob candidate, UserProfile profile) {
+        if (candidate == null || candidate.score() < 10) return false;
+        if (!hasRoleOrStackPreference(profile)) return true;
+        return isRoleOrStackRelevant(candidate);
+    }
+
+    public static boolean hasRoleOrStackPreference(UserProfile profile) {
+        if (profile == null) return false;
+        boolean hasRoles = profile.getTargetRoles() != null
+                && Arrays.stream(profile.getTargetRoles()).anyMatch(r -> r != null && !r.isBlank());
+        boolean hasStack = profile.getTechStack() != null
+                && Arrays.stream(profile.getTechStack()).anyMatch(t -> t != null && !t.isBlank());
+        return hasRoles || hasStack;
+    }
+
+    public static boolean isRoleOrStackRelevant(ScoredJob candidate) {
+        if (candidate == null || candidate.reasons() == null) return false;
+        return candidate.reasons().stream().anyMatch(r -> {
+            String lower = r.toLowerCase(Locale.ROOT);
+            return lower.contains("role match") || lower.contains("stack keywords matched");
+        });
     }
 
     /** Convenience: return the top 3 best matches. */
@@ -107,14 +135,8 @@ public class JobMatchingService {
         }
 
         // ── 3. Location (15 pts) ──────────────────────────────────────────────
-        // 3.041 — Token-based location matching
         String locStr = job.getLocation() == null ? "" : job.getLocation().toLowerCase();
-        Set<String> locTokens = Arrays.stream(locStr.split("[^a-zA-Z]+"))
-                                     .filter(t -> !t.isBlank())
-                                     .collect(Collectors.toSet());
-
-        boolean locationMatch = locTokens.stream().anyMatch(LOCATION_MATCH_TOKENS::contains)
-                                || locStr.contains("work from home") || locStr.contains("fully remote");
+        boolean locationMatch = JobDeliveryFilters.isLocationMatch(locStr, profile);
 
         if (locationMatch) {
             points += 15;

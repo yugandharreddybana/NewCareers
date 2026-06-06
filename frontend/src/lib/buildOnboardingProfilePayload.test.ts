@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { buildOnboardingProfilePayload } from './buildOnboardingProfilePayload';
+import { buildOnboardingProfilePayload, deriveRemotePolicy } from './buildOnboardingProfilePayload';
 import type { PreferencesStepValues } from '@/components/onboarding/PreferencesStep';
 
 const basePreferences = (): PreferencesStepValues => ({
@@ -14,6 +14,7 @@ const basePreferences = (): PreferencesStepValues => ({
   cvFile: null,
   sponsorship: true,
   minMatchPercent: 60,
+  maxAgeDays: 7,
 });
 
 describe('buildOnboardingProfilePayload', () => {
@@ -61,6 +62,7 @@ describe('buildOnboardingProfilePayload', () => {
       sponsorshipRequired: true,
       openToRemote: true,
       remotePolicy: 'Remote',
+      freshnessHours: 168,
       onboarded: true,
     });
     expect(payload.workExperience).toHaveLength(1);
@@ -92,5 +94,13 @@ describe('buildOnboardingProfilePayload', () => {
     );
     expect(payload.workExperience?.[0]?.endDate).toBe('');
     expect(payload.workExperience?.[0]?.current).toBe(true);
+  });
+});
+
+describe('deriveRemotePolicy', () => {
+  it('defaults to Hybrid when no work setting is selected', () => {
+    expect(
+      deriveRemotePolicy({ remote: false, onsite: false, hybrid: false }),
+    ).toBe('Hybrid');
   });
 });

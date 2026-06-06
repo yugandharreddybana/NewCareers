@@ -11,6 +11,7 @@ import com.careerops.repository.UserCvRepository;
 import com.careerops.repository.UserJobRepository;
 import com.careerops.repository.UserProfileRepository;
 import org.jsoup.Jsoup;
+import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -96,7 +97,7 @@ public class UserJobSkillMatchService {
     public void refreshAllForUser(UUID userId) {
         UserProfile profile = profiles.findByUserId(userId).orElse(null);
         String cvText = activeCvText(userId);
-        for (UserJob uj : userJobs.findByUserIdOrderByDeliveredAtDesc(userId)) {
+        for (UserJob uj : userJobs.findByUserIdOrderByDeliveredAtDesc(userId, Pageable.unpaged()).getContent()) {
             jobs.findById(uj.getJobId()).ifPresent(job -> {
                 SkillMatch match = compute(profile, cvText, job);
                 uj.setMatchedSkills(toArray(match.matched()));

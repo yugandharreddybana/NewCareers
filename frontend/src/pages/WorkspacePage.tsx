@@ -68,7 +68,7 @@ const WorkspacePage: React.FC = () => {
 
   if (loadFailed) return (
     <>
-      <PageMeta title="Workspace — CareerOps" />
+      <PageMeta title="Workspace — NewCareers" />
       <div className="max-w-3xl mx-auto px-4 sm:px-6 py-8">
         <EmptyState
           icon={<Briefcase size={28} className="text-slate-300" />}
@@ -83,7 +83,7 @@ const WorkspacePage: React.FC = () => {
 
   return (
     <>
-      <PageMeta title="Workspace — CareerOps" />
+      <PageMeta title="Workspace — NewCareers" />
       {showModal && <CreateModal onClose={() => setShowModal(false)} onCreate={w => setWorkspaces(p => [w, ...p])} />}
       <div className="max-w-3xl mx-auto px-4 sm:px-6 py-8 space-y-6">
         <div className="flex items-center justify-between">

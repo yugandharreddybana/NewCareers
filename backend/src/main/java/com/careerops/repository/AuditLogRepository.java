@@ -2,9 +2,11 @@ package com.careerops.repository;
 
 import com.careerops.model.AuditLog;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 import org.springframework.stereotype.Repository;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Instant;
 import java.util.List;
@@ -41,4 +43,13 @@ public interface AuditLogRepository extends JpaRepository<AuditLog, UUID> {
         ORDER BY COUNT(a) DESC
         """)
     List<Object[]> topEventTypesSince(@Param("since") Instant since);
+
+    @Modifying
+    @Query("UPDATE AuditLog a SET a.userId = NULL WHERE a.userId = :userId")
+    void nullifyUserId(@Param("userId") UUID userId);
+
+    @Modifying
+    @Transactional
+    @Query("DELETE FROM AuditLog a WHERE a.createdAt < :cutoff")
+    int deleteByCreatedAtBefore(@Param("cutoff") Instant cutoff);
 }

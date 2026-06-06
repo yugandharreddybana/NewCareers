@@ -34,7 +34,7 @@ class StructuredJobEvaluationBuilderTest {
         UserJobSkillMatchService skillMatchService = new UserJobSkillMatchService(
             skillExtraction, null, null, null, null, jobMatcher);
         builder = new StructuredJobEvaluationBuilder(
-            skillExtraction, skillMatchService, jobMatcher, new EvaluationReportValidator(mapper), mapper, false);
+            skillExtraction, skillMatchService, jobMatcher, new EvaluationReportValidator(mapper), mapper);
     }
 
     @Test

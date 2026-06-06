@@ -1,18 +1,18 @@
-type NewsItem = { headline?: string; summary?: string; dateHint?: string };
+type NewsItem = { headline?: string | undefined; summary?: string | undefined; dateHint?: string | undefined };
 type CultureBlock = {
-  overview?: string;
-  workStyle?: string;
+  overview?: string | undefined;
+  workStyle?: string | undefined;
   positiveThemes?: string[];
   negativeThemes?: string[];
 };
 type CompensationBlock = {
-  signals?: string;
-  salaryBandHint?: string;
-  currency?: string;
+  signals?: string | undefined;
+  salaryBandHint?: string | undefined;
+  currency?: string | undefined;
 };
 type InterviewBlock = {
-  values?: string;
-  priorities?: string;
+  values?: string | undefined;
+  priorities?: string | undefined;
   questionsToAsk?: string[];
 };
 
@@ -40,7 +40,7 @@ function asStringList(value: unknown): string[] {
       }
       return '';
     })
-    .filter(Boolean);
+    .filter((item): item is string => !!item);
 }
 
 function parseCulture(value: unknown): CultureBlock | null {

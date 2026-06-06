@@ -9,6 +9,8 @@ import { Navigate, Outlet, useLocation } from 'react-router-dom';
 import { useEffect, useRef } from 'react';
 import toast from 'react-hot-toast';
 import { useAuth } from '@/context/AuthContext';
+import { hasPendingSignup } from '@/lib/pendingSignup';
+import { readWelcomePendingFlag } from '@/components/dashboard/CareersHomeDashboard';
 import AppShell from '@/components/layout/AppShell';
 import { PageLoader } from '@/components/LoadingSpinner';
 
@@ -84,6 +86,40 @@ export function GuestRoute() {
       <Navigate
         to={loginRedirectTarget(user, from)}
         replace
+      />
+    );
+  }
+
+  return <Outlet />;
+}
+
+/**
+ * OnboardingRoute — profile setup before or after account exists.
+ * Guests may enter when they have deferred signup credentials; signed-in users
+ * who are not onboarded may continue; everyone else is redirected.
+ */
+export function OnboardingRoute() {
+  const { user, loading } = useAuth();
+  const location = useLocation();
+
+  if (loading) return <PageLoader />;
+
+  if (user?.onboarded) {
+    const pending = readWelcomePendingFlag();
+    return (
+      <Navigate
+        to={pending ? '/dashboard?welcome=1' : '/dashboard'}
+        replace
+      />
+    );
+  }
+
+  if (!user && !hasPendingSignup()) {
+    return (
+      <Navigate
+        to="/signup"
+        replace
+        state={{ from: location }}
       />
     );
   }

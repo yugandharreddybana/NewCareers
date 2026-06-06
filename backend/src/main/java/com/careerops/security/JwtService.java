@@ -6,15 +6,14 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.cloud.context.config.annotation.RefreshScope;
 import org.springframework.stereotype.Service;
 
-import java.security.*;
-import java.security.spec.PKCS8EncodedKeySpec;
-import java.security.spec.X509EncodedKeySpec;
-import java.util.Base64;
+import java.security.PrivateKey;
+import java.security.PublicKey;
+import java.security.interfaces.RSAPublicKey;
 import java.util.Date;
 
 /**
- * JWT utility service — upgraded to RS256.
- * 
+ * JWT utility service — RS256 with RSA key pair (PKCS#8 private, SPKI public).
+ *
  * 3.012 — Added @RefreshScope for dynamic key rotation.
  */
 @Service
@@ -22,6 +21,7 @@ import java.util.Date;
 public class JwtService {
 
     private static final org.slf4j.Logger logger = org.slf4j.LoggerFactory.getLogger(JwtService.class);
+    private static final int MIN_RSA_BITS = 2048;
 
     private final PrivateKey privateKey;
     private final PublicKey publicKey;
@@ -29,25 +29,29 @@ public class JwtService {
     @Value("${jwt.expiry.ms}")
     private long expiryMs;
 
-    public JwtService(@Value("${jwt.private-key:}") String privateKeyPem,
-                      @Value("${jwt.public-key:}") String publicKeyPem) {
+    public JwtService(@Value("${jwt.private-key-pem:}") String privateKeyPem,
+                      @Value("${jwt.public-key-pem:}") String publicKeyPem) {
         if (privateKeyPem == null || privateKeyPem.isBlank() || publicKeyPem == null || publicKeyPem.isBlank()) {
-            throw new IllegalStateException("JWT RSA keypair must be configured via jwt.private-key and jwt.public-key");
+            throw new IllegalStateException(
+                    "JWT RSA keypair must be configured via JWT_PRIVATE_KEY_PEM / JWT_PUBLIC_KEY_PEM "
+                            + "(jwt.private-key-pem / jwt.public-key-pem)");
         }
 
         try {
-            KeyFactory keyFactory = KeyFactory.getInstance("RSA");
-            this.privateKey = keyFactory.generatePrivate(new PKCS8EncodedKeySpec(decodeKeyMaterial(privateKeyPem, "PRIVATE KEY")));
-            this.publicKey = keyFactory.generatePublic(new X509EncodedKeySpec(decodeKeyMaterial(publicKeyPem, "PUBLIC KEY")));
-        } catch (Exception e) {
-            throw new IllegalStateException("Failed to initialize RSA keys for JWT", e);
+            this.privateKey = RsaKeyMaterialParser.parsePrivateKey(privateKeyPem);
+            this.publicKey = RsaKeyMaterialParser.parsePublicKey(publicKeyPem);
+        } catch (RsaKeyMaterialParser.GeneralSecurityExceptionWrapper e) {
+            throw new IllegalStateException("Failed to initialize RSA keys for JWT", e.getCause());
         }
     }
 
     @jakarta.annotation.PostConstruct
-    public void validateExpiry() {
+    public void validateConfiguration() {
         if (expiryMs <= 0 || expiryMs > 86400000L) {
             throw new IllegalStateException("JWT expiryMs must be > 0 and <= 86400000 ms (24 hours).");
+        }
+        if (!(publicKey instanceof RSAPublicKey rsa) || rsa.getModulus().bitLength() < MIN_RSA_BITS) {
+            throw new IllegalStateException("JWT RSA public key must be at least " + MIN_RSA_BITS + " bits");
         }
     }
 
@@ -65,7 +69,7 @@ public class JwtService {
             .claim("email", email)
             .issuedAt(now)
             .expiration(new Date(now.getTime() + expiryMs))
-            .signWith(privateKey)
+            .signWith(privateKey, Jwts.SIG.RS256)
             .compact();
     }
 
@@ -110,9 +114,13 @@ public class JwtService {
 
     // ---- validation ----------------------------------------------------------
 
+    public Claims validate(String token) {
+        return claims(token);
+    }
+
     public boolean isTokenValid(String token) {
         try {
-            claims(token); // throws on invalid / expired
+            claims(token);
             return true;
         } catch (io.jsonwebtoken.ExpiredJwtException e) {
             logger.warn("JWT token has expired: {}", e.getMessage());
@@ -150,16 +158,4 @@ public class JwtService {
         }
         return cl;
     }
-
-    private static byte[] decodeKeyMaterial(String value, String label) {
-        String normalized = value.replace("\\n", "\n").trim();
-        String header = "-----BEGIN " + label + "-----";
-        String footer = "-----END " + label + "-----";
-        if (normalized.contains(header)) {
-            normalized = normalized.replace(header, "").replace(footer, "");
-        }
-        return Base64.getDecoder().decode(normalized.replaceAll("\\s", ""));
-    }
 }
-
-

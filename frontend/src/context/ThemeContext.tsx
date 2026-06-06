@@ -3,7 +3,7 @@ import React, { createContext, useContext, useEffect, useMemo } from 'react';
 export type ThemePreference = 'light';
 type ResolvedTheme = 'light';
 
-const THEME_STORAGE_KEY = 'careerops-theme';
+const THEME_STORAGE_KEY = 'NewCareers-theme';
 
 interface ThemeContextValue {
   theme: ThemePreference;

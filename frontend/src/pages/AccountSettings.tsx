@@ -25,6 +25,7 @@ import {
 import { MonthYearField } from '@/components/onboarding/MonthYearField';
 import { isApiError } from '@/types';
 import { useFiltersMutation } from '@/hooks/queries';
+import { PrivacySettingsSection } from '@/components/gdpr/PrivacySettingsSection';
 import '@/styles/onboarding.css';
 import '@/styles/settings.css';
 
@@ -217,14 +218,16 @@ function SettingsPreferencesSection({ form, patch }: { form: SettingsFormState; 
           {form.selectedRoles
             .filter(r => !SUGGESTED_ROLES.includes(r as (typeof SUGGESTED_ROLES)[number]))
             .map(role => (
-              <span key={role} className="settings-chip">
-                {role}
-                <button type="button" aria-label={`Remove ${role}`} onClick={() => patch({ selectedRoles: form.selectedRoles.filter(r => r !== role) })}>×</button>
-              </span>
+              <ChipToggle
+                key={role}
+                label={role}
+                selected
+                onToggle={() => patch({ selectedRoles: form.selectedRoles.filter(r => r !== role) })}
+              />
             ))}
         </div>
-        <div className="flex gap-2 mt-3">
-          <input id={roleInputId} className="settings-input flex-1" value={customRole} onChange={e => setCustomRole(e.target.value)} placeholder="Add custom role…"
+        <div className="onboarding-chip-add-row">
+          <input id={roleInputId} className="onboarding-chip-custom__input flex-1 min-w-0" value={customRole} onChange={e => setCustomRole(e.target.value)} placeholder="Add custom role…"
             onKeyDown={e => {
               if (e.key === 'Enter') {
                 e.preventDefault();
@@ -233,21 +236,56 @@ function SettingsPreferencesSection({ form, patch }: { form: SettingsFormState; 
               }
             }}
           />
-          <button type="button" className="px-4 py-2 rounded-lg border border-outline-variant text-primary font-label-md hover:bg-primary-fixed/20 transition-colors shrink-0"
-            onClick={() => { const v = customRole.trim(); if (!v) return; if (!form.selectedRoles.some(r => r.toLowerCase() === v.toLowerCase())) patch({ selectedRoles: [...form.selectedRoles, v] }); setCustomRole(''); }}
-          >Add</button>
+          <button
+            type="button"
+            className="onboarding-chip-custom__add"
+            aria-label="Add custom role"
+            onClick={() => {
+              const v = customRole.trim();
+              if (!v) return;
+              if (!form.selectedRoles.some(r => r.toLowerCase() === v.toLowerCase())) {
+                patch({ selectedRoles: [...form.selectedRoles, v] });
+              }
+              setCustomRole('');
+            }}
+          >
+            <span className="material-symbols-outlined" aria-hidden="true">add</span>
+          </button>
         </div>
       </div>
       <div>
         <h3 className="onboarding-pref-section__label">Core tech stack</h3>
         <div className="onboarding-chip-row">
           {SUGGESTED_TECH.map(tech => (<ChipToggle key={tech} label={tech} selected={form.selectedTech.includes(tech)} tone="gap" onToggle={() => patch({ selectedTech: toggleList(form.selectedTech, tech) })} />))}
+          {form.selectedTech
+            .filter(t => !SUGGESTED_TECH.includes(t as (typeof SUGGESTED_TECH)[number]))
+            .map(tech => (
+              <ChipToggle
+                key={tech}
+                label={tech}
+                selected
+                tone="gap"
+                onToggle={() => patch({ selectedTech: form.selectedTech.filter(x => x !== tech) })}
+              />
+            ))}
         </div>
-        <div className="flex gap-2 mt-3">
-          <input id={techInputId} className="settings-input flex-1" value={customTech} onChange={e => setCustomTech(e.target.value)} placeholder="Add technology…" />
-          <button type="button" className="px-4 py-2 rounded-lg border border-outline-variant text-primary font-label-md hover:bg-primary-fixed/20 transition-colors shrink-0"
-            onClick={() => { const v = customTech.trim(); if (!v) return; if (!form.selectedTech.some(t => t.toLowerCase() === v.toLowerCase())) patch({ selectedTech: [...form.selectedTech, v] }); setCustomTech(''); }}
-          >Add</button>
+        <div className="onboarding-chip-add-row">
+          <input id={techInputId} className="onboarding-chip-custom__input flex-1 min-w-0" value={customTech} onChange={e => setCustomTech(e.target.value)} placeholder="Add technology…" />
+          <button
+            type="button"
+            className="onboarding-chip-custom__add"
+            aria-label="Add technology"
+            onClick={() => {
+              const v = customTech.trim();
+              if (!v) return;
+              if (!form.selectedTech.some(t => t.toLowerCase() === v.toLowerCase())) {
+                patch({ selectedTech: [...form.selectedTech, v] });
+              }
+              setCustomTech('');
+            }}
+          >
+            <span className="material-symbols-outlined" aria-hidden="true">add</span>
+          </button>
         </div>
       </div>
       <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
@@ -522,6 +560,15 @@ export default function AccountSettingsPage() {
           <section className="settings-section">
             <SectionHeader icon="tune" title="Job preferences" description="Roles, tech stack, and preferences from onboarding — edit anytime." />
             <SettingsPreferencesSection form={form} patch={patch} />
+          </section>
+
+          <section className="settings-section">
+            <SectionHeader
+              icon="shield"
+              title="Privacy & data"
+              description="Manage consent, export your data, or delete your account."
+            />
+            <PrivacySettingsSection />
           </section>
 
           <div className="flex flex-col sm:flex-row gap-3 sm:justify-end pt-2 pb-12">

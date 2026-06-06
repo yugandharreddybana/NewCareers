@@ -1,4 +1,5 @@
 import { IS_PROD, SENTRY_DSN } from './env';
+import { resolveAnalyticsConsent } from './cookieConsent';
 import { setErrorReporter, type ReportableError } from './telemetry';
 import type { Metric } from 'web-vitals';
 
@@ -27,6 +28,8 @@ function toError(event: ReportableError): Error {
 
 export async function initializeMonitoring(): Promise<void> {
   if (initialized || !IS_PROD || !SENTRY_DSN) return;
+
+  if (!(await resolveAnalyticsConsent())) return;
   initialized = true;
 
   try {

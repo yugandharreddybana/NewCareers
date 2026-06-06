@@ -13,6 +13,8 @@ export * from './api';
 export * from './skillsApi';
 
 // Domain clients (alphabetical)
+export * from './accountApi';
+export * from './consentApi';
 export * from './adminApi';
 export * from './agentMemoryApi';
 export * from './analyticsApi';
@@ -25,6 +27,7 @@ export * from './interviewApi';
 export * from './networkingApi';
 export * from './notificationsApi';
 export * from './outreachApi';
+export * from './permitAnalyticsService';
 export * from './plannerApi';
 export * from './progressApi';
 export * from './referralsApi';

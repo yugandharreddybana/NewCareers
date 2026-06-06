@@ -54,12 +54,6 @@ public class ProfileDtos {
         @jakarta.validation.constraints.Size(max = 100, message = "Goal title too long")
         String    goalTitle,
 
-        @jakarta.validation.constraints.Min(value = 0, message = "Salary cannot be negative")
-        Integer   goalSalaryMin,
-
-        @jakarta.validation.constraints.Min(value = 0, message = "Salary cannot be negative")
-        Integer   goalSalaryMax,
-
         @jakarta.validation.constraints.Size(max = 100, message = "Goal location too long")
         String    goalLocation,
 
@@ -80,7 +74,10 @@ public class ProfileDtos {
         String    hybridOnsiteDays,
 
         @jakarta.validation.constraints.Size(max = 64, message = "Availability value too long")
-        String    availability
+        String    availability,
+
+        @jakarta.validation.constraints.Size(max = 32, message = "Job domain too long")
+        String    jobDomain
     ) {}
 
     // ── Core profile response ────────────────────────────────────────────
@@ -102,8 +99,6 @@ public class ProfileDtos {
         // Section 10
         List<PortfolioItem> portfolioItems,
         String              goalTitle,
-        Integer             goalSalaryMin,
-        Integer             goalSalaryMax,
         String              goalLocation,
         Boolean             openToRemote,
         String              experienceLevel,
@@ -115,7 +110,8 @@ public class ProfileDtos {
         /** CV + profile skills used for ATS highlighting in job descriptions */
         String[]            atsKeywords,
         Integer             completenessScore,
-        Long                version
+        Long                version,
+        String              jobDomain
     ) {}
 
     // ── Stats ────────────────────────────────────────────────────────────

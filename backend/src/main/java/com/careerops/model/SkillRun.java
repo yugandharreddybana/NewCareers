@@ -15,18 +15,12 @@ import java.util.UUID;
  * Persisted output of a completed skill run.
  *
  * Acts as both an audit log and a TTL cache.
- * Cache lookup checks that expiresAt is null (never expire) or in the future.
+ * Cache lookup requires expiresAt to be set and in the future.
  *
- * TTL by skill:
- *   evaluate       = 7 days  (re-evaluate if job changes)
- *   research        = 1 day   (company news changes frequently)
- *   prep-interview  = 3 days
- *   tailor-resume   = no cache (always fresh per application)
- *   outreach        = no cache (channel/tone variants differ)
- *   apply           = no cache (always fresh)
- *   compare         = no cache (job selection varies)
- *   triage          = no cache (queue changes between runs)
- *   scan            = no cache (fresh data each time)
+ * TTL by skill (job-scoped cacheable skills):
+ *   evaluate, research, prep-interview, apply, outreach, Phase 2 skills = 24 hours
+ *   tailor-resume = 48 hours
+ *   compare, triage, scan, help, track = not cached (variable input or no single-job context)
  */
 @Entity
 @Table(
@@ -71,8 +65,8 @@ public class SkillRun {
     private JsonNode output;
 
     /**
-     * Cache expiry. NULL = never expires.
-     * Checked by SkillService cache lookup before running Claude again.
+     * Cache expiry. NULL = not eligible for cache lookup (audit-only row).
+     * Set by SkillService / SkillHandlerRegistry on persist for cacheable skills.
      */
     @Column(name = "expires_at")
     private Instant expiresAt;

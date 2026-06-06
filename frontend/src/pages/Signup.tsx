@@ -2,24 +2,30 @@
  * Signup.tsx — account creation page.
  */
 import { useEffect, useState } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
+import { Link, useNavigate, useSearchParams } from 'react-router-dom';
+import { isAxiosError } from 'axios';
 import { Loader2 } from 'lucide-react';
 import { PageMeta } from '@/components/PageMeta';
-import { useAuth } from '@/context/AuthContext';
-import { GoogleSignInButton } from '@/components/auth/GoogleSignInButton';
+import { SignupPageShell } from '@/components/auth/SignupPageShell';
+import { legalPaths } from '@/lib/brand';
+import { authApi } from '@/services/api';
+import { clearOnboardingVerification } from '@/lib/onboardingVerification';
+import { clearPendingSignup, writePendingSignup } from '@/lib/pendingSignup';
+import { tokenStore } from '@/lib/tokenStore';
 import { isApiError } from '@/types';
+import { writePendingGoogleConsents } from '@/lib/pendingGoogleConsents';
+import { writeAnalyticsConsent } from '@/lib/cookieConsent';
 
 type StrengthLabel = '' | 'Too short' | 'Weak' | 'Fair' | 'Good' | 'Strong';
 
 interface Strength {
   label: StrengthLabel;
-  color: string;
   acceptable: boolean;
 }
 
 function evaluatePassword(p: string): Strength {
-  if (!p) return { label: '', color: '', acceptable: false };
-  if (p.length < 8) return { label: 'Too short', color: 'text-red-600', acceptable: false };
+  if (!p) return { label: '', acceptable: false };
+  if (p.length < 8) return { label: 'Too short', acceptable: false };
 
   let score = 0;
   if (/[A-Z]/.test(p)) score++;
@@ -27,33 +33,65 @@ function evaluatePassword(p: string): Strength {
   if (/[^A-Za-z0-9]/.test(p)) score++;
   if (p.length >= 12) score++;
 
-  if (score <= 1) return { label: 'Weak', color: 'text-red-600', acceptable: false };
-  if (score === 2) return { label: 'Fair', color: 'text-amber-600', acceptable: false };
-  if (score === 3) return { label: 'Good', color: 'text-primary', acceptable: true };
-  return { label: 'Strong', color: 'text-emerald-600', acceptable: true };
+  if (score <= 1) return { label: 'Weak', acceptable: false };
+  if (score === 2) return { label: 'Fair', acceptable: false };
+  if (score === 3) return { label: 'Good', acceptable: true };
+  return { label: 'Strong', acceptable: true };
 }
 
-const inputClass =
-  'w-full px-3 py-2.5 bg-surface-container-lowest border border-outline-variant rounded text-on-surface font-body-sm text-body-sm focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary transition-shadow placeholder:text-outline';
+function isDuplicateEmailError(err: unknown): boolean {
+  if (isAxiosError(err) && err.response?.status === 409) return true;
+  if (isApiError(err) && err.normalizedMessage.toLowerCase().includes('already exists')) return true;
+  return false;
+}
 
 export default function Signup() {
-  const { signUp, signInWithGoogle, actionLoading } = useAuth();
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
+  const sessionExpired = searchParams.get('reason') === 'session_expired';
+
+  useEffect(() => {
+    if (!sessionExpired) return;
+    tokenStore.clear();
+    clearPendingSignup();
+    clearOnboardingVerification();
+    void authApi.logout().catch(() => {
+      /* clear HttpOnly cookies best-effort */
+    });
+  }, [sessionExpired]);
 
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [termsAccepted, setTermsAccepted] = useState(false);
+  const [aiProcessingAccepted, setAiProcessingAccepted] = useState(false);
+  const [marketingAccepted, setMarketingAccepted] = useState(false);
+  const [analyticsAccepted, setAnalyticsAccepted] = useState(false);
   const [error, setError] = useState('');
+  const [submitting, setSubmitting] = useState(false);
 
   const strength = evaluatePassword(password);
+  const busy = submitting;
 
-  useEffect(() => {
-    document.documentElement.classList.add('light');
-    document.documentElement.classList.remove('dark');
-    return () => {
-      document.documentElement.classList.remove('light');
-    };
-  }, []);
+  const buildConsents = () => ({
+    termsAccepted,
+    aiProcessingAccepted,
+    marketingAccepted,
+    analyticsAccepted,
+  });
+
+  const validateConsents = (): string | null => {
+    if (!termsAccepted) {
+      return 'You must accept the Terms of Service and Privacy Policy to continue.';
+    }
+    return null;
+  };
+
+  const persistConsents = () => {
+    const consents = buildConsents();
+    writePendingGoogleConsents(consents);
+    writeAnalyticsConsent(analyticsAccepted);
+  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -71,177 +109,260 @@ export default function Signup() {
       );
       return;
     }
+    const consentError = validateConsents();
+    if (consentError) {
+      setError(consentError);
+      return;
+    }
 
+    setSubmitting(true);
     try {
-      await signUp({ name: name.trim(), email: email.trim(), password });
+      const trimmedEmail = email.trim();
+      await authApi.checkSignupEmail(trimmedEmail);
+
+      const consents = buildConsents();
+      persistConsents();
+      writePendingSignup({
+        email: trimmedEmail,
+        password,
+        ...(name.trim() ? { name: name.trim() } : {}),
+        consents,
+      });
       navigate('/onboarding', { replace: true });
     } catch (err: unknown) {
-      if (isApiError(err)) {
-        setError(err.normalizedMessage || 'Sign up failed. Please try again.');
-      } else if (err instanceof Error) {
-        setError(err.message || 'Sign up failed. Please try again.');
-      } else {
-        setError('Sign up failed. Please try again.');
+      if (isDuplicateEmailError(err)) {
+        setError('An account is already associated with this email.');
+        return;
       }
-    }
-  };
-
-  const handleGoogle = async (idToken: string) => {
-    setError('');
-    try {
-      const user = await signInWithGoogle(idToken);
-      navigate(user.onboarded ? '/dashboard' : '/onboarding', { replace: true });
-    } catch (err: unknown) {
-      if (isApiError(err)) {
-        setError(err.normalizedMessage || 'Google sign-up failed.');
-      } else if (err instanceof Error) {
-        setError(err.message || 'Google sign-up failed.');
-      } else {
-        setError('Google sign-up failed.');
-      }
+      setError('Could not continue. Please try again.');
+    } finally {
+      setSubmitting(false);
     }
   };
 
   return (
-    <div className="bg-surface-container-low min-h-screen flex items-center justify-center p-margin-mobile md:p-margin-desktop antialiased text-on-surface w-full">
-      <PageMeta title="Create Account — NewCareers" />
+    <SignupPageShell>
+      <PageMeta title="CareerOps - Sign Up" />
 
-      <main className="w-full max-w-[440px]">
-        <div className="text-center mb-8">
-          <h1 className="font-headline-lg text-headline-lg text-primary font-bold tracking-tight">NewCareers</h1>
+      <div className="flex flex-col gap-2">
+        <div className="mb-4 flex items-center gap-2">
+          <span
+            className="material-symbols-outlined text-[28px] text-primary"
+            style={{ fontVariationSettings: "'FILL' 1" }}
+            aria-hidden
+          >
+            hexagon
+          </span>
+          <Link
+            to="/"
+            className="font-headline-lg text-headline-lg tracking-tight text-on-surface hover:opacity-90 transition-opacity"
+          >
+            CareerOps
+          </Link>
         </div>
+        <h1 className="font-headline-xl text-headline-xl text-on-surface">Sign up</h1>
+        <p className="font-body-md text-body-md text-on-surface-variant">
+          Set your login details, then complete your profile to create your account.
+        </p>
+      </div>
 
-        <div className="bg-surface-container-lowest rounded-lg border border-outline-variant shadow-sm p-6 md:p-8 flex flex-col gap-6">
-          <div className="text-center flex flex-col gap-2">
-            <h2 className="font-headline-md text-headline-md text-on-surface">Create your account</h2>
-            <p className="font-body-sm text-body-sm text-on-surface-variant">
-              Join NewCareers to elevate your professional path.
-            </p>
+      {sessionExpired && (
+        <div
+          role="status"
+          className="mb-4 rounded border border-primary/20 bg-primary/5 px-4 py-3 text-body-md text-on-surface"
+        >
+          Your sign-up session expired. Please enter your details again to continue.
+        </div>
+      )}
+
+      <form className="flex flex-col gap-6" onSubmit={handleSubmit} noValidate>
+        {error && (
+          <div
+            role="alert"
+            aria-live="polite"
+            className="rounded border border-error bg-error-container px-4 py-3 text-body-md text-on-error-container"
+          >
+            {error}
           </div>
+        )}
 
-          <div className="flex flex-col gap-3">
-            <GoogleSignInButton
-              mode="signup"
-              disabled={actionLoading}
-              loading={actionLoading}
-              onCredential={handleGoogle}
-              onError={msg => setError(msg)}
+        <div className="flex flex-col gap-4">
+          <div className="flex flex-col gap-2">
+            <label className="font-label-md text-label-md text-on-surface" htmlFor="name">
+              Full Name
+            </label>
+            <input
+              className="custom-input rounded"
+              id="name"
+              name="name"
+              type="text"
+              autoComplete="name"
+              required
+              value={name}
+              onChange={e => setName(e.target.value)}
+              placeholder="Jane Doe"
+              disabled={busy}
             />
           </div>
 
-          <div className="flex items-center gap-4">
-            <div className="flex-1 h-px bg-outline-variant/50" />
-            <span className="font-label-sm text-label-sm text-on-surface-variant uppercase tracking-wider">
-              or continue with email
-            </span>
-            <div className="flex-1 h-px bg-outline-variant/50" />
+          <div className="flex flex-col gap-2">
+            <label className="font-label-md text-label-md text-on-surface" htmlFor="email">
+              Email Address
+            </label>
+            <input
+              className="custom-input rounded"
+              id="email"
+              name="email"
+              type="email"
+              autoComplete="email"
+              required
+              value={email}
+              onChange={e => {
+                setEmail(e.target.value);
+                if (error) setError('');
+              }}
+              placeholder="jane@example.com"
+              disabled={busy}
+            />
           </div>
 
-          <form onSubmit={handleSubmit} className="flex flex-col gap-5" noValidate>
-            {error && (
-              <div
-                role="alert"
+          <div className="flex flex-col gap-2">
+            <label className="font-label-md text-label-md text-on-surface" htmlFor="password">
+              Password
+            </label>
+            <input
+              className="custom-input rounded"
+              id="password"
+              name="password"
+              type="password"
+              autoComplete="new-password"
+              required
+              value={password}
+              onChange={e => setPassword(e.target.value)}
+              placeholder="••••••••"
+              disabled={busy}
+            />
+            {password.length > 0 && strength.label && (
+              <p
+                className="font-label-sm text-label-sm text-on-surface-variant"
                 aria-live="polite"
-                className="px-4 py-3 rounded bg-error-container border border-error text-on-error-container text-body-sm font-body-sm"
               >
-                {error}
-              </div>
+                {strength.label}
+              </p>
             )}
-
-            <div className="flex flex-col gap-1.5">
-              <label className="font-label-sm text-label-sm text-on-surface" htmlFor="name">
-                Full Name
-              </label>
-              <input
-                className={inputClass}
-                id="name"
-                type="text"
-                autoComplete="name"
-                required
-                value={name}
-                onChange={e => setName(e.target.value)}
-                placeholder="Jane Smith"
-              />
-            </div>
-
-            <div className="flex flex-col gap-1.5">
-              <label className="font-label-sm text-label-sm text-on-surface" htmlFor="email">
-                Email Address
-              </label>
-              <input
-                className={inputClass}
-                id="email"
-                type="email"
-                autoComplete="email"
-                required
-                value={email}
-                onChange={e => setEmail(e.target.value)}
-                placeholder="jane@example.com"
-              />
-            </div>
-
-            <div className="flex flex-col gap-1.5">
-              <label className="font-label-sm text-label-sm text-on-surface" htmlFor="password">
-                Password
-              </label>
-              <input
-                className={inputClass}
-                id="password"
-                type="password"
-                autoComplete="new-password"
-                required
-                value={password}
-                onChange={e => setPassword(e.target.value)}
-                placeholder="••••••••"
-                aria-describedby="password-strength"
-              />
-              {password && (
-                <p id="password-strength" className={`mt-1.5 text-xs font-semibold ${strength.color}`} aria-live="polite">
-                  Password strength: {strength.label}
-                  {!strength.acceptable && password.length >= 8 && ' — add upper-case, digits, or symbols.'}
-                </p>
-              )}
-            </div>
-
-            <button
-              className="w-full py-3 mt-2 bg-primary text-on-primary font-label-md text-label-md rounded-lg hover:bg-primary-container transition-colors duration-200 shadow-sm flex items-center justify-center gap-2 disabled:opacity-60 disabled:cursor-not-allowed"
-              type="submit"
-              disabled={actionLoading}
-            >
-              {actionLoading ? (
-                <Loader2 size={17} className="animate-spin" />
-              ) : (
-                <>
-                  Create Account
-                  <span className="material-symbols-outlined text-[18px]" aria-hidden="true">
-                    arrow_forward
-                  </span>
-                </>
-              )}
-            </button>
-          </form>
+          </div>
         </div>
 
-        <div className="text-center mt-6">
-          <p className="font-body-sm text-body-sm text-on-surface-variant">
-            Already have an account?{' '}
-            <Link className="text-primary font-medium hover:underline hover:text-primary-container transition-colors" to="/login">
-              Sign In
-            </Link>
-          </p>
-          <p className="mt-4 text-on-surface-variant text-xs leading-relaxed max-w-[320px] mx-auto">
-            By creating an account you agree to our{' '}
-            <Link to="/legal/terms" className="underline hover:text-primary">
-              Terms
-            </Link>{' '}
-            and{' '}
-            <Link to="/legal/privacy" className="underline hover:text-primary">
-              Privacy Policy
-            </Link>
-            .
-          </p>
+        <div className="flex flex-col gap-4 rounded-lg border border-surface-variant bg-surface-container-low p-5">
+          <label className="group flex cursor-pointer items-start gap-3">
+            <input
+              type="checkbox"
+              className="custom-checkbox mt-[2px]"
+              checked={termsAccepted}
+              onChange={e => setTermsAccepted(e.target.checked)}
+              disabled={busy}
+              required
+            />
+            <span className="font-body-md text-body-md text-on-surface-variant transition-colors group-hover:text-on-surface">
+              I agree to the{' '}
+              <Link
+                to={legalPaths.terms}
+                className="text-primary hover:underline"
+                target="_blank"
+                rel="noopener noreferrer"
+              >
+                Terms of Service
+              </Link>{' '}
+              and{' '}
+              <Link
+                to={legalPaths.privacy}
+                className="text-primary hover:underline"
+                target="_blank"
+                rel="noopener noreferrer"
+              >
+                Privacy Policy
+              </Link>
+            </span>
+          </label>
+
+          <div className="h-px w-full bg-surface-variant" />
+
+          <label className="group flex cursor-pointer items-start gap-3">
+            <input
+              type="checkbox"
+              className="custom-checkbox mt-[2px]"
+              checked={aiProcessingAccepted}
+              onChange={e => setAiProcessingAccepted(e.target.checked)}
+              disabled={busy}
+            />
+            <span className="font-body-md text-body-md leading-relaxed text-on-surface-variant transition-colors group-hover:text-on-surface">
+              I consent to AI processing of my CV and profile by third-party providers (Anthropic,
+              Google, NVIDIA) for job matching and career skills{' '}
+              <span className="text-secondary">
+                (optional — enable later in Account settings)
+              </span>
+              .
+            </span>
+          </label>
+
+          <label className="group flex cursor-pointer items-start gap-3">
+            <input
+              type="checkbox"
+              className="custom-checkbox mt-[2px]"
+              checked={marketingAccepted}
+              onChange={e => setMarketingAccepted(e.target.checked)}
+              disabled={busy}
+            />
+            <span className="font-body-md text-body-md text-on-surface-variant transition-colors group-hover:text-on-surface">
+              Send me product tips and job digest emails{' '}
+              <span className="text-secondary">(optional)</span>
+            </span>
+          </label>
+
+          <label className="group flex cursor-pointer items-start gap-3">
+            <input
+              type="checkbox"
+              className="custom-checkbox mt-[2px]"
+              checked={analyticsAccepted}
+              onChange={e => setAnalyticsAccepted(e.target.checked)}
+              disabled={busy}
+            />
+            <span className="font-body-md text-body-md text-on-surface-variant transition-colors group-hover:text-on-surface">
+              Help improve CareerOps with anonymous usage analytics{' '}
+              <span className="text-secondary">(optional)</span>
+            </span>
+          </label>
         </div>
-      </main>
-    </div>
+
+        <button
+          className="btn-primary mt-2 flex w-full items-center justify-center gap-2 rounded py-3 font-label-md text-label-md"
+          type="submit"
+          disabled={busy}
+        >
+          {submitting ? (
+            <Loader2 size={17} className="animate-spin" />
+          ) : (
+            <>
+              Continue to profile
+              <span className="material-symbols-outlined text-[18px]" aria-hidden>
+                arrow_forward
+              </span>
+            </>
+          )}
+        </button>
+      </form>
+
+      <div className="mt-2 text-center">
+        <p className="font-body-md text-body-md text-on-surface-variant">
+          Already have an account?{' '}
+          <Link
+            className="font-medium text-primary underline-offset-4 hover:underline"
+            to="/login"
+          >
+            Sign In
+          </Link>
+        </p>
+      </div>
+    </SignupPageShell>
   );
 }

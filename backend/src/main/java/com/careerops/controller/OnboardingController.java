@@ -50,8 +50,9 @@ public class OnboardingController {
 
     /** Track A — start first-run job delivery (CV normalize → scrape → evaluate). */
     @PostMapping("/delivery/start")
-    public StartDeliveryResponse startDelivery() {
-        return deliveryService.start(AuthUtil.currentUserId());
+    public StartDeliveryResponse startDelivery(
+            @RequestParam(defaultValue = "false") boolean restart) {
+        return deliveryService.start(AuthUtil.currentUserId(), restart);
     }
 
     /** Track A — poll delivery progress for the onboarding loader. */

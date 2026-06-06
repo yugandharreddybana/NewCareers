@@ -170,7 +170,7 @@ class SkillsControllerIntegrationTest {
 
         mockMvc.perform(
             post("/skills/start")
-                .header("X-Internal-Secret", INTERNAL_SECRET)
+                .with(com.careerops.security.InternalRequestHeaders.hmac("POST", "/skills/start", body))
                 .header("X-Internal-User-Id", INTERNAL_USER_ID)
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(body)
@@ -186,7 +186,8 @@ class SkillsControllerIntegrationTest {
     void getLastRun_noPriorRun_returns204() throws Exception {
         mockMvc.perform(
             get("/skills/last-run/{userJobId}/{skillName}", USER_JOB_ID, "tailor-resume")
-                .header("X-Internal-Secret", INTERNAL_SECRET)
+                .with(com.careerops.security.InternalRequestHeaders.hmac(
+                        "GET", "/skills/last-run/" + USER_JOB_ID + "/tailor-resume", new byte[0]))
                 .header("X-Internal-User-Id", INTERNAL_USER_ID)
         )
         .andExpect(status().isNoContent());

@@ -15,7 +15,11 @@ import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
 
+import com.careerops.support.OnboardingVerificationTestSupport;
+
+import java.util.HashMap;
 import java.util.Map;
+import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.*;
@@ -45,18 +49,36 @@ class AuthControllerIntegrationTest {
     private static final String INTERNAL_SECRET = "test-internal-trust-secret-minimum-32-characters-long";
     private static final String INTERNAL_USER_ID_HEADER = "X-Internal-User-Id";
 
+    @Test @Order(0)
+    @DisplayName("0 — check-email available without authentication")
+    void checkEmailAvailableWithoutAuth() throws Exception {
+        String freshEmail = "checkavail_" + System.currentTimeMillis() + "@careerops.test";
+        mockMvc.perform(
+            post("/auth/onboarding/check-email")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(objectMapper.writeValueAsString(Map.of("email", freshEmail)))
+        )
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.available").value(true));
+    }
+
     @Test @Order(1)
     @DisplayName("1 — register new user")
     void registerNewUser() throws Exception {
+        UUID verificationId = OnboardingVerificationTestSupport.verifyEmailForTest(
+                mockMvc, objectMapper, EMAIL);
+        Map<String, Object> body = new HashMap<>();
+        body.put("name", NAME);
+        body.put("username", USERNAME);
+        body.put("email", EMAIL);
+        body.put("password", PASSWORD);
+        body.put("emailVerificationId", verificationId.toString());
+        body.put("consents", OnboardingVerificationTestSupport.defaultSignupConsents());
+
         mockMvc.perform(
             post("/auth/register")
                 .contentType(MediaType.APPLICATION_JSON)
-                .content(objectMapper.writeValueAsString(Map.of(
-                    "name", NAME,
-                    "username", USERNAME,
-                    "email", EMAIL,
-                    "password", PASSWORD
-                )))
+                .content(objectMapper.writeValueAsString(body))
         )
         .andExpect(status().isOk())
         .andExpect(jsonPath("$.token").exists())
@@ -67,11 +89,25 @@ class AuthControllerIntegrationTest {
     @Test @Order(2)
     @DisplayName("2 — login returns access + refresh tokens")
     void loginReturnsTokens() throws Exception {
+        MvcResult captchaResult = mockMvc.perform(get("/auth/captcha/challenge"))
+                .andExpect(status().isOk())
+                .andReturn();
+        Map<?, ?> captchaBody = objectMapper.readValue(
+                captchaResult.getResponse().getContentAsString(), Map.class);
+        String challengeId = (String) captchaBody.get("challengeId");
+        @SuppressWarnings("unchecked")
+        java.util.List<Map<String, Object>> letters =
+                (java.util.List<Map<String, Object>>) captchaBody.get("letters");
+        String answer = letters.stream()
+                .map(l -> (String) l.get("character"))
+                .reduce("", String::concat);
+        String captchaToken = challengeId + ":" + answer;
+
         MvcResult result = mockMvc.perform(
             post("/auth/login")
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(objectMapper.writeValueAsString(Map.of(
-                    "email", EMAIL, "password", PASSWORD
+                    "email", EMAIL, "password", PASSWORD, "captchaToken", captchaToken
                 )))
         )
         .andExpect(status().isOk())
@@ -93,7 +129,7 @@ class AuthControllerIntegrationTest {
     void accessProtectedRouteWithToken() throws Exception {
         mockMvc.perform(
             get("/profile")
-                .header("X-Internal-Secret", INTERNAL_SECRET)
+                .with(com.careerops.security.InternalRequestHeaders.hmac("GET", "/profile", new byte[0]))
                 .header(INTERNAL_USER_ID_HEADER, userId)
                 .header("Authorization", "Bearer " + accessToken)
         )
@@ -123,7 +159,7 @@ class AuthControllerIntegrationTest {
     void accessProtectedRouteWithRefreshedToken() throws Exception {
         mockMvc.perform(
             get("/profile")
-                .header("X-Internal-Secret", INTERNAL_SECRET)
+                .with(com.careerops.security.InternalRequestHeaders.hmac("GET", "/profile", new byte[0]))
                 .header(INTERNAL_USER_ID_HEADER, userId)
                 .header("Authorization", "Bearer " + accessToken)
         )

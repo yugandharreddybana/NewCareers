@@ -6,6 +6,7 @@ import io.netty.handler.timeout.WriteTimeoutHandler;
 import org.slf4j.MDC;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.context.annotation.Primary;
 import org.springframework.http.client.reactive.ReactorClientHttpConnector;
 import org.springframework.web.reactive.function.client.ClientRequest;
 import org.springframework.web.reactive.function.client.ExchangeFilterFunction;
@@ -34,6 +35,7 @@ public class WebClientConfig {
             org.slf4j.LoggerFactory.getLogger(WebClientConfig.class);
 
     @Bean
+    @Primary
     public WebClient.Builder webClientBuilder() {
         ConnectionProvider provider = ConnectionProvider.builder("careerops")
                 .maxConnections(100)

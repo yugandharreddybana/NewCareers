@@ -1,5 +1,7 @@
 SET search_path TO careerops;
 
+CREATE EXTENSION IF NOT EXISTS pgcrypto;
+
 ALTER TABLE org_invitations
 ADD COLUMN IF NOT EXISTS token_hash VARCHAR(128);
 

@@ -14,7 +14,9 @@ import java.nio.charset.StandardCharsets;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
+import java.util.Locale;
 
 /**
  * Scrapes the Irish Government's public job-board at jobsireland.ie.
@@ -27,7 +29,7 @@ public class JobsIrelandSource implements JobSource {
     // JobsIreland is an SPA; fall back to their REST-like JSON endpoint
     private static final String API  = "https://www.jobsireland.ie/api/joboffers?keyword=%s&offset=0&limit=50";
 
-    @Override public String sourceName() { return "JobsIreland.ie"; }
+    @Override public String name() { return "JobsIreland.ie"; }
 
     @Override
     public List<JobListing> fetch(String keyword, String location, int maxAgeDays) {
@@ -56,7 +58,7 @@ public class JobsIrelandSource implements JobSource {
                     JobListing j = new JobListing();
                     j.setTitle(title); j.setCompany(company); j.setLocation(loc);
                     j.setUrl("https://www.jobsireland.ie/#/job-offer/" + id);
-                    j.setSource(sourceName()); j.setPostedAt(posted);
+                    j.setSource(name()); j.setPostedAt(posted);
                     results.add(j);
                 } catch (Exception e) { log.debug("JobsIreland entry parse", e); }
             }
@@ -71,5 +73,35 @@ public class JobsIrelandSource implements JobSource {
         start += search.length();
         int end = json.indexOf("\"", start);
         return end < 0 ? "" : json.substring(start, end);
+    }
+
+    static boolean matchesRole(String title, String role) {
+        if (role == null || role.isBlank()) {
+            return true;
+        }
+        if (title == null || title.isBlank()) {
+            return false;
+        }
+        String t = title.toLowerCase(Locale.ROOT);
+        String r = role.toLowerCase(Locale.ROOT).trim();
+        if (t.contains(r)) {
+            return true;
+        }
+        String[] tokens = Arrays.stream(r.split("\\s+"))
+            .filter(tok -> tok.length() >= 3)
+            .toArray(String[]::new);
+        if (tokens.length == 0) {
+            return false;
+        }
+        int hits = 0;
+        for (String token : tokens) {
+            if (t.contains(token)) {
+                hits++;
+            }
+        }
+        if (tokens.length >= 2) {
+            return hits >= 2;
+        }
+        return hits >= 1;
     }
 }

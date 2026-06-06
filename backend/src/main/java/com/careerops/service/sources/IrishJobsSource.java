@@ -22,7 +22,7 @@ public class IrishJobsSource implements JobSource {
     private static final Logger log = LoggerFactory.getLogger(IrishJobsSource.class);
     private static final String BASE = "https://www.irishjobs.ie/Jobs/";
 
-    @Override public String sourceName() { return "IrishJobs"; }
+    @Override public String name() { return "IrishJobs"; }
 
     @Override
     public List<JobListing> fetch(String keyword, String location, int maxAgeDays) {
@@ -46,12 +46,32 @@ public class IrishJobsSource implements JobSource {
                     if (cutoff != null && posted != null && posted.isBefore(cutoff)) continue;
                     JobListing j = new JobListing();
                     j.setTitle(title); j.setCompany(company); j.setLocation(loc);
-                    j.setUrl(link); j.setSource(sourceName());
+                    j.setUrl(link); j.setSource(name());
                     j.setPostedAt(posted);
                     results.add(j);
                 } catch (Exception e) { log.debug("IrishJobs card parse error", e); }
             }
         } catch (Exception e) { log.warn("IrishJobs fetch failed: {}", e.getMessage()); }
         return results;
+    }
+
+    /** Parses company slug from IrishJobs job URL path (see {@link IrishJobsSourceTest}). */
+    public static String extractCompanyFromUrl(String path) {
+        if (path == null || path.isBlank()) return "Unknown";
+        String[] parts = path.split("/");
+        if (parts.length < 4) return "Unknown";
+        String slug = parts[parts.length - 1];
+        if (slug.startsWith("job") && parts.length >= 3) {
+            slug = parts[parts.length - 2];
+        }
+        if (slug.isBlank() || slug.startsWith("job")) return "Unknown";
+        String[] words = slug.split("-");
+        StringBuilder sb = new StringBuilder();
+        for (String w : words) {
+            if (w.isBlank() || w.equals("job") || w.matches("job\\d+")) continue;
+            if (!sb.isEmpty()) sb.append(' ');
+            sb.append(Character.toUpperCase(w.charAt(0))).append(w.substring(1));
+        }
+        return sb.isEmpty() ? "Unknown" : sb.toString();
     }
 }

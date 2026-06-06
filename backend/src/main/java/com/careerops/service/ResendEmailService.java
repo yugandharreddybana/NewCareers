@@ -14,7 +14,9 @@ import org.springframework.web.util.HtmlUtils;
 import io.github.resilience4j.circuitbreaker.annotation.CircuitBreaker;
 import org.jsoup.Jsoup;
 
-import java.time.Duration;
+import com.careerops.email.OnboardingEmailVerificationOtpEmail;
+import com.careerops.email.PasswordResetOtpEmail;
+
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -32,71 +34,40 @@ public class ResendEmailService {
     private final boolean devMode; // 3.036
     private final com.careerops.repository.UserRepository userRepository;
     private final io.micrometer.core.instrument.MeterRegistry meterRegistry;
- 
+    private final String appBaseUrl;
+
     public ResendEmailService(RestClient.Builder b,
                               @Value("${resend.api.key}") String key,
                               @Value("${resend.from}") String from,
                               @Value("${resend.dev-mode:false}") boolean devMode,
+                              @Value("${app.base-url:http://localhost:5173}") String appBaseUrl,
                               com.careerops.repository.UserRepository userRepository,
                               io.micrometer.core.instrument.MeterRegistry meterRegistry) {
         this.key  = key;
         this.from = from;
         this.devMode = devMode;
+        this.appBaseUrl = appBaseUrl;
         this.userRepository = userRepository;
         this.meterRegistry = meterRegistry;
         this.client = b.baseUrl("https://api.resend.com").build();
     }
 
-    public void sendOtp(String to, String otp) {
-        if (isDevMode()) { log.info("[DEV] Reset OTP for {} = {}", to, otp); return; }
-        send(to, "Your NewCareers password reset code", buildOtpHtml(otp));
+    public void sendOtp(String to, String otp, @Nullable String firstName) {
+        if (isDevMode()) {
+            log.info("[DEV] Reset OTP for {} = {} (firstName={})", to, otp, firstName);
+            return;
+        }
+        send(to, PasswordResetOtpEmail.subject(),
+                PasswordResetOtpEmail.render(otp, firstName, appBaseUrl));
     }
 
-    private String buildOtpHtml(String otp) {
-        String code = HtmlUtils.htmlEscape(otp != null ? otp : "");
-        return "<!DOCTYPE html><html lang=\"en\"><head><meta charset=\"utf-8\"/>"
-            + "<meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"/>"
-            + "<title>Reset your password</title></head>"
-            + "<body style=\"margin:0;padding:0;background:#f1f5f9;"
-            + "font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;\">"
-            + "<table role=\"presentation\" width=\"100%\" cellspacing=\"0\" cellpadding=\"0\" "
-            + "style=\"background:#f1f5f9;padding:40px 16px;\"><tr><td align=\"center\">"
-            + "<table role=\"presentation\" width=\"100%\" cellspacing=\"0\" cellpadding=\"0\" "
-            + "style=\"max-width:440px;background:#ffffff;border:1px solid #e2e8f0;border-radius:12px;\">"
-            // Header
-            + "<tr><td align=\"center\" style=\"padding:32px 28px 8px;\">"
-            + "<table role=\"presentation\" cellspacing=\"0\" cellpadding=\"0\"><tr><td align=\"center\" "
-            + "style=\"width:48px;height:48px;background:#2563eb;border-radius:10px;"
-            + "font-size:22px;line-height:48px;color:#ffffff;\">&#128274;</td></tr></table>"
-            + "</td></tr>"
-            + "<tr><td align=\"center\" style=\"padding:12px 28px 8px;\">"
-            + "<h1 style=\"margin:0;font-size:22px;font-weight:700;line-height:1.3;color:#0f172a;\">"
-            + "Reset your password</h1></td></tr>"
-            + "<tr><td align=\"center\" style=\"padding:0 28px 24px;\">"
-            + "<p style=\"margin:0;font-size:14px;line-height:1.6;color:#64748b;\">"
-            + "Enter this 6-digit code on the reset page. It expires in "
-            + "<strong style=\"color:#0f172a;\">15 minutes</strong>.</p></td></tr>"
-            // OTP box — single line, no spaces between digits (letter-spacing only)
-            + "<tr><td align=\"center\" style=\"padding:0 28px 24px;\">"
-            + "<table role=\"presentation\" cellspacing=\"0\" cellpadding=\"0\"><tr><td align=\"center\" "
-            + "style=\"background:#eff6ff;border:1px solid #bfdbfe;border-radius:10px;"
-            + "padding:18px 32px;font-size:32px;font-weight:700;line-height:1.2;"
-            + "letter-spacing:10px;color:#2563eb;font-family:ui-monospace,'SF Mono',Consolas,monospace;"
-            + "white-space:nowrap;\">" + code + "</td></tr></table></td></tr>"
-            // Disclaimer
-            + "<tr><td align=\"center\" style=\"padding:0 28px 28px;\">"
-            + "<p style=\"margin:0;font-size:13px;line-height:1.5;color:#94a3b8;\">"
-            + "If you didn&rsquo;t request this, you can ignore this email.</p></td></tr>"
-            // Footer
-            + "<tr><td align=\"center\" style=\"padding:20px 28px;background:#f8fafc;"
-            + "border-top:1px solid #e2e8f0;border-radius:0 0 12px 12px;\">"
-            + "<p style=\"margin:0 0 8px;font-size:12px;line-height:1.6;color:#64748b;\">"
-            + "<span style=\"color:#2563eb;font-weight:600;\">NewCareers</span>"
-            + " &middot; Secure SSL &middot; Encrypted</p>"
-            + "<p style=\"margin:0;font-size:12px;line-height:1.5;color:#94a3b8;\">"
-            + "&copy; " + java.time.Year.now().getValue()
-            + " NewCareers AI. All rights reserved.</p></td></tr>"
-            + "</table></td></tr></table></body></html>";
+    public void sendOnboardingVerificationOtp(String to, String otp, @Nullable String firstName) {
+        if (isDevMode()) {
+            log.info("[DEV] Onboarding verification OTP for {} = {} (firstName={})", to, otp, firstName);
+            return;
+        }
+        send(to, OnboardingEmailVerificationOtpEmail.subject(),
+                OnboardingEmailVerificationOtpEmail.render(otp, firstName, appBaseUrl));
     }
 
     public void sendJobDigest(String to, String userName,
@@ -152,7 +123,7 @@ public class ResendEmailService {
             log.info("[DEV] Referral invite to {} from {}", refereeEmail, referrerName);
             return;
         }
-        String subject = referrerName + " invited you to join CareerOps";
+        String subject = referrerName + " invited you to join NewCareers";
         send(refereeEmail, subject, buildReferralInviteHtml(referrerName, referralLink));
     }
 
@@ -164,7 +135,7 @@ public class ResendEmailService {
                      contact.email(), refereeName);
             return;
         }
-        String subject = refereeName + " joined CareerOps — you've earned a reward!";
+        String subject = refereeName + " joined NewCareers — you've earned a reward!";
         send(contact.email(), subject, buildReferralSuccessHtml(contact.firstName(), refereeName));
     }
 
@@ -230,7 +201,7 @@ public class ResendEmailService {
             "</div>" +
             "<p style='font-size:14px;color:#475569;margin:20px 0'>Your AI analysis has finished. Head to your dashboard to review the insights and tailor your application.</p>" +
             "<p style='text-align:center;color:#94a3b8;font-size:12px;margin-top:24px;line-height:1.5'>" +
-            "CareerOps &mdash; AI-powered job search<br/>" +
+            "NewCareers &mdash; AI-powered job search<br/>" +
             "123 Digital Hub, Dublin 8, Ireland<br/>" +
             "To unsubscribe, please update your <a href='https://app.careerops.io/profile' style='color:#6366f1;text-decoration:underline'>preferences</a>" +
             "</p>" +
@@ -255,13 +226,13 @@ public class ResendEmailService {
             "<div style='margin:20px 0;background:#fff;border-radius:12px;padding:20px;border:1px solid #e2e8f0'>" +
             "<p style='margin:0 0 12px;font-size:14px;font-weight:600;color:#1e293b'>📋 Interview prep checklist</p>" +
             "<ul style='margin:0;padding-left:20px;font-size:13px;color:#475569;line-height:1.8'>" +
-            "<li>Run the Interview Prep skill in CareerOps for tailored Q&amp;As</li>" +
+            "<li>Run the Interview Prep skill in NewCareers for tailored Q&amp;As</li>" +
             "<li>Research " + eCompany + "&rsquo;s recent news and culture</li>" +
             "<li>Review the job description against your matched skills</li>" +
             "<li>Prepare 3 strong STAR-format examples</li>" +
             "</ul></div>" +
             "<p style='text-align:center;color:#94a3b8;font-size:12px;margin-top:24px;line-height:1.5'>" +
-            "CareerOps &mdash; AI-powered job search<br/>" +
+            "NewCareers &mdash; AI-powered job search<br/>" +
             "123 Digital Hub, Dublin 8, Ireland<br/>" +
             "To unsubscribe, please update your <a href='https://app.careerops.io/profile' style='color:#6366f1;text-decoration:underline'>preferences</a>" +
             "</p>" +
@@ -272,11 +243,11 @@ public class ResendEmailService {
         String eReferrer = HtmlUtils.htmlEscape(referrerName);
         return "<div style='font-family:-apple-system,BlinkMacSystemFont,\"Segoe UI\",Roboto,Helvetica,Arial,sans-serif;max-width:600px;margin:0 auto;color:#1e293b'>" +
             "<div style='background:linear-gradient(135deg,#f59e0b,#ef4444);padding:32px 24px;border-radius:16px 16px 0 0'>" +
-            "<h1 style='color:#fff;margin:0;font-size:22px'>🎁 You've been invited to CareerOps!</h1>" +
+            "<h1 style='color:#fff;margin:0;font-size:22px'>🎁 You've been invited to NewCareers!</h1>" +
             "<p style='color:rgba(255,255,255,0.85);margin:8px 0 0'>" + eReferrer + " thinks you'd love it.</p>" +
             "</div>" +
             "<div style='background:#f8fafc;padding:28px 24px;border-radius:0 0 16px 16px'>" +
-            "<p style='font-size:15px;color:#475569;margin:0 0 20px'>CareerOps is an AI-powered job search platform that matches you to roles, evaluates your CV, preps you for interviews, and tracks every application in one place.</p>" +
+            "<p style='font-size:15px;color:#475569;margin:0 0 20px'>NewCareers is an AI-powered job search platform that matches you to roles, evaluates your CV, preps you for interviews, and tracks every application in one place.</p>" +
             "<div style='background:#fff;border-radius:12px;padding:20px;border:1px solid #e2e8f0;margin-bottom:20px'>" +
             "<p style='margin:0 0 8px;font-size:13px;color:#64748b'>✓ AI-matched job recommendations</p>" +
             "<p style='margin:0 0 8px;font-size:13px;color:#64748b'>✓ Automated CV scoring &amp; improvement tips</p>" +
@@ -284,11 +255,11 @@ public class ResendEmailService {
             "<p style='margin:0;font-size:13px;color:#64748b'>✓ Full application tracker with Kanban board</p>" +
             "</div>" +
             "<div style='text-align:center'>" +
-            "<a href='" + HtmlUtils.htmlEscape(referralLink) + "' style='display:inline-block;background:linear-gradient(135deg,#6366f1,#8b5cf6);color:#fff;padding:14px 32px;border-radius:10px;text-decoration:none;font-size:15px;font-weight:700'>Join CareerOps &rarr;</a>" +
+            "<a href='" + HtmlUtils.htmlEscape(referralLink) + "' style='display:inline-block;background:linear-gradient(135deg,#6366f1,#8b5cf6);color:#fff;padding:14px 32px;border-radius:10px;text-decoration:none;font-size:15px;font-weight:700'>Join NewCareers &rarr;</a>" +
             "</div>" +
             "<p style='text-align:center;font-size:12px;color:#94a3b8;margin-top:20px'>This invite link is personalised for you.<br/>Invited by " + eReferrer + ".</p>" +
             "<p style='text-align:center;color:#94a3b8;font-size:12px;margin-top:12px;line-height:1.5'>" +
-            "CareerOps &mdash; AI-powered job search<br/>" +
+            "NewCareers &mdash; AI-powered job search<br/>" +
             "123 Digital Hub, Dublin 8, Ireland<br/>" +
             "To unsubscribe, please update your <a href='https://app.careerops.io/profile' style='color:#6366f1;text-decoration:underline'>preferences</a>" +
             "</p>" +
@@ -306,7 +277,7 @@ public class ResendEmailService {
             "<div style='background:#f8fafc;padding:28px 24px;border-radius:0 0 16px 16px'>" +
             "<div style='background:#fff;border-radius:12px;padding:24px;border:1px solid #e2e8f0;text-align:center;margin-bottom:20px'>" +
             "<div style='width:56px;height:56px;background:linear-gradient(135deg,#10b981,#06b6d4);border-radius:50%;margin:0 auto 12px;display:flex;align-items:center;justify-content:center;font-size:24px'>🏆</div>" +
-            "<h2 style='margin:0 0 8px;font-size:18px;color:#1e293b'>" + eReferee + " joined CareerOps!</h2>" +
+            "<h2 style='margin:0 0 8px;font-size:18px;color:#1e293b'>" + eReferee + " joined NewCareers!</h2>" +
             "<p style='margin:0;font-size:14px;color:#64748b'>They signed up using your referral link. Your reward has been credited.</p>" +
             "</div>" +
             "<div style='background:linear-gradient(135deg,#f0fdf4,#ecfdf5);border:1px solid #86efac;border-radius:12px;padding:16px;text-align:center'>" +
@@ -314,7 +285,7 @@ public class ResendEmailService {
             "<p style='margin:4px 0 0;font-size:13px;color:#166534'>Keep referring friends to earn more!</p>" +
             "</div>" +
             "<p style='text-align:center;color:#94a3b8;font-size:12px;margin-top:24px;line-height:1.5'>" +
-            "CareerOps &mdash; AI-powered job search<br/>" +
+            "NewCareers &mdash; AI-powered job search<br/>" +
             "123 Digital Hub, Dublin 8, Ireland<br/>" +
             "To unsubscribe, please update your <a href='https://app.careerops.io/profile' style='color:#6366f1;text-decoration:underline'>preferences</a>" +
             "</p>" +
@@ -355,7 +326,7 @@ public class ResendEmailService {
         sb.append("<a href='").append(base).append("/dashboard' style='color:#6366f1;text-decoration:underline'>Open Dashboard</a>");
         sb.append(" &bull; <a href='").append(base).append("/profile' style='color:#6366f1;text-decoration:underline'>Update Preferences</a>");
         sb.append("<br/><br/>");
-        sb.append("CareerOps &mdash; AI-powered job search<br/>");
+        sb.append("NewCareers &mdash; AI-powered job search<br/>");
         sb.append("123 Digital Hub, Dublin 8, Ireland<br/>");
         sb.append("To unsubscribe, please update your preferences.");
         sb.append("</p></div></div>");

@@ -33,7 +33,8 @@ public class AuditLogService {
      * Log an action performed by a user.
      *
      * @param userId   the acting user's UUID (may be null for anonymous/system events)
-     * @param action   short action label, e.g. "LOGIN", "SKILL_RUN", "DATA_EXPORT", "ACCOUNT_DELETE"
+     * @param action   short action label, e.g. "LOGIN", "SKILL_RUN", "DATA_EXPORT_REQUESTED",
+     *                 "ACCOUNT_DELETED_GDPR", "GDPR_RETENTION_CLEANUP"
      * @param request  the inbound HttpServletRequest (used to extract IP + user-agent); may be null
      * @param metadata any additional key-value pairs to persist as JSONB
      */

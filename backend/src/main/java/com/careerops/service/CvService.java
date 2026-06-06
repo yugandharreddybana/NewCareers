@@ -15,6 +15,7 @@ import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.multipart.MultipartFile;
 
 import java.io.IOException;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
 
@@ -138,6 +139,29 @@ public class CvService {
         return repo.findByUserIdOrderByUploadedAtDesc(userId);
     }
 
+    /**
+     * GDPR erasure — remove all CV rows for a user and their Supabase objects.
+     */
+    @Transactional(timeout = 30)
+    public void deleteAllForUser(UUID userId) {
+        List<UserCv> cvs = new ArrayList<>(repo.findByUserIdOrderByUploadedAtDesc(userId));
+        if (cvs.isEmpty()) {
+            return;
+        }
+        List<String> storagePaths = cvs.stream()
+                .map(UserCv::getStoragePath)
+                .filter(path -> path != null && !path.isBlank() && !isLocalDevPath(path))
+                .toList();
+        repo.deleteByUserId(userId);
+        aiEvalCache.evictAllForUser(userId);
+        log.info("Deleted {} CV record(s) for userId={}", cvs.size(), userId);
+        if (storage.isConfigured()) {
+            for (String path : storagePaths) {
+                scheduleStorageDeleteAfterCommit(path, userId);
+            }
+        }
+    }
+
     @Transactional(timeout = 10)
     public void delete(UUID userId, UUID cvId) {
         UserCv cv = repo.findById(cvId)
@@ -163,7 +187,12 @@ public class CvService {
 
         if (storagePath != null && !storagePath.isBlank()
                 && !isLocalDevPath(storagePath) && storage.isConfigured()) {
-            org.springframework.transaction.support.TransactionSynchronizationManager.registerSynchronization(
+            scheduleStorageDeleteAfterCommit(storagePath, userId);
+        }
+    }
+
+    private void scheduleStorageDeleteAfterCommit(String storagePath, UUID userId) {
+        org.springframework.transaction.support.TransactionSynchronizationManager.registerSynchronization(
                 new org.springframework.transaction.support.TransactionSynchronization() {
                     @Override
                     public void afterCommit() {
@@ -174,7 +203,6 @@ public class CvService {
                         }
                     }
                 });
-        }
     }
 
     public String downloadUrl(UUID userId, UUID cvId) {
