@@ -11,6 +11,7 @@ import com.careerops.repository.UserJobRepository;
 import com.careerops.repository.UserProfileRepository;
 import com.careerops.service.skills.SkillHandlerRegistry;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ObjectNode;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -26,14 +27,23 @@ import org.springframework.transaction.support.DefaultTransactionStatus;
 
 import java.time.Instant;
 import java.util.Collections;
+import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.contains;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doNothing;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -64,24 +74,22 @@ class SkillServiceTest {
     @Mock private TailorResumeBuilderService tailorResumeBuilder;
     @Mock private SkillMdExecutorService skillMdExecutor;
     @Mock private UserConsentService consentService;
+    @Mock private AiProviderRouter aiProviderRouter;                  // NEW — Prompt 4
+    @Mock private SkillExecutionContextBuilder contextBuilder;        // NEW — Prompt 4
 
     private final ObjectMapper mapper = new ObjectMapper();
+    private final SimpleMeterRegistry meterRegistry = new SimpleMeterRegistry();
     private SkillService skillService;
 
     @BeforeEach
     void setUp() {
         PlatformTransactionManager txManager = new AbstractPlatformTransactionManager() {
             @Override
-            protected Object doGetTransaction() {
-                return new Object();
-            }
-
+            protected Object doGetTransaction() { return new Object(); }
             @Override
             protected void doBegin(Object transaction, TransactionDefinition definition) {}
-
             @Override
             protected void doCommit(DefaultTransactionStatus status) {}
-
             @Override
             protected void doRollback(DefaultTransactionStatus status) {}
         };
@@ -89,11 +97,16 @@ class SkillServiceTest {
         skillService = new SkillService(
                 nvidia, prompts, validator, skillRuns, batchRuns, userJobs, jobs,
                 conversations, registry, mapper, emailService, notificationService,
-                tokenUsageService, new SimpleMeterRegistry(), catalogSkills,
+                tokenUsageService, meterRegistry, catalogSkills,
                 evaluationValidator, cvHumanScoreService, cvService, tailorResumePending,
                 localFallback, profiles, evaluationEnrichment, skillMatchService,
-                tailorResumeBuilder, skillMdExecutor, consentService, txManager);
+                tailorResumeBuilder, skillMdExecutor, consentService, txManager,
+                aiProviderRouter, contextBuilder);  // NEW — Prompt 4 params last
     }
+
+    // ================================================================
+    // EXISTING TESTS — constructor args updated only
+    // ================================================================
 
     @Test
     @DisplayName("getLastRun — returns valid result from repository")
@@ -174,6 +187,10 @@ class SkillServiceTest {
         when(skillMdExecutor.isAvailable()).thenReturn(false);
         when(localFallback.tryFallback(eq(skill), eq(userId), eq(userJobId), any()))
                 .thenReturn(Optional.empty());
+        // routeSkillViaRouter path: prompts + contextBuilder + router all need stubs
+        when(prompts.buildBackendSkillSystemPrompt(eq(skill), eq(userId))).thenReturn("sys");
+        when(contextBuilder.buildUserMessage(eq(skill), eq(userId), eq(userJobId), any())).thenReturn("usr");
+        when(aiProviderRouter.routePrompt(any(), eq(userId), contains("skill-"))).thenThrow(new RuntimeException("router fail"));
 
         skillService.startSkill(
                 new SkillStartRequest(skill, userJobId, null, null, null, null, null, true),
@@ -182,4 +199,22 @@ class SkillServiceTest {
         verify(skillRuns).deleteByUserIdAndUserJobIdAndSkill(userId, userJobId, skill);
         verify(skillRuns, never()).findValidCachedRun(any(), any(), any(), any());
     }
-}
+
+    // ================================================================
+    // NEW TESTS — Prompt 4
+    // ================================================================
+
+    @Test
+    @DisplayName("routeSkill — NVIDIA unavailable: router succeeds, localFallback NOT called")
+    void routeSkill_when_nvidia_unavailable_router_succeeds() {
+        UUID userId = UUID.randomUUID();
+        UUID userJobId = UUID.randomUUID();
+        String skill = "research";
+
+        ReflectionTestUtils.setField(skillService, "dailyTokenBudget", 500_000L);
+        doNothing().when(consentService).validateAiConsent(userId);
+        doNothing().when(conversations).deleteByUserIdAndSkillAndUserJobIdAndStatus(
+                eq(userId), eq(skill), eq(userJobId), eq("pending_answer"));
+        when(skillRuns.findValidCachedRun(eq(userId), eq(userJobId), eq(skill), any(Instant.class)))
+                .thenReturn(Optional.empty());
+        when

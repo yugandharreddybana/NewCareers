@@ -42,6 +42,8 @@ import org.springframework.transaction.support.TransactionTemplate;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
 import java.util.*;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.TimeUnit;
 
 /**
@@ -52,6 +54,18 @@ import java.util.concurrent.TimeUnit;
  *   tailor-resume              → dedicated plan + rewrite pipeline (TailorResumeBuilderService)
  *   Phase 2 skills             → SkillHandlerRegistry → SkillMdExecutorService
  *   All other skills           → SkillMdExecutorService (SKILL.md + injected DB context)
+ *
+ * Prompt 4 additions:
+ *   Part A — AiProviderRouter wiring:
+ *     When NVIDIA is not configured, generateSkillMdOutput() now tries routeSkill()
+ *     (Gemini → Claude failover via AiProviderRouter) BEFORE falling through to localFallback.
+ *     localFallback is now true last resort only.
+ *
+ *   Part B — In-memory dedup guard:
+ *     startSkill() extracts body into executeSkillInternal().
+ *     A ConcurrentHashMap<dedupKey, CompletableFuture> guard ensures concurrent identical
+ *     calls (same userId + userJobId + skill) wait on the first, not re-execute.
+ *     Emits skill.dedup.hit{skill} counter on hits.
  *
  * Section 8 — Task 88:
  *   On a successful Done result (Phase 1 only, since Phase 2 returns before
@@ -110,6 +124,14 @@ public class SkillService {
     private final TransactionTemplate           readTx;
     private final TransactionTemplate           writeTx;
 
+    // Prompt 4 — Part A: AiProviderRouter + SkillExecutionContextBuilder
+    private final AiProviderRouter               aiProviderRouter;
+    private final SkillExecutionContextBuilder   contextBuilder;
+
+    // Prompt 4 — Part B: in-memory dedup guard
+    private final ConcurrentHashMap<String, CompletableFuture<SkillRunResponse>> inFlight =
+            new ConcurrentHashMap<>();
+
     private static final int SKILL_RUN_HISTORY_LIMIT = 12;
 
     private final java.util.concurrent.ExecutorService batchExecutor =
@@ -163,7 +185,9 @@ public class SkillService {
             TailorResumeBuilderService tailorResumeBuilder,
             SkillMdExecutorService skillMdExecutor,
             UserConsentService consentService,
-            PlatformTransactionManager transactionManager) {
+            PlatformTransactionManager transactionManager,
+            AiProviderRouter aiProviderRouter,
+            SkillExecutionContextBuilder contextBuilder) {
         this.nvidia               = nvidia;
         this.prompts              = prompts;
         this.validator            = validator;
@@ -186,15 +210,17 @@ public class SkillService {
         this.localFallback        = localFallback;
         this.profiles             = profiles;
         this.evaluationEnrichment = evaluationEnrichment;
-        this.skillMatchService = skillMatchService;
-        this.tailorResumeBuilder = tailorResumeBuilder;
-        this.skillMdExecutor = skillMdExecutor;
-        this.consentService = consentService;
+        this.skillMatchService    = skillMatchService;
+        this.tailorResumeBuilder  = tailorResumeBuilder;
+        this.skillMdExecutor      = skillMdExecutor;
+        this.consentService       = consentService;
         this.readTx = new TransactionTemplate(transactionManager);
         this.readTx.setReadOnly(true);
         this.readTx.setTimeout(10);
         this.writeTx = new TransactionTemplate(transactionManager);
         this.writeTx.setTimeout(60);
+        this.aiProviderRouter     = aiProviderRouter;
+        this.contextBuilder       = contextBuilder;
     }
 
     // ================================================================
@@ -222,6 +248,43 @@ public class SkillService {
             return cached.get();
         }
 
+        // Prompt 4 Part B — dedup guard
+        String dedupKey = userId + ":" +
+                (userJobId != null ? userJobId.toString() : "nojob") + ":" + skill;
+
+        CompletableFuture<SkillRunResponse> existing = inFlight.get(dedupKey);
+        if (existing != null) {
+            meterRegistry.counter("skill.dedup.hit", "skill", skill).increment();
+            log.info("Dedup guard hit for skill={} userId={}", skill, userId);
+            try {
+                return existing.get(60, TimeUnit.SECONDS);
+            } catch (Exception e) {
+                log.debug("Dedup wait failed for skill={}: {} — falling through to fresh execution",
+                        skill, e.getMessage());
+            }
+        }
+
+        CompletableFuture<SkillRunResponse> future = new CompletableFuture<>();
+        inFlight.put(dedupKey, future);
+        try {
+            SkillRunResponse result = executeSkillInternal(skill, userId, userJobId, req);
+            future.complete(result);
+            return result;
+        } catch (Exception e) {
+            future.completeExceptionally(e);
+            throw e;
+        } finally {
+            inFlight.remove(dedupKey);
+        }
+    }
+
+    /**
+     * Core skill execution — extracted from startSkill() for dedup guard.
+     * No logic changes from the original startSkill() body.
+     */
+    private SkillRunResponse executeSkillInternal(
+            String skill, UUID userId, UUID userJobId, SkillStartRequest req) {
+
         // Daily token budget check — skills with deterministic/local fallback still run degraded
         if (tokenUsageService.hasExceededBudget(userId, dailyTokenBudget)) {
             log.warn("Daily token budget exhausted for userId={}", userId);
@@ -247,7 +310,7 @@ public class SkillService {
             return catalogSkills.execute(skill, userId, userJobId);
         }
 
-        // Step 2: Phase 2 routing — delegate to SkillHandlerRegistry
+        // Step 2: Phase 2 routing — delegate to SkillHandlerRegistry (no router interception)
         if (registry.handles(skill)) {
             log.info("Routing Phase 2 skill={} to SkillHandlerRegistry", skill);
             return registry.execute(skill, userId, userJobId, req.forceRefresh());
@@ -290,17 +353,23 @@ public class SkillService {
         });
     }
 
-    /** Runs NVIDIA / fallback outside any DB transaction (compare can take 60s+). */
+    /** Runs NVIDIA / AiProviderRouter / localFallback outside any DB transaction. */
     private JsonNode generateSkillMdOutput(
             String skill, UUID userId, UUID userJobId, SkillStartRequest req) {
         JsonNode output;
         if (!skillMdExecutor.isAvailable()) {
-            log.warn("NVIDIA not configured — local fallback for skill={}", skill);
-            Optional<AgentResult> fb = localFallback.tryFallback(skill, userId, userJobId, req);
-            if (fb.isEmpty() || fb.get() instanceof AgentResult.Error) {
-                return null;
+            // Prompt 4 Part A: try AiProviderRouter BEFORE localFallback
+            log.warn("NVIDIA not configured — routing skill={} via AiProviderRouter", skill);
+            try {
+                output = routeSkillViaRouter(skill, userId, userJobId, req);
+            } catch (Exception ex) {
+                log.warn("routeSkill failed for skill={}, trying local fallback: {}", skill, ex.getMessage());
+                Optional<AgentResult> fb = localFallback.tryFallback(skill, userId, userJobId, req);
+                if (fb.isEmpty() || fb.get() instanceof AgentResult.Error) {
+                    return null;
+                }
+                output = parseOutput(((AgentResult.Done) fb.get()).text());
             }
-            output = parseOutput(((AgentResult.Done) fb.get()).text());
         } else {
             try {
                 output = skillMdExecutor.execute(skill, userId, userJobId, req);
@@ -320,6 +389,30 @@ public class SkillService {
             output = normalizeEvaluateOutput(output, userJobId);
         }
         return output;
+    }
+
+    /**
+     * Private helper — routes skill via AiProviderRouter (Gemini → Claude failover).
+     * Used only when skillMdExecutor (NVIDIA) is not available.
+     * Mirrors metadata shape from SkillMdExecutorService.execute() (mode + skill fields).
+     *
+     * @throws RuntimeException if the router fails or returns empty output
+     */
+    private JsonNode routeSkillViaRouter(
+            String skill, UUID userId, UUID userJobId, SkillStartRequest req) {
+        String system = prompts.buildBackendSkillSystemPrompt(skill, userId);
+        String user   = contextBuilder.buildUserMessage(skill, userId, userJobId, req);
+        String raw    = aiProviderRouter.routePrompt(system + "\n\n" + user, userId, "skill-" + skill);
+        JsonNode parsed = parseOutput(raw);
+        if (parsed == null || parsed.isMissingNode()) {
+            throw new RuntimeException("routeSkill returned empty for skill=" + skill);
+        }
+        ObjectNode out = parsed.isObject()
+                ? (ObjectNode) parsed.deepCopy()
+                : mapper.createObjectNode().put("summary", parsed.asText());
+        out.put("mode", "skill_md");
+        out.put("skill", skill);
+        return out;
     }
 
     // ================================================================
@@ -405,7 +498,6 @@ public class SkillService {
                 } else if (resp.type() == SkillRunResponse.Type.PROFILE_INCOMPLETE) {
                     failed++;
                     results.put(skill, resp);
-                    // Do NOT clear or return early — continue running other skills
                 } else {
                     failed++;
                 }
@@ -485,24 +577,16 @@ public class SkillService {
     // GET LAST RUN
     // ================================================================
 
-    /**
-     * Returns the most recent saved run, or empty when the user has never completed this skill
-     * for the job. Callers should treat empty as "run fresh" — not an error condition.
-     */
     public Optional<SkillRunResponse> findLastRun(UUID userId, UUID userJobId, String skillName) {
         return skillRuns
                 .findFirstByUserIdAndUserJobIdAndSkillOrderByCreatedAtDesc(userId, userJobId, skillName)
                 .map(run -> SkillRunResponse.result(skillName, run.getOutput()));
     }
 
-    /** Skill names that have at least one saved run for this job (for UI tick marks after reload). */
     public List<String> listCompletedSkills(UUID userId, UUID userJobId) {
         return skillRuns.findDistinctSkillsByUserIdAndUserJobId(userId, userJobId);
     }
 
-    /**
-     * Recent runs for a job skill (newest first), for version stack / diff UI.
-     */
     public Optional<TailorResumePreviewResponse> getTailoredResumePreview(UUID userId, UUID userJobId) {
         return readTx.execute(status -> skillRuns
                 .findFirstByUserIdAndUserJobIdAndSkillOrderByCreatedAtDesc(userId, userJobId, "tailor-resume")
@@ -627,10 +711,6 @@ public class SkillService {
         };
     }
 
-    /**
-     * Fires after a Phase 1 skill successfully completes (AgentResult.Done).
-     * Non-fatal — failures never affect the skill save or HTTP response.
-     */
     private void triggerSkillCompleteEvents(String skill, UUID userId, UUID userJobId) {
         if (!EMAIL_NOTIFY_SKILLS.contains(skill)) {
             log.debug("Skipping completion email for non-notifiable skill={}", skill);
@@ -703,10 +783,6 @@ public class SkillService {
         return com.careerops.util.JsonExtractor.extract(text, mapper);
     }
 
-    /**
-     * Ensures the tailor skill always returns a panel-friendly shape (summary + sections)
-     * even when the agent omits fields or only calls save_resume_html.
-     */
     private SkillRunResponse runDedicatedTailorResume(UUID userId, UUID userJobId, SkillStartRequest req) {
         String cvText = loadBaselineCv(userId);
         UserProfile profile = loadProfile(userId);
@@ -884,10 +960,6 @@ public class SkillService {
                 .orElse(null);
     }
 
-    /**
-     * Flags summaries that do not look like the mandatory 3-sentence contract
-     * (Who you are / Key skills / Value you bring).
-     */
     private void appendProfessionalSummaryWarnings(
             String summary,
             com.fasterxml.jackson.databind.node.ArrayNode warnings) {
@@ -914,7 +986,7 @@ public class SkillService {
             return "(Upload your CV in Settings to see a before/after comparison.)";
         }
         String trimmed = text.trim();
-        return trimmed.length() <= maxLen ? trimmed : trimmed.substring(0, maxLen) + "…";
+        return trimmed.length() <= maxLen ? trimmed : trimmed.substring(0, maxLen) + "\u2026";
     }
 
     private JsonNode enrichTailorResumeOutput(
@@ -1023,7 +1095,6 @@ public class SkillService {
         return report;
     }
 
-    /** Replace AI skill lists with deterministic CV ↔ JD matching (alias-aware). */
     private JsonNode overlayDeterministicSkillMatch(JsonNode report, UUID userJobId) {
         if (userJobId == null || report == null || !report.isObject()) {
             return report;
@@ -1069,7 +1140,6 @@ public class SkillService {
 
     private Optional<SkillRunResponse> tryCachedSkillRun(
             String skill, UUID userId, UUID userJobId, Boolean forceRefresh) {
-        // Job-scoped skill cache: skill_runs + expires_at (not AiEvalCacheService — that is eval-score only).
         if (userJobId == null || Boolean.TRUE.equals(forceRefresh) || !SkillRunCachePolicy.isCacheable(skill)) {
             return Optional.empty();
         }
