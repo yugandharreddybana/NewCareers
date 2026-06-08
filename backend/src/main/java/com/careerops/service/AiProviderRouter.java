@@ -1,14 +1,16 @@
 package com.careerops.service;
 
+import io.micrometer.core.instrument.MeterRegistry;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
+import java.util.Set;
 import java.util.UUID;
 import java.util.function.Supplier;
 
 /**
- * Batch 3 — AI Provider Router (fixed)
+ * Batch 3 — AI Provider Router (updated: Prompt 3 — skill-aware routing)
  *
  * Routes lightweight AI scoring calls through a primary + fallback provider.
  *
@@ -21,17 +23,28 @@ import java.util.function.Supplier;
  *
  * Failover triggers when Gemini is "degraded" as measured by
  * AiProviderMetricsService (3+ consecutive failures OR avg latency > threshold).
+ *
+ * Prompt 3 addition — routeSkill():
+ *   Heavy skills (tailor-resume, prep-interview, skills-gap-plan, linkedin-optimize)
+ *   always use Claude — quality is non-negotiable, no Gemini fallback.
+ *   All other skills use Gemini primary → Claude fallback via existing route().
+ *   Emits ai.skill.route{skill, provider} counter on every call.
  */
 @Service
 @Slf4j
 public class AiProviderRouter {
 
+    // ── Fields ──────────────────────────────────────────────────────────────────
+
     private final AiProviderMetricsService metrics;
-    private final GeminiService gemini;
-    private final ClaudeDirectService claudeDirect;
+    private final GeminiService            gemini;
+    private final ClaudeDirectService      claudeDirect;
+    private final MeterRegistry            meterRegistry;  // NEW — Prompt 3
 
     @Value("${ai.router.latency.threshold.ms:8000}")
     private long latencyThresholdMs;
+
+    // ── Constants ───────────────────────────────────────────────────────────────
 
     public static final String PROVIDER_GEMINI = "gemini";
     public static final String PROVIDER_CLAUDE = "claude";
@@ -40,15 +53,32 @@ public class AiProviderRouter {
     private static final String LIGHT_EVAL_SYSTEM_PROMPT =
         "You are a job-matching engine. Return only valid JSON. No markdown, no explanation.";
 
+    /**
+     * Skills where quality is non-negotiable — always routed to Claude, no Gemini fallback.
+     * Validated against SkillPromptLibrary.ALL_SKILLS.
+     */
+    private static final Set<String> HEAVY_SKILLS = Set.of(
+        "tailor-resume",
+        "prep-interview",
+        "skills-gap-plan",
+        "linkedin-optimize"
+    );
+
+    // ── Constructor ──────────────────────────────────────────────────────────────
+
     public AiProviderRouter(AiProviderMetricsService metrics,
                              GeminiService gemini,
-                             ClaudeDirectService claudeDirect) {
-        this.metrics = metrics;
-        this.gemini = gemini;
-        this.claudeDirect = claudeDirect;
+                             ClaudeDirectService claudeDirect,
+                             MeterRegistry meterRegistry) {
+        this.metrics       = metrics;
+        this.gemini        = gemini;
+        this.claudeDirect  = claudeDirect;
+        this.meterRegistry = meterRegistry;
     }
 
-    // ── Main routing method ─────────────────────────────────────────────────
+    // ════════════════════════════════════════════════════════════════════════
+    // PUBLIC METHODS
+    // ════════════════════════════════════════════════════════════════════════
 
     /**
      * Execute the primary supplier; fall back to the secondary on failure or degradation.
@@ -101,7 +131,62 @@ public class AiProviderRouter {
         );
     }
 
-    // ── Internal ───────────────────────────────────────────────────────────────
+    /**
+     * Skill-aware routing — Prompt 3 addition.
+     *
+     * Heavy skills (tailor-resume, prep-interview, skills-gap-plan, linkedin-optimize):
+     *   Always routed to Claude. No Gemini, no fallback. Exceptions propagate —
+     *   quality is non-negotiable for these skills.
+     *
+     * Light skills (all others):
+     *   Gemini primary → Claude fallback via existing route().
+     *
+     * Emits ai.skill.route{skill=<skillName>, provider=<intended provider>} on every call.
+     * Provider latency and failure are tracked via AiProviderMetricsService.
+     *
+     * @param skillName    the skill being executed (must match SkillPromptLibrary.ALL_SKILLS)
+     * @param systemPrompt system/instruction prompt
+     * @param userPrompt   user-facing prompt content
+     * @param userId       for cache key and provider context
+     * @return raw AI response string
+     * @throws RuntimeException if heavy skill Claude call fails (no fallback by design)
+     */
+    public String routeSkill(String skillName, String systemPrompt,
+                             String userPrompt, UUID userId) {
+        boolean heavy = HEAVY_SKILLS.contains(skillName);
+
+        meterRegistry.counter("ai.skill.route",
+                "skill",    skillName,
+                "provider", heavy ? PROVIDER_CLAUDE : PROVIDER_GEMINI)
+                .increment();
+
+        if (heavy) {
+            // Heavy skills: Claude only — no Gemini, no fallback, exception propagates
+            long start = System.currentTimeMillis();
+            try {
+                String result = claudeDirect.generate(systemPrompt, userPrompt, userId, skillName);
+                metrics.recordSuccess(PROVIDER_CLAUDE, System.currentTimeMillis() - start);
+                return result;
+            } catch (Exception ex) {
+                metrics.recordFailure(PROVIDER_CLAUDE);
+                log.error("[AiRouter] Heavy skill {} failed for userId={}: {}",
+                        skillName, userId, ex.getMessage());
+                throw new RuntimeException(
+                        "Skill " + skillName + " failed: " + ex.getMessage(), ex);
+            }
+        }
+
+        // Light skills: Gemini primary → Claude fallback via existing route()
+        return route(
+                () -> gemini.generate(systemPrompt + "\n\n" + userPrompt, userId, skillName),
+                () -> claudeDirect.generate(systemPrompt, userPrompt, userId, skillName),
+                userId + "/" + skillName
+        );
+    }
+
+    // ════════════════════════════════════════════════════════════════════════
+    // PRIVATE
+    // ════════════════════════════════════════════════════════════════════════
 
     private String executeFallback(Supplier<String> fallback, String context) {
         long start = System.currentTimeMillis();
