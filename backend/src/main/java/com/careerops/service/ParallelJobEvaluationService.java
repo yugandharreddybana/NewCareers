@@ -6,6 +6,8 @@ import com.careerops.repository.UserJobRepository;
 import com.careerops.repository.UserProfileRepository;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ObjectNode;
+import io.micrometer.core.instrument.MeterRegistry;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -33,10 +35,16 @@ import java.util.stream.Collectors;
  *    - evaluateDeep()      → triggered when the user opens a job card or requests a PDF.
  *      Runs the full StructuredJobEvaluationBuilder and caches the result.
  *
- * 2. Cache:
- *    - Before every evaluation (light or deep), checks AiEvalCacheService.
- *    - Writes result to cache after a successful evaluation.
- *    - Deep results are served from cache if the user revisits the same job.
+ * 2. Cache (Prompt 2 — fully wired):
+ *    - Both light and deep paths check cache.get() BEFORE any AI call.
+ *    - ai.eval.cache.hit{type=LIGHT_SCORE} and ai.eval.cache.hit{type=DEEP_EVAL} counters
+ *      increment on every cache hit — observable via /actuator/metrics.
+ *    - safeCachePut() wraps all writes: inner AiEvalCacheService.put() already swallows
+ *      errors; outer guard here ensures cache failures NEVER propagate to callers.
+ *    - Corrupt deep cache entries (bad JSON in DB) fall through to full re-evaluation
+ *      instead of throwing.
+ *    - Dual-write after deep eval: DEEP_EVAL + LIGHT_SCORE both written so feed score
+ *      stays consistent after a job card is opened.
  *
  * 3. Provider routing:
  *    - All AI calls go via AiProviderRouter (NVIDIA → Claude fallback).
@@ -48,7 +56,9 @@ public class ParallelJobEvaluationService {
 
     private static final Logger log = LoggerFactory.getLogger(ParallelJobEvaluationService.class);
 
-    private static final int MAX_RETRIES = 2;
+    private static final int    MAX_RETRIES     = 2;
+    private static final String EVAL_TYPE_LIGHT = "LIGHT_SCORE";
+    private static final String EVAL_TYPE_DEEP  = "DEEP_EVAL";
 
     // Light score prompt — cheap, fast, no JSON schema required
     private static final String LIGHT_SCORE_PROMPT = """
@@ -63,21 +73,20 @@ public class ParallelJobEvaluationService {
             Job description (first 800 chars): %.800s
             """;
 
-    private final StructuredJobEvaluationBuilder evaluationBuilder;
-    private final EvaluationReportValidator validator;
+    private final StructuredJobEvaluationBuilder    evaluationBuilder;
+    private final EvaluationReportValidator         validator;
     private final EvaluationReportEnrichmentService evaluationEnrichment;
-    private final JobEvaluationProgressStore progressStore;
-    private final UserJobRepository userJobs;
-    private final UserProfileRepository profiles;
-    private final TransactionTemplate transactionTemplate;
-    private final CvService cvService;
-    private final JobMatchingService matcher;
-    private final DeduplicationService dedup;
-    private final ObjectMapper mapper;
-
-    // Batch 3 additions
-    private final AiEvalCacheService cache;
-    private final AiProviderRouter router;
+    private final JobEvaluationProgressStore        progressStore;
+    private final UserJobRepository                 userJobs;
+    private final UserProfileRepository             profiles;
+    private final TransactionTemplate               transactionTemplate;
+    private final CvService                         cvService;
+    private final JobMatchingService                matcher;
+    private final DeduplicationService              dedup;
+    private final ObjectMapper                      mapper;
+    private final AiEvalCacheService                cache;
+    private final AiProviderRouter                  router;
+    private final MeterRegistry                     meterRegistry;  // NEW — Prompt 2
 
     @Value("${jobs.parallel.eval.pool.size:15}")
     private int evalPoolSize;
@@ -98,20 +107,22 @@ public class ParallelJobEvaluationService {
             DeduplicationService dedup,
             ObjectMapper mapper,
             AiEvalCacheService cache,
-            AiProviderRouter router) {
-        this.evaluationBuilder = evaluationBuilder;
-        this.validator = validator;
+            AiProviderRouter router,
+            MeterRegistry meterRegistry) {
+        this.evaluationBuilder    = evaluationBuilder;
+        this.validator            = validator;
         this.evaluationEnrichment = evaluationEnrichment;
-        this.progressStore = progressStore;
-        this.userJobs = userJobs;
-        this.profiles = profiles;
-        this.transactionTemplate = new TransactionTemplate(txManager);
-        this.cvService = cvService;
-        this.matcher = matcher;
-        this.dedup = dedup;
-        this.mapper = mapper;
-        this.cache = cache;
-        this.router = router;
+        this.progressStore        = progressStore;
+        this.userJobs             = userJobs;
+        this.profiles             = profiles;
+        this.transactionTemplate  = new TransactionTemplate(txManager);
+        this.cvService            = cvService;
+        this.matcher              = matcher;
+        this.dedup                = dedup;
+        this.mapper               = mapper;
+        this.cache                = cache;
+        this.router               = router;
+        this.meterRegistry        = meterRegistry;
     }
 
     @PostConstruct
@@ -186,6 +197,7 @@ public class ParallelJobEvaluationService {
      * Called when the user opens a job card or explicitly requests a full report/PDF.
      *
      * Cache: returns cached deep result if available. Writes to cache on new evaluation.
+     * Corrupt cache entries fall through to full re-evaluation (never throw).
      *
      * @param rankedJob  the job to evaluate deeply
      * @param profile    the user's profile
@@ -202,25 +214,40 @@ public class ParallelJobEvaluationService {
         Job job = rankedJob.job();
         UUID jobId = job.getId();
 
-        // Cache hit — return immediately
-        JsonNode cached = cache.getDeep(userId, jobId);
-        if (cached != null) {
-            int matchPercent = cached.path("matchPercent").asInt(
-                    cached.path("overallScore").asInt(0));
-            log.debug("[Parallel eval DEEP] Cache HIT userId={} jobId={} matchPercent={}",
-                    userId, jobId, matchPercent);
-            return new ScoredResult(job, cached, matchPercent);
+        // Cache hit — read via primitive, deserialise, emit metric
+        String cachedJson = cache.get(userId, jobId, EVAL_TYPE_DEEP);
+        if (cachedJson != null) {
+            try {
+                JsonNode cached = mapper.readTree(cachedJson);
+                meterRegistry.counter("ai.eval.cache.hit", "type", "DEEP_EVAL").increment();
+                int matchPercent = cached.path("matchPercent").asInt(
+                        cached.path("overallScore").asInt(0));
+                log.debug("[Parallel eval DEEP] Cache HIT userId={} jobId={} matchPercent={}",
+                        userId, jobId, matchPercent);
+                return new ScoredResult(job, cached, matchPercent);
+            } catch (Exception e) {
+                // Corrupt entry in DB — fall through to full re-evaluation
+                log.debug("[Parallel eval DEEP] Corrupt cache entry for jobId={}, re-evaluating: {}",
+                        jobId, e.getMessage());
+            }
         }
 
         // Cache miss — run full evaluation with retries
         String cvText = cvService.activeCvText(userId);
         ScoredResult result = evaluateWithRetry(rankedJob, profile, userId, cvText, sourceTag);
 
-        // Write to deep cache
+        // Dual-write: DEEP_EVAL + LIGHT_SCORE so feed score stays consistent after card open
         if (result.scoreBreakdown() != null) {
-            cache.putDeep(userId, jobId, result.scoreBreakdown());
-            // Also update the light cache so the feed score is consistent
-            cache.putLight(userId, jobId, result.matchPercent());
+            try {
+                safeCachePut(userId, jobId, EVAL_TYPE_DEEP,
+                        mapper.writeValueAsString(result.scoreBreakdown()));
+                ObjectNode lightNode = mapper.createObjectNode();
+                lightNode.put("matchPercent", result.matchPercent());
+                safeCachePut(userId, jobId, EVAL_TYPE_LIGHT,
+                        mapper.writeValueAsString(lightNode));
+            } catch (Exception e) {
+                log.debug("[EvalCache] post-deep serialization failed jobId={}: {}", jobId, e.getMessage());
+            }
         }
 
         return result;
@@ -248,22 +275,29 @@ public class ParallelJobEvaluationService {
         Job job = rankedJob.job();
         UUID jobId = job.getId();
 
-        // Cache hit
-        int cached = cache.getLight(userId, jobId);
-        if (cached >= 0) {
-            log.debug("[Light] Cache HIT userId={} jobId={} score={}", userId, jobId, cached);
+        // Cache hit — read via primitive, emit metric
+        String cachedJson = cache.get(userId, jobId, EVAL_TYPE_LIGHT);
+        if (cachedJson != null) {
+            meterRegistry.counter("ai.eval.cache.hit", "type", "LIGHT_SCORE").increment();
+            int matchPercent = parseMatchPercent(cachedJson);
+            log.debug("[Light] Cache HIT userId={} jobId={} score={}", userId, jobId, matchPercent);
             progressStore.recordJobEvaluated(userId, job.getSourceName());
-            return lightResult(job, cached);
+            return lightResult(job, matchPercent);
         }
 
-        // Build and execute light prompt via provider router
+        // Cache miss — build and execute light prompt via provider router
         String jd = job.getDescription() != null ? job.getDescription() : job.getTitle();
         String prompt = String.format(LIGHT_SCORE_PROMPT, cvSummary, job.getTitle(), jd);
 
         try {
             String rawJson = router.routePrompt(prompt, userId, "light-eval");
             int matchPercent = parseMatchPercent(rawJson);
-            cache.putLight(userId, jobId, matchPercent);
+
+            // Write to cache via primitive
+            ObjectNode node = mapper.createObjectNode();
+            node.put("matchPercent", matchPercent);
+            safeCachePut(userId, jobId, EVAL_TYPE_LIGHT, mapper.writeValueAsString(node));
+
             progressStore.recordJobEvaluated(userId, job.getSourceName());
             return lightResult(job, matchPercent);
         } catch (Exception e) {
@@ -273,8 +307,24 @@ public class ParallelJobEvaluationService {
         }
     }
 
+    // ── Private: helpers ───────────────────────────────────────────────────────
+
+    /**
+     * Fail-safe cache write. AiEvalCacheService.put() already swallows internally;
+     * this outer guard satisfies the spec requirement that cache failures never
+     * propagate to evaluation callers.
+     */
+    private void safeCachePut(UUID userId, UUID jobId, String evalType, String json) {
+        try {
+            cache.put(userId, jobId, evalType, json);
+        } catch (Exception e) {
+            log.debug("[EvalCache] put skipped userId={} jobId={} evalType={}: {}",
+                    userId, jobId, evalType, e.getMessage());
+        }
+    }
+
     private ScoredResult lightResult(Job job, int matchPercent) {
-        com.fasterxml.jackson.databind.node.ObjectNode node = mapper.createObjectNode();
+        ObjectNode node = mapper.createObjectNode();
         node.put("matchPercent", matchPercent);
         node.put("evaluationStatus", "LIGHT");
         return new ScoredResult(job, node, matchPercent);
@@ -362,7 +412,7 @@ public class ParallelJobEvaluationService {
 
     public record ScoredResult(Job job, JsonNode scoreBreakdown, int matchPercent) {
         public static ScoredResult failed(Job job, ObjectMapper mapper) {
-            com.fasterxml.jackson.databind.node.ObjectNode node = mapper.createObjectNode();
+            ObjectNode node = mapper.createObjectNode();
             node.put("evaluationStatus", "INCOMPLETE");
             node.put("matchPercent", 0);
             node.put("overallScore", 0);
