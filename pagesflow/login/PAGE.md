@@ -18,7 +18,7 @@ Sign-in page for returning users. Supports email/password and Google OAuth, opti
 | Param | Effect |
 |-------|--------|
 | `?reason=session_expired` | Shows "Your session expired. Please sign in again." banner |
-| `?email=` | Prefills the email field |
+| `?email=` | Prefills the email field, then is stripped from the URL via `history.replaceState` (avoids leaking email in bookmarks/history) |
 
 ## Fields and inputs
 
@@ -45,7 +45,7 @@ Google sign-in does not use the word CAPTCHA.
 | Action | Trigger | Result |
 |--------|---------|--------|
 | Sign in (email) | Form submit | Validates captcha client-side → `AuthContext.signIn` → `POST /auth/login` with `captchaToken` |
-| Sign in (Google) | `LoginGoogleButton` credential | `AuthContext.signInWithGoogle` → `POST /auth/google` (no captcha) |
+| Sign in (Google) | `LoginGoogleButton` credential | `AuthContext.signInWithGoogle` → `POST /auth/google` (visible Google button; no captcha) |
 | Refresh security check | Button on captcha row | New `GET /auth/captcha/challenge` |
 | Forgot password | Link | Navigate to `/forgot-password` |
 | Sign up | Footer link | Navigate to `/signup` |
@@ -139,7 +139,7 @@ sequenceDiagram
 ## Edge cases
 
 - **Session expired redirect**: Axios interceptor sends users to `/login?reason=session_expired`.
-- **Email prefill**: `?email=` pre-populates the field.
+- **Email prefill**: `?email=` pre-populates the field; the query param is removed from the address bar immediately after read.
 - **One-time challenge**: Each `challengeId` is consumed on verify; refresh or retry fetches a new one.
 - **Challenge TTL**: 10 minutes server-side; expired challenges return invalid captcha.
 - **Google-only account**: Server returns "This account uses Google Sign-In" for password login.

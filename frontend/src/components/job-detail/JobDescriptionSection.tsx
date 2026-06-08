@@ -57,9 +57,9 @@ export function JobDescriptionSection({ job, profile, onDescriptionLoaded }: Pro
           <JobDescriptionView
             description={description}
             title={job.title}
-            profile={profile}
-            matchedSkills={job.matchedSkills}
-            unmatchedSkills={job.unmatchedSkills}
+            profile={profile ?? null}
+            {...(job.matchedSkills ? { matchedSkills: job.matchedSkills } : {})}
+            {...(job.unmatchedSkills ? { unmatchedSkills: job.unmatchedSkills } : {})}
           />
         </div>
       ) : (

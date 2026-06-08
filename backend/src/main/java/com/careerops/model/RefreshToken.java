@@ -29,8 +29,23 @@ public class RefreshToken {
     @Column(name = "device_info")
     private String deviceInfo;
 
+    @Column(name = "ip_address", length = 45)
+    private String ipAddress;
+
     @Column(name = "last_used_at")
     private Instant lastUsedAt;
+
+    @Column(name = "token_family_id")
+    private UUID tokenFamilyId;
+
+    @Column(name = "consumed_at")
+    private Instant consumedAt;
+
+    @Column(name = "remember_me", nullable = false)
+    private boolean rememberMe;
+
+    @Column(name = "binding_hash", length = 64)
+    private String bindingHash;
 
     @Column(name = "created_at")
     private Instant createdAt;

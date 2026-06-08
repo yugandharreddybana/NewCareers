@@ -31,6 +31,7 @@ Legacy-style profile editor inside AppShell (sidebar + TopBar with notifications
 | CV file | No | `.pdf`, `.docx` | Active CV |
 | Portfolio title | Yes (add item) | Non-empty trim | Portfolio modal |
 | Portfolio URL | No | URL text | Portfolio modal |
+| Portfolio location | No | Free text | Portfolio modal |
 | Portfolio description | No | Textarea | Portfolio modal |
 
 ## Actions

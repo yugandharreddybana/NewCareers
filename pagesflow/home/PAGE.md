@@ -2,7 +2,7 @@
 
 ## Overview
 
-Public marketing landing page for NewCareers. Presents product value, feature highlights, animated stats, and CTAs to sign up or get started. Accessible to everyone with no authentication required. Renders a standalone layout (custom nav + footer, no `AppShell`).
+Public marketing landing page for NewCareers. Split-hero layout with dark intelligence panel, six feature cards, three testimonial cards, and signup CTAs. Accessible to everyone with no authentication required. Renders a standalone layout (custom fixed nav + footer, no `AppShell`).
 
 ## Route
 
@@ -23,13 +23,14 @@ Public marketing landing page for NewCareers. Presents product value, feature hi
 
 | Action | Trigger | Result |
 |--------|---------|--------|
-| Get Started | Nav / hero CTA | Navigate to `/get-started` |
-| Sign In | Nav link | Navigate to `/login` |
-| Build Profile / Create Free Account | Feature / CTA sections | Navigate to `/signup` |
-| For Employers | Hero secondary CTA | Navigate to `/employers` (no route registered — 404) |
-| Contact Sales | Footer / CTA | `mailto:sales@newcareers.ai` |
-| Anchor scroll | Nav links (`#jobs`, `#employers`, `#tips`, `#about`) | Smooth scroll to in-page sections |
-| Legal links | Footer | Navigate to `/privacy`, `/terms`, `/help`, `/accessibility` |
+| Start Free | Nav / hero CTA | Navigate to `/get-started` |
+| See Plans | Hero secondary CTA | Navigate to `/pricing` (alias → `/billing`) |
+| Log In | Nav / footer link | Navigate to `/login` |
+| Features / How It Works | Nav / footer | Smooth scroll to `#features` |
+| Pricing | Nav / footer | Navigate to `/pricing` |
+| Blog | Nav / footer | Placeholder (`#`) |
+| Privacy / Terms | Footer Legal | Navigate to `/privacy`, `/terms` |
+| Connect | Footer Legal | `mailto:sales@newcareers.ai` |
 | Mobile menu | Hamburger toggle | Opens/closes mobile nav drawer |
 
 ## Auth and session
@@ -50,8 +51,8 @@ N/A — public page. `AuthContext` may still bootstrap in the background via `Ap
 |------|------|
 | Page | `frontend/src/pages/Home.tsx` |
 | Components | `frontend/src/components/PageMeta.tsx` |
-| Hooks / services | — |
-| Styles | Tailwind utility classes (inline) |
+| Brand constants | `frontend/src/lib/brand.ts` |
+| Styles | `frontend/src/styles/home.css` (landing animations + glass) |
 
 ### Middleware
 
@@ -74,17 +75,18 @@ sequenceDiagram
     participant Router
 
     User->>Home: GET /
-    Home->>Home: mount animations (IntersectionObserver, parallax)
-    User->>Router: click CTA (e.g. Get Started)
-    Router-->>User: navigate /get-started or /signup
+    Home->>Home: mount slide-up + data-stream animations
+    User->>Router: click CTA (e.g. Start Free)
+    Router-->>User: navigate /get-started or /login
 ```
 
 ## Edge cases
 
-- Parallax and entrance animations respect `prefers-reduced-motion: reduce`.
-- `/employers` link in hero has no matching route in `App.tsx` — users land on the catch-all 404.
-- Brand name in UI is "NewCareers"; `PageMeta` title uses "NewCareers | Your Career Evolution Starts Here".
-- External images loaded from Google-hosted URLs (platform preview, avatars).
+- Slide-up and data-stream animations respect `prefers-reduced-motion: reduce` (disabled in `home.css`).
+- `PageMeta` title: `{BRAND_NAME} | Land Your Dream Job`.
+- External dashboard preview image loaded from Google-hosted URL.
+- Blog, Changelog, Careers, and Watch Demo are placeholders with no route/handler yet.
+- Floating overlay cards on hero dashboard hidden on very small screens (`hidden sm:block`) to avoid overflow.
 
 ## Related docs
 

@@ -1,5 +1,7 @@
 package com.careerops.exception;
 
+import com.careerops.dto.PlanLimitErrorResponse;
+import com.careerops.exception.PlanLimitExceededException;
 import jakarta.validation.ConstraintViolationException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -69,6 +71,17 @@ public class GlobalExceptionHandler {
         ));
     }
 
+    @ExceptionHandler(PlanLimitExceededException.class)
+    public ResponseEntity<PlanLimitErrorResponse> handlePlanLimitExceeded(PlanLimitExceededException ex, WebRequest req) {
+        log.warn("Plan limit exceeded [{}]: feature={} plan={}", path(req), ex.getFeature(), ex.getPlan());
+        return ResponseEntity.status(HttpStatus.PAYMENT_REQUIRED).body(new PlanLimitErrorResponse(
+                "PLAN_LIMIT_EXCEEDED",
+                ex.getFeature(),
+                ex.getPlan().name(),
+                ex.getUpgradeUrl()
+        ));
+    }
+
     @ExceptionHandler(ApiException.class)
     public ResponseEntity<ErrorResponse> handleApiException(ApiException ex, WebRequest req) {
         HttpStatus status = ex.getStatus() != null ? ex.getStatus() : HttpStatus.INTERNAL_SERVER_ERROR;
@@ -85,7 +98,7 @@ public class GlobalExceptionHandler {
                 ex.getMessage(),
                 status.value(),
                 java.time.Instant.now(),
-                null,
+                ex.getErrorCode(),
                 path,
                 correlationId,
                 null,

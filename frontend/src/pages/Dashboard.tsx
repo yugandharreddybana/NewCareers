@@ -6,6 +6,7 @@ import {
   readWelcomePendingFlag,
 } from '@/components/dashboard/CareersHomeDashboard';
 import { DomainPermitWidget } from '@/components/analytics/DomainPermitWidget';
+import { TrialBanner } from '@/components/TrialBanner';
 import { profileApi } from '@/services/api';
 import { queryKeys } from '@/lib/queryKeys';
 import { resolveProfileDomainKey } from '@/utils/domainResolver';
@@ -42,6 +43,11 @@ export default function Dashboard() {
   );
 
   return (
-    <CareersHomeDashboard celebrate={celebrate} beforeFastTrack={permitSection} />
+    <>
+      <TrialBanner />
+      <div className="pt-14">
+        <CareersHomeDashboard celebrate={celebrate} beforeFastTrack={permitSection} />
+      </div>
+    </>
   );
 }

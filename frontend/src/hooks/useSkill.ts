@@ -1,8 +1,9 @@
-import { useCallback, useState } from 'react';
+import { useCallback, useEffect, useRef, useState, type Dispatch, type SetStateAction } from 'react';
 
 import toast from 'react-hot-toast';
 
 import { skillsApi } from '../services/skillsApi';
+import { getUserFacingErrorMessage } from '@/lib/userFacingError';
 
 import type {
   SkillName,
@@ -27,6 +28,88 @@ const AUTO_RUN_SKILLS = new Set<SkillName>([
   'scan',
 ]);
 
+function skillErrorMessage(err: unknown): string {
+  if (err instanceof Error && err.message && !/request failed|status code|network error/i.test(err.message)) {
+    return err.message;
+  }
+  return getUserFacingErrorMessage(err, 'Something went wrong. Please try again.');
+}
+
+function applySkillResponse(
+  setSkillState: Dispatch<SetStateAction<UseSkillState>>,
+  res: SkillRunResponse,
+  activeSkillName: SkillName | null = null,
+) {
+  switch (res.type) {
+    case 'RESULT':
+      setSkillState(prev => ({
+        ...prev,
+        state:    'done',
+        data:     (res.data as Record<string, unknown>) ?? null,
+        question: null,
+        conversationId: null,
+        missingFields: [],
+        error: null,
+        skillName: activeSkillName ?? prev.skillName,
+      }));
+      break;
+
+    case 'QUESTION':
+      if (activeSkillName && AUTO_RUN_SKILLS.has(activeSkillName)) {
+        setSkillState(prev => ({
+          ...prev,
+          state: 'error',
+          data: null,
+          question: null,
+          conversationId: null,
+          missingFields: [],
+          error: 'This skill runs automatically. Click Re-run to try again.',
+          skillName: activeSkillName,
+        }));
+        break;
+      }
+      setSkillState(prev => ({
+        ...prev,
+        state:          'waiting_answer',
+        question:       res.question ?? null,
+        conversationId: res.conversationId ?? null,
+        error:          null,
+        skillName:      activeSkillName ?? prev.skillName,
+      }));
+      break;
+
+    case 'PROFILE_INCOMPLETE':
+      setSkillState(prev => ({
+        ...prev,
+        state:         'profile_incomplete',
+        data:          null,
+        question:      null,
+        conversationId: null,
+        missingFields: res.missingFields ?? [],
+        error:         null,
+        skillName:     activeSkillName ?? prev.skillName,
+      }));
+      break;
+
+    case 'ERROR':
+      setSkillState(prev => ({
+        ...prev,
+        state:    'error',
+        data:     null,
+        question: null,
+        conversationId: null,
+        error:    res.errorMessage ?? 'An error occurred.',
+        skillName: activeSkillName ?? prev.skillName,
+      }));
+      break;
+
+    default: {
+      const exhaustiveCheck: never = res.type;
+      throw new Error(`Unhandled skill response type: ${exhaustiveCheck}`);
+    }
+  }
+}
+
 /**
  * useSkill — state machine hook for running NewCareers skills.
  *
@@ -47,76 +130,10 @@ export function useSkill() {
     skillName:      null,
   });
 
-  function applyResponse(res: SkillRunResponse, activeSkillName: SkillName | null = null) {
-    switch (res.type) {
-      case 'RESULT':
-        setSkillState(prev => ({
-          ...prev,
-          state:    'done',
-          data:     (res.data as Record<string, unknown>) ?? null,
-          question: null,
-          conversationId: null,
-          missingFields: [],
-          error: null,
-          skillName: activeSkillName ?? prev.skillName,
-        }));
-        break;
-
-      case 'QUESTION':
-        if (activeSkillName && AUTO_RUN_SKILLS.has(activeSkillName)) {
-          setSkillState(prev => ({
-            ...prev,
-            state: 'error',
-            data: null,
-            question: null,
-            conversationId: null,
-            missingFields: [],
-            error: 'This skill runs automatically. Click Re-run to try again.',
-            skillName: activeSkillName,
-          }));
-          break;
-        }
-        setSkillState(prev => ({
-          ...prev,
-          state:          'waiting_answer',
-          question:       res.question ?? null,
-          conversationId: res.conversationId ?? null,
-          error:          null,
-          skillName:      activeSkillName ?? prev.skillName,
-        }));
-        break;
-
-      case 'PROFILE_INCOMPLETE':
-        setSkillState(prev => ({
-          ...prev,
-          state:         'profile_incomplete',
-          data:          null,
-          question:      null,
-          conversationId: null,
-          missingFields: res.missingFields ?? [],
-          error:         null,
-          skillName:     activeSkillName ?? prev.skillName,
-        }));
-        break;
-
-      case 'ERROR':
-        setSkillState(prev => ({
-          ...prev,
-          state:    'error',
-          data:     null,
-          question: null,
-          conversationId: null,
-          error:    res.errorMessage ?? 'An error occurred.',
-          skillName: activeSkillName ?? prev.skillName,
-        }));
-        break;
-
-      default: {
-        const exhaustiveCheck: never = res.type;
-        throw new Error(`Unhandled skill response type: ${exhaustiveCheck}`);
-      }
-    }
-  }
+  const skillStateRef = useRef(skillState);
+  useEffect(() => {
+    skillStateRef.current = skillState;
+  }, [skillState]);
 
   const prepareSkill = useCallback((skillName: SkillName) => {
     setSkillState(prev => ({
@@ -145,16 +162,14 @@ export function useSkill() {
 
     try {
       const res = await skillsApi.start(req);
-      applyResponse(res);
+      applySkillResponse(setSkillState, res);
     } catch (err: unknown) {
-      const msg = (err as { normalizedMessage?: string })?.normalizedMessage
-               || 'Something went wrong. Please try again.';
-      setSkillState(prev => ({ ...prev, state: 'error', error: msg }));
+      setSkillState(prev => ({ ...prev, state: 'error', error: skillErrorMessage(err) }));
     }
   }, []);
 
   const handleAnswer = useCallback(async (answer: string) => {
-    const { conversationId, skillName } = skillState;
+    const { conversationId, skillName } = skillStateRef.current;
     if (!conversationId || !skillName) return;
 
     setSkillState(prev => ({
@@ -166,13 +181,11 @@ export function useSkill() {
 
     try {
       const res = await skillsApi.reply({ conversationId, answer });
-      applyResponse(res, skillName);
+      applySkillResponse(setSkillState, res, skillName);
     } catch (err: unknown) {
-      const msg = (err as { normalizedMessage?: string })?.normalizedMessage
-               || 'Something went wrong. Please try again.';
-      setSkillState(prev => ({ ...prev, state: 'error', error: msg }));
+      setSkillState(prev => ({ ...prev, state: 'error', error: skillErrorMessage(err) }));
     }
-  }, [skillState]);
+  }, []);
 
   const downloadPdf = useCallback(async (
     userJobId: string,
@@ -207,7 +220,7 @@ export function useSkill() {
         return false;
       }
       if (res.type === 'RESULT' && res.data != null) {
-        applyResponse(res, skill);
+        applySkillResponse(setSkillState, res, skill);
         return true;
       }
       if (res.type === 'ERROR') {

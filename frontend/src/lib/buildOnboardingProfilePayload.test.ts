@@ -52,7 +52,7 @@ describe('buildOnboardingProfilePayload', () => {
       goalTitle: 'Senior Product Designer',
       targetRoles: ['Software Engineer'],
       techStack: ['React', 'TypeScript'],
-      sectors: ['Full-time'],
+      workTypes: ['Full-time'],
       location: 'Dublin, Ireland',
       salaryMin: 60_000,
       salaryMax: 120_000,
@@ -74,6 +74,48 @@ describe('buildOnboardingProfilePayload', () => {
       current: false,
     });
     expect(payload.education).toHaveLength(1);
+  });
+
+  it('includes normalized profile links when provided', () => {
+    const payload = buildOnboardingProfilePayload(
+      {
+        fullName: 'Jane Doe',
+        headline: '',
+        experienceYears: '3-5',
+        location: 'Dublin',
+        linkedInUrl: 'linkedin.com/in/jane',
+        portfolioUrl: 'jane.dev',
+        githubUrl: 'github.com/jane',
+      },
+      [],
+      [],
+      basePreferences(),
+    );
+
+    expect(payload.linkedInUrl).toBe('https://linkedin.com/in/jane');
+    expect(payload.websiteUrl).toBe('https://jane.dev');
+    expect(payload.githubUrl).toBe('https://github.com/jane');
+  });
+
+  it('omits profile links when blank', () => {
+    const payload = buildOnboardingProfilePayload(
+      {
+        fullName: 'Jane Doe',
+        headline: '',
+        experienceYears: '3-5',
+        location: 'Dublin',
+        linkedInUrl: '',
+        portfolioUrl: '  ',
+        githubUrl: '',
+      },
+      [],
+      [],
+      basePreferences(),
+    );
+
+    expect(payload.linkedInUrl).toBeUndefined();
+    expect(payload.websiteUrl).toBeUndefined();
+    expect(payload.githubUrl).toBeUndefined();
   });
 
   it('clears end date on current roles', () => {

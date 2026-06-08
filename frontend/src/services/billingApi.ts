@@ -2,9 +2,42 @@
  * billingApi.ts — typed service layer for /api/billing
  *
  * All calls proxy through Node middleware → Java backend → Stripe.
- * Centralises billing API calls so pages don’t inline raw api.get/post calls.
  */
 import { api } from './api';
+
+export type SubscriptionPlanCode = 'FREE' | 'PRO' | 'ENTERPRISE';
+
+export type SubscriptionStatusCode =
+  | 'ACTIVE'
+  | 'TRIALING'
+  | 'PAST_DUE'
+  | 'CANCELLED'
+  | 'CANCELED';
+
+export interface SubscriptionResponse {
+  plan: SubscriptionPlanCode;
+  status: SubscriptionStatusCode;
+  trialEndsAt: string | null;
+  currentPeriodEnd: string | null;
+  daysRemaining: number;
+  usageThisMonth: {
+    aiRuns: number;
+    applications: number;
+  };
+}
+
+export interface SessionUrlResponse {
+  url: string;
+}
+
+/** @deprecated Legacy shape — prefer SubscriptionResponse */
+export interface Subscription {
+  status: 'active' | 'trialing' | 'cancelled' | 'past_due' | 'none';
+  planId: string | null;
+  planName: string | null;
+  currentPeriodEnd: string | null;
+  cancelAtPeriodEnd: boolean;
+}
 
 export interface Plan {
   id: string;
@@ -13,14 +46,6 @@ export interface Plan {
   currency: string;
   interval: 'month' | 'year';
   features: string[];
-}
-
-export interface Subscription {
-  status: 'active' | 'trialing' | 'cancelled' | 'past_due' | 'none';
-  planId: string | null;
-  planName: string | null;
-  currentPeriodEnd: string | null;
-  cancelAtPeriodEnd: boolean;
 }
 
 export interface Invoice {
@@ -41,21 +66,27 @@ export interface UsageMetrics {
 }
 
 export const billingApi = {
-  /** Current subscription status */
+  /** Current org subscription (plan, status, trial) */
   getSubscription: () =>
-    api.get<Subscription>('/billing').then(r => r.data),
+    api.get<SubscriptionResponse>('/billing/subscription').then(r => r.data),
+
+  /** Create Stripe checkout session — returns { url } to redirect to */
+  createCheckoutSession: (plan: SubscriptionPlanCode) =>
+    api.post<SessionUrlResponse>('/billing/checkout-session', { plan }).then(r => r.data),
 
   /** List available plans */
   getPlans: () =>
     api.get<Plan[]>('/billing/plans').then(r => r.data),
 
-  /** Create Stripe checkout session — returns { url } to redirect to */
-  createCheckout: (planId: string) =>
-    api.post<{ url: string }>('/billing/checkout', { planId }).then(r => r.data),
-
   /** Open Stripe customer portal — returns { url } to redirect to */
   openPortal: () =>
-    api.post<{ url: string }>('/billing/portal').then(r => r.data),
+    api.post<SessionUrlResponse>('/billing/customer-portal', {}).then(r => r.data),
+
+  /** @deprecated Use createCheckoutSession */
+  createCheckout: (planId: string) => {
+    const plan = planId.toUpperCase() as SubscriptionPlanCode;
+    return billingApi.createCheckoutSession(plan);
+  },
 
   /** List past invoices */
   getInvoices: () =>

@@ -30,8 +30,13 @@ import { tokenStore } from '@/lib/tokenStore';
 import { reportError } from '@/lib/telemetry';
 import { API_V1_URL, DEV_BYPASS } from '@/lib/env';
 import { isJwtExpired } from '@/lib/jwt';
-import { endApiLoading, startApiLoading } from '@/lib/apiLoading';
+import { endApiLoading, resetApiLoading, startApiLoading } from '@/lib/apiLoading';
 import '@/lib/apiLoading';
+import {
+  emitPlanLimitExceeded,
+  parsePlanLimitResponse,
+} from '@/lib/planLimitEvents';
+import type { PlanLimitPayload } from '@/lib/planLimitEvents';
 import type { User, Profile, KanbanColumn, JobCard, JobDetail, JobsListResponse } from '@/types';
 import { normalizeJobCard, normalizeJobDetail } from '@/lib/normalizeJobCard';
 
@@ -47,9 +52,23 @@ interface SignupBody {
   name: string;
   username: string;
   email: string;
-  password: string;
+  password?: string;
+  signupIntentId?: string;
   consents: SignupConsentsBody;
   emailVerificationId?: string;
+}
+
+interface SignupIntentBody {
+  email: string;
+  password: string;
+  consents: SignupConsentsBody;
+  name?: string;
+  captchaToken?: string;
+}
+
+interface SignupIntentResponse {
+  signupIntentId: string;
+  expiresAt: string;
 }
 
 interface OnboardingOtpSentResponse {
@@ -71,31 +90,32 @@ export interface OnboardingCvParseResponse {
     endDate: string;
     current: boolean;
     description: string;
+    location?: string;
   }>;
   education: Array<{
     schoolName: string;
     degree: string;
     fieldOfStudy: string;
     graduationYear: string;
+    location?: string;
   }>;
   projects?: Array<{
     title: string;
     description: string;
+    url?: string;
+    location?: string;
+    techTags?: string[];
   }>;
   rolesFound: number;
   educationFound: number;
   projectsFound?: number;
+  linkedInUrl?: string | null;
+  githubUrl?: string | null;
+  websiteUrl?: string | null;
 }
-export interface WordCaptchaLetter {
-  character: string;
-  rotate: number;
-  translateY: number;
-  color: string;
-}
-
 export interface WordCaptchaChallenge {
   challengeId: string;
-  letters: WordCaptchaLetter[];
+  imageSvg: string;
 }
 
 interface LoginBody {
@@ -109,6 +129,10 @@ interface AuthResponse {
   token?: string;
   refreshToken?: string;
 }
+
+export type LoginFlowResponse =
+  | { requiresTwoFactor: true; challengeToken: string }
+  | { requiresTwoFactor?: false; user: User; token?: string; refreshToken?: string };
 interface PublicStats {
   jobs: number;
   users: number;
@@ -119,12 +143,38 @@ interface PublicStats {
 export const AUTH_REFRESHED_EVENT = 'co:auth:refreshed';
 export const AUTH_LOGGED_OUT_EVENT = 'co:auth:logged-out';
 
-/** Read the co_csrf cookie that the middleware sets on first response. */
+let csrfTokenMemory: string | null = null;
+let csrfInitPromise: Promise<void> | null = null;
+
+/** Read CSRF token from memory (prod) or co_csrf cookie (dev). */
 function getCsrfToken(): string | null {
+  if (csrfTokenMemory) return csrfTokenMemory;
   if (typeof document === 'undefined') return null;
   const match = document.cookie.match(/(?:^|;\s*)co_csrf=([^;]+)/);
   return match && match[1] ? decodeURIComponent(match[1]) : null;
 }
+
+export async function initCsrfToken(): Promise<void> {
+  if (DEV_BYPASS || typeof window === 'undefined') return;
+  if (csrfInitPromise) return csrfInitPromise;
+  csrfInitPromise = (async () => {
+    try {
+      const resp = await axios.get<{ token?: string }>(`${API_V1_URL}/csrf`, {
+        withCredentials: true,
+        timeout: 10_000,
+      });
+      const header = resp.headers['x-csrf-token'];
+      csrfTokenMemory = resp.data?.token
+        ?? (typeof header === 'string' ? header : null)
+        ?? getCsrfToken();
+    } catch {
+      csrfTokenMemory = getCsrfToken();
+    }
+  })();
+  return csrfInitPromise;
+}
+
+void initCsrfToken();
 
 // ── Axios instance ─────────────────────────────────────────────────────────
 export const api = axios.create({
@@ -172,21 +222,11 @@ api.interceptors.request.use((config: InternalAxiosRequestConfig) => {
 });
 
 // ── Refresh-token machinery ────────────────────────────────────────────────
-let isRefreshing = false;
-type FailedQueueItem = { resolve: (token: string) => void; reject: (reason?: unknown) => void };
-let failedQueue: FailedQueueItem[] = [];
+let refreshPromise: Promise<string> | null = null;
 
 // Pass 6 #6.025 — replace the `_retry` flag-on-config with a WeakSet so each
 // request is only ever retried once even when React Query retries it.
 const retriedConfigs = new WeakSet<AxiosRequestConfig>();
-
-function processQueue(error: unknown, token: string | null = null) {
-  for (const { resolve, reject } of failedQueue) {
-    if (error || token === null) reject(error);
-    else                         resolve(token);
-  }
-  failedQueue = [];
-}
 
 function emit(eventName: string, detail?: unknown): void {
   if (typeof window === 'undefined') return;
@@ -212,11 +252,17 @@ const PUBLIC_PATHS_FRONTEND = new Set([
 /** Pre-auth API routes — must not attach Bearer tokens or trigger silent refresh on 401. */
 export const PUBLIC_AUTH_API_PATHS = new Set([
   '/auth/register',
+  '/auth/signup',
+  '/auth/signup-intent',
   '/auth/login',
+  '/auth/google',
+  '/auth/refresh',
+  '/auth/logout',
   '/auth/captcha/challenge',
   '/auth/forgot-password',
   '/auth/reset-password',
   '/auth/onboarding/check-email',
+  '/auth/onboarding/check-password',
   '/auth/onboarding/send-verification-otp',
   '/auth/onboarding/resend-verification-otp',
   '/auth/onboarding/verify-email',
@@ -238,6 +284,9 @@ export function isPublicAuthApiPath(url: string | undefined): boolean {
     : url.startsWith('/api/')
       ? url.replace(/^\/api\//, '/')
       : url;
+  if (normalized.startsWith('/auth/signup-intent/') && normalized.endsWith('/exists')) {
+    return true;
+  }
   return PUBLIC_AUTH_API_PATHS.has(normalized);
 }
 
@@ -261,9 +310,24 @@ export function shouldSkipInitialSessionProbe(): boolean {
   return false;
 }
 
+/** Pure helper for redirect gating (deferred signup on /onboarding has no session). */
+export function shouldRedirectOnAuthFailure(pathname: string, hasSession: boolean): boolean {
+  if (pathname === '/onboarding' && !hasSession) return false;
+  if (PUBLIC_PATHS_FRONTEND.has(pathname)) return false;
+  return true;
+}
+
+/** Pure helper for jobs listAll pagination stop condition. */
+export function shouldBreakJobPagination(hasMore: boolean, itemsLength: number): boolean {
+  if (!hasMore) return true;
+  if (itemsLength === 0) return true;
+  return false;
+}
+
 interface ErrorBody {
   error?: string;
   message?: string;
+  code?: string;
   captchaRequired?: boolean;
 }
 
@@ -283,41 +347,32 @@ async function readErrorBody(err: AxiosError): Promise<ErrorBody> {
   return {};
 }
 
-/** Persist tokens after login / refresh — refresh may live in HttpOnly cookie. */
-function applyAuthResponse(data: AuthResponse, rememberMe?: boolean): void {
-  if (data.token && data.refreshToken) {
-    tokenStore.set(data.token, data.refreshToken);
-    return;
-  }
+/** Persist tokens after login / refresh — refresh lives in HttpOnly cookie only. */
+function applyAuthResponse(data: AuthResponse): void {
   if (data.token) {
     tokenStore.setAccessOnly(data.token);
-    if (rememberMe) tokenStore.setRefreshViaCookie(true);
-    return;
   }
-  if (data.refreshToken) tokenStore.setRefresh(data.refreshToken);
+}
+
+async function postAuthRefresh(body: Record<string, unknown>): Promise<AuthResponse> {
+  const csrf = getCsrfToken();
+  const resp = await axios.post(`${API_V1_URL}/auth/refresh`, body, {
+    withCredentials: true,
+    timeout: 30_000,
+    headers: {
+      'X-Requested-With': 'XMLHttpRequest',
+      ...(csrf ? { 'X-CSRF-Token': csrf } : {}),
+    },
+  });
+  return resp.data as AuthResponse;
 }
 
 async function refreshAccessToken(): Promise<string> {
-  const sessionRefresh = tokenStore.getRefresh();
-  if (!sessionRefresh && !tokenStore.usesCookieRefresh()) {
+  if (!tokenStore.usesCookieRefresh()) {
     throw new Error('Your session expired. Please sign in again.');
   }
-  const resp = await axios.post(
-    `${API_V1_URL}/auth/refresh`,
-    sessionRefresh ? { refreshToken: sessionRefresh } : {},
-    {
-      withCredentials: true,
-      timeout: 30_000,
-      headers: {
-        'X-Requested-With': 'XMLHttpRequest',
-        ...(getCsrfToken() ? { 'X-CSRF-Token': getCsrfToken()! } : {}),
-      },
-    },
-  );
-
-  const data = resp.data as AuthResponse;
-  const rememberViaCookie = !data.refreshToken && Boolean(data.token);
-  applyAuthResponse(data, rememberViaCookie);
+  const data = await postAuthRefresh({});
+  applyAuthResponse(data);
 
   const access = data.token ?? tokenStore.getAccess();
   if (!access) {
@@ -327,6 +382,23 @@ async function refreshAccessToken(): Promise<string> {
   return access;
 }
 
+/** Deduplicated silent refresh — shared by ensureFreshSession and the 401 interceptor. */
+function getRefreshedAccessToken(): Promise<string> {
+  if (!refreshPromise) {
+    refreshPromise = refreshAccessToken()
+      .catch(err => {
+        tokenStore.clear();
+        emit(AUTH_LOGGED_OUT_EVENT);
+        redirectOnAuthFailure();
+        throw err;
+      })
+      .finally(() => {
+        refreshPromise = null;
+      });
+  }
+  return refreshPromise;
+}
+
 /** Refresh the access token when it is missing or expired (e.g. before PDF export). */
 export async function ensureFreshSession(): Promise<void> {
   if (DEV_BYPASS) return;
@@ -334,34 +406,13 @@ export async function ensureFreshSession(): Promise<void> {
   const access = tokenStore.getAccess();
   if (access && !isJwtExpired(access)) return;
 
-  if (isRefreshing) {
-    return new Promise<void>((resolve, reject) => {
-      failedQueue.push({
-        resolve: () => resolve(),
-        reject,
-      });
-    });
-  }
-
-  isRefreshing = true;
-  try {
-    await refreshAccessToken();
-    processQueue(null, tokenStore.getAccess());
-  } catch (error) {
-    processQueue(error, null);
-    tokenStore.clear();
-    emit(AUTH_LOGGED_OUT_EVENT);
-    redirectOnAuthFailure();
-    throw error;
-  } finally {
-    isRefreshing = false;
-  }
+  await getRefreshedAccessToken();
 }
 
 function redirectOnAuthFailure(): void {
   if (typeof window === 'undefined') return;
   const here = window.location.pathname;
-  if (PUBLIC_PATHS_FRONTEND.has(here) && here !== '/onboarding') return;
+  if (!shouldRedirectOnAuthFailure(here, tokenStore.hasRefreshOrCookie())) return;
   redirectOnSessionExpired(here);
 }
 
@@ -373,6 +424,11 @@ api.interceptors.response.use(
   },
   async (err: AxiosError<{ error?: string; message?: string }>) => {
     const originalRequest = err.config as InternalAxiosRequestConfig | undefined;
+
+    if (err.code === 'ERR_CANCELED') {
+      endApiLoading(originalRequest);
+      return Promise.reject(err);
+    }
 
     const isRefreshableRequest =
       originalRequest &&
@@ -395,9 +451,11 @@ api.interceptors.response.use(
         : undefined;
       const enriched429 = err as AxiosError & {
         normalizedMessage: string;
+        status?: number;
         retryAfterSeconds?: number;
       };
       enriched429.normalizedMessage = msg;
+      enriched429.status = 429;
       if (retryAfterSeconds !== undefined && Number.isFinite(retryAfterSeconds) && retryAfterSeconds > 0) {
         enriched429.retryAfterSeconds = retryAfterSeconds;
       }
@@ -407,6 +465,23 @@ api.interceptors.response.use(
       return Promise.reject(enriched429);
     }
 
+    // 402 → plan limit banner (no toast)
+    if (err.response?.status === 402) {
+      endApiLoading(originalRequest);
+      const errorBody = await readErrorBody(err);
+      const planLimit = parsePlanLimitResponse(errorBody as Record<string, unknown>);
+      if (planLimit) {
+        emitPlanLimitExceeded(planLimit);
+      }
+      const enriched402 = err as AxiosError & { normalizedMessage: string; planLimit?: PlanLimitPayload | null };
+      enriched402.normalizedMessage =
+        (errorBody as { error?: string }).error ?? 'Plan limit exceeded';
+      if (planLimit) {
+        enriched402.planLimit = planLimit;
+      }
+      return Promise.reject(enriched402);
+    }
+
   if (isRefreshableRequest) {
       retriedConfigs.add(originalRequest);
       // Release the original request's loader before retry — otherwise the retry
@@ -414,27 +489,7 @@ api.interceptors.response.use(
       endApiLoading(originalRequest);
 
       try {
-        const access = await (async () => {
-          if (isRefreshing) {
-            return new Promise<string>((resolve, reject) => {
-              failedQueue.push({ resolve, reject });
-            });
-          }
-          isRefreshing = true;
-          try {
-            const token = await refreshAccessToken();
-            processQueue(null, token);
-            return token;
-          } catch (refreshError) {
-            processQueue(refreshError, null);
-            tokenStore.clear();
-            emit(AUTH_LOGGED_OUT_EVENT);
-            redirectOnAuthFailure();
-            throw refreshError;
-          } finally {
-            isRefreshing = false;
-          }
-        })();
+        const access = await getRefreshedAccessToken();
 
         if (originalRequest.headers) {
           const headers = originalRequest.headers as Record<string, string>;
@@ -477,10 +532,14 @@ export const publicApi = {
 
 // ── Auth API ──────────────────────────────────────────────────────────────
 export const authApi = {
+  createSignupIntent: (b: SignupIntentBody): Promise<SignupIntentResponse> =>
+    api
+      .post<SignupIntentResponse>('/auth/signup-intent', b, { skipGlobalLoader: true })
+      .then(r => r.data),
+
   signup: async (b: SignupBody): Promise<AuthResponse> => {
-    const r = await api.post<AuthResponse>('/auth/signup', b);
-    if (r.data.token)        tokenStore.setAccess(r.data.token);
-    if (r.data.refreshToken) tokenStore.setRefresh(r.data.refreshToken);
+    const r = await api.post<AuthResponse>('/auth/register', b);
+    applyAuthResponse(r.data);
     return r.data;
   },
 
@@ -489,9 +548,22 @@ export const authApi = {
       .get<WordCaptchaChallenge>('/auth/captcha/challenge', { skipGlobalLoader: true })
       .then(r => r.data),
 
-  login: async (b: LoginBody): Promise<AuthResponse> => {
-    const r = await api.post<AuthResponse>('/auth/login', b, { skipGlobalLoader: true });
-    applyAuthResponse(r.data, b.rememberMe);
+  login: async (b: LoginBody): Promise<LoginFlowResponse> => {
+    const r = await api.post<LoginFlowResponse>('/auth/login', b, { skipGlobalLoader: true });
+    if (r.data.requiresTwoFactor) {
+      return r.data;
+    }
+    applyAuthResponse(r.data);
+    return r.data;
+  },
+
+  verifyTwoFactor: async (challengeToken: string, code: string): Promise<AuthResponse> => {
+    const r = await api.post<AuthResponse>(
+      '/auth/two-factor/verify',
+      { challengeToken, code },
+      { skipGlobalLoader: true },
+    );
+    applyAuthResponse(r.data);
     return r.data;
   },
 
@@ -499,13 +571,39 @@ export const authApi = {
     idToken: string,
     rememberMe?: boolean,
     consents?: SignupConsentsBody,
+    captchaToken?: string,
   ): Promise<AuthResponse> => {
     const r = await api.post<AuthResponse>(
       '/auth/google',
-      { idToken, rememberMe: Boolean(rememberMe), consents },
+      {
+        idToken,
+        rememberMe: Boolean(rememberMe),
+        consents,
+        ...(captchaToken ? { captchaToken } : {}),
+      },
       { skipGlobalLoader: true },
     );
-    applyAuthResponse(r.data, rememberMe);
+    applyAuthResponse(r.data);
+    return r.data;
+  },
+
+  confirmGoogleLink: async (
+    idToken: string,
+    password: string,
+    rememberMe?: boolean,
+    captchaToken?: string,
+  ): Promise<AuthResponse> => {
+    const r = await api.post<AuthResponse>(
+      '/auth/google/link/confirm',
+      {
+        idToken,
+        password,
+        rememberMe: Boolean(rememberMe),
+        ...(captchaToken ? { captchaToken } : {}),
+      },
+      { skipGlobalLoader: true },
+    );
+    applyAuthResponse(r.data);
     return r.data;
   },
 
@@ -515,12 +613,11 @@ export const authApi = {
     return { success: true };
   },
 
-  refresh: async (refreshToken: string): Promise<AuthResponse> => {
-    const r = await api.post<AuthResponse>('/auth/refresh', { refreshToken });
-    if (r.data.token && r.data.refreshToken) tokenStore.set(r.data.token, r.data.refreshToken);
-    else if (r.data.token) tokenStore.setAccess(r.data.token);
-    else if (r.data.refreshToken) tokenStore.setRefresh(r.data.refreshToken);
-    return r.data;
+  refresh: async (): Promise<AuthResponse> => {
+    const data = await postAuthRefresh({});
+    applyAuthResponse(data);
+    if (data.token) emit(AUTH_REFRESHED_EVENT);
+    return data;
   },
 
   me: (): Promise<User> => api.get<User>('/auth/me').then(r => r.data),
@@ -530,26 +627,39 @@ export const authApi = {
       .post<void>('/auth/forgot-password', { email }, { skipGlobalLoader: true })
       .then(r => r.data),
 
-  resetPassword: (b: { email: string; otp: string; newPassword: string }): Promise<void> =>
+  resetPassword: (b: {
+    email: string;
+    otp: string;
+    newPassword: string;
+    accessToken?: string;
+  }): Promise<void> =>
     api
       .post<void>('/auth/reset-password', b, { skipGlobalLoader: true })
       .then(r => r.data),
 
+  /** @deprecated Prefer createSignupIntent; check-email always returns { available: true } for anti-enumeration. */
   checkSignupEmail: (email: string): Promise<{ available: boolean }> =>
     api
       .post<{ available: boolean }>('/auth/onboarding/check-email', { email }, { skipGlobalLoader: true })
       .then(r => r.data),
 
-  sendOnboardingVerificationOtp: (b: { email: string; firstName?: string }): Promise<OnboardingOtpSentResponse> =>
+  sendOnboardingVerificationOtp: (b: {
+    email: string;
+    firstName?: string;
+    captchaToken?: string;
+  }): Promise<OnboardingOtpSentResponse> =>
     api
       .post<OnboardingOtpSentResponse>('/auth/onboarding/send-verification-otp', b, { skipGlobalLoader: true })
       .then(r => r.data),
 
-  resendOnboardingVerificationOtp: (email: string): Promise<OnboardingOtpSentResponse> =>
+  resendOnboardingVerificationOtp: (
+    email: string,
+    captchaToken?: string,
+  ): Promise<OnboardingOtpSentResponse> =>
     api
       .post<OnboardingOtpSentResponse>(
         '/auth/onboarding/resend-verification-otp',
-        { email },
+        { email, ...(captchaToken ? { captchaToken } : {}) },
         { skipGlobalLoader: true },
       )
       .then(r => r.data),
@@ -563,9 +673,17 @@ export const authApi = {
       .post<OnboardingVerificationResponse>('/auth/onboarding/verify-email', b, { skipGlobalLoader: true })
       .then(r => r.data),
 
-  parseOnboardingCv: (file: File): Promise<OnboardingCvParseResponse> => {
+  parseOnboardingCv: (
+    file: File,
+    signupIntentId?: string,
+    email?: string,
+    captchaToken?: string,
+  ): Promise<OnboardingCvParseResponse> => {
     const fd = new FormData();
     fd.append('file', file);
+    if (signupIntentId) fd.append('signupIntentId', signupIntentId);
+    if (email) fd.append('email', email);
+    if (captchaToken) fd.append('captchaToken', captchaToken);
     return api
       .post<OnboardingCvParseResponse>('/auth/onboarding/parse-cv', fd, { skipGlobalLoader: true })
       .then(r => r.data);
@@ -604,10 +722,16 @@ export const profileApi = {
       a.click();
       a.remove();
     }
-    window.setTimeout(() => URL.revokeObjectURL(objectUrl), 60_000);
+    scheduleRevokeObjectUrl(objectUrl, w);
   },
   stats: () => api.get('/profile/stats').then(r => r.data),
-  addPortfolioItem: (body: { title: string; url?: string; description?: string; techTags?: string[] }) =>
+  addPortfolioItem: (body: {
+    title: string;
+    url?: string;
+    description?: string;
+    techTags?: string[];
+    location?: string;
+  }) =>
     api.post('/profile/portfolio', body).then(r => r.data),
   updatePortfolioItem: (itemId: string, body: { title: string; url?: string; description?: string; techTags?: string[] }) =>
     api.put(`/profile/portfolio/${itemId}`, body).then(r => r.data),
@@ -642,6 +766,33 @@ export const onboardingApi = {
     api.get<OnboardingDeliveryStatus>('/onboarding/delivery/status').then(r => r.data),
 };
 
+// ── CV download blob URL cleanup ───────────────────────────────────────────
+let cvDownloadRevokeTimer: ReturnType<typeof setTimeout> | null = null;
+
+function scheduleRevokeObjectUrl(objectUrl: string, popup: Window | null): void {
+  if (cvDownloadRevokeTimer) {
+    clearTimeout(cvDownloadRevokeTimer);
+    cvDownloadRevokeTimer = null;
+  }
+  const revoke = () => {
+    URL.revokeObjectURL(objectUrl);
+    if (cvDownloadRevokeTimer) {
+      clearTimeout(cvDownloadRevokeTimer);
+      cvDownloadRevokeTimer = null;
+    }
+  };
+  if (popup) {
+    try {
+      popup.addEventListener('load', revoke, { once: true });
+    } catch {
+      /* cross-origin popup — fall back to timeout only */
+    }
+    cvDownloadRevokeTimer = setTimeout(revoke, 5_000);
+  } else {
+    revoke();
+  }
+}
+
 // ── Jobs API ──────────────────────────────────────────────────────────────
 const JOBS_PAGE_SIZE = 200;
 
@@ -671,7 +822,7 @@ export const jobsApi = {
       const batch = await jobsApi.list(page, JOBS_PAGE_SIZE);
       meta = batch;
       allItems.push(...batch.items);
-      if (!batch.hasMore || batch.items.length < JOBS_PAGE_SIZE) break;
+      if (shouldBreakJobPagination(batch.hasMore ?? false, batch.items.length)) break;
       page += 1;
     }
     return {
@@ -755,3 +906,7 @@ export const kanbanApi = {
 
 // Pass 6 #6.012 — canonical SkillStartRequest / SkillRunResponse and
 // the `skillsApi` client live in `services/skillsApi.ts`.
+
+if (typeof window !== 'undefined') {
+  window.addEventListener(AUTH_LOGGED_OUT_EVENT, () => resetApiLoading());
+}

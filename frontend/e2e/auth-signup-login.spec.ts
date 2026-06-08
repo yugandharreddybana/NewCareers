@@ -25,8 +25,11 @@ import {
   ensureTestUser,
   deleteTestUser,
   clearAuthState,
-  checkSignupEmailViaApi,
+  createSignupIntentViaApi,
+  E2E_API_URL,
 } from './helpers/stack';
+
+const API_HEADERS = { 'X-Requested-With': 'XMLHttpRequest' };
 
 test.afterAll(async ({ request }) => {
   await deleteTestUser(request);
@@ -136,7 +139,7 @@ test.describe('B — Signup client validation', () => {
     await page.locator('#password').fill('alllowercase');
     await acceptSignupTerms(page);
     await submitAuthForm(page);
-    await expect(page.getByRole('alert')).toContainText(/weak|password/i);
+    await expect(page.getByRole('alert')).toContainText(/characters|upper-case|password/i);
     await expect(page).toHaveURL(/\/signup/);
   });
 
@@ -147,16 +150,30 @@ test.describe('B — Signup client validation', () => {
     await expect(page).toHaveURL(/\/signup/);
   });
 
-  test('SU-15: submit disables inputs while check-email runs', async ({ page }) => {
+  test('SU-16: AI consent required blocks signup', async ({ page }) => {
+    await fillSignupForm(page, TEST_USER, { aiProcessing: false });
+    await submitAuthForm(page);
+    await expect(page.getByRole('alert')).toContainText(/ai processing consent/i);
+    await expect(page).toHaveURL(/\/signup/);
+  });
+
+  test('SU-15: submit disables inputs while signup-intent runs', async ({ page }) => {
     await fillSignupForm(page, TEST_USER);
 
-    await page.route('**/api/v1/auth/onboarding/check-email', async route => {
-      await new Promise(r => setTimeout(r, 600));
-      await route.continue();
+    await page.route('**/api/v1/auth/signup-intent', async route => {
+      await new Promise(r => setTimeout(r, 1_500));
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          signupIntentId: '00000000-0000-4000-8000-000000000099',
+          expiresAt: new Date(Date.now() + 1_800_000).toISOString(),
+        }),
+      });
     });
 
     await submitAuthForm(page);
-    await expect(page.locator('#name')).toBeDisabled();
+    await expect(page.locator('#name')).toBeDisabled({ timeout: 2_000 });
     await expect(page.locator('#email')).toBeDisabled();
     await expect(page.locator('#password')).toBeDisabled();
   });
@@ -172,8 +189,12 @@ test.describe('C — Signup live API', () => {
 
   test('SU-20: happy path reaches onboarding without session cookie', async ({ page, request }) => {
     await deleteTestUser(request);
+    const freshUser = {
+      ...TEST_USER,
+      email: `su20-${Date.now()}@careerops.test`,
+    };
     await page.goto('/signup');
-    await fillSignupForm(page, TEST_USER);
+    await fillSignupForm(page, freshUser);
     await submitAuthForm(page);
     await expect(page).toHaveURL(/\/onboarding/, { timeout: 20_000 });
     const cookies = await page.context().cookies();
@@ -197,13 +218,44 @@ test.describe('C — Signup live API', () => {
     await submitAuthForm(page);
     await expectSignupDuplicateEmailAlert(page);
     await page.locator('#email').fill('test@newcareer.co');
-    await expect(page.getByText(/already associated with this email/i)).toHaveCount(0);
+    await expect(page.getByText(/account may already exist/i)).toHaveCount(0);
   });
 
-  test('SU-25: check-email API returns conflict for test profile', async ({ request }) => {
+  test('SU-25: signup-intent API returns conflict for registered email', async ({ request }) => {
     await ensureTestUser(request);
-    const dupResult = await checkSignupEmailViaApi(request, TEST_USER.email);
+    const dupResult = await createSignupIntentViaApi(request, TEST_USER);
     expect(dupResult.status).toBe(409);
+  });
+
+  test('M-12: bad OTP verify message matches for registered and new emails after send', async ({ request }) => {
+    await requireLiveStack(request);
+    await ensureTestUser(request);
+    const freshEmail = `m12-${Date.now()}@careerops.test`;
+
+    for (const email of [TEST_USER.email, freshEmail]) {
+      const send = await request.post(`${E2E_API_URL}/auth/onboarding/send-verification-otp`, {
+        headers: API_HEADERS,
+        data: { email, firstName: 'E2E' },
+      });
+      expect(send.ok() || send.status() === 202).toBeTruthy();
+    }
+
+    const badOtp = '99999999';
+    const registeredVerify = await request.post(`${E2E_API_URL}/auth/onboarding/verify-email`, {
+      headers: API_HEADERS,
+      data: { email: TEST_USER.email, otp: badOtp, captchaToken: '' },
+    });
+    const freshVerify = await request.post(`${E2E_API_URL}/auth/onboarding/verify-email`, {
+      headers: API_HEADERS,
+      data: { email: freshEmail, otp: badOtp, captchaToken: '' },
+    });
+
+    const registeredBody = (await registeredVerify.json()) as { message?: string };
+    const freshBody = (await freshVerify.json()) as { message?: string };
+    expect(registeredVerify.status()).toBe(400);
+    expect(freshVerify.status()).toBe(400);
+    expect(registeredBody.message).toBe(freshBody.message);
+    expect(registeredBody.message).toBe('Invalid code.');
   });
 
   test('SU-26: onboarding step 1 visible after signup', async ({ page, request }) => {

@@ -22,6 +22,11 @@ import {
   readPendingGoogleConsents,
 } from '@/lib/pendingGoogleConsents';
 import { syncLocalAnalyticsConsentToBackend } from '@/lib/cookieConsent';
+import { queryClient } from '@/lib/queryClient';
+import { queryKeys } from '@/lib/queryKeys';
+import { payloadAffectsPipelineMatch } from '@/lib/profileMerge';
+import { invalidatePipelineAfterProfileChange, resetPipelineSkillsSync } from '@/hooks/queries/useJobs';
+import type { Profile } from '@/types';
 export interface OnboardingWorkEntry {
   jobTitle: string;
   companyName: string;
@@ -29,13 +34,17 @@ export interface OnboardingWorkEntry {
   endDate: string;
   current: boolean;
   description: string;
+  location?: string;
 }
 
 export interface OnboardingEducationEntry {
   schoolName: string;
   degree: string;
+  degreeLevel?: string;
+  degreeTitle?: string;
   fieldOfStudy: string;
   graduationYear: string;
+  location?: string;
 }
 
 export interface UpdateProfilePayload {
@@ -62,12 +71,15 @@ export interface UpdateProfilePayload {
   minMatchPercent?: number;
   freshnessHours?: number;
   jobDomain?: string;
+  linkedInUrl?: string;
+  githubUrl?: string;
+  websiteUrl?: string;
 }
 
 interface SignUpInput {
   name: string;
   email: string;
-  password: string;
+  signupIntentId: string;
   consents: {
     termsAccepted: boolean;
     aiProcessingAccepted: boolean;
@@ -79,6 +91,7 @@ interface SignUpInput {
 
 interface AuthCtxValue {
   user: User | null;
+  isAdmin: boolean;
   loading: boolean;
   actionLoading: boolean;
   setUser: (u: User | null) => void;
@@ -93,9 +106,10 @@ interface AuthCtxValue {
     idToken: string,
     rememberMe?: boolean,
     consents?: SignupConsents,
+    captchaToken?: string,
   ) => Promise<User>;
   signUp: (input: SignUpInput) => Promise<User>;
-  updateProfile: (data: UpdateProfilePayload) => Promise<void>;
+  updateProfile: (data: UpdateProfilePayload) => Promise<Profile>;
   forgotPassword: (email: string) => Promise<void>;
   resetPassword: (email: string, otp: string, newPassword: string) => Promise<void>;
 }
@@ -129,40 +143,46 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const inFlightMe = useRef<Promise<User | null> | null>(null);
+  const userRef = useRef<User | null>(null);
+
+  useEffect(() => {
+    userRef.current = user;
+  }, [user]);
 
   const refresh = useCallback(async (): Promise<User | null> => {
     if (inFlightMe.current) return inFlightMe.current;
 
-    if (shouldSkipInitialSessionProbe()) {
-      setUser(null);
-      return null;
-    }
+    const promise = (async (): Promise<User | null> => {
+      if (shouldSkipInitialSessionProbe()) {
+        setUser(null);
+        return null;
+      }
 
-    try {
-      await ensureFreshSession();
-    } catch {
+      try {
+        await ensureFreshSession();
+      } catch {
+        if (!tokenStore.hasAccess() && !tokenStore.hasRefreshOrCookie()) {
+          setUser(null);
+          return null;
+        }
+      }
+
       if (!tokenStore.hasAccess() && !tokenStore.hasRefreshOrCookie()) {
         setUser(null);
         return null;
       }
-    }
 
-    if (!tokenStore.hasAccess() && !tokenStore.hasRefreshOrCookie()) {
-      setUser(null);
-      return null;
-    }
-
-    const promise = authApi.me()
-      .then(fresh => {
+      try {
+        const fresh = await authApi.me();
         setUser(fresh);
         if (fresh) void syncLocalAnalyticsConsentToBackend();
         return fresh;
-      })
-      .catch(() => {
+      } catch {
+        tokenStore.clear();
         setUser(null);
         return null;
-      })
-      .finally(() => { inFlightMe.current = null; });
+      }
+    })().finally(() => { inFlightMe.current = null; });
 
     inFlightMe.current = promise;
     return promise;
@@ -200,6 +220,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       if (options?.rememberMe) loginBody.rememberMe = true;
       if (options?.captchaToken) loginBody.captchaToken = options.captchaToken;
       const data = await authApi.login(loginBody);
+      if (data.requiresTwoFactor) {
+        const err = new Error('TWO_FACTOR_REQUIRED') as Error & { challengeToken: string };
+        err.challengeToken = data.challengeToken;
+        throw err;
+      }
+      clearPendingSignup();
+      clearOnboardingVerification();
       setUser(data.user);
       void syncLocalAnalyticsConsentToBackend();
       return data.user;
@@ -212,10 +239,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setActionLoading(true);
     try {
       const baseUsername = usernameFromEmail(input.email);
-      const attempts = [
-        baseUsername,
-        `${baseUsername}${Math.floor(Math.random() * 9000 + 1000)}`,
-      ];
+      const attempts: string[] = [baseUsername];
+      const usedSuffixes = new Set<number>();
+      while (attempts.length < 5) {
+        const suffix = Math.floor(Math.random() * 9000 + 1000);
+        if (usedSuffixes.has(suffix)) continue;
+        usedSuffixes.add(suffix);
+        attempts.push(`${baseUsername}${suffix}`);
+      }
 
       let lastError: unknown;
       for (const username of attempts) {
@@ -223,7 +254,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           const data = await authApi.signup({
             name: input.name,
             email: input.email,
-            password: input.password,
+            signupIntentId: input.signupIntentId,
             username,
             consents: input.consents,
             ...(input.emailVerificationId ? { emailVerificationId: input.emailVerificationId } : {}),
@@ -236,7 +267,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           if (!isUsernameTakenError(err)) throw err;
         }
       }
-      throw lastError;
+      throw lastError instanceof Error
+        ? new Error(
+            'Could not create your account. Please try again or contact support.',
+            { cause: lastError },
+          )
+        : new Error('Could not create your account. Please try again or contact support.');
     } finally {
       setActionLoading(false);
     }
@@ -246,12 +282,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     idToken: string,
     rememberMe?: boolean,
     consents?: SignupConsents,
+    captchaToken?: string,
   ): Promise<User> => {
     setActionLoading(true);
     try {
       const resolvedConsents = consents ?? readPendingGoogleConsents() ?? undefined;
-      const data = await authApi.google(idToken, rememberMe, resolvedConsents);
+      const data = await authApi.google(idToken, rememberMe, resolvedConsents, captchaToken);
       clearPendingGoogleConsents();
+      clearPendingSignup();
+      clearOnboardingVerification();
       setUser(data.user);
       void syncLocalAnalyticsConsentToBackend();
       return data.user;
@@ -267,28 +306,34 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setUser(null);
       clearPendingSignup();
       clearOnboardingVerification();
+      try {
+        queryClient.clear();
+        resetPipelineSkillsSync();
+      } catch {
+        // Cache clear best-effort — user already signed out above
+      }
       setActionLoading(false);
-      const { queryClient } = await import('@/lib/queryClient');
-      queryClient.clear(); // dynamic import avoids circular deps with api layer
     }
   }, [setUser]);
 
-  const updateProfile = useCallback(async (data: UpdateProfilePayload): Promise<void> => {
-    await profileApi.update(data);
-    if (data.onboarded === true) {
-      setUserState(prev =>
-        prev
-          ? {
-              ...prev,
-              onboarded: true,
-              ...(data.name ? { name: data.name } : {}),
-            }
-          : prev,
-      );
-      return;
+  const updateProfile = useCallback(async (data: UpdateProfilePayload): Promise<Profile> => {
+    const serverProfile = await profileApi.update(data);
+    queryClient.setQueryData(queryKeys.profile.current(), serverProfile);
+    if (payloadAffectsPipelineMatch(data)) {
+      invalidatePipelineAfterProfileChange();
     }
-    await refresh();
-  }, [refresh]);
+    if (data.onboarded === true || data.name?.trim()) {
+      setUserState(prev => {
+        if (!prev) return prev;
+        return {
+          ...prev,
+          ...(data.onboarded === true ? { onboarded: true } : {}),
+          ...(data.name?.trim() ? { name: data.name.trim() } : {}),
+        };
+      });
+    }
+    return serverProfile;
+  }, []);
 
   const forgotPassword = useCallback(async (email: string): Promise<void> => {
     await authApi.forgotPassword(email);
@@ -296,7 +341,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const resetPassword = useCallback(
     async (email: string, otp: string, newPassword: string): Promise<void> => {
-      await authApi.resetPassword({ email, otp, newPassword });
+      const accessToken = tokenStore.getAccess();
+      await authApi.resetPassword({
+        email,
+        otp,
+        newPassword,
+        ...(accessToken ? { accessToken } : {}),
+      });
     },
     [],
   );
@@ -304,6 +355,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   return (
     <AuthCtx.Provider value={{
       user,
+      isAdmin: user?.role === 'ADMIN',
       loading: sessionLoading,
       actionLoading,
       setUser,

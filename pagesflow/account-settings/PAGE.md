@@ -4,13 +4,22 @@
 
 Full profile and preference editor for signed-in, onboarded users. Consolidates account identity, CV management, professional summary, work history, education, job-matching preferences (roles, tech, salary, visa, minimum match %), and GDPR privacy controls. Saving updates the profile via optimistic filter mutation plus `AuthContext.updateProfile`. Uses the same onboarding chip/slider patterns as `/onboarding`.
 
-## Route
+## Routes
+
+| URL | Tab | Content |
+|-----|-----|---------|
+| `/account` | — | Redirects to `/account/profile` |
+| `/account/profile` | Profile | Full profile editor (CV, work, education, job prefs, GDPR) |
+| `/account/security` | Security | Password change, 2FA, active sessions, recent activity |
+| `/account/notifications` | Notifications | Placeholder (coming soon) |
+| `/account/billing` | Subscription & Billing | Plan, usage, Stripe portal, invoices, cancel |
+| `/account/team` | Team | Placeholder (coming soon) |
+| `/account/profile#danger-zone` | Danger Zone | Scroll target for GDPR / delete account |
 
 | Property | Value |
 |----------|-------|
-| URL | `/account` |
 | Guard | `ProtectedRoute` |
-| Layout | Full-width standalone with `DashboardTopNav` (no `AppShell` sidebar) |
+| Layout | `AccountSettingsLayout` — `DashboardTopNav` + left settings sidebar + `<Outlet />` (no `AppShell`) |
 | Redirects | Cancel → `/dashboard`; Forgot password → `/forgot-password` with email in location state |
 
 ## Fields and inputs
@@ -24,8 +33,8 @@ Full profile and preference editor for signed-in, onboarded users. Consolidates 
 | Location | No | Free text | Professional summary |
 | Preferred job location | No | Free text | Professional summary |
 | Years of experience | No | `0-2`, `3-5`, `6-10`, `10+` | Professional summary |
-| Work experience rows | No | Job title, company, dates, description | Work experience (min 1 row) |
-| Education rows | No | School, degree, field, graduation year | Education (min 1 row) |
+| Work experience rows | No | Job title, company, dates, location, description | Work experience (min 1 row) |
+| Education rows | No | School, degree combobox (B.Tech/MSc mapping), field, graduation year, location | Education (min 1 row) |
 | Target roles | No | Chips + custom role | Job preferences |
 | Tech stack | No | Chips + custom tech | Job preferences |
 | Work types | Yes (on save) | At least one of Full-time, Part-time, Contract, etc. | Job preferences |
@@ -47,7 +56,13 @@ Full profile and preference editor for signed-in, onboarded users. Consolidates 
 | Upload / replace CV | File input | `POST /profile/cv`; reload profile into form |
 | Download CV | Button when CV on file | `GET /profile/cv/download` → open signed URL or blob |
 | Add/remove work or education | Buttons | Local form state only until save |
-| Forgot password | Link | `/forgot-password` with `state.email` |
+| Change password | Form on `/account/security` | `PATCH /account/password` → new tokens; revokes other sessions |
+| Enable / disable 2FA | Buttons on `/account/security` | `POST /account/two-factor/*` (rollout-gated via `TWO_FACTOR_ROLLOUT_ENABLED`) |
+| End session / End all | Links on `/account/security` | `DELETE /account/sessions/:id`, `POST /account/sessions/revoke-others` |
+| View audit log | Link on `/account/security` | `GET /account/security/activity` (paginated modal) |
+| Manage subscription | Button on `/account/billing` | `POST /billing/customer-portal` → Stripe redirect |
+| Upgrade plan | Button on `/account/billing` | `POST /billing/checkout-session` |
+| Cancel plan | Modal on `/account/billing` | `POST /billing/cancel` (falls back to portal if unavailable) |
 | Turn on marketing / analytics | Toggle in `PrivacySettingsSection` | `POST /consents` |
 | Turn off AI processing | Toggle off | `DELETE /user/consent/ai` → withdraws consent + purges `skill_runs` older than 30 days |
 | Turn on AI processing | Toggle on | `POST /consents` with `AI_PROCESSING` accepted |
@@ -67,6 +82,16 @@ Full profile and preference editor for signed-in, onboarded users. Consolidates 
 | Withdraw AI consent | `DELETE /user/consent/ai` | `DELETE /user/consent/ai` | `UserConsentController` `DELETE /user/consent/ai` |
 | Export data | `GET /account/export` | `GET /account/export` | `AccountController` `GET /export` |
 | Delete account | `POST /account/delete` | `POST /account/delete` | `AccountController` `POST /delete` |
+| Subscription | `GET /billing/subscription` | `GET /billing/subscription` | `BillingController` `GET /subscription` |
+| Checkout | `POST /billing/checkout-session` | `POST /billing/checkout-session` | `BillingController` `POST /checkout-session` |
+| Customer portal | `POST /billing/customer-portal` | `POST /billing/customer-portal` | `BillingController` `POST /customer-portal` |
+| Change password | `PATCH /account/password` | `PATCH /account/password` | `AccountController` `PATCH /password` |
+| List sessions | `GET /account/sessions` | `GET /account/sessions` | `SecurityController` `GET /sessions` |
+| Revoke session | `DELETE /account/sessions/:id` | `DELETE /account/sessions/:id` | `SecurityController` `DELETE /sessions/{id}` |
+| Revoke other sessions | `POST /account/sessions/revoke-others` | `POST /account/sessions/revoke-others` | `SecurityController` `POST /sessions/revoke-others` |
+| Security activity | `GET /account/security/activity` | `GET /account/security/activity` | `SecurityController` `GET /security/activity` |
+| 2FA status / setup | `GET/POST /account/two-factor/*` | proxied | `SecurityController` + `TwoFactorService` |
+| Login 2FA step-up | `POST /auth/two-factor/verify` | `POST /auth/two-factor/verify` | `AuthController` after `requiresTwoFactor` login |
 
 ## File map
 
@@ -74,9 +99,19 @@ Full profile and preference editor for signed-in, onboarded users. Consolidates 
 
 | Role | Path |
 |------|------|
-| Page | `frontend/src/pages/AccountSettings.tsx` |
+| Layout shell | `frontend/src/pages/account/AccountSettingsLayout.tsx` |
+| Sidebar nav | `frontend/src/pages/account/AccountSettingsNav.tsx` |
+| Profile tab | `frontend/src/pages/account/AccountProfilePage.tsx` |
+| Security tab | `frontend/src/pages/account/AccountSecurityPage.tsx` |
+| Security cards | `frontend/src/pages/account/security/ChangePasswordCard.tsx`, `TwoFactorCard.tsx`, `ActiveSessionsCard.tsx`, `RecentActivityCard.tsx`, `SecurityAuditModal.tsx` |
+| Security API | `frontend/src/services/securityApi.ts` |
+| Billing tab | `frontend/src/pages/account/AccountBillingPage.tsx` |
+| Notifications / Team | `frontend/src/pages/account/AccountNotificationsPage.tsx`, `AccountTeamPage.tsx` |
+| Shared form hook | `frontend/src/pages/account/useAccountSettingsForm.ts` |
+| Shared form UI | `frontend/src/pages/account/accountSettingsShared.tsx` |
+| Styles | `frontend/src/styles/account-settings.css` |
 | Components | `frontend/src/components/dashboard/DashboardTopNav.tsx`, `frontend/src/components/onboarding/MinMatchPercentField.tsx`, `MonthYearField.tsx`, `PreferencesStep.tsx` (constants), `frontend/src/components/gdpr/PrivacySettingsSection.tsx` |
-| Hooks / services | `frontend/src/hooks/queries/useFiltersMutation.ts`, `frontend/src/context/AuthContext.tsx`, `frontend/src/services/api.ts`, `accountApi.ts`, `consentApi.ts` |
+| Hooks / services | `frontend/src/hooks/queries/useFiltersMutation.ts`, `useUsageLimits.ts`, `frontend/src/context/AuthContext.tsx`, `frontend/src/services/api.ts`, `billingApi.ts`, `accountApi.ts`, `securityApi.ts`, `consentApi.ts` |
 | Lib | `frontend/src/lib/settingsProfileForm.ts` |
 
 ### Middleware
@@ -89,8 +124,8 @@ Full profile and preference editor for signed-in, onboarded users. Consolidates 
 
 | Role | Path |
 |------|------|
-| Controllers | `ProfileController.java`, `AccountController.java`, `ConsentController.java`, `UserConsentController.java` |
-| Services | `UserConsentService.java`, `GdprExportService.java`, `UserAnonymizationService.java` |
+| Controllers | `ProfileController.java`, `AccountController.java`, `SecurityController.java`, `ConsentController.java`, `UserConsentController.java` |
+| Services | `AccountSecurityService.java`, `TwoFactorService.java`, `UserConsentService.java`, `GdprExportService.java`, `UserAnonymizationService.java` |
 
 ## Sequence diagram
 

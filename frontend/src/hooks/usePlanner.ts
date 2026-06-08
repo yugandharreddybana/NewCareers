@@ -6,15 +6,13 @@ import type {
   PlannerUpcomingSummary,
 } from '@/types/planner';
 import toast from 'react-hot-toast';
+import { getUserFacingErrorMessage } from '@/lib/userFacingError';
 
 const EMPTY_UPCOMING: PlannerUpcomingSummary = {
   pendingTasks: [],
   upcomingEvents: [],
   overdueTasks: [],
 };
-
-const getPlannerErrorMessage = (error: unknown, fallback: string) =>
-  (error as { response?: { data?: { message?: string } } })?.response?.data?.message ?? fallback;
 
 /**
  * Fetches upcoming tasks + deadlines for the logged-in user.
@@ -30,7 +28,7 @@ export function useUpcoming(refreshKey = 0) {
     plannerApi.getUpcoming()
       .then(res => setData(res ?? EMPTY_UPCOMING))
       .catch((error: unknown) => {
-        const msg = getPlannerErrorMessage(error, 'Failed to load planner');
+        const msg = getUserFacingErrorMessage(error, 'Failed to load planner.');
         setError(msg);
         toast.error(msg);
         setData(EMPTY_UPCOMING);
@@ -54,7 +52,7 @@ export function useJobTasks(userJobId: string | number) {
     setLoading(true);
     plannerApi.getTasksForJob(userJobId)
       .then(res => setTasks(res))
-      .catch((error: unknown) => setError(getPlannerErrorMessage(error, 'Failed to load tasks')))
+      .catch((error: unknown) => setError(getUserFacingErrorMessage(error, 'Failed to load tasks.')))
       .finally(() => setLoading(false));
   }, [userJobId]);
 
@@ -86,7 +84,7 @@ export function useJobDeadlines(userJobId: string | number) {
     setLoading(true);
     plannerApi.getDeadlinesForJob(userJobId)
       .then(res => setDeadlines(res))
-      .catch((error: unknown) => setError(getPlannerErrorMessage(error, 'Failed to load deadlines')))
+      .catch((error: unknown) => setError(getUserFacingErrorMessage(error, 'Failed to load deadlines.')))
       .finally(() => setLoading(false));
   }, [userJobId]);
 

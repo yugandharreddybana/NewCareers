@@ -58,17 +58,20 @@ function parseCulture(value: unknown): CultureBlock | null {
 
 function parseNews(value: unknown): NewsItem[] {
   if (!Array.isArray(value)) return [];
-  return value
-    .map(item => {
-      if (typeof item === 'string') return { headline: item.trim() };
-      if (!isRecord(item)) return null;
-      const headline = asString(item.headline);
-      const summary = asString(item.summary);
-      const dateHint = asString(item.dateHint);
-      if (!headline && !summary) return null;
-      return { headline, summary, dateHint };
-    })
-    .filter((item): item is NewsItem => item !== null);
+  const items: NewsItem[] = [];
+  for (const item of value) {
+    if (typeof item === 'string') {
+      items.push({ headline: item.trim() });
+      continue;
+    }
+    if (!isRecord(item)) continue;
+    const headline = asString(item.headline);
+    const summary = asString(item.summary);
+    const dateHint = asString(item.dateHint);
+    if (!headline && !summary) continue;
+    items.push({ headline, summary, dateHint });
+  }
+  return items;
 }
 
 function Section({ title, children }: { title: string; children: React.ReactNode }) {

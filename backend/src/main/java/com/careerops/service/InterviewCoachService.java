@@ -88,6 +88,11 @@ public class InterviewCoachService {
         return trackRepo.findByUserIdOrderByCreatedAtDesc(userId);
     }
 
+    public InterviewTrack getTrack(UUID userId, UUID userJobId) {
+        return trackRepo.findByUserJobIdAndUserId(userJobId, userId)
+            .orElseThrow(() -> new ApiException(HttpStatus.NOT_FOUND, "Interview track not found"));
+    }
+
     // ── Helpers ───────────────────────────────────────────────────────────────
     private String buildKitPrompt(String company, String role, String jd) {
         return String.format("""

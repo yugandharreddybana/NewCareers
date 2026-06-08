@@ -37,18 +37,6 @@ function GoogleIcon() {
   );
 }
 
-function StyledShell({ loading, label }: { loading?: boolean; label: string }) {
-  return (
-    <div className="flex items-center justify-between gap-3 py-3.5 px-4 rounded-xl border border-gray-200 bg-white text-sm font-medium text-gray-800 shadow-sm w-full h-full">
-      <span className="flex items-center gap-3">
-        {loading ? <Loader2 size={20} className="animate-spin text-gray-400" /> : <GoogleIcon />}
-        {label}
-      </span>
-      <ArrowRight size={16} className="text-gray-500" />
-    </div>
-  );
-}
-
 export function LoginGoogleButton({
   label = 'Continue with Google',
   disabled,
@@ -76,9 +64,15 @@ export function LoginGoogleButton({
       <button
         type="button"
         disabled
-        className="w-full cursor-not-allowed opacity-60"
+        className="w-full cursor-not-allowed opacity-60 rounded-xl border border-gray-200 bg-white py-3.5 px-4 shadow-sm"
       >
-        <StyledShell loading={loading} label={label} />
+        <span className="flex items-center justify-between gap-3 text-sm font-medium text-gray-800">
+          <span className="flex items-center gap-3">
+            {loading ? <Loader2 size={20} className="animate-spin text-gray-400" /> : <GoogleIcon />}
+            {label}
+          </span>
+          <ArrowRight size={16} className="text-gray-500" />
+        </span>
       </button>
     );
   }
@@ -86,33 +80,31 @@ export function LoginGoogleButton({
   return (
     <div
       ref={hostRef}
-      className={`relative w-full h-[52px] ${disabled ? 'opacity-60 pointer-events-none' : ''}`}
+      className={`relative w-full min-h-[52px] rounded-xl border border-gray-200 bg-white shadow-sm overflow-hidden ${disabled ? 'opacity-60 pointer-events-none' : ''}`}
     >
-      <div aria-hidden="true" className="pointer-events-none absolute inset-0">
-        <StyledShell label={label} />
-      </div>
-
-      <div className="absolute inset-0 z-10 opacity-[0.01] overflow-hidden rounded-xl login-google-overlay">
-        <GoogleLogin
-          theme="outline"
-          size="large"
-          shape="rectangular"
-          text="continue_with"
-          width={width}
-          onSuccess={(response: CredentialResponse) => {
-            if (disabled) return;
-            const token = response.credential;
-            if (!token) {
-              onError?.('Google did not return a sign-in token. Please try again.');
-              return;
-            }
-            void Promise.resolve(onCredential(token)).catch(() => {
-              onError?.('Google sign-in failed. Please try again.');
-            });
-          }}
-          onError={() => onError?.('Google sign-in was cancelled or blocked.')}
-        />
-      </div>
+      <GoogleLogin
+        theme="outline"
+        size="large"
+        shape="rectangular"
+        text="continue_with"
+        width={width}
+        containerProps={{
+          className: 'w-full flex justify-center py-1',
+          style: { width: '100%' },
+        }}
+        onSuccess={(response: CredentialResponse) => {
+          if (disabled) return;
+          const token = response.credential;
+          if (!token) {
+            onError?.('Google did not return a sign-in token. Please try again.');
+            return;
+          }
+          void Promise.resolve(onCredential(token)).catch(() => {
+            onError?.('Google sign-in failed. Please try again.');
+          });
+        }}
+        onError={() => onError?.('Google sign-in was cancelled or blocked.')}
+      />
     </div>
   );
 }

@@ -27,7 +27,7 @@ public final class OnboardingEmailVerificationOtpEmail {
             + "<table role=\"presentation\" cellspacing=\"0\" cellpadding=\"0\" style=\"margin:0 auto 24px;\">"
             + "<tr><td align=\"center\" style=\"background:linear-gradient(135deg,#eff6ff,#f0f9ff);"
             + "border:1px solid #bfdbfe;border-radius:12px;padding:22px 36px;"
-            + "font-size:34px;font-weight:700;letter-spacing:12px;color:#2563eb;"
+            + "font-size:34px;font-weight:700;letter-spacing:8px;color:#2563eb;"
             + "font-family:ui-monospace,'SF Mono',Consolas,monospace;white-space:nowrap;\">"
             + code + "</td></tr></table>"
             + "<p style=\"margin:0 0 12px;font-size:13px;line-height:1.6;color:#64748b;\">"

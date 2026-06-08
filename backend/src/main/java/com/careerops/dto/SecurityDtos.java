@@ -46,4 +46,51 @@ public class SecurityDtos {
         String clientSecret,
         boolean enabled
     ) {}
+
+    public record SecurityActivityEntry(
+        UUID id,
+        String title,
+        String subtitle,
+        String action,
+        Instant createdAt
+    ) {}
+
+    public record SecurityActivityResponse(
+        List<SecurityActivityEntry> entries,
+        int total,
+        int page,
+        int size
+    ) {}
+
+    public record TwoFactorStatusResponse(
+        boolean enabled,
+        boolean rolloutEnabled,
+        Instant enabledAt
+    ) {}
+
+    public record TwoFactorSetupResponse(
+        String otpauthUri,
+        String secretBase32
+    ) {}
+
+    public record TwoFactorEnableRequest(
+        @jakarta.validation.constraints.NotBlank
+        @jakarta.validation.constraints.Pattern(regexp = "^\\d{6}$")
+        String code
+    ) {}
+
+    public record TwoFactorDisableRequest(
+        @jakarta.validation.constraints.NotBlank String currentPassword
+    ) {}
+
+    public record TwoFactorEnableResponse(
+        List<String> backupCodes
+    ) {}
+
+    public record TwoFactorVerifyRequest(
+        @jakarta.validation.constraints.NotBlank String challengeToken,
+        @jakarta.validation.constraints.NotBlank
+        @jakarta.validation.constraints.Pattern(regexp = "^\\d{6}$")
+        String code
+    ) {}
 }

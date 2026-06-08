@@ -1,23 +1,26 @@
 import { useRef } from 'react';
 
+const DEFAULT_OTP_LENGTH = 8;
+
 type OtpInputProps = {
   value: string;
   onChange: (v: string) => void;
   disabled?: boolean;
+  length?: number;
 };
 
-export function OtpInput({ value, onChange, disabled }: OtpInputProps) {
+export function OtpInput({ value, onChange, disabled, length = DEFAULT_OTP_LENGTH }: OtpInputProps) {
   const inputsRef = useRef<(HTMLInputElement | null)[]>([]);
-  const digits = value.padEnd(6, ' ').split('').slice(0, 6);
+  const digits = value.padEnd(length, ' ').split('').slice(0, length);
 
   const setDigit = (index: number, char: string) => {
     const next = value.split('');
     next[index] = char;
-    onChange(next.join('').replace(/\s/g, '').slice(0, 6));
+    onChange(next.join('').replace(/\s/g, '').slice(0, length));
   };
 
   return (
-    <div className="flex justify-center gap-2 sm:gap-3" role="group" aria-label="6-digit verification code">
+    <div className="flex justify-center gap-2 sm:gap-3" role="group" aria-label={`${length}-digit verification code`}>
       {digits.map((d, i) => (
         <input
           key={i}
@@ -31,11 +34,11 @@ export function OtpInput({ value, onChange, disabled }: OtpInputProps) {
           disabled={disabled}
           value={d.trim()}
           aria-label={`Digit ${i + 1}`}
-          className="w-11 h-12 sm:w-12 sm:h-14 text-center text-lg font-semibold rounded border border-outline-variant bg-surface-container-lowest text-on-surface focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary disabled:opacity-60"
+          className="w-10 h-12 sm:w-11 sm:h-14 text-center text-lg font-semibold rounded border border-outline-variant bg-surface-container-lowest text-on-surface focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary disabled:opacity-60"
           onChange={e => {
             const v = e.target.value.replace(/\D/g, '').slice(-1);
             setDigit(i, v);
-            if (v && i < 5) inputsRef.current[i + 1]?.focus();
+            if (v && i < length - 1) inputsRef.current[i + 1]?.focus();
           }}
           onKeyDown={e => {
             if (e.key === 'Backspace' && !digits[i]?.trim() && i > 0) {
@@ -44,7 +47,7 @@ export function OtpInput({ value, onChange, disabled }: OtpInputProps) {
           }}
           onPaste={e => {
             e.preventDefault();
-            const pasted = e.clipboardData.getData('text').replace(/\D/g, '').slice(0, 6);
+            const pasted = e.clipboardData.getData('text').replace(/\D/g, '').slice(0, length);
             if (pasted) onChange(pasted);
           }}
         />
@@ -52,3 +55,5 @@ export function OtpInput({ value, onChange, disabled }: OtpInputProps) {
     </div>
   );
 }
+
+export { DEFAULT_OTP_LENGTH as OTP_INPUT_LENGTH };

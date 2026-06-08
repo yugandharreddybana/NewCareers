@@ -1,6 +1,8 @@
 package com.careerops.ratelimit;
 
 import com.careerops.exception.ErrorResponse;
+import com.careerops.security.ServletPathNormalizer;
+import com.careerops.security.TrustedProxyIpResolver;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import io.github.bucket4j.Bandwidth;
 import io.github.bucket4j.Bucket;
@@ -20,7 +22,7 @@ import java.time.Duration;
 import java.util.Set;
 
 /**
- * Per-IP rate limiter for auth brute-force endpoints (login + signup/register).
+ * Per-IP rate limiter for auth brute-force endpoints.
  * 20 requests per minute per IP per path; returns HTTP 429 with Retry-After: 60.
  */
 @Component
@@ -31,8 +33,20 @@ public class IpRateLimitFilter extends OncePerRequestFilter {
     private static final int REQUESTS_PER_MINUTE = 20;
 
     private static final Set<String> LIMITED_PATHS = Set.of(
-            "/auth/login",
-            "/auth/register"
+        "/auth/register",
+        "/auth/signup-intent",
+        "/auth/login",
+            "/auth/google",
+            "/auth/refresh",
+            "/auth/forgot-password",
+            "/auth/reset-password",
+            "/auth/captcha/challenge",
+            "/auth/onboarding/check-email",
+            "/auth/onboarding/check-password",
+            "/auth/onboarding/send-verification-otp",
+            "/auth/onboarding/resend-verification-otp",
+            "/auth/onboarding/verify-email",
+            "/auth/onboarding/parse-cv"
     );
 
     private final com.github.benmanes.caffeine.cache.Cache<String, Bucket> buckets =
@@ -59,17 +73,14 @@ public class IpRateLimitFilter extends OncePerRequestFilter {
                                     FilterChain chain)
             throws ServletException, IOException {
 
-        String path = req.getServletPath();
-        if (path == null || path.isEmpty()) {
-            path = req.getRequestURI().substring(req.getContextPath().length());
-        }
+        String path = ServletPathNormalizer.normalize(req);
 
         if (!LIMITED_PATHS.contains(path)) {
             chain.doFilter(req, res);
             return;
         }
 
-        String clientIp = resolveClientIp(req);
+        String clientIp = TrustedProxyIpResolver.resolveClientIp(req);
         String bucketKey = path + ":" + clientIp;
         Bucket bucket = buckets.get(bucketKey, key ->
                 Bucket.builder().addLimit(authBandwidth).build());
@@ -80,14 +91,6 @@ public class IpRateLimitFilter extends OncePerRequestFilter {
         }
 
         chain.doFilter(req, res);
-    }
-
-    static String resolveClientIp(HttpServletRequest req) {
-        String forwarded = req.getHeader("X-Forwarded-For");
-        if (forwarded != null && !forwarded.isBlank()) {
-            return forwarded.split(",")[0].trim();
-        }
-        return req.getRemoteAddr();
     }
 
     private void sendTooManyRequests(HttpServletResponse res, String clientIp, String path) {

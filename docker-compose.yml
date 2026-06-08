@@ -1,5 +1,8 @@
 # Career Ops — scraper sidecar + optional full stack (Postgres + backend)
 #
+# Production self-host:
+#   docker compose -f docker-compose.yml -f docker-compose.prod.yml --profile full up -d
+#
 # Encryption at rest (postgres service, profile "full"):
 #   - Local dev: unencrypted Docker volume is acceptable.
 #   - Production self-hosted: do not rely on this compose file alone — use managed

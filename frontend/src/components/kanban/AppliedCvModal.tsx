@@ -1,6 +1,6 @@
 import { useRef, useState } from 'react';
-import { isApiError } from '@/types';
 import { kanbanApi } from '@/services/api';
+import { getUserFacingErrorMessage } from '@/lib/userFacingError';
 import toast from 'react-hot-toast';
 
 interface Props {
@@ -22,8 +22,7 @@ export default function AppliedCvModal({ userJobId, jobTitle, onClose }: Props) 
       toast.success('CV attached to application');
       onClose();
     } catch (e) {
-      const msg = isApiError(e) ? e.normalizedMessage : 'Upload failed';
-      toast.error(msg);
+      toast.error(getUserFacingErrorMessage(e, 'Upload failed. Please try again.'));
     } finally { setUploading(false); }
   }
 

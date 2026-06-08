@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { Download, Loader2, Zap } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { skillsApi } from '../../services/skillsApi';
+import { getUserFacingErrorMessage } from '@/lib/userFacingError';
 import type { RunAllSkillsBatchStatus, RunAllSkillsResponse, SkillRunResponse } from '../../types/skills';
 
 const POLL_INTERVAL_MS = 3_000;
@@ -70,9 +71,7 @@ export function RunAllSkillsButton({ userJobId, onComplete }: Props) {
       }, POLL_INTERVAL_MS);
     } catch (err: unknown) {
       clearPollTimer();
-      const msg = (err as { normalizedMessage?: string })?.normalizedMessage
-        || 'Run All status could not be refreshed. Please try again.';
-      setError(msg);
+      setError(getUserFacingErrorMessage(err, 'Run All status could not be refreshed. Please try again.'));
       setStatus('error');
     }
   };
@@ -97,9 +96,7 @@ export function RunAllSkillsButton({ userJobId, onComplete }: Props) {
         void pollBatchStatus(nextBatch.id);
       }, POLL_INTERVAL_MS);
     } catch (err: unknown) {
-      const msg = (err as { normalizedMessage?: string })?.normalizedMessage
-        || 'Run All could not be started. Please try again.';
-      setError(msg);
+      setError(getUserFacingErrorMessage(err, 'Run All could not be started. Please try again.'));
       setStatus('error');
     }
   };

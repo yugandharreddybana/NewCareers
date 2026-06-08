@@ -7,6 +7,7 @@ import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.Size;
 import jakarta.validation.constraints.Pattern;
+import com.careerops.validation.ValidGoogleAuthConsents;
 
 /**
  * Auth-related DTOs for register, login, forgot-password, OTP verify, and refresh.
@@ -17,9 +18,23 @@ public class AuthDtos {
         @NotBlank @Size(max = 100) String name,
         @NotBlank @Size(max = 100) @Pattern(regexp = "^[a-zA-Z0-9._-]{3,30}$") String username,
         @NotBlank @Email @Size(max = 254) String email,
+        @Size(min = 8, max = 128) @Pattern(regexp = "^(?=.*[a-z])(?=.*[A-Z])(?=.*\\d).{8,128}$") String password,
+        @Valid @NotNull SignupConsentsRequest consents,
+        @NotNull java.util.UUID emailVerificationId,
+        java.util.UUID signupIntentId
+    ) {}
+
+    public record SignupIntentRequest(
+        @NotBlank @Email @Size(max = 254) String email,
         @NotBlank @Size(min = 8, max = 128) @Pattern(regexp = "^(?=.*[a-z])(?=.*[A-Z])(?=.*\\d).{8,128}$") String password,
         @Valid @NotNull SignupConsentsRequest consents,
-        java.util.UUID emailVerificationId
+        @Size(max = 100) String name,
+        String captchaToken
+    ) {}
+
+    public record SignupIntentResponse(
+        java.util.UUID signupIntentId,
+        java.time.Instant expiresAt
     ) {}
 
     public record OnboardingCheckEmailRequest(
@@ -28,18 +43,29 @@ public class AuthDtos {
 
     public record OnboardingCheckEmailResponse(boolean available) {}
 
+    public record OnboardingCheckPasswordRequest(
+        @NotNull java.util.UUID signupIntentId,
+        @NotBlank @Email @Size(max = 254) String email,
+        @NotBlank @Size(min = 8, max = 128)
+        @Pattern(regexp = "^(?=.*[a-z])(?=.*[A-Z])(?=.*\\d).{8,128}$") String password
+    ) {}
+
+    public record OnboardingCheckPasswordResponse(boolean secure) {}
+
     public record OnboardingSendOtpRequest(
         @NotBlank @Email @Size(max = 254) String email,
-        @Size(max = 100) String firstName
+        @Size(max = 100) String firstName,
+        String captchaToken
     ) {}
 
     public record OnboardingResendOtpRequest(
-        @NotBlank @Email @Size(max = 254) String email
+        @NotBlank @Email @Size(max = 254) String email,
+        String captchaToken
     ) {}
 
     public record OnboardingVerifyEmailRequest(
         @NotBlank @Email @Size(max = 254) String email,
-        @NotBlank @Pattern(regexp = "^\\d{6}$", message = "OTP must be a 6-digit code") String otp,
+        @NotBlank @Pattern(regexp = "^\\d{8}$", message = "OTP must be an 8-digit code") String otp,
         String captchaToken
     ) {}
 
@@ -49,29 +75,32 @@ public class AuthDtos {
 
     public record LoginRequest(
         @NotBlank @Email String email,
-        @NotBlank String password,
+        @NotBlank @Size(max = 128) String password,
         String captchaToken,
         Boolean rememberMe
     ) {}
 
-    /** Jumbled character CAPTCHA — GET /auth/captcha/challenge */
-    public record WordCaptchaLetter(
-        String character,
-        int rotate,
-        int translateY,
-        String color
-    ) {}
-
+    /** Jumbled character CAPTCHA — GET /auth/captcha/challenge (SVG only; answer never exposed). */
     public record WordCaptchaChallengeResponse(
         String challengeId,
-        java.util.List<WordCaptchaLetter> letters
+        String imageSvg
+    ) {}
+
+    public record GoogleLinkConfirmRequest(
+        @NotBlank @Size(min = 100, max = 8192) String idToken,
+        @NotBlank String password,
+        String captchaToken
     ) {}
 
     /** Body for POST /auth/google — Google Identity Services ID token (JWT). */
+    @ValidGoogleAuthConsents
     public record GoogleAuthRequest(
         @NotBlank @Size(min = 100, max = 8192) String idToken,
-        @Valid SignupConsentsRequest consents
+        @Valid SignupConsentsRequest consents,
+        String captchaToken
     ) {}
+
+    public record SignupIntentExistsResponse(boolean exists, boolean active) {}
 
     public record ForgotRequest(
         @NotBlank @Email String email
@@ -79,8 +108,9 @@ public class AuthDtos {
 
     public record VerifyOtpRequest(
         @NotBlank @Email @Size(max = 254) String email,
-        @NotBlank @Pattern(regexp = "^\\d{6}$", message = "OTP must be a 6-digit code") String otp,
-        @NotBlank @Size(min = 8, max = 128) @Pattern(regexp = "^(?=.*[a-z])(?=.*[A-Z])(?=.*\\d).{8,128}$") String newPassword
+        @NotBlank @Pattern(regexp = "^\\d{8}$", message = "OTP must be an 8-digit code") String otp,
+        @NotBlank @Size(min = 8, max = 128) @Pattern(regexp = "^(?=.*[a-z])(?=.*[A-Z])(?=.*\\d).{8,128}$") String newPassword,
+        String accessToken
     ) {}
 
     /** Task 118 — body for POST /auth/refresh */
@@ -89,7 +119,9 @@ public class AuthDtos {
     ) {}
 
     public record LogoutRequest(
-        String refreshToken
+        String refreshToken,
+        String accessToken,
+        Boolean logoutAllDevices
     ) {}
 
     /**
@@ -108,7 +140,8 @@ public class AuthDtos {
         String email,
         String role,
         boolean onboarded,
-        java.time.Instant createdAt
+        java.time.Instant createdAt,
+        boolean passwordLoginEnabled
     ) {}
 
     /**
@@ -122,6 +155,15 @@ public class AuthDtos {
         UserDto user
     ) {}
 
+    /** Login may return tokens or a 2FA challenge instead of full session. */
+    public record LoginFlowResponse(
+        Boolean requiresTwoFactor,
+        String challengeToken,
+        String token,
+        String refreshToken,
+        UserDto user
+    ) {}
+
     // ── Onboarding CV parse (stateless, pre-signup) ─────────────────────
 
     public record OnboardingCvParseWorkEntry(
@@ -130,20 +172,29 @@ public class AuthDtos {
         String startDate,
         String endDate,
         boolean current,
-        String description
+        String description,
+        String location
     ) {}
 
     public record OnboardingCvParseEducationEntry(
         String schoolName,
         String degree,
         String fieldOfStudy,
-        String graduationYear
+        String graduationYear,
+        String location
     ) {}
 
     public record OnboardingCvParseProjectEntry(
         String title,
-        String description
-    ) {}
+        String description,
+        String url,
+        String location,
+        java.util.List<String> techTags
+    ) {
+        public OnboardingCvParseProjectEntry(String title, String description, String url, String location) {
+            this(title, description, url, location, java.util.List.of());
+        }
+    }
 
     public record OnboardingCvParseResponse(
         String cvMarkdown,
@@ -153,6 +204,9 @@ public class AuthDtos {
         java.util.List<OnboardingCvParseProjectEntry> projects,
         int rolesFound,
         int educationFound,
-        int projectsFound
+        int projectsFound,
+        String linkedInUrl,
+        String githubUrl,
+        String websiteUrl
     ) {}
 }

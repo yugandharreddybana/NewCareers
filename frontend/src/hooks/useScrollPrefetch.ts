@@ -23,7 +23,7 @@ import { useCallback, useEffect, useRef } from 'react';
 type Params = {
   hasNextPage: boolean;
   isFetchingNextPage: boolean;
-  fetchNextPage: () => void;
+  fetchNextPage: () => void | Promise<unknown>;
 };
 
 export function useScrollPrefetch({ hasNextPage, isFetchingNextPage, fetchNextPage }: Params) {
@@ -39,7 +39,10 @@ export function useScrollPrefetch({ hasNextPage, isFetchingNextPage, fetchNextPa
   const onNearBottom = useCallback(() => {
     if (!hasNextPage || fetchingRef.current) return;
     fetchingRef.current = true;
-    fetchNextPage();
+    void Promise.resolve(fetchNextPage()).catch(() => {
+      // Allow retry after failure; isFetchingNextPage may never flip true on throw
+      fetchingRef.current = false;
+    });
   }, [hasNextPage, fetchNextPage]);
 
   return { onNearBottom };

@@ -36,7 +36,8 @@ Or from `frontend/`: `npm run dev:stack` (Vite + middleware together).
 | `.env` (repo root) | Java backend | Yes | Platform env / AWS Secrets Manager (`prod` profile) |
 | `middleware/.env` | Express BFF | Yes | Platform env on middleware host |
 | `frontend/.env.local` | Vite build | Yes | CI/CD build-time env (`VITE_*` only) |
-| `backend/src/main/resources/application.properties` | Java defaults | Yes (non-secret defaults only) | Do not put secrets here |
+| `backend/src/main/resources/application.yml` | Java defaults | Yes (non-secret defaults only) | Do not put secrets here |
+| `backend/src/main/resources/application-{dev,staging,prod}.yml` | Profile overrides | Via `SPRING_PROFILES_ACTIVE` | Platform sets profile per deploy |
 | `scraper/.env` | Playwright scraper | Optional locally | If scraper deployed separately |
 
 **Rule:** Secrets go in `.env` / `middleware/.env` / `frontend/.env.local` or production platform injection — never in committed properties files.
@@ -57,7 +58,7 @@ Or from `frontend/`: `npm run dev:stack` (Vite + middleware together).
 | `SPRING_DATASOURCE_USERNAME` | Supabase dashboard | DB user |
 | `SPRING_DATASOURCE_PASSWORD` | Supabase dashboard | DB password |
 
-Aliases also accepted: `DATABASE_URL`, `DATABASE_USERNAME`, `DATABASE_PASSWORD` (see `application.properties`).
+Aliases also accepted: `DATABASE_URL`, `DATABASE_USERNAME`, `DATABASE_PASSWORD` (see `application.yml`).
 
 ### `middleware/.env`
 
@@ -197,16 +198,24 @@ One-time setup: `cd scraper && pip install -r requirements.txt && playwright ins
 
 ---
 
-## Dev vs production summary
+## Dev vs staging vs production summary
 
-| Concern | Development | Production |
-|---------|-------------|------------|
-| Frontend API | Leave `VITE_API_URL` unset; Vite proxies `/api` → `:4000` | Set `VITE_API_URL` to middleware public URL |
-| Java port | `8080` (Postgres dev) or `8100` (H2 test) | Platform-assigned; set `JAVA_BACKEND_URL` accordingly |
-| Cookies | `COOKIE_SECURE=false` | `COOKIE_SECURE=true`, HTTPS only |
-| Email | `RESEND_DEV_MODE=true` logs OTP | `RESEND_DEV_MODE=false` + verified domain |
-| DB | Local Postgres or Supabase | Managed Postgres (Supabase/RDS) |
-| Secrets | Gitignored `.env` files | CI/CD + AWS Secrets Manager / platform env |
+| Concern | Development | Staging | Production |
+|---------|-------------|---------|------------|
+| `SPRING_PROFILES_ACTIVE` | `dev` | `staging` | `prod` |
+| Frontend API | Leave `VITE_API_URL` unset; Vite proxies `/api` → `:4000` | `VITE_API_URL` = staging middleware URL (CI secret) | `VITE_API_URL` = prod middleware URL (CI secret) |
+| Java port | `8080` (Postgres) or H2 file default | Railway internal; middleware `JAVA_BACKEND_URL` | Same |
+| Plan limits | Bypassed (`dev` profile) | Enforced | Enforced |
+| Stripe | Mock (`StripeMockGateway`) | Mock | Real (`StripeRealGateway`) |
+| CAPTCHA | Off | Required + Redis | Required + Redis |
+| Scraper | `SCRAPER_AUTO_START=true` | `false` (sidecar service) | `false` |
+| Cookies | `COOKIE_SECURE=false` | `true` behind HTTPS | `true` |
+| Email | `RESEND_DEV_MODE=true` logs OTP | `false` | `false` |
+| DB | H2 file or local Postgres | Supabase (required) | Supabase + optional AWS Secrets Manager |
+| Secrets | Gitignored `.env` files | Railway service env | Railway + AWS Secrets Manager (`prod` profile) |
+| Deploy | Local / `docker compose` | `develop` branch → `RAILWAY_DEPLOY_HOOK_STAGING` | `main` branch → `RAILWAY_DEPLOY_HOOK_PROD` |
+
+**Critical:** Base `application.yml` must never include `spring.profiles.include=dev`. Only `application-dev.yml` may include `cache`.
 
 ---
 

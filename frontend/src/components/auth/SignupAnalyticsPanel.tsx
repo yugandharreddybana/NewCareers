@@ -55,7 +55,7 @@ function AnalyticsCard({ children, className = '', delay = 0 }: AnalyticsCardPro
   return (
     <motion.div
       className={`glass-panel analytics-card flex min-w-0 flex-col rounded-lg p-6 ${className}`}
-      initial={reduce ? undefined : { opacity: 0 }}
+      {...(reduce ? {} : { initial: { opacity: 0 } })}
       animate={{ opacity: 1 }}
       transition={{ duration: 0.45, delay, ease: 'easeOut' }}
     >
@@ -73,7 +73,7 @@ function RadarChart() {
         className="radar-chart"
         viewBox="0 0 100 100"
         aria-hidden
-        animate={reduce ? undefined : { rotate: [0, 1, 0, -1, 0] }}
+        {...(reduce ? {} : { animate: { rotate: [0, 1, 0, -1, 0] } })}
         transition={{ duration: 16, repeat: Infinity, ease: 'easeInOut' }}
       >
         <polygon className="radar-base" points="50,10 85,30 85,70 50,90 15,70 15,30" />
@@ -90,7 +90,7 @@ function RadarChart() {
           points="50,20 75,35 65,65 50,85 25,65 20,40"
           stroke="rgba(137, 245, 231, 0.8)"
           strokeWidth="1.5"
-          initial={reduce ? undefined : { opacity: 0 }}
+          {...(reduce ? {} : { initial: { opacity: 0 } })}
           animate={{ opacity: 1 }}
           transition={{ duration: 0.8, delay: 0.35, ease: 'easeOut' }}
         />
@@ -108,7 +108,7 @@ function RadarChart() {
             cy={cy}
             fill={TEAL}
             r="2"
-            initial={reduce ? undefined : { opacity: 0 }}
+            {...(reduce ? {} : { initial: { opacity: 0 } })}
             animate={{ opacity: 1 }}
             transition={{ duration: 0.3, delay: 0.45 + i * 0.06 }}
           />
@@ -125,7 +125,7 @@ export function SignupAnalyticsPanel() {
     <div className="signup-page__analytics dashboard-bg relative hidden min-h-0 min-w-0 flex-1 flex-col overflow-y-auto overscroll-y-contain p-8 md:flex lg:p-12">
       <motion.div
         className="signup-analytics-header mb-8 flex items-center justify-between gap-3 border-b border-[#89f5e7]/10 pb-4"
-        initial={reduce ? undefined : { opacity: 0 }}
+        {...(reduce ? {} : { initial: { opacity: 0 } })}
         animate={{ opacity: 1 }}
         transition={{ duration: 0.45 }}
       >
@@ -229,7 +229,7 @@ export function SignupAnalyticsPanel() {
               <motion.div
                 key={item.icon}
                 className="feed-item flex min-w-0 items-start gap-3 rounded border border-white/10 bg-white/5 p-3 sm:items-center"
-                initial={reduce ? undefined : { opacity: 0 }}
+                {...(reduce ? {} : { initial: { opacity: 0 } })}
                 animate={{ opacity: 1 }}
                 transition={{ duration: 0.4, delay: 0.5 + i * 0.1 }}
               >

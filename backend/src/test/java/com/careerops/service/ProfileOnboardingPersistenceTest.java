@@ -95,7 +95,10 @@ class ProfileOnboardingPersistenceTest {
             "Hybrid",
             "2 Days per week",
             "2 weeks notice",
-            null
+            null,
+            "https://linkedin.com/in/jane",
+            "https://github.com/jane",
+            "https://jane.dev"
         );
 
         var response = profileService.upsert(userId, req, null);
@@ -116,6 +119,12 @@ class ProfileOnboardingPersistenceTest {
         assertThat(profile.getHybridOnsiteDays()).isEqualTo("2 Days per week");
         assertThat(profile.getOnboarded()).isTrue();
         assertThat(response.onboarded()).isTrue();
+        assertThat(profile.getLinkedInUrl()).isEqualTo("https://linkedin.com/in/jane");
+        assertThat(profile.getGithubUrl()).isEqualTo("https://github.com/jane");
+        assertThat(profile.getWebsiteUrl()).isEqualTo("https://jane.dev");
+        assertThat(response.linkedInUrl()).isEqualTo("https://linkedin.com/in/jane");
+        assertThat(response.githubUrl()).isEqualTo("https://github.com/jane");
+        assertThat(response.websiteUrl()).isEqualTo("https://jane.dev");
         verify(audit).log(userId, "ONBOARDING_COMPLETE", java.util.Map.of("targetRole", "Full Stack Developer"));
     }
 }

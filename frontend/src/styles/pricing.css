@@ -1,0 +1,10 @@
+.glass-panel {
+  background: rgba(255, 255, 255, 0.7);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border: 1px solid rgba(0, 0, 0, 0.05);
+}
+
+.btn-glow:hover {
+  box-shadow: 0 0 24px rgba(13, 148, 136, 0.25);
+}

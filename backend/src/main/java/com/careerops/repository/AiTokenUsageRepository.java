@@ -45,5 +45,18 @@ public interface AiTokenUsageRepository extends JpaRepository<AiTokenUsage, UUID
     @Query("SELECT COALESCE(SUM(t.totalTokens), 0) FROM AiTokenUsage t WHERE t.userId = :userId AND t.createdAt >= :since")
     long sumTokensByUserSince(@Param("userId") UUID userId, @Param("since") java.time.Instant since);
 
+    @Query("""
+            SELECT om.orgId, o.name, SUM(t.totalTokens), SUM(COALESCE(t.costUsd, 0)), COUNT(t)
+            FROM AiTokenUsage t
+            JOIN OrgMember om ON om.userId = t.userId
+            JOIN Organization o ON o.id = om.orgId
+            WHERE t.createdAt >= :since
+            GROUP BY om.orgId, o.name
+            ORDER BY SUM(t.totalTokens) DESC
+            """)
+    List<Object[]> topOrgsByTokensSince(
+            @Param("since") java.time.Instant since,
+            org.springframework.data.domain.Pageable pageable);
+
     void deleteAllByUserId(UUID userId);
 }

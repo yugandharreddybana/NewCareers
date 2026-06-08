@@ -14,10 +14,12 @@
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { useQueryClient } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import toast from 'react-hot-toast';
+import { getUserFacingErrorMessage } from '@/lib/userFacingError';
 import { PageMeta } from '@/components/PageMeta';
 import { discoveryApi, SearchParams, SearchResult } from '@/services/discoveryApi';
+import { profileApi } from '@/services/api';
 import { queryKeys } from '@/lib/queryKeys';
 import {
   useFetchLiveJobMutation,
@@ -26,7 +28,7 @@ import {
 } from '@/hooks/queries';
 import { fetchJobsOrchestrated } from '@/lib/pipelineJobSearch';
 import { skillsApi } from '@/services/skillsApi';
-import { isApiError, JobCard } from '@/types';
+import { JobCard } from '@/types';
 import { isCompareData, isTriageData, type CompareData, type TriageData } from '@/types/skills-data';
 import JobCardUI from '@/components/ui/JobCard';
 import SkillButton from '@/components/skills/SkillButton';
@@ -47,9 +49,12 @@ import {
   ChevronLeft, ChevronRight,
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
+import { readLocalStorage, writeLocalStorage } from '@/lib/utils';
 
 const TOUR_KEY = 'NewCareers_dashboard_tour_done';
 const FEED_HEIGHT = 660; // 3 card rows
+const SALARY_STEP = 5_000;
+const SALARY_MAX = 200_000;
 
 export default function PipelineDashboard() {
   const queryClient = useQueryClient();
@@ -74,7 +79,10 @@ export default function PipelineDashboard() {
 
   // D1 – correct ref type
   const feedRef = useRef<VirtualJobFeedHandle>(null);
+  const fetchAbortRef = useRef<AbortController | null>(null);
   const { onNearBottom } = useScrollPrefetch({ hasNextPage, isFetchingNextPage, fetchNextPage });
+
+  useEffect(() => () => { fetchAbortRef.current?.abort(); }, []);
 
   // D3 – stable renderCard so VirtualJobFeed itemData memo holds
   const renderCard = useCallback((job: JobCard) => <JobCardUI job={job} />, []);
@@ -83,16 +91,20 @@ export default function PipelineDashboard() {
   const [fetchInFlight, setFetchInFlight] = useState(false);
   const [fetchProgress, setFetchProgress] = useState<string | null>(null);
   const { data: analyticsStats, isLoading: statsLoading } = useAnalyticsSummary();
+  const { data: profile } = useQuery({
+    queryKey: queryKeys.profile.current(),
+    queryFn: () => profileApi.get(),
+  });
+  const minMatch = profile?.minMatchPercent ?? 0;
 
-  const [search] = useState('');
+  const [search, setSearch] = useState('');
   const [sourceFilter, setSourceFilter] = useState('All Sources');
-  const [minMatch] = useState(0);
-  const [pipelineMinSalary] = useState<number | undefined>(undefined);
-  const [pipelineMaxSalary] = useState<number | undefined>(undefined);
+  const [pipelineMinSalary, setPipelineMinSalary] = useState<number | undefined>(undefined);
+  const [pipelineMaxSalary, setPipelineMaxSalary] = useState<number | undefined>(undefined);
 
   const [searchResult, setSearchResult] = useState<SearchResult | null>(null);
   const [searching, setSearching] = useState(false);
-  const [lastSearchParams, setLastSearchParams] = useState<SearchParams>({});
+  const [activeSearchParams, setActiveSearchParams] = useState<SearchParams>({});
   const isSearchMode = searchResult !== null;
 
   const [plannerJobId, setPlannerJobId] = useState<string | null>(null);
@@ -101,14 +113,16 @@ export default function PipelineDashboard() {
 
   const [tourActive, setTourActive] = useState(false);
   useEffect(() => {
-    if (!localStorage.getItem(TOUR_KEY)) {
+    if (!readLocalStorage(TOUR_KEY)) {
       const t = setTimeout(() => setTourActive(true), 800);
       return () => clearTimeout(t);
     }
   }, []);
 
   // Scroll to top on filter change
-  useEffect(() => { feedRef.current?.scrollToItem(0); }, [sourceFilter, minMatch, search]);
+  useEffect(() => {
+    feedRef.current?.scrollToItem(0);
+  }, [sourceFilter, minMatch, search, pipelineMinSalary, pipelineMaxSalary]);
 
   function openPlannerForJob(userJobId: string) {
     const found = allJobs.find(j => j.userJobId === userJobId);
@@ -116,42 +130,44 @@ export default function PipelineDashboard() {
     setPlannerJobId(userJobId);
   }
 
-  const unwrapCompareData = (value: unknown): CompareData | null => {
-    if (!isCompareData(value)) throw new Error('Compare skill returned unexpected data.');
-    return value;
-  };
-  const unwrapTriageData = (value: unknown): TriageData | null => {
-    if (!isTriageData(value)) throw new Error('Triage skill returned unexpected data.');
-    return value;
-  };
-
-  const compareSkill = useSkill<CompareData | null>(useCallback(async () => {
-    const ids = allJobs.slice(0, 5).map(j => j.userJobId);
-    return unwrapCompareData((await skillsApi.compare(ids)).data);
-  }, [allJobs]));
+  const unwrapCompareData = (value: unknown): CompareData | null =>
+    isCompareData(value) ? value : null;
+  const unwrapTriageData = (value: unknown): TriageData | null =>
+    isTriageData(value) ? value : null;
 
   const triageSkill = useSkill<TriageData | null>(useCallback(async () => {
-    return unwrapTriageData((await skillsApi.triage()).data);
+    const data = unwrapTriageData((await skillsApi.triage()).data);
+    if (!data) throw new Error('Triage skill returned unexpected data.');
+    return data;
   }, []));
 
   async function getMore() {
     const remaining = firstPage?.remaining ?? 0;
-    if (!remaining && allJobs.length > 0) return;
+    if (remaining <= 0 && allJobs.length > 0) return;
+    fetchAbortRef.current?.abort();
+    const controller = new AbortController();
+    fetchAbortRef.current = controller;
     setFetchInFlight(true);
     setFetchProgress(allJobs.length === 0 ? 'Starting full job search…' : 'Fetching jobs…');
     try {
-      const count = allJobs.length === 0 ? 5 : Math.min(5, remaining || 5);
+      const count = allJobs.length === 0 ? 5 : Math.min(5, remaining);
       const result = await fetchJobsOrchestrated(count, status => {
         setFetchProgress(status.message ?? 'Matching jobs to your profile…');
-      });
+      }, controller.signal);
       await queryClient.invalidateQueries({ queryKey: queryKeys.jobs.all });
       if (result.fullSearch) {
         toast.success('Job search complete — your evaluated matches are in the tracker.');
         return;
       }
-      toast.success(`${result.delivered} new job${result.delivered !== 1 ? 's' : ''} added`);
+      const n = result.delivered;
+      if (n > 0) {
+        toast.success(`Added ${n} new job${n === 1 ? '' : 's'} from all sources.`);
+        return;
+      }
+      toast('No new roles for your profile right now. Try broadening target roles or check back later.');
     } catch (e) {
-      toast.error(isApiError(e) ? e.normalizedMessage : e instanceof Error ? e.message : 'Fetch failed');
+      if (e instanceof DOMException && e.name === 'AbortError') return;
+      toast.error(getUserFacingErrorMessage(e, 'Could not fetch jobs.'));
     } finally {
       setFetchInFlight(false);
       setFetchProgress(null);
@@ -167,17 +183,16 @@ export default function PipelineDashboard() {
       const liveJob = await fetchLive.mutateAsync();
       toast.success(`Fetched: ${liveJob.title} at ${liveJob.company}!`);
     } catch (e) {
-      toast.error(isApiError(e) ? e.normalizedMessage : 'Failed to fetch live jobs');
+      toast.error(getUserFacingErrorMessage(e, 'Could not fetch live jobs.'));
     }
   }
 
   async function handleSearch(params: SearchParams) {
     if (Object.keys(params).length === 0) {
       setSearchResult(null);
-      setLastSearchParams({});
+      setActiveSearchParams({});
       return;
     }
-    setLastSearchParams(params);
     setSearching(true);
     try {
       const result = await queryClient.fetchQuery({
@@ -185,8 +200,9 @@ export default function PipelineDashboard() {
         queryFn: () => discoveryApi.search({ ...params, page: 0 }),
       });
       setSearchResult(result);
+      setActiveSearchParams(params);
     } catch (e) {
-      toast.error(isApiError(e) ? e.normalizedMessage : 'Search failed');
+      toast.error(getUserFacingErrorMessage(e, 'Search failed. Please try again.'));
     } finally {
       setSearching(false);
     }
@@ -194,19 +210,27 @@ export default function PipelineDashboard() {
 
   async function goToSearchPage(page: number) {
     if (!searchResult || page < 0 || page >= searchResult.totalPages) return;
+    if (Object.keys(activeSearchParams).length === 0) return;
     setSearching(true);
     try {
       const result = await queryClient.fetchQuery({
-        queryKey: queryKeys.discovery.search({ ...lastSearchParams, page }),
-        queryFn: () => discoveryApi.search({ ...lastSearchParams, page }),
+        queryKey: queryKeys.discovery.search({ ...activeSearchParams, page }),
+        queryFn: () => discoveryApi.search({ ...activeSearchParams, page }),
       });
       setSearchResult(result);
       window.scrollTo({ top: 0, behavior: 'smooth' });
     } catch (e) {
-      toast.error(isApiError(e) ? e.normalizedMessage : 'Failed to load page');
+      toast.error(getUserFacingErrorMessage(e, 'Could not load this page.'));
     } finally {
       setSearching(false);
     }
+  }
+
+  function clearPipelineFilters() {
+    setSearch('');
+    setSourceFilter('All Sources');
+    setPipelineMinSalary(undefined);
+    setPipelineMaxSalary(undefined);
   }
 
   const sourceOptions = useMemo(() => {
@@ -232,9 +256,23 @@ export default function PipelineDashboard() {
     });
   }, [allJobs, search, sourceFilter, minMatch, pipelineMinSalary, pipelineMaxSalary]);
 
-  const topJobs = filteredJobs.filter(
-    j => j.kanbanColumn === 'Discovered' || j.kanbanColumn === 'Saved',
+  const topJobs = useMemo(
+    () => filteredJobs.filter(
+      j => j.kanbanColumn === 'Discovered' || j.kanbanColumn === 'Saved',
+    ),
+    [filteredJobs],
   );
+
+  const compareJobIds = useMemo(
+    () => topJobs.slice(0, 5).map(j => j.userJobId),
+    [topJobs],
+  );
+
+  const compareSkill = useSkill<CompareData | null>(useCallback(async () => {
+    const data = unwrapCompareData((await skillsApi.compare(compareJobIds)).data);
+    if (!data) throw new Error('Compare skill returned unexpected data.');
+    return data;
+  }, [compareJobIds]));
 
   const missingSkillsMap = useMemo(() => {
     const map: Record<string, number> = {};
@@ -245,7 +283,7 @@ export default function PipelineDashboard() {
   }, [allJobs]);
   const topMissingSkillCount = missingSkillsMap[0]?.[1] ?? 0;
 
-  const activeFilters = search || sourceFilter !== 'All Sources' || minMatch > 0
+  const activeFilters = search.trim() !== '' || sourceFilter !== 'All Sources'
     || pipelineMinSalary != null || pipelineMaxSalary != null;
 
   const currentPage  = searchResult?.page ?? 0;
@@ -259,8 +297,8 @@ export default function PipelineDashboard() {
       {tourActive && (
         <ProductTour
           steps={DASHBOARD_TOUR_STEPS}
-          onComplete={() => { localStorage.setItem(TOUR_KEY, '1'); setTourActive(false); }}
-          onSkip={() => { localStorage.setItem(TOUR_KEY, '1'); setTourActive(false); }}
+          onComplete={() => { writeLocalStorage(TOUR_KEY, '1'); setTourActive(false); }}
+          onSkip={() => { writeLocalStorage(TOUR_KEY, '1'); setTourActive(false); }}
         />
       )}
 
@@ -320,7 +358,7 @@ export default function PipelineDashboard() {
             </h2>
             <div className="flex items-center gap-3">
               {isSearchMode && (
-                <button onClick={() => { setSearchResult(null); setLastSearchParams({}); }}
+                <button onClick={() => { setSearchResult(null); setActiveSearchParams({}); }}
                   className="flex items-center gap-1.5 text-xs font-semibold text-slate-400 hover:text-rose-500 transition-colors">
                   <X size={12} /> Clear search
                 </button>
@@ -347,6 +385,70 @@ export default function PipelineDashboard() {
             )}
           </div>
 
+          {!isSearchMode && (
+            <div className="mb-5 flex flex-wrap items-end gap-3">
+              <div className="flex-1 min-w-[180px]">
+                <label htmlFor="pipeline-keyword" className="block text-xs font-medium text-slate-500 mb-1">
+                  Filter matches
+                </label>
+                <input
+                  id="pipeline-keyword"
+                  type="search"
+                  value={search}
+                  onChange={e => setSearch(e.target.value)}
+                  placeholder="Title or company…"
+                  className="w-full h-9 px-3 rounded-xl border border-slate-200 bg-white text-sm text-slate-700 placeholder:text-slate-400 focus:border-emerald-400 focus:ring-2 focus:ring-emerald-100 outline-none transition-all"
+                />
+              </div>
+              <div className="w-28">
+                <label htmlFor="pipeline-min-salary" className="block text-xs font-medium text-slate-500 mb-1">
+                  Min salary (€)
+                </label>
+                <input
+                  id="pipeline-min-salary"
+                  type="number"
+                  min={0}
+                  max={SALARY_MAX}
+                  step={SALARY_STEP}
+                  value={pipelineMinSalary ?? ''}
+                  onChange={e => setPipelineMinSalary(e.target.value ? Number(e.target.value) : undefined)}
+                  placeholder="Any"
+                  className="w-full h-9 px-3 rounded-xl border border-slate-200 bg-white text-sm text-slate-700 focus:border-emerald-400 focus:ring-2 focus:ring-emerald-100 outline-none transition-all"
+                />
+              </div>
+              <div className="w-28">
+                <label htmlFor="pipeline-max-salary" className="block text-xs font-medium text-slate-500 mb-1">
+                  Max salary (€)
+                </label>
+                <input
+                  id="pipeline-max-salary"
+                  type="number"
+                  min={0}
+                  max={SALARY_MAX}
+                  step={SALARY_STEP}
+                  value={pipelineMaxSalary ?? ''}
+                  onChange={e => setPipelineMaxSalary(e.target.value ? Number(e.target.value) : undefined)}
+                  placeholder="Any"
+                  className="w-full h-9 px-3 rounded-xl border border-slate-200 bg-white text-sm text-slate-700 focus:border-emerald-400 focus:ring-2 focus:ring-emerald-100 outline-none transition-all"
+                />
+              </div>
+              {minMatch > 0 && (
+                <p className="text-xs text-slate-400 pb-1">
+                  Showing {minMatch}%+ match (from profile)
+                </p>
+              )}
+              {activeFilters && (
+                <button
+                  type="button"
+                  onClick={clearPipelineFilters}
+                  className="h-9 px-3 text-xs font-semibold text-slate-500 hover:text-rose-500 transition-colors"
+                >
+                  Clear filters
+                </button>
+              )}
+            </div>
+          )}
+
           {isSearchMode ? (
             searching ? (
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
@@ -357,7 +459,7 @@ export default function PipelineDashboard() {
                 <Building2 size={28} className="text-slate-300 mb-4" />
                 <h3 className="text-lg font-bold text-slate-800 mb-1">No jobs match your search</h3>
                 <p className="text-sm text-slate-400 mb-6 max-w-sm">Try different keywords, location, or remove salary filters.</p>
-                <button onClick={() => { setSearchResult(null); setLastSearchParams({}); }}
+                <button onClick={() => { setSearchResult(null); setActiveSearchParams({}); }}
                   className="px-7 py-3 bg-slate-900 text-white rounded-xl font-bold text-sm hover:bg-slate-800 transition-all">
                   Back to pipeline
                 </button>
@@ -399,6 +501,7 @@ export default function PipelineDashboard() {
                 jobs={topJobs}
                 height={FEED_HEIGHT}
                 onNearBottom={onNearBottom}
+                isLoadingMore={isFetchingNextPage}
                 renderCard={renderCard}
                 aria-label="Your matched job pipeline"
               />
@@ -472,7 +575,7 @@ export default function PipelineDashboard() {
         </div>
       </section>
 
-      <ComparePanel data={compareSkill.data} open={compareSkill.open} onClose={() => compareSkill.setOpen(false)} jobIds={topJobs.map(j => j.userJobId)} />
+      <ComparePanel data={compareSkill.data} open={compareSkill.open} onClose={() => compareSkill.setOpen(false)} jobIds={compareJobIds} />
       <TriagePanel data={triageSkill.data} open={triageSkill.open} onClose={() => triageSkill.setOpen(false)} />
 
       <AnimatePresence>

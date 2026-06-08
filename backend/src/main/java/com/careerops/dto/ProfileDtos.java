@@ -77,7 +77,16 @@ public class ProfileDtos {
         String    availability,
 
         @jakarta.validation.constraints.Size(max = 32, message = "Job domain too long")
-        String    jobDomain
+        String    jobDomain,
+
+        @jakarta.validation.constraints.Size(max = 500, message = "LinkedIn URL too long")
+        String    linkedInUrl,
+
+        @jakarta.validation.constraints.Size(max = 500, message = "GitHub URL too long")
+        String    githubUrl,
+
+        @jakarta.validation.constraints.Size(max = 500, message = "Website URL too long")
+        String    websiteUrl
     ) {}
 
     // ── Core profile response ────────────────────────────────────────────
@@ -111,7 +120,10 @@ public class ProfileDtos {
         String[]            atsKeywords,
         Integer             completenessScore,
         Long                version,
-        String              jobDomain
+        String              jobDomain,
+        String              linkedInUrl,
+        String              githubUrl,
+        String              websiteUrl
     ) {}
 
     // ── Stats ────────────────────────────────────────────────────────────
@@ -134,7 +146,9 @@ public class ProfileDtos {
         String       url,
         @jakarta.validation.constraints.Size(max = 1000, message = "Description too long")
         String       description,
-        List<String> techTags
+        List<String> techTags,
+        @jakarta.validation.constraints.Size(max = 100, message = "Location too long")
+        String       location
     ) {}
 
     // ── LinkedIn import result ────────────────────────────────────────────

@@ -86,6 +86,9 @@ export const interviewApi = {
   listTracks: () =>
     api.get<InterviewTrack[]>(`${BASE}/tracks`).then(r => r.data),
 
+  getTrack: (userJobId: string) =>
+    api.get<InterviewTrack>(`${BASE}/tracks/${userJobId}`).then(r => r.data),
+
   updateStage: (userJobId: string, stage: string) =>
     api.patch<InterviewTrack>(`${BASE}/tracks/${userJobId}/stage`, { stage }).then(r => r.data),
 };

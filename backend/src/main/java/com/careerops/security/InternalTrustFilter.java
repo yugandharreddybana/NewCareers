@@ -1,5 +1,7 @@
 package com.careerops.security;
 
+import com.careerops.model.User;
+import com.careerops.repository.UserRepository;
 import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServletRequest;
@@ -13,28 +15,27 @@ import org.springframework.web.filter.OncePerRequestFilter;
 
 import java.io.IOException;
 import java.util.List;
+import java.util.UUID;
+import java.util.regex.Pattern;
 
 /**
  * Populates {@link org.springframework.security.core.context.SecurityContext} from the
  * user id header injected by Node middleware on internal calls.
  *
  * Request authenticity is verified upstream by {@link HmacVerificationFilter}.
- *
- * Public (unauthenticated) endpoints:
- *   POST /auth/register
- *   POST /auth/login
- *   POST /auth/forgot-password
- *   POST /auth/reset-password
- *   POST /auth/refresh
- *   GET  /health
  */
 @Component
 public class InternalTrustFilter extends OncePerRequestFilter {
 
-    private final com.careerops.security.PublicPathPolicy publicPathPolicy;
+    private static final Pattern UUID_PATTERN =
+            Pattern.compile("^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$");
 
-    public InternalTrustFilter(com.careerops.security.PublicPathPolicy publicPathPolicy) {
+    private final PublicPathPolicy publicPathPolicy;
+    private final UserRepository users;
+
+    public InternalTrustFilter(PublicPathPolicy publicPathPolicy, UserRepository users) {
         this.publicPathPolicy = publicPathPolicy;
+        this.users = users;
     }
 
     @Value("${internal.trust.header}")
@@ -46,7 +47,6 @@ public class InternalTrustFilter extends OncePerRequestFilter {
 
         String path = ServletPathNormalizer.normalize(req);
 
-        // Allow truly-public endpoints through without auth
         if (publicPathPolicy.isPublic(path)) {
             chain.doFilter(req, res);
             return;
@@ -54,14 +54,7 @@ public class InternalTrustFilter extends OncePerRequestFilter {
 
         String userId = req.getHeader(trustHeader);
 
-        boolean userIdValid = false;
-        if (userId != null && !userId.isBlank() && userId.length() <= 64) {
-            if (userId.matches("^[0-9a-fA-F-]{36}$") || userId.matches("^\\d+$")) {
-                userIdValid = true;
-            }
-        }
-
-        if (!userIdValid) {
+        if (userId == null || userId.isBlank() || !UUID_PATTERN.matcher(userId).matches()) {
             logger.warn("Malformed or missing userId in InternalTrustFilter on path=" + path + " from IP=" + req.getRemoteAddr());
             incrementFailedTrustCounter();
             res.setStatus(HttpServletResponse.SC_UNAUTHORIZED);
@@ -70,10 +63,21 @@ public class InternalTrustFilter extends OncePerRequestFilter {
             return;
         }
 
+        req.setAttribute("userId", userId);
 
-        req.setAttribute("userId", userId); // expose for @RequestAttribute
+        String roleAuthority = "ROLE_USER";
+        try {
+            UUID parsed = UUID.fromString(userId);
+            roleAuthority = users.findById(parsed)
+                    .map(User::getRole)
+                    .map(r -> "ROLE_" + r.name())
+                    .orElse("ROLE_USER");
+        } catch (IllegalArgumentException ignored) {
+            // UUID_PATTERN already validated format; defensive fallback only.
+        }
+
         var auth = new UsernamePasswordAuthenticationToken(
-            userId, null, List.of(new SimpleGrantedAuthority("ROLE_USER"))
+                userId, null, List.of(new SimpleGrantedAuthority(roleAuthority))
         );
         SecurityContextHolder.getContext().setAuthentication(auth);
 
@@ -97,5 +101,3 @@ public class InternalTrustFilter extends OncePerRequestFilter {
         }
     }
 }
-
-

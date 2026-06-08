@@ -54,6 +54,14 @@ test.describe('Signup — deferred account creation', () => {
     await expect(page).toHaveURL(/\/signup/);
   });
 
+  test('SU-16: AI consent required blocks signup', async ({ page }) => {
+    await page.goto('/signup');
+    await fillSignupForm(page, TEST_USER, { aiProcessing: false });
+    await submitAuthForm(page);
+    await expect(page.getByRole('alert')).toContainText(/ai processing consent/i);
+    await expect(page).toHaveURL(/\/signup/);
+  });
+
   test('password strength indicator updates while typing', async ({ page }) => {
     await page.goto('/signup');
     await page.locator('#password').fill('short');
@@ -108,9 +116,10 @@ test.describe('Signup — live API registration', () => {
     expect(verificationId.length).toBeGreaterThan(10);
   });
 
-  test('SU-25: check-email API conflict for test profile', async ({ request }) => {
+  test('SU-25: signup-intent API returns conflict for registered email', async ({ request }) => {
     await ensureTestUser(request);
-    const conflict = await checkSignupEmailViaApi(request, TEST_USER.email);
+    const { createSignupIntentViaApi } = await import('./helpers/stack');
+    const conflict = await createSignupIntentViaApi(request, TEST_USER);
     expect(conflict.status).toBe(409);
   });
 

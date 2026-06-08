@@ -1,25 +1,35 @@
 /**
  * Short-lived onboarding email verification handoff (OTP + CAPTCHA completed).
+ * Bound to the deferred signup intent id when present.
  */
 export interface OnboardingVerificationSession {
   verificationId: string;
   email: string;
+  signupIntentId?: string;
   expiresAt: number;
 }
 
-const KEY = 'co_onboarding_verification_v1';
-const SESSION_TTL_MS = 20 * 60 * 1000;
+const KEY = 'co_onboarding_verification_v2';
+const SESSION_TTL_MS = 15 * 60 * 1000;
 
-export function writeOnboardingVerification(verificationId: string, email: string): void {
+export function writeOnboardingVerification(
+  verificationId: string,
+  email: string,
+  signupIntentId?: string,
+): void {
   const session: OnboardingVerificationSession = {
     verificationId,
     email: email.trim().toLowerCase(),
+    ...(signupIntentId ? { signupIntentId } : {}),
     expiresAt: Date.now() + SESSION_TTL_MS,
   };
   sessionStorage.setItem(KEY, JSON.stringify(session));
 }
 
-export function readOnboardingVerification(expectedEmail?: string): OnboardingVerificationSession | null {
+export function readOnboardingVerification(
+  expectedEmail?: string,
+  expectedSignupIntentId?: string,
+): OnboardingVerificationSession | null {
   try {
     const raw = sessionStorage.getItem(KEY);
     if (!raw) return null;
@@ -39,6 +49,12 @@ export function readOnboardingVerification(expectedEmail?: string): OnboardingVe
     if (expectedEmail && parsed.email !== expectedEmail.trim().toLowerCase()) {
       return null;
     }
+    if (
+      expectedSignupIntentId &&
+      parsed.signupIntentId !== expectedSignupIntentId
+    ) {
+      return null;
+    }
     return parsed;
   } catch {
     return null;
@@ -47,4 +63,5 @@ export function readOnboardingVerification(expectedEmail?: string): OnboardingVe
 
 export function clearOnboardingVerification(): void {
   sessionStorage.removeItem(KEY);
+  sessionStorage.removeItem('co_onboarding_verification_v1');
 }

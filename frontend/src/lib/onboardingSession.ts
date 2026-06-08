@@ -1,4 +1,5 @@
 import { isAxiosError } from 'axios';
+import { hasPendingSignup } from '@/lib/pendingSignup';
 
 export const SESSION_EXPIRED_SIGNUP_REDIRECT = '/signup?reason=session_expired';
 export const SESSION_EXPIRED_LOGIN_REDIRECT = '/login?reason=session_expired';
@@ -12,12 +13,16 @@ export function isOnboardingPath(pathname?: string): boolean {
 }
 
 /**
- * Target after invalid/expired token: signup during onboarding, login everywhere else.
+ * Target after invalid/expired token.
+ * On onboarding: deferred signup (intent) → signup; authenticated onboarding → login.
  */
 export function getSessionExpiredRedirectTarget(pathname: string): string {
-  return isOnboardingPath(pathname)
-    ? SESSION_EXPIRED_SIGNUP_REDIRECT
-    : SESSION_EXPIRED_LOGIN_REDIRECT;
+  if (isOnboardingPath(pathname)) {
+    return hasPendingSignup()
+      ? SESSION_EXPIRED_SIGNUP_REDIRECT
+      : SESSION_EXPIRED_LOGIN_REDIRECT;
+  }
+  return SESSION_EXPIRED_LOGIN_REDIRECT;
 }
 
 /** Replace history with the session-expired redirect for the given path. */

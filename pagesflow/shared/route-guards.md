@@ -6,11 +6,11 @@ All guards live in `frontend/src/components/ProtectedRoute.tsx` and wrap route g
 
 | Guard | Routes | Allows | Redirects when blocked |
 |-------|--------|--------|------------------------|
-| None | `/`, `/get-started`, legal pages, `*` | Everyone | — |
+| None | `/`, `/get-started`, `/billing`, `/pricing`, legal pages, `*` | Everyone | — |
 | `GuestRoute` | `/login`, `/signup`, `/forgot-password`, `/reset-password` | Guests only | Logged-in → `/dashboard` or `/onboarding` (or `from` path) |
 | `OnboardingRoute` | `/onboarding` | Guests with pending signup OR signed-in non-onboarded | No pending signup → `/signup`; onboarded → `/dashboard` |
 | `ProtectedRoute` | All app pages | Signed-in + onboarded | No user → `/login`; not onboarded → `/onboarding` |
-| `AdminRoute` | `/admin/experiments` | `user.role === 'ADMIN'` | No user → `/login`; non-admin → `/dashboard` + toast |
+| `AdminRoute` | `/admin/saas`, `/admin/experiments` | `user.role === 'ADMIN'` | No user → `/login`; non-admin → `/dashboard` + toast |
 
 ## Redirect decision tree
 
@@ -61,6 +61,7 @@ All other protected routes render inside `AppShell` (sidebar + top bar + notific
 | From | To |
 |------|-----|
 | `/register` | `/signup` |
+| `/pricing` | `/billing` |
 | `/kanban` | `/jobs` |
 | `/legal/privacy` | `/privacy` |
 | `/legal/terms` | `/terms` |

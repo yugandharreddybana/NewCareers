@@ -16,24 +16,34 @@ public class ApiException extends RuntimeException {
     private final HttpStatus status;
     private final Integer retryAfterSeconds;
     private final boolean captchaRequired;
+    private final String errorCode;
 
     public ApiException(HttpStatus status, String message) {
-        this(status, message, null, false);
+        this(status, message, null, false, null);
+    }
+
+    public ApiException(HttpStatus status, String message, String errorCode) {
+        this(status, message, null, false, errorCode);
     }
 
     public ApiException(HttpStatus status, String message, Integer retryAfterSeconds) {
-        this(status, message, retryAfterSeconds, false);
+        this(status, message, retryAfterSeconds, false, null);
     }
 
     public ApiException(HttpStatus status, String message, boolean captchaRequired) {
-        this(status, message, null, captchaRequired);
+        this(status, message, null, captchaRequired, null);
     }
 
     public ApiException(HttpStatus status, String message, Integer retryAfterSeconds, boolean captchaRequired) {
+        this(status, message, retryAfterSeconds, captchaRequired, null);
+    }
+
+    public ApiException(HttpStatus status, String message, Integer retryAfterSeconds, boolean captchaRequired, String errorCode) {
         super(message);
         this.status = status;
         this.retryAfterSeconds = retryAfterSeconds;
         this.captchaRequired = captchaRequired;
+        this.errorCode = errorCode;
     }
 
     public ApiException(HttpStatus status, String message, Throwable cause) {
@@ -41,11 +51,13 @@ public class ApiException extends RuntimeException {
         this.status = status;
         this.retryAfterSeconds = null;
         this.captchaRequired = false;
+        this.errorCode = null;
     }
 
     public HttpStatus getStatus() { return status; }
     public Integer getRetryAfterSeconds() { return retryAfterSeconds; }
     public boolean isCaptchaRequired() { return captchaRequired; }
+    public String getErrorCode() { return errorCode; }
 
     // ── Convenience factories ──────────────────────────────────────────────
 

@@ -43,6 +43,8 @@ type Props<T extends VirtualJobFeedItem> = {
   width?: number | string;
   /** Called when scroll position is within PREFETCH_THRESHOLD items of end */
   onNearBottom?: () => void;
+  /** Screen readers: announce when additional pages are loading */
+  isLoadingMore?: boolean;
   /** Return the JSX for a single card */
   renderCard: (item: T, index: number) => ReactNode;
   /** Override height for a specific index; falls back to DEFAULT_ITEM_HEIGHT */
@@ -78,6 +80,7 @@ function VirtualJobFeedInner<T extends VirtualJobFeedItem>(
     height,
     width = '100%',
     onNearBottom,
+    isLoadingMore = false,
     renderCard,
     getItemHeight,
     className,
@@ -86,6 +89,7 @@ function VirtualJobFeedInner<T extends VirtualJobFeedItem>(
   ref: React.ForwardedRef<VirtualJobFeedHandle>,
 ) {
   const listRef = useRef<VariableSizeList>(null);
+  const lastPrefetchTriggerRef = useRef(-1);
 
   // F1 – expose a stable public handle, not the raw react-window ref
   useImperativeHandle(
@@ -110,8 +114,13 @@ function VirtualJobFeedInner<T extends VirtualJobFeedItem>(
       if (!onNearBottom || jobs.length === 0) return;
       const avgHeight = DEFAULT_ITEM_HEIGHT;
       const visibleEndIndex = Math.floor((scrollOffset + height) / avgHeight);
-      if (jobs.length - visibleEndIndex <= PREFETCH_THRESHOLD) {
+      const nearBottom = jobs.length - visibleEndIndex <= PREFETCH_THRESHOLD;
+      if (nearBottom && visibleEndIndex > lastPrefetchTriggerRef.current) {
+        lastPrefetchTriggerRef.current = visibleEndIndex;
         onNearBottom();
+      }
+      if (!nearBottom) {
+        lastPrefetchTriggerRef.current = -1;
       }
     },
     [jobs.length, height, onNearBottom],
@@ -124,7 +133,7 @@ function VirtualJobFeedInner<T extends VirtualJobFeedItem>(
   );
 
   return (
-    <div className={className} role="feed" aria-label={ariaLabel} aria-busy={false}>
+    <div className={className} role="feed" aria-label={ariaLabel} aria-busy={isLoadingMore}>
       <VariableSizeList
         ref={listRef}
         height={height}

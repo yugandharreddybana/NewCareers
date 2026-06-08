@@ -314,11 +314,9 @@ export function SkillPanel({
               ? (runHistory[historyIndex].output as Record<string, unknown>)
               : data
           }
-          compareFrom={
-            skillName === 'tailor-resume' && historyIndex > 0 && runHistory[0]?.output
-              ? runHistory[0].output
-              : undefined
-          }
+          {...(skillName === 'tailor-resume' && historyIndex > 0 && runHistory[0]?.output
+            ? { compareFrom: runHistory[0].output }
+            : {})}
           skillName={skillName}
           userJobId={userJobId}
           {...(skillName === 'tailor-resume'

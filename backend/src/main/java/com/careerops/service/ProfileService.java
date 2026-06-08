@@ -134,6 +134,15 @@ public class ProfileService {
                 profile.setJobDomain(domain);
             }
         }
+        if (req.linkedInUrl() != null) {
+            profile.setLinkedInUrl(normalizeProfileUrl(req.linkedInUrl()));
+        }
+        if (req.githubUrl() != null) {
+            profile.setGithubUrl(normalizeProfileUrl(req.githubUrl()));
+        }
+        if (req.websiteUrl() != null) {
+            profile.setWebsiteUrl(normalizeProfileUrl(req.websiteUrl()));
+        }
 
         boolean wasOnboarded = Boolean.TRUE.equals(profile.getOnboarded());
         if (Boolean.TRUE.equals(req.onboarded())) {
@@ -206,6 +215,7 @@ public class ProfileService {
             .url(req.url())
             .description(req.description())
             .techTags(req.techTags())
+            .location(req.location())
             .build());
         profile.setPortfolioItems(items);
         profiles.save(profile);
@@ -252,6 +262,7 @@ public class ProfileService {
                 if (req.url()         != null && !req.url().isBlank())   item.setUrl(req.url());
                 if (req.description() != null) item.setDescription(req.description());
                 if (req.techTags()    != null) item.setTechTags(req.techTags());
+                if (req.location()    != null) item.setLocation(req.location());
                 found = true;
                 break;
             }
@@ -345,8 +356,28 @@ public class ProfileService {
             atsKeywords.toArray(new String[0]),
             score,
             p.getVersion(),
-            p.getJobDomain()
+            p.getJobDomain(),
+            p.getLinkedInUrl(),
+            p.getGithubUrl(),
+            p.getWebsiteUrl()
         );
+    }
+
+    private static String normalizeProfileUrl(String raw) {
+        if (raw == null) {
+            return null;
+        }
+        String trimmed = raw.trim();
+        if (trimmed.isEmpty()) {
+            return null;
+        }
+        if (trimmed.startsWith("www.")) {
+            return "https://" + trimmed;
+        }
+        if (!trimmed.startsWith("http://") && !trimmed.startsWith("https://")) {
+            return "https://" + trimmed;
+        }
+        return trimmed;
     }
 
     /**

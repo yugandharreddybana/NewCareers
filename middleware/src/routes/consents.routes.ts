@@ -1,15 +1,10 @@
 import express from 'express';
 import { authGuard } from '../authGuard.js';
 import { forward, bubble } from '../services/backendProxy.js';
+import { resolveClientIp } from '../trustedClientIp.js';
 
 const router = express.Router();
 router.use(authGuard);
-
-function clientIp(req: express.Request): string | undefined {
-  return (typeof req.headers['x-forwarded-for'] === 'string'
-    ? req.headers['x-forwarded-for']
-    : undefined) || req.ip;
-}
 
 function clientForwardHeaders(req: express.Request): Record<string, string> {
   const ua = req.headers['user-agent'];
@@ -22,7 +17,7 @@ router.get('/', async (req, res, next) => {
       method: 'GET',
       path: '/consents',
       userId: req.userId,
-      ip: clientIp(req),
+      ip: resolveClientIp(req),
       headers: clientForwardHeaders(req),
     });
     bubble(r, res);
@@ -38,7 +33,7 @@ router.post('/', async (req, res, next) => {
       path: '/consents',
       userId: req.userId,
       data: req.body,
-      ip: clientIp(req),
+      ip: resolveClientIp(req),
       headers: clientForwardHeaders(req),
     });
     bubble(r, res);

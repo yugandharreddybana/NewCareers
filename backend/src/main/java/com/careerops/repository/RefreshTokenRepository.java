@@ -8,9 +8,13 @@ import java.util.List;
 
 public interface RefreshTokenRepository extends JpaRepository<RefreshToken, UUID> {
     Optional<RefreshToken> findByTokenHash(String tokenHash);
+    Optional<RefreshToken> findByTokenHashAndConsumedAtIsNull(String tokenHash);
+    Optional<RefreshToken> findByTokenHashAndConsumedAtIsNotNull(String tokenHash);
     List<RefreshToken> findByUserIdOrderByLastUsedAtDesc(UUID userId);
+    long countByUserId(UUID userId);
     void deleteByUserId(UUID userId);
     void deleteByTokenHash(String tokenHash);
+    void deleteByTokenFamilyId(UUID tokenFamilyId);
 
     @org.springframework.transaction.annotation.Transactional
     int deleteByExpiresAtBefore(java.time.Instant now);

@@ -1,5 +1,5 @@
 /**
- * Forgot password — email → 6-digit OTP → new password (end-to-end with backend).
+ * Forgot password — email → 8-digit OTP → new password (end-to-end with backend).
  */
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { OtpInput } from '@/components/auth/OtpInput';
@@ -9,24 +9,21 @@ import { useAuth } from '@/context/AuthContext';
 import { PageMeta } from '@/components/PageMeta';
 import { AuthPageShell } from '@/components/auth/AuthPageShell';
 import { legalPaths } from '@/lib/brand';
-import { isApiError } from '@/types';
+import {
+  evaluatePasswordStrength,
+  isPasswordComplexityValid,
+  passwordComplexityHint,
+} from '@/lib/passwordRules';
+import {
+  GENERIC_FORGOT_SUCCESS,
+  GENERIC_RESET_ERROR,
+} from '@/lib/authErrors';
 
 type Step = 'email' | 'verify' | 'done';
 
 const RESEND_COOLDOWN_SEC = 60;
 
 type LocationState = { step?: Step; email?: string } | null;
-
-function getPasswordStrength(pw: string): { score: number; label: string } {
-  if (pw.length === 0) return { score: 0, label: '' };
-  if (pw.length < 8) return { score: 1, label: 'Too short' };
-  let score = 1;
-  if (/[A-Z]/.test(pw)) score++;
-  if (/[0-9]/.test(pw)) score++;
-  if (/[^A-Za-z0-9]/.test(pw)) score++;
-  const labels = ['', 'Too short', 'Weak', 'Fair', 'Strong'];
-  return { score, label: labels[score] ?? '' };
-}
 
 export default function ForgotPasswordPage() {
   const location = useLocation();
@@ -44,7 +41,7 @@ export default function ForgotPasswordPage() {
   const [error, setError] = useState('');
   const [resendCooldown, setResendCooldown] = useState(0);
 
-  const strength = useMemo(() => getPasswordStrength(password), [password]);
+  const strength = useMemo(() => evaluatePasswordStrength(password), [password]);
 
   useEffect(() => {
     if (resendCooldown <= 0) return;
@@ -61,12 +58,12 @@ export default function ForgotPasswordPage() {
       try {
         await forgotPassword(targetEmail.trim());
         setResendCooldown(RESEND_COOLDOWN_SEC);
+        setError('');
         return true;
-      } catch (err: unknown) {
-        if (isApiError(err)) setError(err.normalizedMessage);
-        else if (err instanceof Error) setError(err.message);
-        else setError('Could not send verification code. Please try again.');
-        return false;
+      } catch {
+        setError(GENERIC_FORGOT_SUCCESS);
+        setResendCooldown(RESEND_COOLDOWN_SEC);
+        return true;
       } finally {
         setResendLoading(false);
       }
@@ -94,16 +91,12 @@ export default function ForgotPasswordPage() {
     e.preventDefault();
     setError('');
 
-    if (otp.length !== 6) {
-      setError('Enter the 6-digit code from your email.');
+    if (otp.length !== 8) {
+      setError('Enter the 8-digit code from your email.');
       return;
     }
-    if (password.length < 8) {
-      setError('Password must be at least 8 characters.');
-      return;
-    }
-    if (strength.score < 3) {
-      setError('Password is too weak. Add upper-case letters, numbers, or symbols.');
+    if (!isPasswordComplexityValid(password)) {
+      setError(passwordComplexityHint());
       return;
     }
     if (password !== confirmPassword) {
@@ -115,10 +108,8 @@ export default function ForgotPasswordPage() {
     try {
       await resetPassword(email.trim(), otp, password);
       setStep('done');
-    } catch (err: unknown) {
-      if (isApiError(err)) setError(err.normalizedMessage);
-      else if (err instanceof Error) setError(err.message);
-      else setError('Could not reset password. Please try again.');
+    } catch {
+      setError(GENERIC_RESET_ERROR);
     } finally {
       setLoading(false);
     }
@@ -158,7 +149,7 @@ export default function ForgotPasswordPage() {
                 </h1>
                 <p className="font-body-sm text-body-sm text-on-surface-variant">
                   {step === 'email' &&
-                    "Enter your email address and we'll send you a 6-digit code to reset your password."}
+                    "Enter your email address and we'll send you an 8-digit code to reset your password."}
                   {step === 'verify' &&
                     `Enter the code we sent to ${email} and choose a new password.`}
                   {step === 'done' && 'Your password has been updated. You can sign in with your new password.'}
@@ -268,7 +259,7 @@ export default function ForgotPasswordPage() {
                       </span>
                     </button>
                   </div>
-                  {password.length > 0 && (
+                  {password.length > 0 && strength.label && (
                     <p className="font-label-sm text-label-sm text-on-surface-variant">{strength.label}</p>
                   )}
                 </div>

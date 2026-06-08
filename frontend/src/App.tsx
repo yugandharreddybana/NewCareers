@@ -29,6 +29,7 @@ import { ApiLoadingOverlay } from './components/ApiLoadingOverlay';
 import { ExperimentProvider } from './context/ExperimentContext';
 import { ErrorBoundary, RouteFallback } from './components/ErrorBoundary';
 import { CookieConsentBanner } from './components/gdpr/CookieConsentBanner';
+import { PlanLimitBanner } from './components/PlanLimitBanner';
 
 // ── lazy() with a `.preload()` method for hover-warming chunks ─────────────
 type Importable<T extends ComponentType<any>> = () => Promise<{ default: T }>;
@@ -61,13 +62,19 @@ const WelcomeDashboard     = withPreload(() => import('./pages/WelcomeDashboard'
 const PipelineDashboard    = withPreload(() => import('./pages/PipelineDashboard'));
 const JobDetail            = withPreload(() => import('./pages/JobDetail'));
 const Profile              = withPreload(() => import('./pages/Profile'));
-const AccountSettings      = withPreload(() => import('./pages/AccountSettings'));
+const AccountSettingsLayout   = withPreload(() => import('./pages/account/AccountSettingsLayout'));
+const AccountProfilePage      = withPreload(() => import('./pages/account/AccountProfilePage'));
+const AccountSecurityPage     = withPreload(() => import('./pages/account/AccountSecurityPage'));
+const AccountNotificationsPage = withPreload(() => import('./pages/account/AccountNotificationsPage'));
+const AccountBillingPage      = withPreload(() => import('./pages/account/AccountBillingPage'));
+const AccountTeamPage         = withPreload(() => import('./pages/account/AccountTeamPage'));
 const InterviewHistoryPage = withPreload(() => import('./pages/InterviewHistoryPage'));
 const InterviewPage        = withPreload(() => import('./pages/InterviewPage'));
 const NetworkingPage       = withPreload(() => import('./pages/NetworkingPage'));
 const WorkspacePage        = withPreload(() => import('./pages/WorkspacePage'));
 const ProgressPage         = withPreload(() => import('./pages/ProgressPage'));
 const ExperimentDashboard  = withPreload(() => import('./pages/ExperimentDashboardPage'));
+const SaasDashboard        = withPreload(() => import('./pages/admin/SaasDashboard'));
 const Kanban               = withPreload(() => import('./pages/Kanban'));
 const CvManager            = withPreload(() => import('./pages/CvManager'));
 const Skills               = withPreload(() => import('./pages/Skills'));
@@ -113,6 +120,7 @@ export const App: React.FC = () => (
         <AuthProvider>
           <ExperimentProvider>
             <ApiLoadingOverlay />
+            <PlanLimitBanner />
             <CookieConsentBanner />
             {/* Top-level Suspense catches the very first paint. */}
             <Suspense fallback={<PageLoader />}>
@@ -134,6 +142,8 @@ export const App: React.FC = () => (
                 <Route path="/terms"            element={<RouteWithBoundary label="Terms of service"><TermsOfServicePage /></RouteWithBoundary>} />
                 <Route path="/help"             element={<RouteWithBoundary label="Help"><HelpPage /></RouteWithBoundary>} />
                 <Route path="/accessibility"    element={<RouteWithBoundary label="Accessibility"><AccessibilityPage /></RouteWithBoundary>} />
+                <Route path="/billing"          element={<RouteWithBoundary label="Pricing"><BillingPage /></RouteWithBoundary>} />
+                <Route path="/pricing"          element={<Navigate to="/billing" replace />} />
                 <Route path="/legal/privacy"    element={<Navigate to="/privacy" replace />} />
                 <Route path="/legal/terms"      element={<Navigate to="/terms" replace />} />
                 <Route path="/legal/help"       element={<Navigate to="/help" replace />} />
@@ -151,7 +161,14 @@ export const App: React.FC = () => (
                   <Route path="/pipeline"        element={<RouteWithBoundary label="Job pipeline"><PipelineDashboard /></RouteWithBoundary>} />
                   <Route path="/jobs/:id"         element={<RouteWithBoundary label="Job detail"><JobDetail /></RouteWithBoundary>} />
                   <Route path="/profile"          element={<RouteWithBoundary label="Profile"><Profile /></RouteWithBoundary>} />
-                  <Route path="/account"          element={<RouteWithBoundary label="Account settings"><AccountSettings /></RouteWithBoundary>} />
+                  <Route path="/account" element={<RouteWithBoundary label="Account settings"><AccountSettingsLayout /></RouteWithBoundary>}>
+                    <Route index element={<Navigate to="profile" replace />} />
+                    <Route path="profile"       element={<RouteWithBoundary label="Profile settings"><AccountProfilePage /></RouteWithBoundary>} />
+                    <Route path="security"      element={<RouteWithBoundary label="Security settings"><AccountSecurityPage /></RouteWithBoundary>} />
+                    <Route path="notifications" element={<RouteWithBoundary label="Notification settings"><AccountNotificationsPage /></RouteWithBoundary>} />
+                    <Route path="billing"       element={<RouteWithBoundary label="Billing settings"><AccountBillingPage /></RouteWithBoundary>} />
+                    <Route path="team"          element={<RouteWithBoundary label="Team settings"><AccountTeamPage /></RouteWithBoundary>} />
+                  </Route>
                   <Route path="/interviews"       element={<RouteWithBoundary label="Interview history"><InterviewHistoryPage /></RouteWithBoundary>} />
                   <Route path="/interview"        element={<RouteWithBoundary label="Interview"><InterviewPage /></RouteWithBoundary>} />
                   <Route path="/networking"       element={<RouteWithBoundary label="Networking"><NetworkingPage /></RouteWithBoundary>} />
@@ -162,7 +179,6 @@ export const App: React.FC = () => (
                   <Route path="/cv"               element={<RouteWithBoundary label="CV manager"><CvManager /></RouteWithBoundary>} />
                   <Route path="/skills"           element={<RouteWithBoundary label="Skills"><Skills /></RouteWithBoundary>} />
                   <Route path="/analytics"        element={<RouteWithBoundary label="Analytics"><Analytics /></RouteWithBoundary>} />
-                  <Route path="/billing"          element={<RouteWithBoundary label="Billing"><BillingPage /></RouteWithBoundary>} />
                   <Route path="/refer"            element={<RouteWithBoundary label="Refer"><Refer /></RouteWithBoundary>} />
                   <Route path="/planner"          element={<RouteWithBoundary label="Planner"><PlannerPage /></RouteWithBoundary>} />
                   <Route path="/auto-apply"       element={<RouteWithBoundary label="Auto apply"><AutoApplyPage /></RouteWithBoundary>} />
@@ -174,6 +190,7 @@ export const App: React.FC = () => (
 
                 {/* ── Admin-only routes ───────────────────────────────────── */}
                 <Route element={<AdminRoute />}>
+                  <Route path="/admin/saas" element={<RouteWithBoundary label="SaaS Admin"><SaasDashboard /></RouteWithBoundary>} />
                   <Route path="/admin/experiments" element={<RouteWithBoundary label="Experiments"><ExperimentDashboard /></RouteWithBoundary>} />
                 </Route>
 
@@ -200,9 +217,11 @@ export const App: React.FC = () => (
 // Pass 6 #6.036 — exposed for sidebars / nav links to call `.preload()` on hover.
 export const lazyPages = {
   Home, Login, Signup, ForgotPasswordPage, ResetPasswordPage, Onboarding,
-  Dashboard, WelcomeDashboard, PipelineDashboard, JobDetail, Profile, AccountSettings,
+  Dashboard, WelcomeDashboard, PipelineDashboard, JobDetail, Profile,
+  AccountSettingsLayout, AccountProfilePage, AccountSecurityPage, AccountNotificationsPage,
+  AccountBillingPage, AccountTeamPage,
   InterviewHistoryPage, InterviewPage, NetworkingPage, WorkspacePage,
-  ProgressPage, ExperimentDashboard, Kanban, CvManager, Skills, Analytics,
+  ProgressPage, ExperimentDashboard, SaasDashboard, Kanban, CvManager, Skills, Analytics,
   BillingPage, Refer, PlannerPage, WatchlistsPage, AutoApplyPage, OutreachPage,
   AgentMemoryPage, ResumeVersionsPage, GetStarted,
 };

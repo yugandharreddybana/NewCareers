@@ -10,6 +10,7 @@ import { checkValidation, trimStrings } from '../sanitize.js';
 import { authLimiter, loginLimiter, csrfGuard } from '../rateLimiter.js';
 import { authGuard } from '../authGuard.js';
 import { verifySessionToken } from '../jwtVerification.js';
+import { resolveClientIp } from '../trustedClientIp.js';
 
 const router = express.Router();
 
@@ -22,12 +23,6 @@ const cvUpload = multer({
     else cb(new Error('Only PDF or DOCX'));
   },
 });
-
-function clientIp(req: express.Request): string | undefined {
-  return (typeof req.headers['x-forwarded-for'] === 'string'
-    ? req.headers['x-forwarded-for']
-    : undefined) || req.ip;
-}
 
 function clientForwardHeaders(req: express.Request): Record<string, string> {
   const ua = req.headers['user-agent'];
@@ -65,6 +60,11 @@ type AuthPayload = {
   user?: unknown;
 };
 
+type LoginFlowPayload = AuthPayload & {
+  requiresTwoFactor?: boolean;
+  challengeToken?: string;
+};
+
 function resolveRememberMe(req: express.Request, explicit?: boolean): boolean {
   if (typeof explicit === 'boolean') return explicit;
   return req.cookies?.[REMEMBER_FLAG] === '1';
@@ -96,14 +96,7 @@ function authJsonResponse(
   rememberMe: boolean,
 ) {
   issueAuthCookies(res, data, rememberMe);
-  if (rememberMe) {
-    return res.json({ token: data.token, user: data.user });
-  }
-  return res.json({
-    token: data.token,
-    user: data.user,
-    refreshToken: data.refreshToken,
-  });
+  return res.json({ token: data.token, user: data.user });
 }
 
 function clearAuthCookies(res: express.Response) {
@@ -115,12 +108,35 @@ function clearAuthCookies(res: express.Response) {
 
 router.use(csrfGuard);
 
+router.post('/signup-intent',
+  authLimiter, trimStrings,
+  body('email').isEmail().normalizeEmail(),
+  body('password').isString().isLength({ min: 8, max: 128 }),
+  body('consents').isObject(),
+  body('captchaToken').optional().isString(),
+  body('name').optional().isString().isLength({ max: 100 }),
+  checkValidation,
+  async (req, res, next) => {
+    try {
+      const r = await forward({
+        method: 'POST',
+        path: '/auth/signup-intent',
+        data: req.body,
+        ip: resolveClientIp(req),
+        headers: clientForwardHeaders(req),
+      });
+      if (r.status >= 400) return res.status(r.status).json(r.data);
+      return res.json(r.data);
+    } catch (e) { next(e); }
+  });
+
 router.post('/signup',
   authLimiter, trimStrings,
   body('name').isString().isLength({ min: 1 }),
   body('username').isString().isLength({ min: 3, max: 32 }),
   body('email').isEmail().normalizeEmail(),
-  body('password').isString().isLength({ min: 8 }),
+  body('password').optional().isString().isLength({ min: 8, max: 128 }),
+  body('signupIntentId').optional().isUUID(),
   body('emailVerificationId').optional().isUUID(),
   checkValidation,
   async (req, res, next) => {
@@ -129,7 +145,7 @@ router.post('/signup',
         method: 'POST',
         path: '/auth/register',
         data: req.body,
-        ip: clientIp(req),
+        ip: resolveClientIp(req),
         headers: clientForwardHeaders(req),
       });
       if (r.status >= 400) return res.status(r.status).json(r.data);
@@ -137,10 +153,38 @@ router.post('/signup',
     } catch (e) { next(e); }
   });
 
+router.post('/google/link/confirm',
+  authLimiter, trimStrings,
+  body('idToken').isString().isLength({ min: 100, max: 8192 }),
+  body('password').isString().isLength({ min: 8, max: 128 }),
+  body('rememberMe').optional().isBoolean(),
+  body('captchaToken').optional().isString(),
+  checkValidation,
+  async (req, res, next) => {
+    try {
+      const rememberMe = Boolean(req.body.rememberMe);
+      const r = await forward({
+        method: 'POST',
+        path: '/auth/google/link/confirm',
+        data: {
+          idToken: req.body.idToken,
+          password: req.body.password,
+          captchaToken: req.body.captchaToken,
+        },
+        ip: resolveClientIp(req),
+        headers: clientForwardHeaders(req),
+      });
+      if (r.status >= 400) return res.status(r.status).json(r.data);
+      authJsonResponse(res, r.data as AuthPayload, rememberMe);
+    } catch (e) { next(e); }
+  });
+
 router.post('/google',
   authLimiter, trimStrings,
   body('idToken').isString().isLength({ min: 100, max: 8192 }),
   body('rememberMe').optional().isBoolean(),
+  body('consents').optional().isObject(),
+  body('captchaToken').optional().isString(),
   checkValidation,
   async (req, res, next) => {
     try {
@@ -148,8 +192,12 @@ router.post('/google',
       const r = await forward({
         method: 'POST',
         path: '/auth/google',
-        data: { idToken: req.body.idToken },
-        ip: clientIp(req),
+        data: {
+          idToken: req.body.idToken,
+          consents: req.body.consents,
+          captchaToken: req.body.captchaToken,
+        },
+        ip: resolveClientIp(req),
         headers: clientForwardHeaders(req),
       });
       if (r.status >= 400) return res.status(r.status).json(r.data);
@@ -184,7 +232,34 @@ router.post('/login',
         method: 'POST',
         path: '/auth/login',
         data: req.body,
-        ip: clientIp(req),
+        ip: resolveClientIp(req),
+        headers: clientForwardHeaders(req),
+      });
+      if (r.status >= 400) return res.status(r.status).json(r.data);
+      const data = r.data as LoginFlowPayload;
+      if (data.requiresTwoFactor) {
+        return res.json({
+          requiresTwoFactor: true,
+          challengeToken: data.challengeToken,
+        });
+      }
+      authJsonResponse(res, data, rememberMe);
+    } catch (e) { next(e); }
+  });
+
+router.post('/two-factor/verify',
+  loginLimiter, trimStrings,
+  body('challengeToken').isString().isLength({ min: 10 }),
+  body('code').matches(/^\d{6}$/),
+  checkValidation,
+  async (req, res, next) => {
+    try {
+      const rememberMe = resolveRememberMe(req);
+      const r = await forward({
+        method: 'POST',
+        path: '/auth/two-factor/verify',
+        data: req.body,
+        ip: resolveClientIp(req),
         headers: clientForwardHeaders(req),
       });
       if (r.status >= 400) return res.status(r.status).json(r.data);
@@ -243,8 +318,14 @@ router.post('/logout', async (req, res) => {
         method: 'POST',
         path: '/auth/logout',
         userId,
-        data: refreshToken ? { refreshToken } : {},
-        headers: { 'Content-Type': 'application/json' },
+        data: {
+          ...(refreshToken ? { refreshToken } : {}),
+          ...(token ? { accessToken: token } : {}),
+        },
+        headers: {
+          'Content-Type': 'application/json',
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
       });
       if (r.status >= 400) {
         console.warn(`Backend logout returned ${r.status}; clearing cookies anyway`);
@@ -267,7 +348,7 @@ router.post('/onboarding/check-email',
         method: 'POST',
         path: '/auth/onboarding/check-email',
         data: req.body,
-        ip: clientIp(req),
+        ip: resolveClientIp(req),
         headers: clientForwardHeaders(req),
       });
       if (r.status >= 400) return res.status(r.status).json(r.data ?? {});
@@ -275,10 +356,31 @@ router.post('/onboarding/check-email',
     } catch (e) { next(e); }
   });
 
+router.post('/onboarding/check-password',
+  authLimiter, trimStrings,
+  body('signupIntentId').isUUID(),
+  body('email').isEmail().normalizeEmail(),
+  body('password').isString().isLength({ min: 8, max: 128 }),
+  checkValidation,
+  async (req, res, next) => {
+    try {
+      const r = await forward({
+        method: 'POST',
+        path: '/auth/onboarding/check-password',
+        data: req.body,
+        ip: resolveClientIp(req),
+        headers: clientForwardHeaders(req),
+      });
+      if (r.status >= 400) return res.status(r.status).json(r.data ?? {});
+      res.status(200).json(r.data ?? { secure: true });
+    } catch (e) { next(e); }
+  });
+
 router.post('/onboarding/send-verification-otp',
   authLimiter, trimStrings,
   body('email').isEmail().normalizeEmail(),
   body('firstName').optional().isString().isLength({ max: 100 }),
+  body('captchaToken').optional().isString(),
   checkValidation,
   async (req, res, next) => {
     try {
@@ -286,7 +388,7 @@ router.post('/onboarding/send-verification-otp',
         method: 'POST',
         path: '/auth/onboarding/send-verification-otp',
         data: req.body,
-        ip: clientIp(req),
+        ip: resolveClientIp(req),
         headers: clientForwardHeaders(req),
       });
       if (r.status >= 400) return res.status(r.status).json(r.data ?? {});
@@ -297,6 +399,7 @@ router.post('/onboarding/send-verification-otp',
 router.post('/onboarding/resend-verification-otp',
   authLimiter, trimStrings,
   body('email').isEmail().normalizeEmail(),
+  body('captchaToken').optional().isString(),
   checkValidation,
   async (req, res, next) => {
     try {
@@ -304,7 +407,7 @@ router.post('/onboarding/resend-verification-otp',
         method: 'POST',
         path: '/auth/onboarding/resend-verification-otp',
         data: req.body,
-        ip: clientIp(req),
+        ip: resolveClientIp(req),
         headers: clientForwardHeaders(req),
       });
       if (r.status === 429) {
@@ -318,7 +421,7 @@ router.post('/onboarding/resend-verification-otp',
 router.post('/onboarding/verify-email',
   authLimiter, trimStrings,
   body('email').isEmail().normalizeEmail(),
-  body('otp').isString().matches(/^\d{6}$/),
+  body('otp').isString().matches(/^\d{8}$/),
   body('captchaToken').optional().isString(),
   checkValidation,
   async (req, res, next) => {
@@ -327,7 +430,22 @@ router.post('/onboarding/verify-email',
         method: 'POST',
         path: '/auth/onboarding/verify-email',
         data: req.body,
-        ip: clientIp(req),
+        ip: resolveClientIp(req),
+        headers: clientForwardHeaders(req),
+      });
+      if (r.status >= 400) return res.status(r.status).json(r.data ?? {});
+      res.status(200).json(r.data ?? {});
+    } catch (e) { next(e); }
+  });
+
+router.get('/signup-intent/:id/exists',
+  authLimiter,
+  async (req, res, next) => {
+    try {
+      const r = await forward({
+        method: 'GET',
+        path: `/auth/signup-intent/${req.params.id}/exists`,
+        ip: resolveClientIp(req),
         headers: clientForwardHeaders(req),
       });
       if (r.status >= 400) return res.status(r.status).json(r.data ?? {});
@@ -341,17 +459,23 @@ router.post('/onboarding/parse-cv',
   async (req, res, next) => {
     try {
       if (!req.file) return res.status(400).json({ error: 'Upload your CV to continue' });
+      const signupIntentId = typeof req.body.signupIntentId === 'string' ? req.body.signupIntentId : undefined;
+      const email = typeof req.body.email === 'string' ? req.body.email : undefined;
+      const captchaToken = typeof req.body.captchaToken === 'string' ? req.body.captchaToken : undefined;
       const fd = new FormData();
       fd.append('file', req.file.buffer, {
         filename: req.file.originalname,
         contentType: req.file.mimetype,
       });
+      if (signupIntentId) fd.append('signupIntentId', signupIntentId);
+      if (email) fd.append('email', email);
+      if (captchaToken) fd.append('captchaToken', captchaToken);
       const r = await forward({
         method: 'POST',
         path: '/auth/onboarding/parse-cv',
         data: fd,
         headers: fd.getHeaders(),
-        ip: clientIp(req),
+        ip: resolveClientIp(req),
       });
       if (r.status >= 400) return res.status(r.status).json(r.data ?? {});
       res.status(200).json(r.data ?? {});
@@ -381,7 +505,7 @@ router.post('/forgot-password',
 router.post('/reset-password',
   authLimiter, trimStrings,
   body('email').isEmail().normalizeEmail(),
-  body('otp').isString().matches(/^\d{6}$/),
+  body('otp').isString().matches(/^\d{8}$/),
   body('newPassword').isString().isLength({ min: 8 }),
   checkValidation,
   async (req, res, next) => {

@@ -25,10 +25,14 @@ export async function acceptSignupTerms(page: Page): Promise<void> {
   await page.getByRole('checkbox', { name: /terms of service/i }).check();
 }
 
+export async function acceptSignupAiProcessing(page: Page): Promise<void> {
+  await page.getByRole('checkbox', { name: /ai processing/i }).check();
+}
+
 export async function fillSignupForm(
   page: Page,
   creds: TestCredentials,
-  opts?: { terms?: boolean },
+  opts?: { terms?: boolean; aiProcessing?: boolean },
 ): Promise<void> {
   await page.locator('#name').fill(creds.name);
   await page.locator('#email').fill(creds.email);
@@ -36,10 +40,13 @@ export async function fillSignupForm(
   if (opts?.terms !== false) {
     await acceptSignupTerms(page);
   }
+  if (opts?.aiProcessing !== false) {
+    await acceptSignupAiProcessing(page);
+  }
 }
 
 export async function expectSignupDuplicateEmailAlert(page: Page): Promise<void> {
-  await expect(page.getByRole('alert')).toContainText(/already associated with this email/i);
+  await expect(page.getByRole('alert')).toContainText(/account may already exist/i);
 }
 
 export async function gotoLoginWithEmail(page: Page, email: string): Promise<void> {
@@ -83,19 +90,19 @@ export async function loginWithRememberMe(
   await submitAuthForm(page);
 }
 
-export async function fillOtpCode(page: Page, otp: string): Promise<void> {
-  const code = otp.replace(/\D/g, '').slice(0, 6);
+export async function fillOtpCode(page: Page, otp: string, length = 8): Promise<void> {
+  const code = otp.replace(/\D/g, '').slice(0, length);
   for (let i = 0; i < code.length; i++) {
     await page.getByRole('textbox', { name: `Digit ${i + 1}` }).fill(code[i]!);
   }
 }
 
-export async function pasteOtpCode(page: Page, otp: string): Promise<void> {
+export async function pasteOtpCode(page: Page, otp: string, length = 8): Promise<void> {
   const first = page.getByRole('textbox', { name: 'Digit 1' });
   await first.focus();
   await page.evaluate(async code => {
     await navigator.clipboard.writeText(code);
-  }, otp.replace(/\D/g, '').slice(0, 6));
+  }, otp.replace(/\D/g, '').slice(0, length));
   await first.press('ControlOrMeta+V');
 }
 

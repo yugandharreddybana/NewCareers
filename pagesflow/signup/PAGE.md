@@ -2,7 +2,7 @@
 
 ## Overview
 
-First step of deferred signup: collects name, email, password, and consent checkboxes but does **not** create an account yet. Validates email availability via API, then stores credentials in `sessionStorage` (`pendingSignup`) and navigates to `/onboarding`. Account registration happens on onboarding finish. Guests only.
+First step of deferred signup: collects name, email, password, and consent checkboxes but does **not** create an account yet. Creates a short-lived **signup intent** server-side, then stores the intent id and consents in `sessionStorage` (`pendingSignup`) and navigates to `/onboarding`. Account registration happens on onboarding finish. Guests only.
 
 ## Route
 
@@ -27,7 +27,7 @@ First step of deferred signup: collects name, email, password, and consent check
 | Email | Yes | HTML5 email; trimmed on submit | Always |
 | Password | Yes | Client strength: min 8 chars; score ≥3 (Good/Strong) to proceed | Always |
 | Terms of Service + Privacy Policy | Yes | `termsAccepted` must be true | Always |
-| AI processing consent | No | Optional; stored in pending signup | Always |
+| AI processing consent | Yes | Required client- and server-side for CV parse during onboarding | Always |
 | Marketing emails | No | Optional | Always |
 | Analytics consent | No | Optional; also written to local cookie consent | Always |
 
@@ -37,8 +37,8 @@ Password strength labels: Too short (<8), Weak, Fair (not acceptable), Good, Str
 
 | Action | Trigger | Result |
 |--------|---------|--------|
-| Continue to profile | Form submit | `authApi.checkSignupEmail` → `writePendingSignup` → `navigate('/onboarding')` |
-| Duplicate email | 409 / "already exists" | Shows inline error alert (no login handoff link) |
+| Continue to profile | Form submit | `authApi.createSignupIntent` → `writePendingSignup` → `navigate('/onboarding')` |
+| Duplicate email | 409 on signup-intent | Shows generic inline duplicate-email alert (no login handoff link) |
 | Sign in (footer) | Link | Navigate to `/login` |
 | Open legal docs | Terms/Privacy links | New tab to `/terms`, `/privacy` |
 
@@ -60,12 +60,14 @@ Session-expired cleanup (`?reason=session_expired`): clears `tokenStore`, `pendi
 
 | User action | Frontend | Middleware (`/api/v1`) | Java (`/api`) |
 |-------------|----------|------------------------|---------------|
-| Check email available | `authApi.checkSignupEmail` | `POST /auth/onboarding/check-email` | `POST /auth/onboarding/check-email` |
+| Create signup intent | `authApi.createSignupIntent` | `POST /auth/signup-intent` | `POST /auth/signup-intent` |
 | Logout (session expired cleanup) | `authApi.logout` | `POST /auth/logout` | `POST /auth/logout` |
 
-Check-email success: `{ available: true }`. Duplicate email: HTTP 409 from backend (surfaced as inline "already registered" UI, not generic error).
+Signup-intent success: `{ signupIntentId, expiresAt }`. Duplicate email: HTTP 409 with generic message (surfaced as inline duplicate-email UI).
 
-Actual registration (`POST /auth/register`) is deferred to onboarding finish — see [onboarding/PAGE.md](../onboarding/PAGE.md).
+Legacy `POST /auth/onboarding/check-email` remains for compatibility but always returns `{ available: true }` to prevent email enumeration.
+
+Actual registration (`POST /auth/signup`) is deferred to onboarding finish — see [onboarding/PAGE.md](../onboarding/PAGE.md).
 
 ## File map
 
@@ -76,6 +78,7 @@ Actual registration (`POST /auth/register`) is deferred to onboarding finish —
 | Page | `frontend/src/pages/Signup.tsx` |
 | Shell | `frontend/src/components/auth/SignupPageShell.tsx` |
 | Pending signup store | `frontend/src/lib/pendingSignup.ts` |
+| Auth error constants | `frontend/src/lib/authErrors.ts` |
 | Google consent handoff | `frontend/src/lib/pendingGoogleConsents.ts` |
 | Analytics consent | `frontend/src/lib/cookieConsent.ts` |
 | Verification cleanup | `frontend/src/lib/onboardingVerification.ts` |
@@ -86,14 +89,14 @@ Actual registration (`POST /auth/register`) is deferred to onboarding finish —
 
 | Role | Path |
 |------|------|
-| Check-email route | `middleware/src/routes/auth.routes.ts` — `POST /onboarding/check-email` |
+| Signup-intent route | `middleware/src/routes/auth.routes.ts` — `POST /signup-intent` |
 
 ### Backend
 
 | Role | Path |
 |------|------|
 | Controller | `backend/src/main/java/com/careerops/controller/AuthController.java` |
-| Email availability | `backend/src/main/java/com/careerops/service/OnboardingEmailVerificationService.java` |
+| Signup intent | `backend/src/main/java/com/careerops/service/SignupIntentService.java` |
 | Registration (deferred) | `backend/src/main/java/com/careerops/service/AuthService.java` — `signup` |
 
 ## Sequence diagram
@@ -103,20 +106,20 @@ sequenceDiagram
     participant Signup as Signup.tsx
     participant Axios
     participant Middleware
-    participant Java as OnboardingEmailVerificationService
+    participant Java as SignupIntentService
     participant Storage as sessionStorage
 
-    Signup->>Signup: validate name, password strength, terms
-    Signup->>Axios: POST /auth/onboarding/check-email { email }
+    Signup->>Signup: validate name, password strength, terms, AI consent
+    Signup->>Axios: POST /auth/signup-intent { email, password, consents, name? }
     Axios->>Middleware: proxy
-    Middleware->>Java: POST /auth/onboarding/check-email
+    Middleware->>Java: POST /auth/signup-intent
 
     alt email already registered
         Java-->>Signup: 409 Conflict
-        Signup->>Signup: show duplicate-email error alert
+        Signup->>Signup: show generic duplicate-email error alert
     else email available
-        Java-->>Signup: { available: true }
-        Signup->>Storage: writePendingSignup({ email, password, name?, consents })
+        Java-->>Signup: { signupIntentId, expiresAt }
+        Signup->>Storage: writePendingSignup({ signupIntentId, email, consents, name? })
         Signup->>Storage: writePendingGoogleConsents, writeAnalyticsConsent
         Signup->>Signup: navigate(/onboarding, replace)
     end
@@ -125,13 +128,14 @@ sequenceDiagram
 ## Edge cases
 
 - **Deferred account creation**: Closing the tab loses `pendingSignup`; user must restart from signup.
-- **Duplicate email**: Shows an inline error; editing the email field clears the message.
-- **Weak password**: Blocked client-side before any API call.
-- **Terms not accepted**: Blocked client-side; only required consent checkbox.
+- **Duplicate email**: Shows a generic inline error; editing the email field clears the message.
+- **Weak password**: Blocked client-side before any API call; server may return 400 with generic weak-password message.
+- **Terms / AI consent not accepted**: Blocked client-side before signup-intent call; server rejects missing AI consent with 400.
 - **Session expired on signup URL**: Wipes all signup handoff state; user re-enters form.
 - **Logged-in user**: `GuestRoute` redirects away before form is usable.
-- **No CAPTCHA on signup page**: Email verification CAPTCHA happens later in onboarding modal.
+- **reCAPTCHA**: When configured, required on signup-intent submit.
 - **Legacy `/register`**: Permanent redirect to `/signup` in `App.tsx`.
+- **No Google button on signup**: Google OAuth is available on `/login` only; consents collected on signup are reused via `pendingGoogleConsents`.
 
 ## Related docs
 

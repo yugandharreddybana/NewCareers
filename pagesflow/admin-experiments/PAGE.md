@@ -105,6 +105,7 @@ sequenceDiagram
 
 ## Related docs
 
+- [admin-saas/PAGE.md](../admin-saas/PAGE.md) — SaaS ops dashboard
 - [shared/auth-infrastructure.md](../shared/auth-infrastructure.md)
 - [shared/route-guards.md](../shared/route-guards.md)
 - [mandatory-fields.md](../mandatory-fields.md) — `APP_ADMIN_USER_IDS`

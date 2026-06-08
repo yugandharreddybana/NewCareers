@@ -3,12 +3,13 @@
  * Keep in sync with shared/canonical-mock-job.json and backend h2-dev-seed.sql.
  */
 import canonical from '../../../shared/canonical-mock-job.json';
+import { normalizeJobCard } from '@/lib/normalizeJobCard';
 import type { RecommendedJob } from '@/services/discoveryApi';
 import type { FetchSummary, JobCard, JobDetail, Stats } from '@/types';
 
 export const CANONICAL_MOCK_JOB_IDS = canonical.ids;
 
-export const MOCK_JOB: JobCard = canonical.card as JobCard;
+export const MOCK_JOB: JobCard = normalizeJobCard(canonical.card as Partial<JobCard>);
 
 export const MOCK_JOBS: JobCard[] = [MOCK_JOB];
 

@@ -11,7 +11,6 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
-import org.mockito.ArgumentCaptor;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
@@ -39,25 +38,31 @@ class OnboardingEmailVerificationServiceTest {
     @Mock UserRepository users;
     @Mock ResendEmailService email;
     @Mock CaptchaService captcha;
+    @Mock com.careerops.security.OtpHashService otpHashService;
 
     @InjectMocks OnboardingEmailVerificationService service;
 
     private static final String EMAIL = "new.user@example.com";
+    private static final String REGISTERED_EMAIL = "existing.user@example.com";
     private UUID verificationId;
 
     @BeforeEach
     void setUp() {
         verificationId = UUID.randomUUID();
+        when(otpHashService.hash(any())).thenAnswer(inv -> sha256(inv.getArgument(0)));
+        when(otpHashService.matches(any(), any())).thenAnswer(inv -> {
+            String otp = inv.getArgument(0);
+            String hash = inv.getArgument(1);
+            return sha256(otp).equals(hash);
+        });
     }
 
     @Test
-    @DisplayName("checkEmailAvailable rejects when email already registered")
-    void checkEmailAvailableRejectsExistingUser() {
+    @DisplayName("checkEmailAvailable returns silently when email already registered")
+    void checkEmailAvailableIgnoresExistingUser() {
         when(users.findByEmail(EMAIL)).thenReturn(Optional.of(User.builder().email(EMAIL).build()));
 
-        assertThatThrownBy(() -> service.checkEmailAvailable(EMAIL))
-                .isInstanceOf(ApiException.class)
-                .hasMessageContaining("already exists");
+        service.checkEmailAvailable(EMAIL);
 
         verify(verifications, never()).save(any());
     }
@@ -74,19 +79,22 @@ class OnboardingEmailVerificationServiceTest {
     }
 
     @Test
-    @DisplayName("sendOtp rejects when email already registered")
-    void sendOtpRejectsExistingUser() {
-        when(users.findByEmail(EMAIL)).thenReturn(Optional.of(User.builder().email(EMAIL).build()));
+    @DisplayName("sendOtp creates decoy row when email already registered without sending email")
+    void sendOtpDecoyForRegisteredUser() {
+        when(users.findByEmail(REGISTERED_EMAIL))
+                .thenReturn(Optional.of(User.builder().email(REGISTERED_EMAIL).build()));
+        when(verifications.save(any(EmailVerification.class))).thenAnswer(inv -> inv.getArgument(0));
 
-        assertThatThrownBy(() -> service.sendOtp(EMAIL, "New"))
-                .isInstanceOf(ApiException.class)
-                .hasMessageContaining("already exists");
+        OnboardingOtpSentResponse resp = service.sendOtp(REGISTERED_EMAIL, "New", null);
 
-        verify(verifications, never()).save(any());
+        assertThat(resp.resendsRemaining()).isEqualTo(3);
+        verify(verifications).invalidateAllActiveForEmail(REGISTERED_EMAIL);
+        verify(verifications).save(any(EmailVerification.class));
+        verify(email, never()).sendOnboardingVerificationOtp(any(), any(), any());
     }
 
     @Test
-    @DisplayName("sendOtp creates verification row and sends email")
+    @DisplayName("sendOtp creates verification row and sends email for new users")
     void sendOtpSuccess() {
         when(users.findByEmail(EMAIL)).thenReturn(Optional.empty());
         when(verifications.save(any(EmailVerification.class))).thenAnswer(inv -> {
@@ -95,7 +103,7 @@ class OnboardingEmailVerificationServiceTest {
             return ev;
         });
 
-        OnboardingOtpSentResponse resp = service.sendOtp(EMAIL, "New User");
+        OnboardingOtpSentResponse resp = service.sendOtp(EMAIL, "New User", null);
 
         assertThat(resp.resendsRemaining()).isEqualTo(3);
         verify(verifications).invalidateAllActiveForEmail(EMAIL);
@@ -103,15 +111,52 @@ class OnboardingEmailVerificationServiceTest {
     }
 
     @Test
-    @DisplayName("resendOtp enforces 5-minute cooldown")
+    @DisplayName("registered and unregistered emails get same generic error on bad OTP after send")
+    void verifyEmailBadOtpSameMessageForRegisteredAndNew() {
+        EmailVerification row = activeRow("11111111", 0);
+        when(verifications.findFirstByEmailAndConsumedAtIsNullOrderByCreatedAtDesc(REGISTERED_EMAIL))
+                .thenReturn(Optional.of(row));
+
+        assertThatThrownBy(() -> service.verifyEmail(REGISTERED_EMAIL, "99999999", "captcha-token"))
+                .isInstanceOf(ApiException.class)
+                .hasMessage(OnboardingEmailVerificationService.GENERIC_VERIFY_FAILURE);
+
+        when(verifications.findFirstByEmailAndConsumedAtIsNullOrderByCreatedAtDesc(EMAIL))
+                .thenReturn(Optional.of(row));
+
+        assertThatThrownBy(() -> service.verifyEmail(EMAIL, "99999999", "captcha-token"))
+                .isInstanceOf(ApiException.class)
+                .hasMessage(OnboardingEmailVerificationService.GENERIC_VERIFY_FAILURE);
+    }
+
+    @Test
+    @DisplayName("resendOtp for registered email updates row without sending email")
+    void resendOtpRegisteredSkipsEmail() {
+        EmailVerification row = activeRow("12345678", 0);
+        row.setLastSentAt(Instant.now().minus(6, ChronoUnit.MINUTES));
+        when(verifications.findFirstByEmailAndConsumedAtIsNullOrderByCreatedAtDesc(REGISTERED_EMAIL))
+                .thenReturn(Optional.of(row));
+        when(users.findByEmail(REGISTERED_EMAIL))
+                .thenReturn(Optional.of(User.builder().email(REGISTERED_EMAIL).build()));
+        when(verifications.save(row)).thenReturn(row);
+
+        OnboardingOtpSentResponse resp = service.resendOtp(REGISTERED_EMAIL, null);
+
+        assertThat(resp.resendsRemaining()).isEqualTo(2);
+        verify(email, never()).sendOnboardingVerificationOtp(any(), any(), any());
+    }
+
+    @Test
+    @DisplayName("resendOtp enforces cooldown with generic message")
     void resendOtpCooldown() {
-        EmailVerification row = activeRow("123456", 0);
+        EmailVerification row = activeRow("12345678", 0);
         row.setLastSentAt(Instant.now().minus(1, ChronoUnit.MINUTES));
         when(verifications.findFirstByEmailAndConsumedAtIsNullOrderByCreatedAtDesc(EMAIL))
                 .thenReturn(Optional.of(row));
 
-        assertThatThrownBy(() -> service.resendOtp(EMAIL))
+        assertThatThrownBy(() -> service.resendOtp(EMAIL, null))
                 .isInstanceOf(ApiException.class)
+                .hasMessage(OnboardingEmailVerificationService.GENERIC_OTP_SEND_FAILURE)
                 .satisfies(ex -> {
                     ApiException api = (ApiException) ex;
                     assertThat(api.getRetryAfterSeconds()).isNotNull();
@@ -119,22 +164,22 @@ class OnboardingEmailVerificationServiceTest {
     }
 
     @Test
-    @DisplayName("resendOtp enforces max 3 resends")
+    @DisplayName("resendOtp enforces max resends with generic message")
     void resendOtpMaxLimit() {
-        EmailVerification row = activeRow("123456", 3);
+        EmailVerification row = activeRow("12345678", 3);
         row.setLastSentAt(Instant.now().minus(6, ChronoUnit.MINUTES));
         when(verifications.findFirstByEmailAndConsumedAtIsNullOrderByCreatedAtDesc(EMAIL))
                 .thenReturn(Optional.of(row));
 
-        assertThatThrownBy(() -> service.resendOtp(EMAIL))
+        assertThatThrownBy(() -> service.resendOtp(EMAIL, null))
                 .isInstanceOf(ApiException.class)
-                .hasMessageContaining("Resend limit");
+                .hasMessage(OnboardingEmailVerificationService.GENERIC_OTP_SEND_FAILURE);
     }
 
     @Test
     @DisplayName("verifyEmail validates OTP and CAPTCHA in one call")
     void verifyEmailSuccess() {
-        String otp = "654321";
+        String otp = "65432178";
         EmailVerification row = activeRow(otp, 0);
         when(verifications.findFirstByEmailAndConsumedAtIsNullOrderByCreatedAtDesc(EMAIL))
                 .thenReturn(Optional.of(row));
@@ -151,22 +196,35 @@ class OnboardingEmailVerificationServiceTest {
     @Test
     @DisplayName("verifyEmail rejects invalid OTP and increments attempts")
     void verifyEmailInvalidOtp() {
-        EmailVerification row = activeRow("111111", 0);
+        EmailVerification row = activeRow("11111111", 0);
         when(verifications.findFirstByEmailAndConsumedAtIsNullOrderByCreatedAtDesc(EMAIL))
                 .thenReturn(Optional.of(row));
 
-        assertThatThrownBy(() -> service.verifyEmail(EMAIL, "999999", "captcha-token"))
+        assertThatThrownBy(() -> service.verifyEmail(EMAIL, "99999999", "captcha-token"))
                 .isInstanceOf(ApiException.class)
-                .hasMessageContaining("Invalid code");
+                .hasMessage(OnboardingEmailVerificationService.GENERIC_VERIFY_FAILURE);
 
         verify(verifications).incrementAttempts(verificationId);
         verify(captcha, never()).verify(any());
     }
 
     @Test
+    @DisplayName("verifyEmail returns generic error when code expired")
+    void verifyEmailExpired() {
+        EmailVerification row = activeRow("11111111", 0);
+        row.setExpiresAt(Instant.now().minus(1, ChronoUnit.MINUTES));
+        when(verifications.findFirstByEmailAndConsumedAtIsNullOrderByCreatedAtDesc(EMAIL))
+                .thenReturn(Optional.of(row));
+
+        assertThatThrownBy(() -> service.verifyEmail(EMAIL, "11111111", "captcha-token"))
+                .isInstanceOf(ApiException.class)
+                .hasMessage(OnboardingEmailVerificationService.GENERIC_VERIFY_FAILURE);
+    }
+
+    @Test
     @DisplayName("verifyEmail rejects bad CAPTCHA after valid OTP")
     void verifyEmailBadCaptcha() {
-        String otp = "654321";
+        String otp = "65432178";
         EmailVerification row = activeRow(otp, 0);
         when(verifications.findFirstByEmailAndConsumedAtIsNullOrderByCreatedAtDesc(EMAIL))
                 .thenReturn(Optional.of(row));
@@ -174,7 +232,7 @@ class OnboardingEmailVerificationServiceTest {
 
         assertThatThrownBy(() -> service.verifyEmail(EMAIL, otp, "bad"))
                 .isInstanceOf(ApiException.class)
-                .hasMessageContaining("CAPTCHA");
+                .hasMessage(OnboardingEmailVerificationService.GENERIC_SECURITY_FAILURE);
 
         assertThat(row.getCaptchaVerifiedAt()).isNull();
     }
@@ -182,7 +240,7 @@ class OnboardingEmailVerificationServiceTest {
     @Test
     @DisplayName("consumeForSignup marks verification consumed")
     void consumeForSignup() {
-        EmailVerification row = activeRow("123456", 0);
+        EmailVerification row = activeRow("12345678", 0);
         row.setOtpVerifiedAt(Instant.now());
         row.setCaptchaVerifiedAt(Instant.now());
         when(verifications.findByIdAndEmail(verificationId, EMAIL)).thenReturn(Optional.of(row));

@@ -94,7 +94,7 @@ describe('useSkill', () => {
     });
 
     await waitFor(() => expect(result.current.state).toBe('error'));
-    expect(result.current.error).toContain('API down');
+    expect(result.current.error).toBe('Something went wrong. Please try again.');
   });
 
   it('loadLastRun restores cached tailor-resume run', async () => {
@@ -134,6 +134,56 @@ describe('useSkill', () => {
     expect(restored).toBe(true);
     expect(result.current.state).toBe('done');
     expect(result.current.data).toEqual({ summary: 'cached' });
+  });
+
+  it('surfaces unhandled response type in error message', async () => {
+    mockStart.mockResolvedValueOnce({
+      type: 'UNKNOWN' as SkillRunResponse['type'],
+      skillName: 'evaluate',
+    });
+
+    const { result } = renderHook(() => useSkill());
+
+    act(() => {
+      void result.current.startSkill({ skillName: 'evaluate', userJobId: 'job-1' });
+    });
+
+    await waitFor(() => expect(result.current.state).toBe('error'));
+    expect(result.current.error).toContain('Unhandled skill response type');
+  });
+
+  it('handleAnswer uses current conversationId after rapid state updates', async () => {
+    mockStart.mockResolvedValueOnce({
+      type: 'QUESTION',
+      question: 'Years of experience?',
+      conversationId: 'conv-stable',
+    });
+    const replyDeferred = createDeferred<SkillRunResponse>();
+    mockReply.mockImplementationOnce(() => replyDeferred.promise);
+
+    const { result } = renderHook(() => useSkill());
+
+    act(() => {
+      void result.current.startSkill({ skillName: 'evaluate', userJobId: 'job-1' });
+    });
+    await waitFor(() => expect(result.current.state).toBe('waiting_answer'));
+
+    act(() => {
+      void result.current.handleAnswer('5 years');
+    });
+    expect(result.current.state).toBe('loading');
+
+    replyDeferred.resolve({
+      type: 'RESULT',
+      skillName: 'evaluate',
+      data: { summary: 'ok' },
+    });
+
+    await waitFor(() => expect(result.current.state).toBe('done'));
+    expect(mockReply).toHaveBeenCalledWith({
+      conversationId: 'conv-stable',
+      answer: '5 years',
+    });
   });
 
   it('reset returns to idle', async () => {

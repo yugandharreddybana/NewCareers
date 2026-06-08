@@ -1,5 +1,6 @@
 package com.careerops.controller;
 
+import com.careerops.annotation.PlanGated;
 import com.careerops.dto.ApplicationPlannerDtos.PlanRequest;
 import com.careerops.dto.ApplicationPlannerDtos.PlanResponse;
 import com.careerops.service.ApplicationPlannerService;
@@ -38,6 +39,7 @@ public class ApplicationPlannerController {
 
     @PostMapping("/plan")
     @PreAuthorize("isAuthenticated()")
+    @PlanGated("ai_skill_run")
     @Operation(summary = "Generate application plan (synchronous)",
                description = "Blocking call — use /plan/async for long-running plans to avoid gateway timeouts.")
     public ResponseEntity<PlanResponse> generatePlan(
@@ -57,6 +59,7 @@ public class ApplicationPlannerController {
      */
     @PostMapping("/plan/async")
     @PreAuthorize("isAuthenticated()")
+    @PlanGated("ai_skill_run")
     @Operation(summary = "Generate application plan (async, non-blocking)",
                description = "Returns 202 immediately. Poll GET /plan/result/{jobId} for the result.")
     public ResponseEntity<Void> generatePlanAsync(

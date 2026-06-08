@@ -39,6 +39,7 @@ describe('parseEvaluationReport V2', () => {
 describe('resolveJobEvaluation', () => {
   it('reads scoreBreakdown from job detail', () => {
     const job: JobDetail = {
+      id: 'uj-1',
       userJobId: 'uj-1',
       jobId: 'j-1',
       title: 'Designer',
@@ -55,6 +56,7 @@ describe('resolveJobEvaluation', () => {
 
   it('overlayPersistedJobSkills uses persisted columns when set', () => {
     const job: JobDetail = {
+      id: 'uj-1',
       userJobId: 'uj-1',
       jobId: 'j-1',
       title: 'Engineer',
@@ -77,6 +79,7 @@ describe('resolveJobEvaluation', () => {
 
   it('resolveJobSkillListsForDisplay prefers API columns over scoreBreakdown', () => {
     const job: JobDetail = {
+      id: 'uj-1',
       userJobId: 'uj-1',
       jobId: 'j-1',
       title: 'Engineer',
@@ -103,6 +106,7 @@ describe('resolveJobEvaluation', () => {
       unmatchedSkills: ['React', 'Spring', 'Kubernetes'],
     })!;
     const job: JobDetail = {
+      id: 'uj-1',
       userJobId: 'uj-1',
       jobId: 'j-1',
       title: 'Engineer',

@@ -2,6 +2,8 @@ package com.careerops.service;
 
 import com.careerops.dto.AuthDtos.ForgotRequest;
 import com.careerops.dto.AuthDtos.GoogleAuthRequest;
+import com.careerops.dto.AuthDtos.GoogleLinkConfirmRequest;
+import com.careerops.dto.AuthDtos.LoginRequest;
 import com.careerops.dto.AuthDtos.SignupRequest;
 import com.careerops.dto.AuthDtos.VerifyOtpRequest;
 import com.careerops.dto.ConsentDtos.SignupConsentsRequest;
@@ -61,6 +63,10 @@ class AuthServiceTest {
     @Mock UserConsentService consentService;
     @Mock UserKeyService userKeyService;
     @Mock OnboardingEmailVerificationService onboardingVerification;
+    @Mock SignupIntentService signupIntentService;
+    @Mock com.careerops.security.OtpHashService otpHashService;
+    @Mock org.springframework.core.env.Environment environment;
+    @Mock TrialProvisioningService trialProvisioningService;
     @Mock HttpServletRequest httpRequest;
 
     @InjectMocks AuthService authService;
@@ -99,14 +105,14 @@ class AuthServiceTest {
         when(jwt.issue(any(), any())).thenReturn("access-token");
 
         authService.signup(new SignupRequest(
-                "Test User", "testuser", "signup@example.com", "Secure1Pass", defaultConsents, verificationId),
+                "Test User", "testuser", "signup@example.com", "Secure1Pass", defaultConsents, verificationId, null),
                 httpRequest);
 
         verify(onboardingVerification).consumeForSignup(verificationId, "signup@example.com");
 
         verify(userKeyService).provisionForUser(any(UUID.class));
         verify(consentService).recordSignupConsents(userId, defaultConsents, httpRequest);
-        verify(audit).log(eq(userId), eq("SIGNUP"), eq(httpRequest), any());
+        verify(audit).log(eq(userId), eq("SIGNUP"), eq(httpRequest));
     }
 
     @Test
@@ -115,7 +121,7 @@ class AuthServiceTest {
         SignupConsentsRequest noTerms = new SignupConsentsRequest(false, true, false, false);
 
         assertThatThrownBy(() -> authService.signup(new SignupRequest(
-                "Test User", "testuser", "signup@example.com", "Secure1Pass", noTerms, verificationId),
+                "Test User", "testuser", "signup@example.com", "Secure1Pass", noTerms, verificationId, null),
                 httpRequest))
                 .isInstanceOf(ApiException.class)
                 .hasMessageContaining("Terms of Service");
@@ -127,7 +133,7 @@ class AuthServiceTest {
     @DisplayName("signup rejects when email verification id missing")
     void signupRejectsMissingVerification() {
         assertThatThrownBy(() -> authService.signup(new SignupRequest(
-                "Test User", "testuser", "signup@example.com", "Secure1Pass", defaultConsents, null),
+                "Test User", "testuser", "signup@example.com", "Secure1Pass", defaultConsents, null, null),
                 httpRequest))
                 .isInstanceOf(ApiException.class)
                 .hasMessageContaining("Email verification required");
@@ -155,7 +161,7 @@ class AuthServiceTest {
         when(profiles.findByUserId(userId)).thenReturn(Optional.empty());
 
         authService.authenticateWithGoogle(
-                new GoogleAuthRequest(idToken, defaultConsents), httpRequest);
+                new GoogleAuthRequest(idToken, defaultConsents, null), httpRequest);
 
         verify(userKeyService).provisionForUser(any(UUID.class));
         verify(consentService).recordSignupConsents(userId, defaultConsents, httpRequest);
@@ -174,9 +180,51 @@ class AuthServiceTest {
         when(jwt.issue(any(), any())).thenReturn("access-token");
         when(profiles.findByUserId(userId)).thenReturn(Optional.empty());
 
-        authService.authenticateWithGoogle(new GoogleAuthRequest(idToken, defaultConsents), httpRequest);
+        authService.authenticateWithGoogle(new GoogleAuthRequest(idToken, defaultConsents, null), httpRequest);
 
         verify(consentService, never()).recordSignupConsents(any(), any(), any());
+    }
+
+    @Test
+    @DisplayName("Google login on locked account returns generic failure")
+    void googleLoginLockedAccountUsesGenericFailure() {
+        String idToken = "d".repeat(120);
+        user.setGoogleSub("locked-sub");
+        user.setLockedUntil(Instant.now().plus(15, ChronoUnit.MINUTES));
+        GoogleOAuthService.GoogleIdentity identity =
+                new GoogleOAuthService.GoogleIdentity("locked-sub", user.getEmail(), user.getName(), true);
+
+        when(googleOAuth.verifyIdToken(idToken)).thenReturn(identity);
+        when(users.findByGoogleSub("locked-sub")).thenReturn(Optional.of(user));
+
+        assertThatThrownBy(() -> authService.authenticateWithGoogle(
+                new GoogleAuthRequest(idToken, defaultConsents, null), httpRequest))
+                .isInstanceOf(ApiException.class)
+                .hasMessageContaining("Invalid email or password");
+
+        verify(jwt, never()).issue(any(), any());
+    }
+
+    @Test
+    @DisplayName("Google login on password-only account requires link confirmation")
+    void googleLinkRequiresVerificationForPasswordAccount() {
+        String idToken = "c".repeat(120);
+        user.setPasswordHash("hash");
+        user.setGoogleSub(null);
+        GoogleOAuthService.GoogleIdentity identity =
+                new GoogleOAuthService.GoogleIdentity("new-google-sub", user.getEmail(), user.getName(), true);
+
+        when(googleOAuth.verifyIdToken(idToken)).thenReturn(identity);
+        when(users.findByGoogleSub("new-google-sub")).thenReturn(Optional.empty());
+        when(users.findByEmail(user.getEmail())).thenReturn(Optional.of(user));
+
+        assertThatThrownBy(() -> authService.authenticateWithGoogle(
+                new GoogleAuthRequest(idToken, defaultConsents, null), httpRequest))
+                .isInstanceOf(ApiException.class)
+                .extracting(ex -> ((ApiException) ex).getErrorCode())
+                .isEqualTo("LINK_REQUIRES_VERIFICATION");
+
+        verify(users, never()).save(any());
     }
 
     @Test
@@ -228,7 +276,7 @@ class AuthServiceTest {
     @Test
     @DisplayName("verifyOtp rejects invalid OTP")
     void verifyOtpInvalidCode() {
-        String otp = "123456";
+        String otp = "12345678";
         PasswordReset pr = PasswordReset.builder()
                 .userId(userId)
                 .email("test.user@example.com")
@@ -243,9 +291,9 @@ class AuthServiceTest {
                 .thenReturn(Optional.of(pr));
 
         assertThatThrownBy(() -> authService.verifyOtp(new VerifyOtpRequest(
-                "test.user@example.com", "000000", "N0tPwned!000000Aa")))
+                "test.user@example.com", "00000000", "N0tPwned!00000000Aa", null)))
                 .isInstanceOf(ApiException.class)
-                .hasMessageContaining("Invalid OTP");
+                .hasMessageContaining("Invalid code");
 
         verify(resets).incrementAttempts(pr.getId());
     }
@@ -253,7 +301,7 @@ class AuthServiceTest {
     @Test
     @DisplayName("verifyOtp succeeds with valid OTP")
     void verifyOtpSuccess() {
-        String otp = "654321";
+        String otp = "87654321";
         PasswordReset pr = PasswordReset.builder()
                 .id(UUID.randomUUID())
                 .userId(userId)
@@ -267,16 +315,196 @@ class AuthServiceTest {
         when(users.findByEmail("test.user@example.com")).thenReturn(Optional.of(user));
         when(resets.findFirstByUserIdAndUsedFalseOrderByCreatedAtDesc(userId))
                 .thenReturn(Optional.of(pr));
-        String newPassword = "N0tPwned!654321Aa";
+        String newPassword = "N0tPwned!87654321Aa";
         when(encoder.matches(newPassword, "hash")).thenReturn(false);
         when(encoder.encode(newPassword)).thenReturn("new-hash");
 
         authService.verifyOtp(new VerifyOtpRequest(
-                "test.user@example.com", otp, newPassword));
+                "test.user@example.com", otp, newPassword, null));
 
         verify(users).save(user);
         verify(refreshTokens).deleteByUserId(userId);
         assertThat(pr.isUsed()).isTrue();
+    }
+
+    @Test
+    @DisplayName("logout revokes only supplied refresh token by default")
+    void logoutRevokesSingleRefreshToken() {
+        String rawRefresh = "refresh-token-value";
+        authService.logout(userId, rawRefresh, "access-token", false, httpRequest);
+
+        verify(jwt).revokeToken("access-token");
+        verify(refreshTokens).deleteByTokenHash(any());
+        verify(refreshTokens, never()).deleteByUserId(userId);
+    }
+
+    @Test
+    @DisplayName("logout without refresh token skips refresh revocation unless logoutAll")
+    void logoutWithoutRefreshSkipsFamilyRevocation() {
+        authService.logout(userId, null, "access-token", false, httpRequest);
+
+        verify(jwt).revokeToken("access-token");
+        verify(refreshTokens, never()).deleteByUserId(userId);
+        verify(refreshTokens, never()).deleteByTokenHash(any());
+    }
+
+    @Test
+    @DisplayName("logoutAll clears every refresh token for the user")
+    void logoutAllRevokesEveryRefreshToken() {
+        authService.logout(userId, null, "access-token", true, httpRequest);
+
+        verify(refreshTokens).deleteByUserId(userId);
+    }
+
+    @Test
+    @DisplayName("verifyOtp returns generic error for unknown email")
+    void verifyOtpUnknownEmail() {
+        when(users.findByEmail("unknown@example.com")).thenReturn(Optional.empty());
+
+        assertThatThrownBy(() -> authService.verifyOtp(new VerifyOtpRequest(
+                "unknown@example.com", "12345678", "N0tPwned!12345678Aa", null)))
+                .isInstanceOf(ApiException.class)
+                .hasMessageContaining("Invalid code");
+    }
+
+    @Test
+    @DisplayName("M-9: refresh rejects IP/UA binding mismatch and revokes token family")
+    void refreshRejectsBindingMismatch() {
+        UUID familyId = UUID.randomUUID();
+        String rawToken = "refresh-token-raw-value";
+        String storedHash = sha256(rawToken);
+        String originalBinding = sha256("Mozilla/5.0|192.168.1.0");
+
+        RefreshToken rt = RefreshToken.builder()
+                .userId(userId)
+                .tokenHash(storedHash)
+                .tokenFamilyId(familyId)
+                .bindingHash(originalBinding)
+                .rememberMe(false)
+                .expiresAt(Instant.now().plus(1, ChronoUnit.DAYS))
+                .build();
+
+        when(refreshTokens.findByTokenHashAndConsumedAtIsNull(storedHash)).thenReturn(Optional.of(rt));
+        when(users.findById(userId)).thenReturn(Optional.of(user));
+        when(httpRequest.getHeader("User-Agent")).thenReturn("DifferentBrowser/1.0");
+        when(httpRequest.getRemoteAddr()).thenReturn("10.0.0.5");
+
+        assertThatThrownBy(() -> authService.refresh(rawToken, httpRequest))
+                .isInstanceOf(ApiException.class)
+                .hasMessage("Invalid or expired refresh token")
+                .extracting(ex -> ((ApiException) ex).getStatus().value())
+                .isEqualTo(401);
+
+        verify(refreshTokens).deleteByTokenFamilyId(familyId);
+        verify(refreshTokens, never()).save(any());
+    }
+
+    @Test
+    @DisplayName("confirmGoogleLink returns generic error when account not found")
+    void confirmGoogleLinkUnknownAccount() {
+        var identity = new GoogleOAuthService.GoogleIdentity("sub-1", "missing@example.com", "Missing", true);
+        when(googleOAuth.verifyIdToken("token")).thenReturn(identity);
+        when(users.findByEmail("missing@example.com")).thenReturn(Optional.empty());
+
+        assertThatThrownBy(() -> authService.confirmGoogleLink(
+                new GoogleLinkConfirmRequest("token", "Password1!", null), httpRequest))
+                .isInstanceOf(ApiException.class)
+                .hasMessage("Invalid email or password");
+    }
+
+    @Test
+    @DisplayName("confirmGoogleLink returns generic error for wrong password")
+    void confirmGoogleLinkWrongPassword() {
+        var identity = new GoogleOAuthService.GoogleIdentity("sub-1", "test.user@example.com", "Test", true);
+        when(googleOAuth.verifyIdToken("token")).thenReturn(identity);
+        when(users.findByEmail("test.user@example.com")).thenReturn(Optional.of(user));
+        when(encoder.matches("wrong", "hash")).thenReturn(false);
+
+        assertThatThrownBy(() -> authService.confirmGoogleLink(
+                new GoogleLinkConfirmRequest("token", "wrong", null), httpRequest))
+                .isInstanceOf(ApiException.class)
+                .hasMessage("Invalid email or password");
+    }
+
+    @Test
+    @DisplayName("confirmGoogleLink returns generic error when Google sub mismatches")
+    void confirmGoogleLinkWrongGoogleSub() {
+        User linked = User.builder()
+                .id(userId)
+                .email("test.user@example.com")
+                .passwordHash("hash")
+                .googleSub("other-sub")
+                .build();
+        var identity = new GoogleOAuthService.GoogleIdentity("sub-1", "test.user@example.com", "Test", true);
+        when(googleOAuth.verifyIdToken("token")).thenReturn(identity);
+        when(users.findByEmail("test.user@example.com")).thenReturn(Optional.of(linked));
+
+        assertThatThrownBy(() -> authService.confirmGoogleLink(
+                new GoogleLinkConfirmRequest("token", "Password1!", null), httpRequest))
+                .isInstanceOf(ApiException.class)
+                .hasMessage("Invalid email or password");
+    }
+
+    @Test
+    @DisplayName("login rejects deleted accounts with generic failure")
+    void loginRejectedForDeletedUser() {
+        User deleted = User.builder()
+                .id(userId)
+                .email("test.user@example.com")
+                .passwordHash("hash")
+                .deletedAt(Instant.now())
+                .build();
+        when(users.findByEmail("test.user@example.com")).thenReturn(Optional.of(deleted));
+        when(encoder.matches("Password1!", "hash")).thenReturn(true);
+
+        assertThatThrownBy(() -> authService.login(
+                new LoginRequest("test.user@example.com", "Password1!", null, false),
+                httpRequest))
+                .isInstanceOf(ApiException.class)
+                .hasMessage("Invalid email or password");
+    }
+
+    @Test
+    @DisplayName("refresh returns generic error when user deleted")
+    void refreshUserDeleted() {
+        String rawToken = "refresh-token-raw-value";
+        String storedHash = sha256(rawToken);
+        RefreshToken rt = RefreshToken.builder()
+                .userId(userId)
+                .tokenHash(storedHash)
+                .rememberMe(false)
+                .expiresAt(Instant.now().plus(1, ChronoUnit.DAYS))
+                .build();
+        when(refreshTokens.findByTokenHashAndConsumedAtIsNull(storedHash)).thenReturn(Optional.of(rt));
+        when(users.findById(userId)).thenReturn(Optional.empty());
+
+        assertThatThrownBy(() -> authService.refresh(rawToken, httpRequest))
+                .isInstanceOf(ApiException.class)
+                .hasMessage("Invalid or expired refresh token");
+    }
+
+    @Test
+    @DisplayName("verifyOtp returns generic error when new password matches current")
+    void verifyOtpSamePassword() {
+        String otp = "12345678";
+        PasswordReset pr = PasswordReset.builder()
+                .userId(userId)
+                .email("test.user@example.com")
+                .otpHash(sha256(otp))
+                .expiresAt(Instant.now().plus(10, ChronoUnit.MINUTES))
+                .used(false)
+                .attempts(0)
+                .build();
+        when(users.findByEmail("test.user@example.com")).thenReturn(Optional.of(user));
+        when(resets.findFirstByUserIdAndUsedFalseOrderByCreatedAtDesc(userId))
+                .thenReturn(Optional.of(pr));
+        when(otpHashService.matches(otp, pr.getOtpHash())).thenReturn(true);
+        when(encoder.matches("SamePass1!", "hash")).thenReturn(true);
+
+        assertThatThrownBy(() -> authService.verifyOtp(new VerifyOtpRequest(
+                "test.user@example.com", otp, "SamePass1!", null)))
+                .isInstanceOf(ApiException.class)
+                .hasMessage("Unable to reset password. Please try again.");
     }
 
     private static String sha256(String input) {

@@ -1,8 +1,10 @@
 import axios, { type AxiosInstance, type ResponseType } from 'axios';
 import crypto from 'crypto';
+import FormData from 'form-data';
 import type { NextFunction, Request, Response } from 'express';
+import { resolveClientIp } from '../trustedClientIp.js';
 import {
-  bodyForSigning,
+  bytesForSigning,
   SIGNATURE_HEADER,
   signInternalRequest,
   TIMESTAMP_HEADER,
@@ -53,6 +55,9 @@ function buildHeaders(userId: string | undefined, extra: Record<string, unknown>
   }
   if (userId) {
     h[TRUST_HEADER] = userId;
+  } else {
+    delete h[TRUST_HEADER];
+    delete h[TRUST_HEADER.toLowerCase()];
   }
 
   const correlationId =
@@ -62,6 +67,53 @@ function buildHeaders(userId: string | undefined, extra: Record<string, unknown>
   h['X-Correlation-Id'] = correlationId;
 
   return h;
+}
+
+export function isMultipartFormData(data: unknown): data is FormData {
+  return data instanceof FormData;
+}
+
+export function formDataToBuffer(fd: FormData): Promise<Buffer> {
+  return new Promise((resolve, reject) => {
+    const chunks: Buffer[] = [];
+    fd.on('data', (chunk: Buffer | string) => {
+      chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+    });
+    fd.on('end', () => resolve(Buffer.concat(chunks)));
+    fd.on('error', reject);
+    fd.resume();
+  });
+}
+
+export async function prepareForwardBody(data: unknown): Promise<{
+  requestBody: string | Buffer | undefined;
+  bodyText: string;
+  formHeaders: Record<string, string>;
+}> {
+  if (data === undefined || data === null) {
+    return { requestBody: undefined, bodyText: '', formHeaders: {} };
+  }
+  if (isMultipartFormData(data)) {
+    const formHeaders = data.getHeaders() as Record<string, string>;
+    const bodyBuf = await formDataToBuffer(data);
+    return {
+      requestBody: bodyBuf,
+      bodyText: bytesForSigning(bodyBuf),
+      formHeaders,
+    };
+  }
+  if (typeof data === 'string') {
+    return { requestBody: data, bodyText: data, formHeaders: {} };
+  }
+  if (Buffer.isBuffer(data)) {
+    return {
+      requestBody: data,
+      bodyText: bytesForSigning(data),
+      formHeaders: {},
+    };
+  }
+  const json = JSON.stringify(data);
+  return { requestBody: json, bodyText: json, formHeaders: {} };
 }
 
 export async function forward({
@@ -86,10 +138,10 @@ export async function forward({
   /** Override the default timeout for this request only. */
   timeoutMs?: number;
 }) {
-  const finalHeaders = buildHeaders(userId, headers || {});
+  const { requestBody, bodyText, formHeaders } = await prepareForwardBody(data);
+  const finalHeaders = buildHeaders(userId, { ...headers, ...formHeaders });
   if (ip) finalHeaders['X-Forwarded-For'] = ip;
 
-  const bodyText = bodyForSigning(data);
   const signed = signInternalRequest(method, path, bodyText);
   if (signed) {
     finalHeaders[TIMESTAMP_HEADER] = signed.timestamp;
@@ -97,21 +149,20 @@ export async function forward({
   }
 
   // Axios may omit JSON bodies on DELETE unless serialized with Content-Type set.
-  const serializedBody =
-    data === undefined || data === null
-      ? undefined
-      : typeof data === 'string'
-        ? data
-        : JSON.stringify(data);
-  if (serializedBody !== undefined) {
-    finalHeaders['Content-Type'] = 'application/json';
+  if (requestBody !== undefined && !isMultipartFormData(data)) {
+    const hasContentType = Object.keys(finalHeaders).some(
+      k => k.toLowerCase() === 'content-type',
+    );
+    if (!hasContentType && typeof data !== 'string' && !Buffer.isBuffer(data)) {
+      finalHeaders['Content-Type'] = 'application/json';
+    }
   }
 
   return getApiClient().request({
     method,
     url: path,
     params,
-    data: serializedBody,
+    data: requestBody,
     responseType,
     headers: finalHeaders,
     // Per-request timeout overrides the singleton default when provided.
@@ -146,6 +197,35 @@ export function proxyOnError(
 }
 
 /**
+ * Forwards Stripe webhook payloads to Java without auth headers.
+ * Java verifies Stripe-Signature on the public /billing/webhook path.
+ */
+export async function forwardRawBillingWebhook(req: Request, res: Response) {
+  try {
+    const body = Buffer.isBuffer(req.body) ? req.body : Buffer.from(req.body ?? '');
+    const stripeSignature = req.headers['stripe-signature'];
+    const headers: Record<string, unknown> = {
+      'content-type': 'application/json',
+    };
+    if (stripeSignature) {
+      headers['stripe-signature'] = stripeSignature;
+    }
+
+    const response = await forward({
+      method: 'POST',
+      path: '/billing/webhook',
+      data: body,
+      headers,
+    });
+    bubble(response, res);
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : String(err);
+    console.error('Billing webhook proxy error:', message);
+    res.status(502).json({ error: 'Backend unavailable', details: message });
+  }
+}
+
+/**
  * Express handler that forwards to Java using servlet paths under /api (no /v1).
  * Use when the middleware mount path differs from Java (e.g. auto-apply).
  */
@@ -160,11 +240,7 @@ export function createJavaRouteProxy(
     try {
       const suffix = req.path === '/' ? '' : req.path;
       const path = `${prefix}${suffix}`.replace(/\{2}+/g, '/');
-      const clientIp =
-        (typeof req.headers['x-forwarded-for'] === 'string'
-          ? req.headers['x-forwarded-for']
-          : undefined) ||
-        req.ip;
+      const clientIp = resolveClientIp(req);
 
       const response = await forward({
         method: req.method,
@@ -213,11 +289,7 @@ export function proxyMiddleware() {
     try {
       const path = req.baseUrl ? `${req.baseUrl}${req.path}` : req.path;
       const servletPath = path.replace(/^\/api\/v1/, '') || '/';
-      const clientIp =
-        (typeof req.headers['x-forwarded-for'] === 'string'
-          ? req.headers['x-forwarded-for']
-          : undefined) ||
-        req.ip;
+      const clientIp = resolveClientIp(req);
 
       const isEvaluationPdfRequest =
         req.method === 'POST' && servletPath === '/skills/pdf/evaluation-report';

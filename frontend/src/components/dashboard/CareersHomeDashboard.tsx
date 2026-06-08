@@ -12,6 +12,7 @@ import { queryKeys } from '@/lib/queryKeys';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import type { JobCard } from '@/types';
 import { isApiError } from '@/types';
+import { getUserFacingErrorMessage } from '@/lib/userFacingError';
 import { normalizeJobCard } from '@/lib/normalizeJobCard';
 import { fetchJobsOrchestrated, pollPipelineJobSearch } from '@/lib/pipelineJobSearch';
 import { DashboardUserAnalytics } from '@/components/dashboard/DashboardUserAnalytics';
@@ -132,7 +133,10 @@ export function CareersHomeDashboard({ celebrate = false, beforeFastTrack }: Pro
   const { user } = useAuth();
   const navigate = useNavigate();
   const matchesRef = useRef<HTMLDivElement>(null);
+  const pipelineAbortRef = useRef<AbortController | null>(null);
   const queryClient = useQueryClient();
+
+  useEffect(() => () => { pipelineAbortRef.current?.abort(); }, []);
 
   useEffect(() => {
     if (celebrate) {
@@ -183,7 +187,7 @@ export function CareersHomeDashboard({ celebrate = false, beforeFastTrack }: Pro
     },
     onError: (err: unknown) => {
       setMatchingInFlight(false);
-      toast.error(isApiError(err) ? err.normalizedMessage : 'Could not start job matching.');
+      toast.error(getUserFacingErrorMessage(err, 'Could not start job matching.'));
     },
   });
 
@@ -222,17 +226,17 @@ export function CareersHomeDashboard({ celebrate = false, beforeFastTrack }: Pro
   const handleFetchJobs = async () => {
     setFetchError(null);
     if (pipelineTotal === 0) {
+      pipelineAbortRef.current?.abort();
+      const controller = new AbortController();
+      pipelineAbortRef.current = controller;
       setMatchingInFlight(true);
       try {
-        await fetchJobsOrchestrated(5);
+        await fetchJobsOrchestrated(5, undefined, controller.signal);
         await refetchJobs();
         toast.success('Job search complete — your matches are on the tracker.');
       } catch (err: unknown) {
-        const msg = isApiError(err)
-          ? err.normalizedMessage
-          : err instanceof Error
-            ? err.message
-            : 'Could not run job search right now.';
+        if (err instanceof DOMException && err.name === 'AbortError') return;
+        const msg = getUserFacingErrorMessage(err, 'Could not run job search right now.');
         setFetchError(msg);
         toast.error(msg);
       } finally {
@@ -249,13 +253,17 @@ export function CareersHomeDashboard({ celebrate = false, beforeFastTrack }: Pro
       }
     } catch (err: unknown) {
       if (isApiError(err) && err.status === 202) {
+        pipelineAbortRef.current?.abort();
+        const controller = new AbortController();
+        pipelineAbortRef.current = controller;
         setMatchingInFlight(true);
         try {
-          await pollPipelineJobSearch();
+          await pollPipelineJobSearch(undefined, controller.signal);
           await refetchJobs();
           toast.success('Job search started — your matches are loading.');
         } catch (pollErr: unknown) {
-          const msg = pollErr instanceof Error ? pollErr.message : err.normalizedMessage;
+          if (pollErr instanceof DOMException && pollErr.name === 'AbortError') return;
+          const msg = getUserFacingErrorMessage(pollErr, 'Could not run job search right now.');
           setFetchError(msg);
           toast.error(msg);
         } finally {
@@ -263,9 +271,7 @@ export function CareersHomeDashboard({ celebrate = false, beforeFastTrack }: Pro
         }
         return;
       }
-      const msg = isApiError(err)
-        ? err.normalizedMessage
-        : 'Could not fetch jobs right now. Please try again later.';
+      const msg = getUserFacingErrorMessage(err, 'Could not fetch jobs right now. Please try again later.');
       setFetchError(msg);
       toast.error(msg);
     }
@@ -329,7 +335,7 @@ export function CareersHomeDashboard({ celebrate = false, beforeFastTrack }: Pro
               <div className="flex items-center gap-4">
                 <button
                   type="button"
-                  onClick={() => void refetchRecommended()}
+                  onClick={() => void refetchJobs()}
                   disabled={matchesLoading}
                   className="text-primary font-label-md text-label-md hover:underline disabled:opacity-50 disabled:cursor-not-allowed"
                   title="Refresh matches"

@@ -8,9 +8,9 @@ const stripTrailingSlash = (url: string): string => url.replace(/\/+$/, '');
 export const IS_PROD: boolean = env.MODE === 'production';
 export const IS_DEV: boolean = env.MODE === 'development' || env.DEV === true;
 
-/** Only honoured when explicitly opted in AND we're not in production. */
+/** Only honoured in development builds when explicitly opted in. */
 export const DEV_BYPASS: boolean =
-  !IS_PROD && env.VITE_DEV_BYPASS_GUARDS === 'true';
+  IS_DEV && !IS_PROD && env.VITE_DEV_BYPASS_GUARDS === 'true';
 
 /** Matches local middleware when set explicitly in .env (bypasses Vite proxy). */
 const LOCAL_MIDDLEWARE_RE = /^https?:\/\/(localhost|127\.0\.0\.1):4000$/i;

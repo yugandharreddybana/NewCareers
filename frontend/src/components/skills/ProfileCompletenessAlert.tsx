@@ -45,7 +45,7 @@ export function ProfileCompletenessAlert({ missingFields = [], skillName = '', o
           </ul>
           <div className="mt-3 flex items-center gap-3">
             <a
-              href="/settings"
+              href="/account/profile"
               className="text-sm font-medium text-amber-800 dark:text-amber-200 underline hover:no-underline"
             >
               Go to Settings →

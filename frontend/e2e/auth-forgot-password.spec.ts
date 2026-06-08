@@ -67,11 +67,11 @@ test.describe('Forgot password — verify step validation', () => {
     await page.locator('#confirm-password').fill(TEST_USER.password);
     await submitAuthForm(page);
 
-    await expect(page.getByRole('alert')).toContainText(/6-digit/i);
+    await expect(page.getByRole('alert')).toContainText(/8-digit/i);
   });
 
   test('rejects password shorter than 8 characters', async ({ page }) => {
-    await fillOtpCode(page, '123456');
+    await fillOtpCode(page, '12345678');
     await page.locator('#new-password').fill('short');
     await page.locator('#confirm-password').fill('short');
     await submitAuthForm(page);
@@ -80,7 +80,7 @@ test.describe('Forgot password — verify step validation', () => {
   });
 
   test('rejects weak password', async ({ page }) => {
-    await fillOtpCode(page, '123456');
+    await fillOtpCode(page, '12345678');
     await page.locator('#new-password').fill('alllowercase');
     await page.locator('#confirm-password').fill('alllowercase');
     await submitAuthForm(page);
@@ -89,7 +89,7 @@ test.describe('Forgot password — verify step validation', () => {
   });
 
   test('rejects mismatched confirm password', async ({ page }) => {
-    await fillOtpCode(page, '123456');
+    await fillOtpCode(page, '12345678');
     await page.locator('#new-password').fill(TEST_USER.password);
     await page.locator('#confirm-password').fill('NotTest@9999');
     await submitAuthForm(page);
@@ -111,11 +111,11 @@ test.describe('Forgot password — verify step validation', () => {
 
   test('OTP paste fills all digit inputs', async ({ page, context }) => {
     await context.grantPermissions(['clipboard-read', 'clipboard-write']);
-    await page.evaluate(() => navigator.clipboard.writeText('482917'));
+    await page.evaluate(() => navigator.clipboard.writeText('48291700'));
     const first = page.getByRole('textbox', { name: 'Digit 1' });
     await first.focus();
     await first.press('ControlOrMeta+V');
-    for (let i = 1; i <= 6; i++) {
+    for (let i = 1; i <= 8; i++) {
       await expect(page.getByRole('textbox', { name: `Digit ${i}` })).toHaveValue(/\d/);
     }
   });
@@ -137,7 +137,7 @@ test.describe('Forgot password — live API errors', () => {
   test('invalid OTP from API shows error alert', async ({ page }) => {
     await goToForgotPasswordVerifyStep(page, TEST_USER.email);
 
-    await fillOtpCode(page, '000000');
+    await fillOtpCode(page, '00000000');
     await page.locator('#new-password').fill('NotTest@9999');
     await page.locator('#confirm-password').fill('NotTest@9999');
     await submitAuthForm(page);
@@ -157,7 +157,7 @@ test.describe('Forgot password — success UI', () => {
       await route.fulfill({ status: 200, contentType: 'application/json', body: '{}' });
     });
 
-    await fillOtpCode(page, '123456');
+    await fillOtpCode(page, '12345678');
     await page.locator('#new-password').fill(TEST_USER.password);
     await page.locator('#confirm-password').fill(TEST_USER.password);
     await submitAuthForm(page);

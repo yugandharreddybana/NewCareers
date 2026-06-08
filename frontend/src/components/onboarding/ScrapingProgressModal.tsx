@@ -53,7 +53,7 @@ export function ScrapingProgressModal({ open, onClose, onComplete }: Props) {
     // Mark all as running immediately
     setSources(ALL_SOURCES.map(name => ({ name, state: 'running', count: 0 })));
 
-    ALL_SOURCES.forEach((name, idx) => {
+    ALL_SOURCES.forEach(name => {
       // Each source completes at a random time between 1.5s and 8s
       const delay = 1500 + Math.random() * 6500;
       const fakeCount = Math.floor(Math.random() * 60) + 5;

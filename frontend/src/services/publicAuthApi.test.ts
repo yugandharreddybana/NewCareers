@@ -1,12 +1,23 @@
 import { describe, expect, it } from 'vitest';
-import { isPublicAuthApiPath, PUBLIC_AUTH_API_PATHS, shouldSkipInitialSessionProbe } from '@/services/api';
+import {
+  isPublicAuthApiPath,
+  PUBLIC_AUTH_API_PATHS,
+  shouldBreakJobPagination,
+  shouldRedirectOnAuthFailure,
+  shouldSkipInitialSessionProbe,
+} from '@/services/api';
 import { tokenStore } from '@/lib/tokenStore';
 
 describe('public auth API helpers', () => {
   it('recognises pre-auth onboarding paths', () => {
+    expect(PUBLIC_AUTH_API_PATHS.has('/auth/signup-intent')).toBe(true);
+    expect(PUBLIC_AUTH_API_PATHS.has('/auth/google')).toBe(true);
+    expect(PUBLIC_AUTH_API_PATHS.has('/auth/refresh')).toBe(true);
     expect(PUBLIC_AUTH_API_PATHS.has('/auth/onboarding/check-email')).toBe(true);
+    expect(PUBLIC_AUTH_API_PATHS.has('/auth/onboarding/check-password')).toBe(true);
     expect(isPublicAuthApiPath('/auth/onboarding/parse-cv')).toBe(true);
     expect(isPublicAuthApiPath('/api/v1/auth/onboarding/check-email')).toBe(true);
+    expect(isPublicAuthApiPath('/api/v1/auth/onboarding/check-password')).toBe(true);
     expect(isPublicAuthApiPath('/auth/me')).toBe(false);
   });
 
@@ -39,5 +50,18 @@ describe('public auth API helpers', () => {
     });
     expect(shouldSkipInitialSessionProbe()).toBe(false);
     tokenStore.clear();
+  });
+
+  it('shouldRedirectOnAuthFailure skips deferred signup on /onboarding', () => {
+    expect(shouldRedirectOnAuthFailure('/onboarding', false)).toBe(false);
+    expect(shouldRedirectOnAuthFailure('/onboarding', true)).toBe(false);
+    expect(shouldRedirectOnAuthFailure('/dashboard', false)).toBe(true);
+    expect(shouldRedirectOnAuthFailure('/login', false)).toBe(false);
+  });
+
+  it('shouldBreakJobPagination stops on empty page or hasMore false', () => {
+    expect(shouldBreakJobPagination(false, 200)).toBe(true);
+    expect(shouldBreakJobPagination(true, 0)).toBe(true);
+    expect(shouldBreakJobPagination(true, 200)).toBe(false);
   });
 });

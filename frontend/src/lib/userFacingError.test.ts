@@ -9,4 +9,29 @@ describe('getUserFacingErrorMessage', () => {
     expect(getUserFacingErrorMessage(err)).not.toMatch(/404/);
     expect(getUserFacingErrorMessage(err)).toContain('unavailable');
   });
+
+  it('does not leak internal server diagnostics', () => {
+    const err = {
+      status: 500,
+      normalizedMessage: 'NullPointerException at com.careerops.service.Foo',
+    };
+    expect(getUserFacingErrorMessage(err, 'Fallback')).toBe(
+      'Our servers had trouble completing that request. Please try again shortly.',
+    );
+  });
+
+  it('allows safe client-validation phrases', () => {
+    const err = {
+      status: 400,
+      normalizedMessage: 'Enter the 8-digit code from your email.',
+    };
+    expect(getUserFacingErrorMessage(err, 'Fallback')).toBe(
+      'Enter the 8-digit code from your email.',
+    );
+  });
+
+  it('maps 401 to session expired guidance', () => {
+    const err = { status: 401, normalizedMessage: 'Account is no longer active' };
+    expect(getUserFacingErrorMessage(err)).toContain('session');
+  });
 });

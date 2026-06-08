@@ -61,8 +61,8 @@ describe('usePlanner', () => {
     expect(result.current.data.pendingTasks).toEqual([]);
     expect(result.current.data.upcomingEvents).toEqual([]);
     expect(result.current.data.overdueTasks).toEqual([]);
-    expect(result.current.error).toBe('Planner unavailable');
-    expect(mockedToast.error).toHaveBeenCalledWith('Planner unavailable');
+    expect(result.current.error).toBe('Failed to load planner.');
+    expect(mockedToast.error).toHaveBeenCalledWith('Failed to load planner.');
   });
 
   it('refreshes job tasks after generate and complete actions', async () => {

@@ -25,13 +25,36 @@ final class EducationSectionParser {
     );
 
     private static final Pattern DEGREE_HINT = Pattern.compile(
-        "(?i)\\b(B\\.?S\\.?c?|B\\.?A\\.?|M\\.?S\\.?c?|M\\.?A\\.?|M\\.?B\\.?A\\.?|Ph\\.?D\\.?|"
-            + "Bachelor|Master|Doctor|Diploma|Certificate|B\\.?Eng\\.?|M\\.?Eng\\.?)\\b"
+        "(?i)\\b(B\\.?\\s*Tech\\.?|B\\.?E\\.?|B\\.?S\\.?c?\\.?|B\\.?A\\.?|M\\.?S\\.?c?\\.?|M\\.?Tech\\.?|"
+            + "M\\.?A\\.?|M\\.?B\\.?A\\.?|Ph\\.?D\\.?|Bachelor|Master|Doctor|Diploma|Certificate|"
+            + "B\\.?Eng\\.?|M\\.?Eng\\.?|Associate|HND|LLB|PGDip|PG Dip)\\b"
     );
+
+    private static final Pattern PAREN_LOCATION = Pattern.compile("\\(([^)]+)\\)\\s*$");
+
+    private static final Pattern TRAILING_DASH_LOCATION = Pattern.compile(
+        "\\s+[—–-]\\s+([A-Za-z][A-Za-z .,'-]{1,48})\\s*$"
+    );
+
+    private static final Pattern INSTITUTION_HINT = Pattern.compile(
+        "(?i)\\b(University|College|Institute|School|Academy|Polytechnic|IIT|NIT|TU\\b|UCD|Trinity)"
+    );
+
+    private static final Pattern RELATED_COURSES = Pattern.compile(
+        "(?i)^(related|relevant)\\s+courses\\b"
+    );
+
+    private static final Pattern YEAR_IN_LINE = Pattern.compile("\\b(19|20)\\d{2}\\b");
 
     private EducationSectionParser() {}
 
-    record ParsedEducation(String degree, String schoolName, String fieldOfStudy, String graduationYear) {}
+    record ParsedEducation(
+        String degree,
+        String schoolName,
+        String fieldOfStudy,
+        String graduationYear,
+        String location
+    ) {}
 
     static List<ParsedEducation> parseEntries(String body) {
         if (body == null || body.isBlank()) {
@@ -54,20 +77,32 @@ final class EducationSectionParser {
     private static List<String> splitBlocks(String body) {
         List<String> blocks = new ArrayList<>();
         List<String> current = new ArrayList<>();
+        boolean inCourseList = false;
         for (String raw : body.split("\\r?\\n")) {
             String line = raw.strip();
             if (line.isBlank()) {
+                inCourseList = false;
                 if (!current.isEmpty()) {
                     blocks.add(String.join("\n", current).trim());
                     current = new ArrayList<>();
                 }
                 continue;
             }
-            if (BULLET_LINE.matcher(line).find() && !current.isEmpty()) {
+            String stripped = line.replaceFirst("^[•\\-*▪►#]+\\s*", "").trim();
+            if (RELATED_COURSES.matcher(stripped).find()) {
+                inCourseList = true;
+                current.add(stripped);
+                continue;
+            }
+            if (inCourseList) {
+                current.add(stripped);
+                continue;
+            }
+            if (!current.isEmpty() && looksLikeNewEducationEntry(stripped)) {
                 blocks.add(String.join("\n", current).trim());
                 current = new ArrayList<>();
             }
-            current.add(line.replaceFirst("^[•\\-*▪►#]+\\s*", "").trim());
+            current.add(stripped);
         }
         if (!current.isEmpty()) {
             blocks.add(String.join("\n", current).trim());
@@ -76,6 +111,25 @@ final class EducationSectionParser {
             return splitPipeLines(body);
         }
         return blocks.isEmpty() ? List.of(body.trim()) : blocks;
+    }
+
+    private static boolean looksLikeNewEducationEntry(String line) {
+        if (line.isBlank()) {
+            return false;
+        }
+        if (RELATED_COURSES.matcher(line).find()) {
+            return false;
+        }
+        if (DEGREE_HINT.matcher(line).find()) {
+            return true;
+        }
+        if (YEAR_IN_LINE.matcher(line).find() && INSTITUTION_HINT.matcher(line).find()) {
+            return true;
+        }
+        if (INSTITUTION_HINT.matcher(line).find() && !BULLET_LINE.matcher(line).find()) {
+            return true;
+        }
+        return line.contains("|") && (DEGREE_HINT.matcher(line).find() || INSTITUTION_HINT.matcher(line).find());
     }
 
     private static List<String> splitPipeLines(String body) {
@@ -95,25 +149,50 @@ final class EducationSectionParser {
         String school = "";
         String field = "";
         String year = "";
+        String location = "";
 
         String primary = lines[0].strip();
+        location = extractLocation(primary);
+        primary = stripLocationSuffix(primary);
+
         if (primary.contains("|")) {
             String[] parts = primary.split("\\|");
-            if (parts.length >= 2) {
-                school = parts[0].trim();
-                degree = parts[1].trim();
-                if (parts.length >= 3) {
-                    year = extractYear(parts[2]);
-                }
+            CvPipeFields.EducationPipeParts pipe = CvPipeFields.parseEducationPipeParts(parts);
+            degree = pipe.degree();
+            school = pipe.school();
+            year = CvPipeFields.extractYearFromSegment(pipe.yearOrLocation());
+            if (year.isBlank() && !pipe.yearOrLocation().isBlank()
+                && !CvPipeFields.looksLikeLocationSegment(pipe.yearOrLocation())) {
+                location = location.isBlank() ? pipe.yearOrLocation().trim() : location;
+            } else if (year.isBlank() && CvPipeFields.looksLikeLocationSegment(pipe.yearOrLocation())) {
+                location = location.isBlank() ? pipe.yearOrLocation().trim() : location;
             }
         } else if (primary.contains(",")) {
             String[] parts = primary.split(",", 3);
-            degree = parts[0].trim();
-            if (parts.length >= 2) {
-                school = parts[1].trim();
-            }
-            if (parts.length >= 3) {
-                year = extractYear(parts[2]);
+            boolean firstIsDegree = DEGREE_HINT.matcher(parts[0]).find();
+            boolean secondIsDegree = parts.length >= 2 && DEGREE_HINT.matcher(parts[1]).find();
+            if (!firstIsDegree && secondIsDegree) {
+                school = parts[0].trim();
+                degree = parts[1].trim();
+                if (parts.length >= 3) {
+                    String third = parts[2].trim();
+                    year = extractYear(third);
+                    if (year.isBlank() && !third.isBlank()) {
+                        location = location.isBlank() ? third : location;
+                    }
+                }
+            } else {
+                degree = parts[0].trim();
+                if (parts.length >= 2) {
+                    school = parts[1].trim();
+                }
+                if (parts.length >= 3) {
+                    String third = parts[2].trim();
+                    year = extractYear(third);
+                    if (year.isBlank() && !third.isBlank()) {
+                        location = location.isBlank() ? third : location;
+                    }
+                }
             }
         } else {
             if (DEGREE_HINT.matcher(primary).find()) {
@@ -123,21 +202,39 @@ final class EducationSectionParser {
             }
         }
 
+        List<String> courseNames = new ArrayList<>();
         for (int i = 1; i < lines.length; i++) {
-            String line = lines[i].strip();
+            String line = lines[i].strip().replaceFirst("^[•\\-*▪►#]+\\s*", "").trim();
             if (line.isBlank()) {
                 continue;
+            }
+            if (RELATED_COURSES.matcher(line).find()) {
+                continue;
+            }
+            if (location.isBlank()) {
+                location = extractLocation(line);
+                line = stripLocationSuffix(line);
             }
             if (year.isBlank()) {
                 year = extractYear(line);
             }
-            if (school.isBlank() && !DEGREE_HINT.matcher(line).find()) {
+            if (school.isBlank() && INSTITUTION_HINT.matcher(line).find()) {
+                school = line.replaceAll("[|]", " ").trim();
+            } else if (school.isBlank() && !DEGREE_HINT.matcher(line).find() && !YEAR_IN_LINE.matcher(line).find()
+                && !RELATED_COURSES.matcher(line).find() && !looksLikeCourseNoise(line, degree, school)) {
                 school = line.replaceAll("[|]", " ").trim();
             } else if (degree.isBlank() && DEGREE_HINT.matcher(line).find()) {
                 degree = line.trim();
             } else if (field.isBlank() && line.toLowerCase(Locale.ROOT).contains(" in ")) {
                 field = line.replaceFirst("(?i)^.*\\bin\\b\\s*", "").trim();
+            } else if (!DEGREE_HINT.matcher(line).find() && !INSTITUTION_HINT.matcher(line).find()
+                && !YEAR_IN_LINE.matcher(line).find() && line.length() < 80
+                && !looksLikeCourseNoise(line, degree, school)) {
+                courseNames.add(line);
             }
+        }
+        if (!courseNames.isEmpty() && field.isBlank()) {
+            field = String.join(", ", courseNames);
         }
 
         if (year.isBlank()) {
@@ -149,7 +246,47 @@ final class EducationSectionParser {
         }
         field = inferFieldOfStudy(degree, field);
 
-        return new ParsedEducation(degree, school, field, year);
+        return new ParsedEducation(degree, school, field, year, location);
+    }
+
+    private static String extractLocation(String text) {
+        if (text == null || text.isBlank()) {
+            return "";
+        }
+        Matcher paren = PAREN_LOCATION.matcher(text);
+        if (paren.find()) {
+            String inner = paren.group(1).trim();
+            if (!inner.matches("(?i).*(remote|present|current).*") && !inner.matches(".*\\d{4}.*")) {
+                return inner;
+            }
+        }
+        Matcher dash = TRAILING_DASH_LOCATION.matcher(text);
+        if (dash.find()) {
+            String place = dash.group(1).trim();
+            if (!place.matches(".*\\d{4}.*")) {
+                return place;
+            }
+        }
+        return "";
+    }
+
+    private static String stripLocationSuffix(String text) {
+        if (text == null) {
+            return "";
+        }
+        String out = text;
+        Matcher paren = PAREN_LOCATION.matcher(out);
+        if (paren.find()) {
+            String inner = paren.group(1).trim();
+            if (!inner.matches(".*\\d{4}.*")) {
+                out = out.substring(0, paren.start()).trim();
+            }
+        }
+        Matcher dash = TRAILING_DASH_LOCATION.matcher(out);
+        if (dash.find() && !dash.group(1).matches(".*\\d{4}.*")) {
+            out = out.substring(0, dash.start()).trim();
+        }
+        return out;
     }
 
     private static String inferFieldOfStudy(String degree, String existing) {
@@ -159,9 +296,17 @@ final class EducationSectionParser {
         if (degree == null || degree.isBlank()) {
             return "";
         }
-        Matcher m = Pattern.compile("(?i)(?:in|of)\\s+(.+)$").matcher(degree);
-        if (m.find()) {
-            return m.group(1).trim();
+        Matcher inMatcher = Pattern.compile("(?i)(?:in|of)\\s+(.+)$").matcher(degree);
+        if (inMatcher.find()) {
+            return inMatcher.group(1).trim();
+        }
+        Matcher stripped = Pattern.compile(
+            "(?i)^(?:B\\.?\\s*Tech\\.?|B\\.?E\\.?|B\\.?S\\.?c?\\.?|B\\.?A\\.?|M\\.?S\\.?c?\\.?|M\\.?Tech\\.?|"
+                + "M\\.?A\\.?|M\\.?B\\.?A\\.?|Ph\\.?D\\.?|Bachelor(?:'s)?|Master(?:'s)?|Doctor(?:ate)?)"
+                + "\\s+(?:in\\s+)?(.+)$"
+        ).matcher(degree.trim());
+        if (stripped.find()) {
+            return stripped.group(1).trim();
         }
         return "";
     }
@@ -190,7 +335,44 @@ final class EducationSectionParser {
         return last;
     }
 
+    private static boolean looksLikeCourseNoise(String line, String degree, String school) {
+        if (line.isBlank()) {
+            return true;
+        }
+        if (RELATED_COURSES.matcher(line).find()) {
+            return true;
+        }
+        if (!degree.isBlank() && !school.isBlank() && line.length() < 40 && !line.contains(" ")
+            && !INSTITUTION_HINT.matcher(line).find()) {
+            return true;
+        }
+        return false;
+    }
+
     private static boolean hasContent(ParsedEducation e) {
-        return !e.degree().isBlank() || !e.schoolName().isBlank();
+        if (e.degree().isBlank() && e.schoolName().isBlank()) {
+            return false;
+        }
+        if (RELATED_COURSES.matcher(e.schoolName()).find() || RELATED_COURSES.matcher(e.degree()).find()) {
+            return false;
+        }
+        boolean hasDegree = DEGREE_HINT.matcher(e.degree()).find();
+        boolean hasInstitution = INSTITUTION_HINT.matcher(e.schoolName()).find();
+        boolean hasYear = !e.graduationYear().isBlank();
+        boolean hasSchool = !e.schoolName().isBlank();
+
+        if (hasDegree && (hasYear || hasSchool || hasInstitution)) {
+            return true;
+        }
+        if (hasInstitution && (hasDegree || hasYear || hasSchool)) {
+            return true;
+        }
+        if (hasSchool && hasYear) {
+            return true;
+        }
+        if (!hasDegree && !hasInstitution && !hasYear) {
+            return false;
+        }
+        return hasDegree || hasInstitution;
     }
 }

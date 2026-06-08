@@ -76,7 +76,8 @@ class OnboardingCvParseServiceTest {
                 dates.startDate(),
                 dates.current() ? "" : dates.endDate(),
                 dates.current(),
-                String.join("\n", role.bullets()).trim()
+                String.join("\n", role.bullets()).trim(),
+                role.location()
             ));
         }
         return out;

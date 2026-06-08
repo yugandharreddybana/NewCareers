@@ -1,5 +1,6 @@
 package com.careerops.controller;
 
+import com.careerops.annotation.PlanGated;
 import com.careerops.dto.MockInterviewDtos.InterviewKitRequest;
 import com.careerops.dto.MockInterviewDtos.InterviewKitResponse;
 import com.careerops.service.MockInterviewService;
@@ -39,6 +40,7 @@ public class MockInterviewController {
 
     @PostMapping("/interview-kit")
     @PreAuthorize("isAuthenticated()")
+    @PlanGated("ai_skill_run")
     @Operation(summary = "Generate interview kit (synchronous)",
                description = "Blocking. Use /interview-kit/async to avoid gateway timeouts.")
     public ResponseEntity<InterviewKitResponse> generateKit(
@@ -58,6 +60,7 @@ public class MockInterviewController {
      */
     @PostMapping("/interview-kit/async")
     @PreAuthorize("isAuthenticated()")
+    @PlanGated("ai_skill_run")
     @Operation(summary = "Generate interview kit (async, non-blocking)",
                description = "Returns 202 immediately. Poll GET /interview-kit/result/{jobId}.")
     public ResponseEntity<Void> generateKitAsync(

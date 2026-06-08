@@ -2,7 +2,7 @@ import { useCallback, useRef, useState } from 'react';
 import toast from 'react-hot-toast';
 
 const MAX_BYTES = 5 * 1024 * 1024;
-const ACCEPT = '.pdf,.doc,.docx';
+const ACCEPT = '.pdf,.docx';
 
 type Props = {
   file: File | null;
@@ -15,7 +15,11 @@ type Props = {
 
 function validateFile(file: File): boolean {
   const ext = file.name.split('.').pop()?.toLowerCase() ?? '';
-  if (!['pdf', 'doc', 'docx'].includes(ext)) {
+  if (ext === 'doc') {
+    toast.error('Legacy .doc files are not supported. Please upload a PDF or DOCX file.');
+    return false;
+  }
+  if (!['pdf', 'docx'].includes(ext)) {
     toast.error('Please upload a PDF or DOCX file.');
     return false;
   }
@@ -70,7 +74,10 @@ export function CvUploadDropzone({
           type="file"
           accept={ACCEPT}
           className="sr-only"
-          onChange={e => acceptFile(e.target.files?.[0] ?? null)}
+          onChange={e => {
+            acceptFile(e.target.files?.[0] ?? null);
+            e.target.value = '';
+          }}
         />
       </div>
     );
@@ -89,7 +96,6 @@ export function CvUploadDropzone({
           className={`onboarding-cv-zone group${dragOver ? ' onboarding-cv-zone--active' : ''}`}
           role="button"
           tabIndex={0}
-          onClick={() => inputRef.current?.click()}
           onKeyDown={e => {
             if (e.key === 'Enter' || e.key === ' ') {
               e.preventDefault();
@@ -113,7 +119,10 @@ export function CvUploadDropzone({
             type="file"
             accept={ACCEPT}
             className="absolute inset-0 w-full h-full opacity-0 cursor-pointer z-10"
-            onChange={e => acceptFile(e.target.files?.[0] ?? null)}
+            onChange={e => {
+              acceptFile(e.target.files?.[0] ?? null);
+              e.target.value = '';
+            }}
           />
           <div className="flex flex-col items-center justify-center pt-5 pb-6 text-center px-4 z-0 relative">
             <span

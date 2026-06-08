@@ -231,6 +231,14 @@ public final class CvHeaderParser {
         if (fromHeader != null && !fromHeader.isBlank()) {
             return fromHeader;
         }
+        if (profile != null) {
+            if ("linkedin".equals(kind) && profile.getLinkedInUrl() != null && !profile.getLinkedInUrl().isBlank()) {
+                return normalizeUrl(profile.getLinkedInUrl());
+            }
+            if ("github".equals(kind) && profile.getGithubUrl() != null && !profile.getGithubUrl().isBlank()) {
+                return normalizeUrl(profile.getGithubUrl());
+            }
+        }
         if (profile == null || profile.getPortfolioItems() == null) {
             return "";
         }
@@ -255,6 +263,9 @@ public final class CvHeaderParser {
             String github) {
         if (fromHeader != null && !fromHeader.isBlank()) {
             return fromHeader;
+        }
+        if (profile != null && profile.getWebsiteUrl() != null && !profile.getWebsiteUrl().isBlank()) {
+            return normalizeUrl(profile.getWebsiteUrl());
         }
         if (profile == null || profile.getPortfolioItems() == null) {
             return "";

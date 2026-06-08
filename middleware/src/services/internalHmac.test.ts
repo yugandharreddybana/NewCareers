@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { createHmac } from 'node:crypto';
 import test from 'node:test';
-import { bodyForSigning, signInternalRequest } from './internalHmac.js';
+import { bodyForSigning, bytesForSigning, signInternalRequest } from './internalHmac.js';
 
 const TEST_SECRET = 'test-internal-trust-secret-minimum-32-characters-long';
 
@@ -31,5 +31,6 @@ test('signInternalRequest matches Java canonical payload', () => {
 test('bodyForSigning serializes objects like axios JSON', () => {
   assert.equal(bodyForSigning({ a: 1 }), '{"a":1}');
   assert.equal(bodyForSigning(undefined), '');
-  assert.equal(bodyForSigning(Buffer.from('raw')), 'raw');
+  const binary = Buffer.from([0xff, 0xfe, 0x61]);
+  assert.equal(bodyForSigning(binary), bytesForSigning(binary));
 });

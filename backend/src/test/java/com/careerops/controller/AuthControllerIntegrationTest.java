@@ -62,6 +62,72 @@ class AuthControllerIntegrationTest {
         .andExpect(jsonPath("$.available").value(true));
     }
 
+    @Test @Order(0)
+    @DisplayName("0b — check-password requires signup intent")
+    void checkPasswordSecureForSignupIntent() throws Exception {
+        String e2eEmail = "pwcheck_" + System.currentTimeMillis() + "@careerops.test";
+        Map<String, Object> intentBody = new HashMap<>();
+        intentBody.put("email", e2eEmail);
+        intentBody.put("password", "Test@1234");
+        intentBody.put("consents", OnboardingVerificationTestSupport.defaultSignupConsents());
+
+        MvcResult intentResult = mockMvc.perform(
+            post("/auth/signup-intent")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(objectMapper.writeValueAsString(intentBody))
+        )
+        .andExpect(status().isOk())
+        .andReturn();
+
+        String signupIntentId = objectMapper.readTree(intentResult.getResponse().getContentAsString())
+                .get("signupIntentId").asText();
+
+        Map<String, String> body = Map.of(
+                "signupIntentId", signupIntentId,
+                "email", e2eEmail,
+                "password", "Test@1234");
+        mockMvc.perform(
+            post("/auth/onboarding/check-password")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(objectMapper.writeValueAsString(body))
+        )
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.secure").value(true));
+    }
+
+    @Test @Order(0)
+    @DisplayName("0c — check-password via /v1/auth servlet path (direct Java /api/v1/* access)")
+    void checkPasswordViaV1ServletPath() throws Exception {
+        String e2eEmail = "pwcheck_v1_" + System.currentTimeMillis() + "@careerops.test";
+        Map<String, Object> intentBody = new HashMap<>();
+        intentBody.put("email", e2eEmail);
+        intentBody.put("password", "Test@1234");
+        intentBody.put("consents", OnboardingVerificationTestSupport.defaultSignupConsents());
+
+        MvcResult intentResult = mockMvc.perform(
+            post("/v1/auth/signup-intent")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(objectMapper.writeValueAsString(intentBody))
+        )
+        .andExpect(status().isOk())
+        .andReturn();
+
+        String signupIntentId = objectMapper.readTree(intentResult.getResponse().getContentAsString())
+                .get("signupIntentId").asText();
+
+        Map<String, String> body = Map.of(
+                "signupIntentId", signupIntentId,
+                "email", e2eEmail,
+                "password", "Test@1234");
+        mockMvc.perform(
+            post("/v1/auth/onboarding/check-password")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(objectMapper.writeValueAsString(body))
+        )
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.secure").value(true));
+    }
+
     @Test @Order(1)
     @DisplayName("1 — register new user")
     void registerNewUser() throws Exception {

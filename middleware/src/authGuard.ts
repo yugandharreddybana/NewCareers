@@ -18,9 +18,10 @@ import { verifySessionToken } from './jwtVerification.js';
 const COOKIE = process.env.COOKIE_NAME || 'co_session';
 const DEV_USER_ID = '00000000-0000-0000-0000-000000000001';
 
-/** Opt-in only: fake dev user when no/invalid JWT (never default — breaks logout testing). */
+/** Opt-in only: fake dev user when no/invalid JWT — never in staging/production. */
 function devAutoAuthEnabled(): boolean {
-  return process.env.NODE_ENV === 'development' && process.env.DEV_AUTO_AUTH === 'true';
+  return process.env.NODE_ENV === 'development'
+    && process.env.DEV_AUTO_AUTH === 'true';
 }
 
 function applyDevUser(req: Request): void {

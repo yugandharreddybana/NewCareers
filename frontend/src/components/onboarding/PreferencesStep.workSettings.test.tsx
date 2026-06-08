@@ -78,7 +78,7 @@ describe('PreferencesStep work settings', () => {
     });
 
     expect(screen.getByText('Work setting')).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Find my jobs' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Complete profile' })).toBeInTheDocument();
   });
 
   it('survives partial workSettings in values (merge on render)', () => {
@@ -111,7 +111,7 @@ describe('PreferencesStep work settings', () => {
       />,
     );
 
-    fireEvent.click(screen.getByRole('button', { name: 'Find my jobs' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Complete profile' }));
     expect(onComplete).not.toHaveBeenCalled();
   });
 });

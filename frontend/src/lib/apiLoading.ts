@@ -18,6 +18,7 @@ type Listener = () => void;
 
 const listeners = new Set<Listener>();
 const inFlight = new Map<string, string>();
+const loaderIds = new WeakMap<InternalAxiosRequestConfig, string>();
 let seq = 0;
 
 function notify() {
@@ -88,7 +89,8 @@ export function getApiLoadingSnapshot(): ApiLoadingSnapshot {
   if (inFlight.size === 0) {
     return { active: false, message: 'Loading…' };
   }
-  const lastMessage = Array.from(inFlight.values()).at(-1) ?? 'Loading…';
+  const values = Array.from(inFlight.values());
+  const lastMessage = values.length ? values[values.length - 1]! : 'Loading…';
   return { active: true, message: lastMessage };
 }
 
@@ -101,12 +103,32 @@ export function startApiLoading(config: InternalAxiosRequestConfig): void {
   if (!shouldTrack(config)) return;
   const id = `loader-${++seq}`;
   config.__loaderTrackId = id;
+  loaderIds.set(config, id);
   inFlight.set(id, messageFor(config));
   notify();
 }
 
 export function endApiLoading(config?: InternalAxiosRequestConfig): void {
-  if (!config?.__loaderTrackId) return;
-  inFlight.delete(config.__loaderTrackId);
+  if (!config) return;
+  const id = config.__loaderTrackId ?? loaderIds.get(config);
+  if (id) {
+    loaderIds.delete(config);
+    inFlight.delete(id);
+    notify();
+    return;
+  }
+  if (inFlight.size > 0) {
+    const firstKey = inFlight.keys().next().value as string | undefined;
+    if (firstKey) {
+      inFlight.delete(firstKey);
+      notify();
+    }
+  }
+}
+
+/** Clear stuck loader entries on logout or session reset. */
+export function resetApiLoading(): void {
+  if (inFlight.size === 0) return;
+  inFlight.clear();
   notify();
 }

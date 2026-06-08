@@ -24,6 +24,7 @@ import {
   isHeuristicPlaceholderEvaluation,
   resolveJobSkillListsForDisplay,
 } from '@/lib/jobEvaluation';
+import { timeAgo } from '@/lib/utils';
 import '@/styles/job-detail.css';
 
 function formatSalary(min?: number, max?: number, currency?: string): string {
@@ -51,6 +52,7 @@ const JobDetail: React.FC = () => {
     queryFn: () => profileApi.get(),
   });
   const [saving, setSaving] = useState(false);
+  const [deleting, setDeleting] = useState(false);
   const [activeTab, setActiveTab] = useState<JobDetailTab>('overview');
   const [openEvaluationSignal, setOpenEvaluationSignal] = useState(0);
   const [savedColumn, setSavedColumn] = useState<JobDetail['kanbanColumn'] | null>(null);
@@ -75,8 +77,12 @@ const JobDetail: React.FC = () => {
     await queryClient.invalidateQueries({ queryKey: queryKeys.jobs.detail(id) });
   }, [id, queryClient]);
 
+  const needsEnrichment = Boolean(
+    id && !loading && jobData && !hasUsableJobDescription(jobData.description),
+  );
+
   useEffect(() => {
-    if (!id || loading || !jobData || hasUsableJobDescription(jobData.description)) return;
+    if (!id || !needsEnrichment) return;
     const delays = [1500, 5000, 12_000];
     const timers = delays.map((ms, index) =>
       window.setTimeout(() => {
@@ -88,7 +94,7 @@ const JobDetail: React.FC = () => {
       }, ms),
     );
     return () => timers.forEach(t => window.clearTimeout(t));
-  }, [id, loading, jobData, refetch, refreshJob]);
+  }, [id, needsEnrichment, refetch, refreshJob]);
 
   const openJobEvaluation = useCallback(() => {
     setActiveTab('skills');
@@ -106,6 +112,10 @@ const JobDetail: React.FC = () => {
 
   const handleSave = async () => {
     if (!displayJob) return;
+    if (displayJob.kanbanColumn === 'Saved') {
+      toast('Already saved for later.');
+      return;
+    }
     setSaving(true);
     try {
       await kanbanApi.patch(displayJob.userJobId, { kanbanColumn: 'Saved' });
@@ -121,7 +131,7 @@ const JobDetail: React.FC = () => {
 
   const confirmDelete = async () => {
     if (!displayJob) return;
-    setSaving(true);
+    setDeleting(true);
     try {
       await jobsApi.delete(displayJob.userJobId);
       await queryClient.invalidateQueries({ queryKey: queryKeys.jobs.all });
@@ -131,7 +141,7 @@ const JobDetail: React.FC = () => {
     } catch {
       toast.error('Could not delete this job.');
     } finally {
-      setSaving(false);
+      setDeleting(false);
     }
   };
 
@@ -169,9 +179,8 @@ const JobDetail: React.FC = () => {
   const showCvTips = hasActionableCvTips(job);
   const { matchedSkills, unmatchedSkills } = resolveJobSkillListsForDisplay(job);
   const sectorLabel = job.sector ?? '';
-  const postedLabel = job.postedAt
-    ? `${Math.max(0, Math.floor((Date.now() - new Date(job.postedAt).getTime()) / 86_400_000))} days ago`
-    : 'Recently';
+  const postedLabel = job.postedAt ? timeAgo(job.postedAt) : 'Recently';
+  const isSaved = job.kanbanColumn === 'Saved';
 
   function companyInitials(company: string): string {
     return company
@@ -301,7 +310,7 @@ const JobDetail: React.FC = () => {
             </div>
             {activeTab !== 'skills' ? (
               <>
-            <JobDescriptionSection job={job} profile={profile} onDescriptionLoaded={refreshJob} />
+            <JobDescriptionSection job={job} profile={profile ?? null} onDescriptionLoaded={refreshJob} />
 
             {(job.humanSummary || heuristicEval) && (
               <div className="bg-surface-container-lowest p-margin-mobile md:p-margin-desktop rounded-xl border border-primary/20 shadow-sm">
@@ -388,16 +397,21 @@ const JobDetail: React.FC = () => {
                 <button
                   type="button"
                   onClick={handleSave}
-                  disabled={saving}
+                  disabled={saving || isSaved}
                   className="w-full bg-surface-container-lowest border border-outline text-on-surface py-4 rounded-lg font-label-md text-label-md font-medium hover:bg-surface-container transition-all active:scale-95 flex items-center justify-center gap-2 disabled:opacity-60"
                 >
-                  <span className="material-symbols-outlined text-xl">bookmark</span>
-                  Save for Later
+                  <span
+                    className="material-symbols-outlined text-xl"
+                    style={isSaved ? { fontVariationSettings: "'FILL' 1" } : undefined}
+                  >
+                    bookmark
+                  </span>
+                  {isSaved ? 'Saved' : 'Save for Later'}
                 </button>
                 <button
                   type="button"
                   onClick={() => setDeleteModalOpen(true)}
-                  disabled={saving}
+                  disabled={deleting}
                   className="w-full bg-error-container border border-error/20 text-on-error-container py-4 rounded-lg font-label-md text-label-md font-medium hover:opacity-90 transition-all active:scale-95 flex items-center justify-center gap-2 disabled:opacity-60"
                 >
                   <span className="material-symbols-outlined text-xl">delete</span>
@@ -552,7 +566,7 @@ const JobDetail: React.FC = () => {
         open={deleteModalOpen}
         onClose={() => setDeleteModalOpen(false)}
         onConfirm={confirmDelete}
-        loading={saving}
+        loading={deleting}
         destructive
         title="Delete from pipeline?"
         description={

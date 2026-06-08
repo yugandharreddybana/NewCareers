@@ -15,7 +15,7 @@ export function DashboardTopNav() {
   const [signingOut, setSigningOut] = useState(false);
 
   const isDashboard = location.pathname === '/dashboard';
-  const isSettings = location.pathname === '/account';
+  const isSettings = location.pathname.startsWith('/account');
 
   const navLinkClass = (active: boolean) =>
     `font-body-md text-body-md transition-colors whitespace-nowrap ${

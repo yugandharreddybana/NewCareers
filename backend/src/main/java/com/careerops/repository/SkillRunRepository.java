@@ -91,6 +91,15 @@ public interface SkillRunRepository extends JpaRepository<SkillRun, UUID> {
 
     long countByUserIdAndCreatedAtAfter(UUID userId, Instant since);
 
+    @Query("""
+        SELECT COUNT(sr) FROM SkillRun sr
+        WHERE sr.userId IN (
+            SELECT om.userId FROM OrgMember om
+            WHERE om.orgId = :orgId AND om.status = 'active'
+        ) AND sr.createdAt >= :since
+        """)
+    long countByOrgIdAndCreatedAtAfter(@Param("orgId") UUID orgId, @Param("since") Instant since);
+
     /**
      * GDPR Art. 7(3): purge AI skill outputs older than retention cutoff on consent withdrawal.
      */

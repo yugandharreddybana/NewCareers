@@ -17,7 +17,8 @@ public final class CvMarkdownSections {
     private static final Pattern KNOWN_SECTION_HEADING = Pattern.compile(
         "^\\s*(PROFESSIONAL SUMMARY|PROFILE|SUMMARY|SKILLS|TECHNICAL SKILLS|CORE SKILLS|"
             + "PROFESSIONAL EXPERIENCE|WORK EXPERIENCE|EXPERIENCE|EMPLOYMENT|"
-            + "EDUCATION|CERTIFICATIONS|PROJECTS|LANGUAGES|REFERENCES|AWARDS|"
+            + "EDUCATION|QUALIFICATIONS|ACADEMIC BACKGROUND|ACADEMIC HISTORY|TRAINING|"
+            + "CERTIFICATIONS|PROJECTS|LANGUAGES|REFERENCES|AWARDS|"
             + "VOLUNTEER|INTERESTS)\\s*$",
         Pattern.MULTILINE | Pattern.CASE_INSENSITIVE);
 
@@ -30,6 +31,10 @@ public final class CvMarkdownSections {
         // Map.entry("work experience", "Professional experience"),
         Map.entry("employment", "Professional experience"),
         Map.entry("education", "Education"),
+        Map.entry("qualifications", "Education"),
+        Map.entry("academic background", "Education"),
+        Map.entry("academic history", "Education"),
+        Map.entry("training", "Education"),
         Map.entry("skills", "Skills"),
         Map.entry("technical skills", "Skills"),
         Map.entry("core skills", "Skills"),

@@ -70,6 +70,11 @@ public class OnboardingCvParseService {
         List<OnboardingCvParseEducationEntry> education = parseEducation(educationBody);
         List<OnboardingCvParseProjectEntry> projects = parseProjects(projectsBody);
         String headline = inferHeadline(summaryBody);
+        String headerBody = sectionBody(sections, "Header");
+        if (headerBody.isBlank()) {
+            headerBody = summaryBody;
+        }
+        CvHeaderParser.HeaderData headerLinks = CvHeaderParser.parse(headerBody, null, null);
 
         UserProfile profile = buildTempProfile(work, education);
         String markdown = buildMarkdown(parsedText, profile, projects);
@@ -84,7 +89,10 @@ public class OnboardingCvParseService {
             projects,
             work.size(),
             education.size(),
-            projects.size()
+            projects.size(),
+            blankToNull(headerLinks.linkedInUrl()),
+            blankToNull(headerLinks.githubUrl()),
+            blankToNull(headerLinks.portfolioUrl())
         );
     }
 
@@ -115,7 +123,8 @@ public class OnboardingCvParseService {
                 dates.startDate(),
                 dates.current() ? "" : dates.endDate(),
                 dates.current(),
-                description
+                description,
+                role.location()
             ));
         }
         return out;
@@ -128,7 +137,8 @@ public class OnboardingCvParseService {
                 e.schoolName(),
                 e.degree(),
                 e.fieldOfStudy(),
-                e.graduationYear()
+                e.graduationYear(),
+                e.location()
             ));
         }
         return out;
@@ -137,7 +147,9 @@ public class OnboardingCvParseService {
     private static List<OnboardingCvParseProjectEntry> parseProjects(String body) {
         List<OnboardingCvParseProjectEntry> out = new ArrayList<>();
         for (ProjectsSectionParser.ParsedProject p : ProjectsSectionParser.parseEntries(body)) {
-            out.add(new OnboardingCvParseProjectEntry(p.title(), p.description()));
+            out.add(new OnboardingCvParseProjectEntry(
+                p.title(), p.description(), p.url(), p.location(), p.techTags()
+            ));
         }
         return out;
     }
@@ -171,6 +183,7 @@ public class OnboardingCvParseService {
                 .endDate(w.endDate())
                 .current(w.current())
                 .description(w.description())
+                .location(w.location())
                 .build())
             .toList();
 
@@ -180,6 +193,7 @@ public class OnboardingCvParseService {
                 .degree(e.degree())
                 .fieldOfStudy(e.fieldOfStudy())
                 .graduationYear(e.graduationYear())
+                .location(e.location())
                 .build())
             .toList();
 
@@ -204,10 +218,20 @@ public class OnboardingCvParseService {
             if (!p.title().isBlank()) {
                 md.append("### ").append(p.title().trim()).append("\n");
             }
+            if (p.url() != null && !p.url().isBlank()) {
+                md.append(p.url().trim()).append("\n");
+            }
             if (p.description() != null && !p.description().isBlank()) {
                 md.append(p.description().trim()).append("\n\n");
             }
         }
         return md.toString().trim();
+    }
+
+    private static String blankToNull(String value) {
+        if (value == null || value.isBlank()) {
+            return null;
+        }
+        return value.trim();
     }
 }

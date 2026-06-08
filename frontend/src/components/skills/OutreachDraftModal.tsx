@@ -92,10 +92,16 @@ export function OutreachDraftModal({ open, onClose, job }: Props) {
                 <div className="space-y-3">
                   <FormatBlock
                     label="LinkedIn connection request"
-                    text={contact.formats.linkedInConnection}
+                    {...(contact.formats.linkedInConnection
+                      ? { text: contact.formats.linkedInConnection }
+                      : {})}
                     onCopy={copy}
                   />
-                  <FormatBlock label="LinkedIn message" text={contact.formats.linkedInMessage} onCopy={copy} />
+                  <FormatBlock
+                    label="LinkedIn message"
+                    {...(contact.formats.linkedInMessage ? { text: contact.formats.linkedInMessage } : {})}
+                    onCopy={copy}
+                  />
                   <FormatBlock
                     label="Cold email"
                     text={
@@ -105,7 +111,11 @@ export function OutreachDraftModal({ open, onClose, job }: Props) {
                     }
                     onCopy={copy}
                   />
-                  <FormatBlock label="Follow-up" text={contact.formats.followUp} onCopy={copy} />
+                  <FormatBlock
+                    label="Follow-up"
+                    {...(contact.formats.followUp ? { text: contact.formats.followUp } : {})}
+                    onCopy={copy}
+                  />
                 </div>
               )}
             </section>

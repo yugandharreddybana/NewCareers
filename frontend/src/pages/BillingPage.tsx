@@ -1,152 +1,320 @@
-/**
- * BillingPage.tsx — placeholder.
- *
- * Pass 6 #6.040 / Pass 9 #9.001 / Pass 10 #10.039 — Stripe integration is not
- * yet wired end-to-end (no backend BillingController, no DB tables, no Stripe
- * client library on the frontend). To avoid shipping a half-baked UI that
- * proxies to a non-existent backend (returning 502 to users), this page now
- * presents a polite "coming soon" with a way for the user to register interest.
- *
- * When the backend is ready (BillingController + Stripe webhook + customer/
- * subscription/invoice tables + Stripe client lib), restore the previous Stripe
- * Elements UI and remove this placeholder. The git history retains it.
- */
-import { useEffect, useState } from 'react';
-import { Sparkles, Mail, Loader2, CheckCircle } from 'lucide-react';
+import { useState } from 'react';
+import { Link, useNavigate } from 'react-router-dom';
 import toast from 'react-hot-toast';
 import { PageMeta } from '@/components/PageMeta';
+import { MarketingNav } from '@/components/marketing/MarketingNav';
 import { useAuth } from '@/context/AuthContext';
+import { useSubscription } from '@/hooks/useSubscription';
+import { BRAND_NAME, SALES_EMAIL } from '@/lib/brand';
+import { subscriptionPlanToCardId } from '@/lib/subscriptionUtils';
+import { billingApi, type SubscriptionPlanCode } from '@/services/billingApi';
 
-const PLAN_PREVIEWS = [
+type BillingInterval = 'monthly' | 'yearly';
+
+interface PlanFeature {
+  text: string;
+  iconColor?: 'primary' | 'secondary' | 'tertiary';
+  textVariant?: 'default' | 'muted';
+}
+
+interface PricingPlan {
+  id: string;
+  checkoutPlan?: SubscriptionPlanCode;
+  name: string;
+  monthlyPrice: number;
+  description: string;
+  features: PlanFeature[];
+  cta: string;
+  ctaVariant: 'outline' | 'primary' | 'tertiary';
+  highlighted?: boolean;
+  badge?: string;
+}
+
+const PLANS: PricingPlan[] = [
   {
+    id: 'free',
     name: 'Free',
-    price: '€0',
-    cadence: 'forever',
-    features: ['5 AI job matches/day', '3 skill runs/month', 'Basic Kanban tracker'],
-    badge: 'Current plan',
+    monthlyPrice: 0,
+    description: 'Start your solo job search with the essentials.',
+    features: [
+      { text: '5 AI runs per month' },
+      { text: '10 active job applications' },
+      { text: '1 CV profile' },
+    ],
+    cta: 'Get Started Free',
+    ctaVariant: 'outline',
   },
   {
+    id: 'pro',
     name: 'Pro',
-    price: '€19',
-    cadence: 'per month',
-    features: ['Unlimited AI matches', '50 skill runs/month', 'Mock interviews', 'Outreach campaigns', 'Priority support'],
-    badge: 'Most popular',
-    highlight: true,
+    checkoutPlan: 'PRO',
+    monthlyPrice: 49,
+    description: 'Full toolkit for one person running a serious job search.',
+    features: [
+      { text: '200 AI runs per month', textVariant: 'default' },
+      { text: 'Unlimited job tracking', textVariant: 'default' },
+      { text: '10 CV profiles', textVariant: 'default' },
+      { text: 'Interview Prep Suite', iconColor: 'secondary', textVariant: 'default' },
+      { text: 'Personal Networking CRM', iconColor: 'secondary', textVariant: 'default' },
+      { text: 'Transition Analytics', iconColor: 'secondary', textVariant: 'default' },
+    ],
+    cta: 'Upgrade to Pro',
+    ctaVariant: 'primary',
+    highlighted: true,
+    badge: 'Most Popular',
   },
   {
-    name: 'Team',
-    price: '€49',
-    cadence: 'per seat / month',
-    features: ['Everything in Pro', 'Shared workspaces', 'Org analytics', 'Admin controls'],
-    badge: 'Coming Q3',
+    id: 'elite',
+    name: 'Elite',
+    checkoutPlan: 'ENTERPRISE',
+    monthlyPrice: 79,
+    description: 'Unlimited power for one individual at peak search intensity.',
+    features: [
+      { text: 'Unlimited AI runs', iconColor: 'tertiary' },
+      { text: 'Unlimited job tracking', iconColor: 'tertiary' },
+      { text: 'Unlimited CV profiles', iconColor: 'tertiary' },
+      { text: 'Work Permit Intel', iconColor: 'tertiary' },
+      { text: 'Priority support', iconColor: 'tertiary' },
+    ],
+    cta: 'Upgrade to Elite',
+    ctaVariant: 'primary',
   },
 ];
 
-export default function BillingPage() {
-  const { user } = useAuth();
-  const billingInterestKey = user
-    ? `co_billing_interest_${user.id}`
-    : null;
-  const [interested, setInterested] = useState(() =>
-    billingInterestKey ? window.localStorage.getItem(billingInterestKey) === '1' : false,
-  );
-  const [submitting, setSubmitting] = useState(false);
+function displayPrice(monthlyPrice: number, interval: BillingInterval): number {
+  if (monthlyPrice === 0) return 0;
+  if (interval === 'yearly') {
+    return Math.round(monthlyPrice * 0.9);
+  }
+  return monthlyPrice;
+}
 
-  useEffect(() => {
-    if (!billingInterestKey) {
-      setInterested(false);
+function checkIconColor(color: PlanFeature['iconColor']): string {
+  switch (color) {
+    case 'secondary':
+      return 'text-secondary';
+    case 'tertiary':
+      return 'text-tertiary';
+    default:
+      return 'text-primary';
+  }
+}
+
+export default function BillingPage() {
+  const [billingInterval, setBillingInterval] = useState<BillingInterval>('monthly');
+  const [checkoutLoading, setCheckoutLoading] = useState<string | null>(null);
+  const { user } = useAuth();
+  const { subscription, isTrialing, daysRemaining, isLoading: subscriptionLoading } = useSubscription();
+  const navigate = useNavigate();
+
+  const currentPlanId = subscription ? subscriptionPlanToCardId(subscription.plan) : null;
+
+  const handlePaidUpgrade = async (plan: PricingPlan) => {
+    if (!plan.checkoutPlan) return;
+    if (!user) {
+      navigate('/login', { state: { from: { pathname: '/billing' } } });
       return;
     }
-    setInterested(window.localStorage.getItem(billingInterestKey) === '1');
-  }, [billingInterestKey]);
-
-  // No backend endpoint yet — we keep state local and notify the user.
-  // Once the billing backend ships, change this to `await billingApi.registerInterest()`.
-  const registerInterest = async () => {
-    if (!user || !billingInterestKey) return;
-    setSubmitting(true);
+    setCheckoutLoading(plan.id);
     try {
-      // Lightweight client-side persistence so the user is not asked twice.
-      window.localStorage.setItem(billingInterestKey, '1');
-      setInterested(true);
-      toast.success("You're on the list — we'll email you when Pro launches.");
+      const { url } = await billingApi.createCheckoutSession(plan.checkoutPlan);
+      window.location.href = url;
+    } catch {
+      toast.error('Checkout unavailable right now. Try again later or contact support.');
     } finally {
-      setSubmitting(false);
+      setCheckoutLoading(null);
+    }
+  };
+
+  const resolveCtaLabel = (plan: PricingPlan, isCurrent: boolean): string => {
+    if (checkoutLoading === plan.id) return 'Redirecting…';
+    if (isCurrent) return 'Current Plan';
+    if (plan.id === 'free') return plan.cta;
+    return 'Upgrade Now';
+  };
+
+  const handlePlanCta = (plan: PricingPlan) => {
+    if (plan.id === 'free') {
+      navigate('/get-started');
+      return;
+    }
+    if (plan.checkoutPlan) {
+      void handlePaidUpgrade(plan);
     }
   };
 
   return (
     <>
-      <PageMeta title="Billing" />
-      <div className="max-w-5xl mx-auto px-6 py-10">
-        <div className="rounded-2xl border border-amber-200 bg-amber-50 p-6 mb-10 flex items-start gap-3">
-          <Sparkles className="text-amber-600 mt-0.5 shrink-0" size={20} />
-          <div>
-            <h2 className="text-amber-900 font-semibold mb-1">Billing is coming soon</h2>
-            <p className="text-sm text-amber-800/90">
-              We&apos;re putting the finishing touches on subscriptions and secure
-              payments. In the meantime, every feature is fully available on the
-              Free plan. Tell us if you&apos;d like to be notified the moment Pro
-              ships.
+      <PageMeta title={`${BRAND_NAME} | Pricing`} />
+      <div className="font-sans antialiased min-h-screen flex flex-col text-on-surface bg-surface">
+        <MarketingNav activeLink="pricing" />
+
+        <main className="flex-grow pt-32 pb-stack-xl px-margin-mobile md:px-margin-desktop max-w-container-max mx-auto w-full flex flex-col items-center">
+          <div className="text-center mb-stack-xl max-w-2xl">
+            <h1 className="font-display text-display text-on-surface mb-stack-md">
+              Invest in your career operating system.
+            </h1>
+            <p className="font-body-lg text-body-lg text-on-surface-variant">
+              Simple pricing for individual job seekers. Pick the plan that fits your search — one account,
+              one career, upgrade anytime.
             </p>
           </div>
-        </div>
 
-        <div className="grid md:grid-cols-3 gap-6 mb-12">
-          {PLAN_PREVIEWS.map(plan => (
-            <div
-              key={plan.name}
-              className={
-                'rounded-2xl border p-6 flex flex-col gap-4 relative ' +
-                (plan.highlight
-                  ? 'border-emerald-300 bg-emerald-50/40 shadow-sm'
-                  : 'border-slate-200 bg-white')
-              }
-            >
-              {plan.badge && (
-                <span className={
-                  'absolute -top-3 right-5 px-2 py-0.5 rounded-full text-[10px] font-bold tracking-wide uppercase ' +
-                  (plan.highlight ? 'bg-emerald-500 text-white' : 'bg-slate-200 text-slate-600')
-                }>
-                  {plan.badge}
-                </span>
-              )}
-              <h3 className="text-xl font-bold text-slate-900">{plan.name}</h3>
-              <div className="flex items-baseline gap-2">
-                <span className="text-3xl font-black text-slate-900">{plan.price}</span>
-                <span className="text-sm text-slate-500">{plan.cadence}</span>
-              </div>
-              <ul className="space-y-2 text-sm text-slate-600">
-                {plan.features.map(f => (
-                  <li key={f} className="flex items-start gap-2">
-                    <CheckCircle size={14} className="text-emerald-500 mt-0.5 shrink-0" /> {f}
-                  </li>
-                ))}
-              </ul>
-            </div>
-          ))}
-        </div>
-
-        <div className="rounded-2xl border border-slate-200 bg-white p-6 flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
-          <div className="flex items-start gap-3">
-            <Mail className="text-slate-500 mt-1 shrink-0" size={18} />
-            <div>
-              <h3 className="font-semibold text-slate-900">Notify me when Pro launches</h3>
-              <p className="text-sm text-slate-500">
-                We&apos;ll email <span className="font-medium text-slate-700">{user?.email ?? 'your account'}</span> once payments are open.
+          {user && isTrialing && (
+            <div className="w-full mb-stack-lg rounded-lg border border-primary/20 bg-primary/5 px-6 py-4 text-center">
+              <p className="font-label-md text-label-md text-primary">
+                {daysRemaining} {daysRemaining === 1 ? 'day' : 'days'} left in your trial
               </p>
             </div>
+          )}
+
+          <div className="flex items-center gap-stack-md mb-stack-xl bg-surface-container p-1 rounded-full border border-outline-variant/30 shadow-sm">
+            <button
+              type="button"
+              className={`font-label-md text-label-md px-6 py-2 rounded-full transition-all ${
+                billingInterval === 'monthly'
+                  ? 'bg-surface text-on-surface shadow-sm'
+                  : 'text-on-surface-variant hover:text-on-surface'
+              }`}
+              onClick={() => setBillingInterval('monthly')}
+            >
+              Monthly
+            </button>
+            <button
+              type="button"
+              className={`font-label-md text-label-md px-6 py-2 rounded-full flex items-center gap-2 transition-all ${
+                billingInterval === 'yearly'
+                  ? 'bg-surface text-on-surface shadow-sm'
+                  : 'text-on-surface-variant hover:text-on-surface'
+              }`}
+              onClick={() => setBillingInterval('yearly')}
+            >
+              Yearly{' '}
+              <span className="bg-primary/10 text-primary text-[10px] px-2 py-0.5 rounded-full font-bold uppercase tracking-wider">
+                Save 10%
+              </span>
+            </button>
           </div>
-          <button
-            type="button"
-            onClick={registerInterest}
-            disabled={interested || submitting || !user}
-            className="px-5 h-11 rounded-xl bg-slate-900 text-white text-sm font-bold hover:bg-slate-800 disabled:opacity-60 inline-flex items-center gap-2"
-          >
-            {submitting && <Loader2 size={16} className="animate-spin" />}
-            {interested ? 'You’re on the list' : 'Notify me'}
-          </button>
-        </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-gutter w-full mb-stack-xl">
+            {PLANS.map((plan) => {
+              const price = displayPrice(plan.monthlyPrice, billingInterval);
+              const featureTextClass =
+                plan.highlighted ? 'text-on-surface' : 'text-on-surface-variant';
+              const isCurrentPlan =
+                !subscriptionLoading && user && currentPlanId === plan.id;
+
+              return (
+                <div
+                  key={plan.id}
+                  className={`glass-panel rounded p-gutter flex flex-col h-full shadow-sm hover:shadow-md transition-shadow ${
+                    plan.highlighted
+                      ? 'border-primary relative transform md:-translate-y-4 shadow-lg bg-white border'
+                      : 'border border-outline-variant/40 hover:border-primary/30 transition-colors'
+                  }`}
+                >
+                  {plan.badge && (
+                    <div className="absolute top-0 left-1/2 -translate-x-1/2 -translate-y-1/2 bg-primary text-on-primary font-label-sm text-label-sm px-3 py-1 rounded-full whitespace-nowrap shadow-sm">
+                      {plan.badge}
+                    </div>
+                  )}
+                  {isCurrentPlan && (
+                    <div className="absolute top-4 right-4 bg-surface-container text-on-surface font-label-sm text-label-sm px-2 py-1 rounded border border-outline-variant/50">
+                      Current Plan
+                    </div>
+                  )}
+                  <div className="mb-stack-md">
+                    <h3
+                      className={`font-headline-md text-headline-md mb-stack-sm ${
+                        plan.highlighted ? 'text-primary' : 'text-on-surface'
+                      }`}
+                    >
+                      {plan.name}
+                    </h3>
+                    <div className="flex items-baseline gap-1">
+                      <span className="font-display text-display text-on-surface">€{price}</span>
+                      <span className="font-body-md text-body-md text-on-surface-variant">/mo</span>
+                    </div>
+                    <p className="font-body-md text-body-md text-on-surface-variant mt-stack-sm">
+                      {plan.description}
+                    </p>
+                  </div>
+                  <ul className="flex flex-col gap-stack-sm mb-stack-lg flex-grow">
+                    {plan.features.map((feature) => (
+                      <li
+                        key={feature.text}
+                        className={`flex items-center gap-2 font-body-md text-body-md ${
+                          feature.textVariant === 'default' ? featureTextClass : 'text-on-surface-variant'
+                        }`}
+                      >
+                        <span
+                          className={`material-symbols-outlined text-[20px] ${checkIconColor(feature.iconColor)}`}
+                        >
+                          check
+                        </span>
+                        {feature.text}
+                      </li>
+                    ))}
+                  </ul>
+                  <button
+                    type="button"
+                    disabled={
+                      isCurrentPlan ||
+                      (!!plan.checkoutPlan && checkoutLoading === plan.id)
+                    }
+                    className={`w-full py-3 rounded font-label-md text-label-md mt-auto transition-all shadow-sm ${
+                      isCurrentPlan
+                        ? 'border border-outline-variant/50 text-on-surface-variant bg-surface-container cursor-default'
+                        : plan.ctaVariant === 'primary'
+                          ? 'bg-primary text-on-primary btn-glow shadow-md'
+                          : 'border border-outline-variant text-on-surface hover:bg-surface-variant'
+                    }`}
+                    onClick={() => !isCurrentPlan && handlePlanCta(plan)}
+                  >
+                    {resolveCtaLabel(plan, !!isCurrentPlan)}
+                  </button>
+                </div>
+              );
+            })}
+          </div>
+        </main>
+
+        <footer className="w-full py-stack-xl px-margin-mobile md:px-margin-desktop grid grid-cols-2 md:grid-cols-4 gap-gutter max-w-container-max mx-auto bg-background border-t border-outline-variant/30">
+          <div className="col-span-2 md:col-span-1 flex flex-col gap-stack-sm">
+            <div className="font-headline-md text-headline-md font-bold text-on-surface">{BRAND_NAME}</div>
+            <p className="font-body-md text-body-md text-on-surface-variant text-sm mt-2">
+              © {new Date().getFullYear()} {BRAND_NAME} AI. All rights reserved.
+            </p>
+          </div>
+          <div className="flex flex-col gap-stack-sm">
+            <Link
+              className="font-label-md text-label-md text-on-surface-variant hover:text-primary transition-colors duration-200 hover:underline"
+              to="/#features"
+            >
+              Product
+            </Link>
+            <Link
+              className="font-label-md text-label-md text-on-surface-variant hover:text-primary transition-colors duration-200 hover:underline"
+              to="/#features"
+            >
+              Company
+            </Link>
+          </div>
+          <div className="flex flex-col gap-stack-sm">
+            <Link
+              className="font-label-md text-label-md text-on-surface-variant hover:text-primary transition-colors duration-200 hover:underline"
+              to="/privacy"
+            >
+              Legal
+            </Link>
+            <a
+              className="font-label-md text-label-md text-on-surface-variant hover:text-primary transition-colors duration-200 hover:underline"
+              href={`mailto:${SALES_EMAIL}`}
+            >
+              Connect
+            </a>
+          </div>
+        </footer>
       </div>
     </>
   );

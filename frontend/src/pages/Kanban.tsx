@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import { useQueryClient } from '@tanstack/react-query';
 import toast from 'react-hot-toast';
@@ -14,6 +14,7 @@ import {
 import { useQuery } from '@tanstack/react-query';
 import { useAuth } from '@/context/AuthContext';
 import { isApiError, type JobCard } from '@/types';
+import { getUserFacingErrorMessage } from '@/lib/userFacingError';
 import { fetchJobsOrchestrated } from '@/lib/pipelineJobSearch';
 import { JobSourceBadge } from '@/components/ui/JobSourceBadge';
 import { ConfirmModal } from '@/components/ui/ConfirmModal';
@@ -71,7 +72,11 @@ const Kanban: React.FC = () => {
   const [optimisticJobs, setOptimisticJobs] = useState<JobCard[] | null>(null);
   const [jobToDelete, setJobToDelete] = useState<JobCard | null>(null);
   const [deletePending, setDeletePending] = useState(false);
+  const patchInFlight = useRef<Set<string>>(new Set());
+  const fetchAbortRef = useRef<AbortController | null>(null);
   const pipelineTotal = jobsData?.totalCount ?? jobs.length;
+
+  useEffect(() => () => { fetchAbortRef.current?.abort(); }, []);
 
   const boardJobs = useMemo(() => {
     const base = optimisticJobs ?? jobs;
@@ -85,12 +90,15 @@ const Kanban: React.FC = () => {
       );
       return;
     }
+    fetchAbortRef.current?.abort();
+    const controller = new AbortController();
+    fetchAbortRef.current = controller;
     setFetchInFlight(true);
     setFetchProgress(pipelineTotal === 0 ? 'Starting full job search…' : 'Fetching jobs…');
     try {
       const result = await fetchJobsOrchestrated(5, status => {
         setFetchProgress(status.message ?? 'Matching jobs to your profile…');
-      });
+      }, controller.signal);
       await qc.invalidateQueries({ queryKey: queryKeys.jobs.all });
       await qc.invalidateQueries({ queryKey: queryKeys.onboarding.delivery() });
       if (result.fullSearch) {
@@ -104,13 +112,10 @@ const Kanban: React.FC = () => {
       }
       toast('No new roles for your profile right now. Try broadening target roles or check back later.');
     } catch (e) {
-      const msg = isApiError(e)
-        ? e.normalizedMessage
-        : e instanceof Error
-          ? e.message
-          : 'Failed to fetch jobs';
+      if (e instanceof DOMException && e.name === 'AbortError') return;
+      const msg = getUserFacingErrorMessage(e, 'Failed to fetch jobs.');
       toast.error(
-        isApiError(e) && e.status === 429
+        isApiError(e) && (e.status === 429 || e.response?.status === 429)
           ? `You have reached your daily limit of ${dailyLimit} jobs. Come back tomorrow.`
           : msg,
       );
@@ -128,6 +133,12 @@ const Kanban: React.FC = () => {
     return ['All Sources', ...Array.from(sources).sort((a, b) => a.localeCompare(b))];
   }, [boardJobs]);
 
+  useEffect(() => {
+    if (listSourceFilter !== 'All Sources' && !listSourceOptions.includes(listSourceFilter)) {
+      setListSourceFilter('All Sources');
+    }
+  }, [listSourceOptions, listSourceFilter]);
+
   const listJobs = boardJobs.filter(job => {
     const q = listQuery.trim().toLowerCase();
     const queryMatch = !q ||
@@ -144,20 +155,31 @@ const Kanban: React.FC = () => {
   });
 
   async function handleListStageChange(job: JobCard, nextStage: JobCard['kanbanColumn']) {
-    const prev = boardJobs;
-    setOptimisticJobs(prev.map(item => (
-      item.userJobId === job.userJobId ? { ...item, kanbanColumn: nextStage } : item
-    )));
+    if (patchInFlight.current.has(job.userJobId)) {
+      toast.error('This card is still saving. Please wait a moment.');
+      return;
+    }
+
+    patchInFlight.current.add(job.userJobId);
+    setOptimisticJobs(current => {
+      const base = (current ?? jobs).filter(j => (j.matchPercent ?? 0) >= minMatch);
+      return base.map(item => (
+        item.userJobId === job.userJobId ? { ...item, kanbanColumn: nextStage } : item
+      ));
+    });
 
     try {
       await kanbanPatch.mutateAsync({
         userJobId: job.userJobId,
         body: { kanbanColumn: nextStage },
       });
-      setOptimisticJobs(null);
     } catch (e) {
-      toast.error(isApiError(e) ? e.normalizedMessage : 'Failed to move job stage');
-      setOptimisticJobs(null);
+      toast.error(getUserFacingErrorMessage(e, 'Failed to move job stage.'));
+    } finally {
+      patchInFlight.current.delete(job.userJobId);
+      if (patchInFlight.current.size === 0) {
+        setOptimisticJobs(null);
+      }
     }
   }
 
@@ -298,12 +320,13 @@ const Kanban: React.FC = () => {
                   </button>
                 </div>
               )}
-              {viewMode === 'board' && boardJobs.length > 0 ? (
+              {viewMode === 'board' && boardJobs.length > 0 && (
                 <KanbanBoard
                   jobs={boardJobs}
                   onJobClick={job => navigate(`/jobs/${job.userJobId}`)}
                 />
-              ) : boardJobs.length > 0 ? (
+              )}
+              {viewMode === 'list' && boardJobs.length > 0 && (
                 <section className="rounded-xl border border-outline-variant bg-surface-container-lowest overflow-hidden">
                   <div className="px-6 py-4 border-b border-outline-variant bg-surface-container-low flex flex-wrap items-center gap-3">
                     <div className="relative min-w-[220px] flex-1">
@@ -383,7 +406,7 @@ const Kanban: React.FC = () => {
                               <p className="font-body-sm text-body-sm text-on-surface truncate">{job.company}</p>
                             </td>
                             <td className="px-4 py-4 align-middle">
-                              <JobSourceBadge name={job.sourceName} />
+                              <JobSourceBadge name={job.sourceName ?? null} />
                             </td>
                             <td className="px-4 py-4 align-middle">
                               <span className="inline-block whitespace-nowrap text-primary bg-primary-fixed text-[10px] px-2 py-1 rounded font-bold uppercase tracking-wider">
@@ -444,7 +467,7 @@ const Kanban: React.FC = () => {
                     )}
                   </div>
                 </section>
-              ) : null}
+              )}
             </>
           )}
         </main>

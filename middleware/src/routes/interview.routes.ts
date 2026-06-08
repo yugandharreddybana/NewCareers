@@ -8,6 +8,7 @@
  * GET  /api/interviews/history/:userJobId       — sessions for a job
  * GET  /api/interviews/history                  — all sessions for user
  * GET  /api/interviews/tracks                   — all interview tracks
+ * GET  /api/interviews/tracks/:userJobId        — single track for a job
  * PATCH /api/interviews/tracks/:userJobId/stage — update stage
  */
 import express from 'express';
@@ -22,6 +23,7 @@ const javaProxy = createJavaRouteProxy('/interviews', {
 
 // Specific routes before parameterised ones
 router.get('/history',                     authGuard, javaProxy);
+router.get('/tracks/:userJobId',           authGuard, javaProxy);
 router.get('/tracks',                      authGuard, javaProxy);
 router.post('/generate-kit/:userJobId',    authGuard, javaProxy);
 router.get('/kit/:userJobId',              authGuard, javaProxy);

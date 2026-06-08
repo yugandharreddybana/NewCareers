@@ -6,6 +6,7 @@ import JobCard from './JobCard';
 import type { JobCard as JobCardType } from '@/types';
 
 const job: JobCardType = {
+  id: 'user-job-1',
   userJobId: 'user-job-1',
   jobId: 'job-1',
   title: 'Senior Frontend Engineer',

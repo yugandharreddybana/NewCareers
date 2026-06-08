@@ -60,23 +60,21 @@ function GlassCard({
     <motion.div
       className={`${GLASS} ${className}`}
       style={{ rotate, zIndex }}
-      animate={reduce ? undefined : { y: [0, -7, 0] }}
-      transition={
-        reduce
-          ? undefined
-          : { y: { duration: 5.5 + delay, repeat: Infinity, ease: 'easeInOut', delay } }
-      }
-      whileHover={
-        reduce
-          ? undefined
-          : {
+      {...(reduce
+        ? {}
+        : {
+            animate: { y: [0, -7, 0] },
+            transition: {
+              y: { duration: 5.5 + delay, repeat: Infinity, ease: 'easeInOut', delay },
+            },
+            whileHover: {
               y: -10,
               rotate: hoverRotate,
               scale: 1.02,
               boxShadow:
-                'inset 0 1px 0 rgba(255,255,255,0.18), 0 32px 56px rgba(0,0,0,0.45)',
-            }
-      }
+                'inset 0 1px 0 rgba(255, 255, 255, 0.18), 0 32px 56px rgba(0, 0, 0, 0.45)',
+            },
+          })}
     >
       {children}
     </motion.div>
@@ -301,7 +299,7 @@ function HeroBlock() {
   return (
     <motion.div
       className="relative z-20 mt-auto pt-6"
-      initial={reduce ? undefined : { opacity: 0, y: 16 }}
+      {...(reduce ? {} : { initial: { opacity: 0, y: 16 } })}
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.7, delay: 0.2 }}
     >
@@ -319,8 +317,6 @@ function HeroBlock() {
 }
 
 export function AuthIntelligencePanel() {
-  const reduce = useReducedMotion();
-
   return (
     <div className="relative hidden min-h-screen w-1/2 flex-col overflow-hidden bg-[#042f2c] lg:flex">
       <div

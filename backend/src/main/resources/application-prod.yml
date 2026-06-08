@@ -1,0 +1,50 @@
+# Production — real Supabase, Redis, Stripe; secrets from env / AWS Secrets Manager only.
+spring:
+  cloud:
+    aws:
+      secretsmanager:
+        enabled: true
+  config:
+    import: optional:aws-secretsmanager:${AWS_SECRETS_MANAGER_NAME:careerops/prod}
+  data:
+    redis:
+      host: ${SPRING_DATA_REDIS_HOST:${REDIS_HOST:}}
+      port: ${SPRING_DATA_REDIS_PORT:${REDIS_PORT:6379}}
+      password: ${SPRING_DATA_REDIS_PASSWORD:${REDIS_PASSWORD:}}
+
+auth:
+  login:
+    word-captcha:
+      required: true
+  word-captcha:
+    require-redis: true
+
+captcha:
+  secret: ${CAPTCHA_SECRET:}
+
+ratelimit:
+  require-shared-store: true
+
+resend:
+  dev-mode: false
+
+scraper:
+  auto-start: false
+
+permit:
+  ingestion:
+    enabled: false
+
+jobs:
+  live:
+    simulation:
+      enabled: false
+
+server:
+  error:
+    include-message: never
+    include-binding-errors: never
+
+logging:
+  level:
+    com.careerops: INFO

@@ -1,5 +1,6 @@
 package com.careerops.ratelimit;
 
+import com.careerops.security.TrustedProxyIpResolver;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -63,32 +64,39 @@ class IpRateLimitFilterTest {
     }
 
     @Test
-    @DisplayName("X-Forwarded-For first hop is used as client IP")
-    void forwardedForClientIp() throws Exception {
-        for (int i = 0; i < 20; i++) {
-            MockHttpServletRequest request = loginRequest("10.0.0.99");
-            request.addHeader("X-Forwarded-For", "203.0.113.1, 10.0.0.1");
-            MockHttpServletResponse response = new MockHttpServletResponse();
-            MockFilterChain chain = new MockFilterChain();
-            filter.doFilter(request, response, chain);
-            assertThat(chain.getRequest()).isNotNull();
+    @DisplayName("X-Forwarded-For is honored only when TRUSTED_PROXY is set")
+    void forwardedForRequiresTrustedProxy() throws Exception {
+        String previous = System.getenv("TRUSTED_PROXY");
+        try {
+            for (int i = 0; i < 20; i++) {
+                MockHttpServletRequest request = loginRequest("10.0.0.99");
+                request.addHeader("X-Forwarded-For", "203.0.113.1, 10.0.0.1");
+                MockHttpServletResponse response = new MockHttpServletResponse();
+                MockFilterChain chain = new MockFilterChain();
+                filter.doFilter(request, response, chain);
+                assertThat(chain.getRequest()).isNotNull();
+            }
+
+            MockHttpServletRequest blocked = loginRequest("10.0.0.99");
+            blocked.addHeader("X-Forwarded-For", "203.0.113.1, 10.0.0.1");
+            MockHttpServletResponse blockedResponse = new MockHttpServletResponse();
+            MockFilterChain blockedChain = new MockFilterChain();
+            filter.doFilter(blocked, blockedResponse, blockedChain);
+            assertThat(blockedChain.getRequest()).isNull();
+            assertThat(blockedResponse.getStatus()).isEqualTo(429);
+
+            MockHttpServletRequest otherForwarded = loginRequest("10.0.0.99");
+            otherForwarded.addHeader("X-Forwarded-For", "198.51.100.9, 10.0.0.1");
+            MockHttpServletResponse otherResponse = new MockHttpServletResponse();
+            MockFilterChain otherChain = new MockFilterChain();
+            filter.doFilter(otherForwarded, otherResponse, otherChain);
+            assertThat(otherChain.getRequest()).isNull();
+            assertThat(otherResponse.getStatus()).isEqualTo(429);
+        } finally {
+            if (previous != null) {
+                // env vars are immutable in JVM — test documents loopback-only default
+            }
         }
-
-        MockHttpServletRequest blocked = loginRequest("10.0.0.99");
-        blocked.addHeader("X-Forwarded-For", "203.0.113.1, 10.0.0.1");
-        MockHttpServletResponse blockedResponse = new MockHttpServletResponse();
-        MockFilterChain blockedChain = new MockFilterChain();
-        filter.doFilter(blocked, blockedResponse, blockedChain);
-
-        assertThat(blockedChain.getRequest()).isNull();
-        assertThat(blockedResponse.getStatus()).isEqualTo(429);
-
-        MockHttpServletRequest otherIp = loginRequest("10.0.0.99");
-        otherIp.addHeader("X-Forwarded-For", "198.51.100.9, 10.0.0.1");
-        MockHttpServletResponse otherResponse = new MockHttpServletResponse();
-        MockFilterChain otherChain = new MockFilterChain();
-        filter.doFilter(otherIp, otherResponse, otherChain);
-        assertThat(otherChain.getRequest()).isNotNull();
     }
 
     @Test
@@ -109,12 +117,42 @@ class IpRateLimitFilterTest {
     }
 
     @Test
-    @DisplayName("resolveClientIp prefers X-Forwarded-For first hop")
-    void resolveClientIp() {
+    @DisplayName("/v1/auth/login is normalized and rate limited")
+    void v1LoginPathLimited() throws Exception {
+        MockHttpServletRequest request = new MockHttpServletRequest("POST", "/api/v1/auth/login");
+        request.setServletPath("/v1/auth/login");
+        request.setRemoteAddr("192.0.2.4");
+
+        for (int i = 0; i < 20; i++) {
+            MockHttpServletResponse response = new MockHttpServletResponse();
+            MockFilterChain chain = new MockFilterChain();
+            filter.doFilter(request, response, chain);
+            assertThat(chain.getRequest()).isNotNull();
+        }
+
+        MockHttpServletResponse blockedResponse = new MockHttpServletResponse();
+        MockFilterChain blockedChain = new MockFilterChain();
+        filter.doFilter(request, blockedResponse, blockedChain);
+        assertThat(blockedChain.getRequest()).isNull();
+        assertThat(blockedResponse.getStatus()).isEqualTo(429);
+    }
+
+    @Test
+    @DisplayName("resolveClientIp honors X-Forwarded-For from loopback middleware")
+    void resolveClientIpFromLoopbackProxy() {
         MockHttpServletRequest request = new MockHttpServletRequest();
         request.addHeader("X-Forwarded-For", "203.0.113.5, 10.0.0.2");
         request.setRemoteAddr("127.0.0.1");
-        assertThat(IpRateLimitFilter.resolveClientIp(request)).isEqualTo("203.0.113.5");
+        assertThat(TrustedProxyIpResolver.resolveClientIp(request)).isEqualTo("203.0.113.5");
+    }
+
+    @Test
+    @DisplayName("resolveClientIp ignores X-Forwarded-For from non-trusted remote")
+    void resolveClientIpIgnoresForwardedWithoutTrust() {
+        MockHttpServletRequest request = new MockHttpServletRequest();
+        request.addHeader("X-Forwarded-For", "203.0.113.5, 10.0.0.2");
+        request.setRemoteAddr("10.0.0.99");
+        assertThat(TrustedProxyIpResolver.resolveClientIp(request)).isEqualTo("10.0.0.99");
     }
 
     private static MockHttpServletRequest loginRequest(String remoteAddr) {

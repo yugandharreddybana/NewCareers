@@ -27,7 +27,7 @@ public final class PasswordResetOtpEmail {
             + "<table role=\"presentation\" cellspacing=\"0\" cellpadding=\"0\" style=\"margin:0 auto 20px;\">"
             + "<tr><td align=\"center\" style=\"background:#eff6ff;border:1px solid #bfdbfe;"
             + "border-radius:10px;padding:18px 32px;font-size:32px;font-weight:700;"
-            + "letter-spacing:10px;color:#2563eb;font-family:ui-monospace,'SF Mono',Consolas,monospace;"
+            + "letter-spacing:8px;color:#2563eb;font-family:ui-monospace,'SF Mono',Consolas,monospace;"
             + "white-space:nowrap;\">" + code + "</td></tr></table>"
             + "<p style=\"margin:0;font-size:13px;line-height:1.6;color:#64748b;\">"
             + "Never share this code with anyone. NewCareers will never ask for it by phone or chat.</p>";

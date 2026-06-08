@@ -1,29 +1,25 @@
-# ── Build stage ──────────────────────────────────────────────────────────────
+﻿# ── Build stage ──────────────────────────────────────────────────────────────
 FROM maven:3.9-eclipse-temurin-21 AS build
 WORKDIR /build
 COPY pom.xml .
 COPY src ./src
-RUN mvn -q -DskipTests package
+RUN mvn -B -DskipTests package
 
-# ── Runtime stage (Java + Python ingest) ───────────────────────────────────────
-FROM eclipse-temurin:21-jre-jammy
+# ── Runtime stage ────────────────────────────────────────────────────────────
+FROM eclipse-temurin:21-jre-alpine
 
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    python3 python3-pip curl \
-    && rm -rf /var/lib/apt/lists/*
+RUN apk add --no-cache curl
 
 WORKDIR /app
 
-COPY requirements-ingest.txt /app/backend/requirements-ingest.txt
-RUN pip3 install --no-cache-dir --break-system-packages -r /app/backend/requirements-ingest.txt
-
 COPY --from=build /build/target/careerops-backend-*.jar /app/app.jar
-COPY ingest_permit_stats.py /app/backend/ingest_permit_stats.py
 
-ENV PERMIT_INGEST_SCRIPT=/app/backend/ingest_permit_stats.py
-ENV PERMIT_XLSX_CACHE=/tmp/permits
-ENV TMPDIR=/tmp/permits
+ENV SPRING_PROFILES_ACTIVE=prod
+ENV PERMIT_INGESTION_ENABLED=false
 
 EXPOSE 8080
+
+HEALTHCHECK --interval=30s --timeout=5s --start-period=60s --retries=3 \
+  CMD curl -f http://localhost:8080/api/health || exit 1
 
 ENTRYPOINT ["java", "-jar", "/app/app.jar"]

@@ -1,7 +1,11 @@
 package com.careerops.security;
 
+import jakarta.servlet.http.HttpServletRequest;
+import org.springframework.core.env.Environment;
+import org.springframework.core.env.Profiles;
 import org.springframework.stereotype.Component;
 
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Set;
 
@@ -16,14 +20,17 @@ import java.util.Set;
 @Component
 public final class PublicPathPolicy {
 
-    private static final Set<String> EXACT_PATHS = Set.of(
+    private static final Set<String> BASE_EXACT_PATHS = Set.of(
         "/auth/register",
         "/auth/login",
+        "/auth/signup-intent",
+        "/auth/signup-intent/*/exists",
         "/auth/forgot-password",
         "/auth/reset-password",
         "/auth/refresh",
         "/auth/google",
         "/auth/onboarding/check-email",
+        "/auth/onboarding/check-password",
         "/auth/onboarding/send-verification-otp",
         "/auth/onboarding/resend-verification-otp",
         "/auth/onboarding/verify-email",
@@ -32,23 +39,31 @@ public final class PublicPathPolicy {
         "/health",
         "/public/stats",
         "/.well-known/jwks.json",
-        "/swagger-ui.html"
+        "/billing/webhook"
     );
 
-    private static final List<String> PREFIX_PATHS = List.of(
-        "/referrals/validate",
-        "/v3/api-docs",
-        "/swagger-ui/"
-    );
+    private static final Set<String> SWAGGER_EXACT_PATHS = Set.of("/swagger-ui.html");
+    private static final List<String> SWAGGER_PREFIX_PATHS = List.of("/v3/api-docs", "/swagger-ui/");
 
-    private static final String[] SECURITY_PATTERNS = {
+    private static final List<String> BASE_PREFIX_PATHS = List.of("/referrals/validate");
+
+    private final Environment environment;
+
+    public PublicPathPolicy(Environment environment) {
+        this.environment = environment;
+    }
+
+    private static final String[] BASE_SECURITY_PATTERNS = {
         "/auth/register",
         "/auth/login",
+        "/auth/signup-intent",
+        "/auth/signup-intent/*/exists",
         "/auth/forgot-password",
         "/auth/reset-password",
         "/auth/refresh",
         "/auth/google",
         "/auth/onboarding/check-email",
+        "/auth/onboarding/check-password",
         "/auth/onboarding/send-verification-otp",
         "/auth/onboarding/resend-verification-otp",
         "/auth/onboarding/verify-email",
@@ -57,31 +72,51 @@ public final class PublicPathPolicy {
         "/health",
         "/public/stats",
         "/.well-known/jwks.json",
-        "/referrals/validate/**",
+        "/billing/webhook",
+        "/referrals/validate/**"
+    };
+
+    private static final String[] SWAGGER_SECURITY_PATTERNS = {
         "/v3/api-docs/**",
         "/swagger-ui/**",
         "/swagger-ui.html"
     };
 
+    public boolean isPublic(HttpServletRequest request) {
+        return isPublic(ServletPathNormalizer.normalize(request));
+    }
+
     public boolean isPublic(String rawPath) {
         final String path = normalize(rawPath);
-        if (EXACT_PATHS.contains(path)) {
+        if (path.startsWith("/auth/signup-intent/") && path.endsWith("/exists")) {
             return true;
         }
-        return PREFIX_PATHS.stream().anyMatch(path::startsWith);
+        if (BASE_EXACT_PATHS.contains(path)) {
+            return true;
+        }
+        if (swaggerEnabled() && SWAGGER_EXACT_PATHS.contains(path)) {
+            return true;
+        }
+        if (BASE_PREFIX_PATHS.stream().anyMatch(path::startsWith)) {
+            return true;
+        }
+        return swaggerEnabled() && SWAGGER_PREFIX_PATHS.stream().anyMatch(path::startsWith);
     }
 
     public String[] securityPatterns() {
-        return SECURITY_PATTERNS.clone();
+        if (!swaggerEnabled()) {
+            return BASE_SECURITY_PATTERNS.clone();
+        }
+        List<String> patterns = new ArrayList<>(List.of(BASE_SECURITY_PATTERNS));
+        patterns.addAll(List.of(SWAGGER_SECURITY_PATTERNS));
+        return patterns.toArray(String[]::new);
+    }
+
+    private boolean swaggerEnabled() {
+        return !environment.acceptsProfiles(Profiles.of("prod"));
     }
 
     private String normalize(String path) {
-        if (path == null || path.isBlank()) {
-            return "";
-        }
-        if (path.length() > 1 && path.endsWith("/")) {
-            return path.substring(0, path.length() - 1);
-        }
-        return path;
+        return ServletPathNormalizer.normalizePath(path);
     }
 }

@@ -7,6 +7,7 @@ import {
 } from './completeOnboardingFinish';
 import { writeOnboardingVerification } from './onboardingVerification';
 import type { User } from '@/types';
+import { GENERIC_ONBOARDING_SIGNUP_ERROR } from '@/lib/authErrors';
 
 const baseUser: User = {
   id: 'existing-user-id',
@@ -18,8 +19,8 @@ const baseUser: User = {
 };
 
 const pending = {
+  signupIntentId: '33333333-3333-4333-8333-333333333333',
   email: 'new@test.ie',
-  password: 'N0tPwned!1234Aa',
   name: 'New User',
   consents: {
     termsAccepted: true,
@@ -37,17 +38,30 @@ describe('completeOnboardingFinish', () => {
   const ensureFreshSession = vi.fn();
   const updateProfile = vi.fn();
   const uploadCv = vi.fn();
+  const addPortfolioItem = vi.fn();
   const startDelivery = vi.fn();
   const onPhase = vi.fn();
+
+  const deps = () => ({
+    signUp,
+    clearPendingSignup,
+    ensureFreshSession,
+    updateProfile,
+    uploadCv,
+    addPortfolioItem,
+    startDelivery,
+    onPhase,
+  });
 
   beforeEach(() => {
     vi.clearAllMocks();
     sessionStorage.clear();
-    writeOnboardingVerification('verification-id-1', pending.email);
+    writeOnboardingVerification('verification-id-1', pending.email, pending.signupIntentId);
     signUp.mockResolvedValue({ ...baseUser, id: 'new-user-id', email: pending.email });
     ensureFreshSession.mockResolvedValue(undefined);
     updateProfile.mockResolvedValue(undefined);
     uploadCv.mockResolvedValue(undefined);
+    addPortfolioItem.mockResolvedValue(undefined);
     startDelivery.mockResolvedValue({ stage: 'reading_cv', message: 'Reading your CV…' });
   });
 
@@ -69,7 +83,7 @@ describe('completeOnboardingFinish', () => {
         profilePayload: { onboarded: true, name: 'New User' },
         cvFile,
       },
-      { signUp, clearPendingSignup, ensureFreshSession, updateProfile, uploadCv, startDelivery, onPhase },
+      deps(),
     );
 
     expect(result).toEqual({ ok: true, evaluationUserId: 'new-user-id' });
@@ -98,7 +112,7 @@ describe('completeOnboardingFinish', () => {
         profilePayload: { onboarded: true },
         cvFile,
       },
-      { signUp, clearPendingSignup, ensureFreshSession, updateProfile, uploadCv, startDelivery, onPhase },
+      deps(),
     );
 
     expect(result).toEqual({ ok: true, evaluationUserId: 'existing-user-id' });
@@ -118,7 +132,7 @@ describe('completeOnboardingFinish', () => {
         profilePayload: { onboarded: true },
         cvFile,
       },
-      { signUp, clearPendingSignup, ensureFreshSession, updateProfile, uploadCv, startDelivery, onPhase },
+      deps(),
     );
 
     expect(result).toEqual({
@@ -140,13 +154,76 @@ describe('completeOnboardingFinish', () => {
         profilePayload: { onboarded: true },
         cvFile,
       },
-      { signUp, clearPendingSignup, ensureFreshSession, updateProfile, uploadCv, startDelivery, onPhase },
+      deps(),
     );
 
     expect(result.ok).toBe(false);
     if (!result.ok) expect(result.reason).toBe('signup_failed');
     expect(updateProfile).not.toHaveBeenCalled();
     expect(startDelivery).not.toHaveBeenCalled();
+  });
+
+  it('returns missing_cv before profile save when cvFile is absent', async () => {
+    const result = await completeOnboardingFinish(
+      {
+        existingUser: baseUser,
+        pending: null,
+        registerName: 'Existing',
+        profilePayload: { onboarded: true },
+        cvFile: null,
+      },
+      deps(),
+    );
+
+    expect(result).toEqual({ ok: false, reason: 'missing_cv' });
+    expect(updateProfile).not.toHaveBeenCalled();
+    expect(uploadCv).not.toHaveBeenCalled();
+    expect(startDelivery).not.toHaveBeenCalled();
+  });
+
+  it('returns structured failure when uploadCv throws', async () => {
+    uploadCv.mockRejectedValue(new Error('Upload failed'));
+
+    const result = await completeOnboardingFinish(
+      {
+        existingUser: baseUser,
+        pending: null,
+        registerName: 'Existing',
+        profilePayload: { onboarded: true },
+        cvFile,
+      },
+      deps(),
+    );
+
+    expect(result).toEqual({
+      ok: false,
+      reason: 'signup_failed',
+      message: GENERIC_ONBOARDING_SIGNUP_ERROR,
+    });
+    expect(updateProfile).toHaveBeenCalledOnce();
+    expect(startDelivery).not.toHaveBeenCalled();
+  });
+
+  it('returns structured failure when startDelivery throws', async () => {
+    startDelivery.mockRejectedValue(new Error('Delivery unavailable'));
+
+    const result = await completeOnboardingFinish(
+      {
+        existingUser: baseUser,
+        pending: null,
+        registerName: 'Existing',
+        profilePayload: { onboarded: true },
+        cvFile,
+      },
+      deps(),
+    );
+
+    expect(result).toEqual({
+      ok: false,
+      reason: 'signup_failed',
+      message: GENERIC_ONBOARDING_SIGNUP_ERROR,
+    });
+    expect(uploadCv).toHaveBeenCalledOnce();
   });
 
   it('returns session_expired when no user and no pending signup', async () => {
@@ -158,7 +235,7 @@ describe('completeOnboardingFinish', () => {
         profilePayload: { onboarded: true },
         cvFile,
       },
-      { signUp, clearPendingSignup, ensureFreshSession, updateProfile, uploadCv, startDelivery, onPhase },
+      deps(),
     );
 
     expect(result).toEqual({ ok: false, reason: 'session_expired' });

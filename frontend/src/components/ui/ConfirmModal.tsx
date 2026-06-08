@@ -30,7 +30,7 @@ export function ConfirmModal({
       open={open}
       onClose={loading ? () => {} : onClose}
       title={title}
-      description={typeof description === 'string' ? description : undefined}
+      {...(typeof description === 'string' ? { description } : {})}
       size="sm"
       hideCloseButton={loading}
       className="bg-surface-container-lowest border border-outline-variant"

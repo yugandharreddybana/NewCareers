@@ -22,6 +22,9 @@ public interface AuditLogRepository extends JpaRepository<AuditLog, UUID> {
 
     Page<AuditLog> findByUserIdOrderByCreatedAtDesc(UUID userId, Pageable pageable);
 
+    Page<AuditLog> findByUserIdAndActionInOrderByCreatedAtDesc(
+            UUID userId, java.util.Collection<String> actions, Pageable pageable);
+
     /**
      * Task 135 — AdminService.platformStats(): total audit events in last 24 h.
      */

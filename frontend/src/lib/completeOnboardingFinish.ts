@@ -7,6 +7,10 @@ import type { UpdateProfilePayload } from '@/context/AuthContext';
 import { clearOnboardingVerification, readOnboardingVerification } from '@/lib/onboardingVerification';
 import type { PendingSignup, SignupConsents } from '@/lib/pendingSignup';
 import type { OnboardingDeliveryStatus } from '@/services/api';
+import { filterProjectEntries } from '@/lib/buildOnboardingProfilePayload';
+import type { MappedProjectEntry } from '@/lib/mapCvParseToOnboarding';
+import { normalizeUrl } from '@/lib/normalizeUrl';
+import { GENERIC_ONBOARDING_SIGNUP_ERROR } from '@/lib/authErrors';
 
 export const ONBOARDING_OVERLAY_CREATING_ACCOUNT =
   'Creating your account…' as const;
@@ -56,26 +60,35 @@ export function messageForDeliveryStage(
   }
 }
 
+
 export type CompleteOnboardingFinishInput = {
   existingUser: User | null;
   pending: PendingSignup | null;
   registerName: string;
   profilePayload: UpdateProfilePayload;
-  cvFile: File;
+  cvFile: File | null | undefined;
+  projectEntries?: MappedProjectEntry[];
 };
 
 export type CompleteOnboardingFinishDeps = {
   signUp: (input: {
     name: string;
     email: string;
-    password: string;
+    signupIntentId: string;
     consents: SignupConsents;
     emailVerificationId?: string;
   }) => Promise<User>;
   clearPendingSignup: () => void;
   ensureFreshSession: () => Promise<void>;
-  updateProfile: (data: UpdateProfilePayload) => Promise<void>;
+  updateProfile: (data: UpdateProfilePayload) => Promise<unknown>;
   uploadCv: (file: File) => Promise<void>;
+  addPortfolioItem: (body: {
+    title: string;
+    url?: string;
+    description?: string;
+    techTags?: string[];
+    location?: string;
+  }) => Promise<void>;
   startDelivery: () => Promise<{ stage: string; message: string }>;
   onPhase: (status: OnboardingDeliveryStatus) => void;
 };
@@ -92,7 +105,7 @@ export async function completeOnboardingFinish(
   input: CompleteOnboardingFinishInput,
   deps: CompleteOnboardingFinishDeps,
 ): Promise<CompleteOnboardingFinishResult> {
-  const { existingUser, pending, registerName, profilePayload, cvFile } = input;
+  const { existingUser, pending, registerName, profilePayload, cvFile, projectEntries } = input;
 
   if (!existingUser && !pending) {
     return { ok: false, reason: 'session_expired' };
@@ -101,7 +114,10 @@ export async function completeOnboardingFinish(
   let evaluationUserId = existingUser?.id;
 
   if (pending) {
-    const verification = readOnboardingVerification(pending.email);
+    const verification = readOnboardingVerification(
+      pending.email,
+      pending.signupIntentId,
+    );
     if (!verification?.verificationId) {
       return { ok: false, reason: 'signup_failed', message: 'Email verification required.' };
     }
@@ -111,25 +127,15 @@ export async function completeOnboardingFinish(
       const created = await deps.signUp({
         name: registerName,
         email: pending.email,
-        password: pending.password,
+        signupIntentId: pending.signupIntentId,
         consents: pending.consents,
         emailVerificationId: verification.verificationId,
       });
       evaluationUserId = created.id;
       deps.clearPendingSignup();
       clearOnboardingVerification();
-    } catch (err: unknown) {
-      const rawMessage =
-        err && typeof err === 'object' && 'response' in err
-          ? (err as { response?: { data?: { message?: string; error?: string } } }).response?.data
-              ?.message ??
-            (err as { response?: { data?: { error?: string } } }).response?.data?.error
-          : err instanceof Error
-            ? err.message
-            : undefined;
-      return rawMessage
-        ? { ok: false, reason: 'signup_failed', message: rawMessage }
-        : { ok: false, reason: 'signup_failed' };
+    } catch {
+      return { ok: false, reason: 'signup_failed', message: GENERIC_ONBOARDING_SIGNUP_ERROR };
     }
   } else {
     await deps.ensureFreshSession();
@@ -144,13 +150,47 @@ export async function completeOnboardingFinish(
   }
 
   deps.onPhase(overlayStatusForPhase(ONBOARDING_OVERLAY_SAVING_PROFILE));
-  await deps.updateProfile(profilePayload);
-  await deps.uploadCv(cvFile);
+  try {
+    await deps.updateProfile(profilePayload);
+    await deps.uploadCv(cvFile);
+    for (const project of filterProjectEntries(projectEntries ?? [])) {
+      const title = project.projectName.trim();
+      if (!title) continue;
+      const link = project.projectLink.trim();
+      const details = project.projectDetails.trim();
+      const loc = project.location.trim();
+      const techTags = project.techStack
+        .split(/[,;|/]/)
+        .map(t => t.trim())
+        .filter(Boolean);
+      await deps.addPortfolioItem({
+        title,
+        ...(link ? { url: normalizeUrl(link) } : {}),
+        ...(details ? { description: details } : {}),
+        ...(techTags.length > 0 ? { techTags } : {}),
+        ...(loc ? { location: loc } : {}),
+      });
+    }
+  } catch {
+    return {
+      ok: false,
+      reason: 'signup_failed',
+      message: GENERIC_ONBOARDING_SIGNUP_ERROR,
+    };
+  }
 
   deps.onPhase(
     overlayStatusForPhase(ONBOARDING_OVERLAY_STARTING_MATCH, { stage: 'fetching_jobs' }),
   );
-  await deps.startDelivery();
+  try {
+    await deps.startDelivery();
+  } catch {
+    return {
+      ok: false,
+      reason: 'signup_failed',
+      message: GENERIC_ONBOARDING_SIGNUP_ERROR,
+    };
+  }
 
   return { ok: true, evaluationUserId };
 }

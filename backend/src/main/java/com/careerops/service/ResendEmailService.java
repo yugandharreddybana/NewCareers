@@ -139,6 +139,15 @@ public class ResendEmailService {
         send(contact.email(), subject, buildReferralSuccessHtml(contact.firstName(), refereeName));
     }
 
+    /** Sends HTML email; in dev-mode logs only and never calls Resend API. */
+    public void sendHtml(String to, String subject, String html) {
+        if (isDevMode()) {
+            log.info("[DEV] Email to {} subject={} ({} chars html)", to, subject, html != null ? html.length() : 0);
+            return;
+        }
+        send(to, subject, html);
+    }
+
     private boolean isDevMode() {
         // 3.036 — Explicit dev-mode flag or placeholder key
         return devMode || key == null || key.isBlank() || key.contains("YOUR_RESEND_KEY");

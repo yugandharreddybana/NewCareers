@@ -53,6 +53,11 @@ test.describe('Route guards — protected routes', () => {
     await page.goto('/account');
     await expect(page).toHaveURL(/\/login/, { timeout: 10_000 });
   });
+
+  test('unauthenticated /account/profile redirects to /login', async ({ page }) => {
+    await page.goto('/account/profile');
+    await expect(page).toHaveURL(/\/login/, { timeout: 10_000 });
+  });
 });
 
 test.describe('Route guards — authenticated guest routes', () => {

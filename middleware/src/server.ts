@@ -58,6 +58,7 @@ import agentMemory from './routes/agent-memory.routes.js';
 import resumeVersions from './routes/resume-versions.routes.js';
 import cv from './routes/cv.routes.js';
 import billing from './routes/billing.routes.js';
+import adminSaas from './routes/admin-saas.routes.js';
 import usage from './routes/usage.routes.js';
 import consents from './routes/consents.routes.js';
 import userConsent from './routes/user.consent.routes.js';
@@ -133,6 +134,7 @@ app.use(compression());
 
 // Stripe webhook needs raw body — must be BEFORE express.json()
 app.use('/api/billing/webhook', express.raw({ type: 'application/json' }));
+app.use('/api/v1/billing/webhook', express.raw({ type: 'application/json' }));
 
 // Early Content-Length check to reject oversized payloads before parsing (9.035: raised to 5MB on skills route)
 app.use((req, res, next) => {
@@ -176,6 +178,7 @@ app.use((req, res, next) => {
 const CSRF_COOKIE = 'co_csrf';
 const CSRF_EXEMPT_ROUTES = new Set([
   '/billing/webhook',
+  '/api/billing/webhook',
   '/api/v1/billing/webhook',
 ]);
 
@@ -206,6 +209,15 @@ app.use((req, res, next) => {
   next();
 });
 
+app.get('/api/v1/csrf', (req, res) => {
+  const token = (req.cookies[CSRF_COOKIE] as string | undefined) || req.issuedCsrfToken;
+  if (!token) {
+    return res.status(500).json({ error: 'CSRF token unavailable' });
+  }
+  res.setHeader('X-CSRF-Token', token);
+  return res.json({ token });
+});
+
 app.use('/api/v1', (req, res, next) => {
   const safeMethods = ['GET', 'HEAD', 'OPTIONS'];
   if (safeMethods.includes(req.method)) return next();
@@ -214,17 +226,22 @@ app.use('/api/v1', (req, res, next) => {
     || [...CSRF_EXEMPT_ROUTES].some(route => req.path.startsWith(route));
   if (isExempt) return next();
 
-  // Local dev without a warmed cookie jar (e.g. first POST right after page load).
-  if (!IS_PROD) {
-    const xrw = req.headers['x-requested-with'];
-    if (String(xrw ?? '').toLowerCase() === 'xmlhttprequest') {
-      return next();
-    }
-  }
-
   const cookieToken = (req.cookies[CSRF_COOKIE] as string | undefined) || req.issuedCsrfToken;
   if (!cookieToken) {
     return res.status(403).json({ error: 'CSRF validation failed: Token missing' });
+  }
+
+  if (IS_PROD) {
+    const headerToken = req.headers['x-csrf-token'];
+    if (!headerToken || String(headerToken) !== cookieToken) {
+      return res.status(403).json({ error: 'CSRF validation failed: Token mismatch' });
+    }
+    return next();
+  }
+
+  const xrw = req.headers['x-requested-with'];
+  if (String(xrw ?? '').toLowerCase() === 'xmlhttprequest') {
+    return next();
   }
 
   const headerToken = req.headers['x-csrf-token'];
@@ -332,6 +349,8 @@ app.use('/api/v1/agent-memory', agentMemory);
 app.use('/api/v1/resume-versions', resumeVersions);
 app.use('/api/v1/cv', cv);
 app.use('/api/v1/billing', billing);
+app.use('/api/billing', billing);
+app.use('/api/v1/admin/saas', adminSaas);
 app.use('/api/v1/usage', usage);
 app.use('/api/v1/consents', consents);
 app.use('/api/v1/user/consent', userConsent);

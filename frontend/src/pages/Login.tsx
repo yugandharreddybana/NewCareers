@@ -9,6 +9,7 @@ import { PageMeta } from '@/components/PageMeta';
 import { LoginPageShell } from '@/components/auth/LoginPageShell';
 import { LoginGoogleButton } from '@/components/auth/LoginGoogleButton';
 import { WordCaptchaField } from '@/components/auth/WordCaptchaField';
+import { GoogleConsentSheet } from '@/components/auth/GoogleConsentSheet';
 import {
   LOGIN_BRAND,
   LOGIN_DIVIDER,
@@ -25,17 +26,43 @@ import {
   LOGIN_TAGLINE,
   LOGIN_WELCOME,
 } from '@/components/auth/loginCopy';
-import { LOGIN_WORD_CAPTCHA_REQUIRED } from '@/lib/env';
+import { LOGIN_WORD_CAPTCHA_REQUIRED, IS_DEV } from '@/lib/env';
+import {
+  GENERIC_GOOGLE_ERROR,
+  GENERIC_LOGIN_ERROR,
+} from '@/lib/authErrors';
+import { CAPTCHA_ENABLED, RecaptchaBlock } from '@/components/auth/RecaptchaBlock';
+import ReCAPTCHA from 'react-google-recaptcha';
+import { authApi } from '@/services/api';
+import { OtpInput } from '@/components/auth/OtpInput';
+import { clearOnboardingVerification } from '@/lib/onboardingVerification';
+import { clearPendingSignup } from '@/lib/pendingSignup';
+import { syncLocalAnalyticsConsentToBackend } from '@/lib/cookieConsent';
 import { isApiError } from '@/types';
+import { readPendingGoogleConsents, writePendingGoogleConsents } from '@/lib/pendingGoogleConsents';
+import {
+  clearPendingGoogleLink,
+  readPendingGoogleLink,
+  writePendingGoogleLink,
+} from '@/lib/pendingGoogleLink';
+import { writeAnalyticsConsent } from '@/lib/cookieConsent';
+import type { SignupConsents } from '@/lib/pendingSignup';
+
+const EMAIL_PARAM_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 const inputClass =
   'w-full px-4 py-3 text-sm border border-gray-200 rounded-xl bg-white text-gray-900 focus:outline-none focus:ring-2 focus:ring-[#022c22]/15 focus:border-[#022c22] transition-colors placeholder:text-gray-400 disabled:opacity-60';
 
+function safeEmailFromParam(raw: string | null): string {
+  const trimmed = raw?.trim() ?? '';
+  return EMAIL_PARAM_PATTERN.test(trimmed) ? trimmed : '';
+}
+
 export default function Login() {
-  const { signIn, signInWithGoogle } = useAuth();
+  const { signIn, signInWithGoogle, setUser } = useAuth();
   const [searchParams] = useSearchParams();
   const sessionExpired = searchParams.get('reason') === 'session_expired';
-  const prefillEmail = searchParams.get('email')?.trim() ?? '';
+  const prefillEmail = safeEmailFromParam(searchParams.get('email'));
 
   const [form, setForm] = useState(() => ({
     email: prefillEmail,
@@ -45,20 +72,42 @@ export default function Login() {
   const [showPw, setShowPw] = useState(false);
   const [emailSubmitting, setEmailSubmitting] = useState(false);
   const [googleSubmitting, setGoogleSubmitting] = useState(false);
+  const [googleLinkToken, setGoogleLinkToken] = useState<string | null>(() => readPendingGoogleLink());
+  const [linkPassword, setLinkPassword] = useState('');
+  const linkCaptchaRef = useRef<ReCAPTCHA>(null);
+  const [linkCaptchaToken, setLinkCaptchaToken] = useState<string | null>(null);
   const [error, setError] = useState('');
+  const [captchaRequired, setCaptchaRequired] = useState(LOGIN_WORD_CAPTCHA_REQUIRED);
   const [captchaToken, setCaptchaToken] = useState<string | null>(null);
   const [captchaKey, setCaptchaKey] = useState(0);
+  const [googleConsentOpen, setGoogleConsentOpen] = useState(false);
+  const [pendingGoogleToken, setPendingGoogleToken] = useState<string | null>(null);
+  const [twoFactorChallenge, setTwoFactorChallenge] = useState<string | null>(null);
+  const [twoFactorCode, setTwoFactorCode] = useState('');
+  const [twoFactorSubmitting, setTwoFactorSubmitting] = useState(false);
 
   const errorRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    const email = searchParams.get('email')?.trim() ?? '';
-    if (email) {
-      setForm(f => (f.email === email ? f : { ...f, email }));
-    }
+    const email = safeEmailFromParam(searchParams.get('email'));
+    if (!email) return;
+    setForm(f => (f.email === email ? f : { ...f, email }));
+    const params = new URLSearchParams(searchParams);
+    params.delete('email');
+    const qs = params.toString();
+    const next = qs ? `${window.location.pathname}?${qs}` : window.location.pathname;
+    window.history.replaceState({}, '', next);
   }, [searchParams]);
 
-  const busy = emailSubmitting || googleSubmitting;
+  useEffect(() => {
+    if (!IS_DEV || searchParams.get('e2e') !== 'google-consent') return;
+    setPendingGoogleToken('e2e-stub-google-token');
+    setGoogleConsentOpen(true);
+  }, [searchParams]);
+
+  const busy = emailSubmitting || googleSubmitting || twoFactorSubmitting;
+  const showTwoFactorStep = Boolean(twoFactorChallenge);
+  const showCaptcha = captchaRequired || LOGIN_WORD_CAPTCHA_REQUIRED;
 
   const set = (k: keyof typeof form) =>
     (e: React.ChangeEvent<HTMLInputElement>) =>
@@ -77,7 +126,7 @@ export default function Login() {
     e.preventDefault();
     setError('');
 
-    if (LOGIN_WORD_CAPTCHA_REQUIRED && !captchaToken) {
+    if (showCaptcha && !captchaToken) {
       setError('Please enter the security check characters.');
       focusError();
       return;
@@ -87,36 +136,155 @@ export default function Login() {
     try {
       await signIn(form.email, form.password, {
         rememberMe,
-        ...(LOGIN_WORD_CAPTCHA_REQUIRED && captchaToken ? { captchaToken } : {}),
+        ...(showCaptcha && captchaToken ? { captchaToken } : {}),
       });
     } catch (err: unknown) {
-      if (isApiError(err)) {
-        setError(err.normalizedMessage || 'Invalid email or password.');
-      } else if (err instanceof Error) {
-        setError(err.message || 'Invalid email or password.');
-      } else {
-        setError('Invalid email or password.');
+      if (
+        err instanceof Error &&
+        err.message === 'TWO_FACTOR_REQUIRED' &&
+        'challengeToken' in err &&
+        typeof (err as { challengeToken?: string }).challengeToken === 'string'
+      ) {
+        setTwoFactorChallenge((err as { challengeToken: string }).challengeToken);
+        setTwoFactorCode('');
+        setError('');
+        return;
       }
-      if (LOGIN_WORD_CAPTCHA_REQUIRED) refreshCaptcha();
+      if (isApiError(err)) {
+        if (err.captchaRequired) {
+          setCaptchaRequired(true);
+          refreshCaptcha();
+        }
+        setError(GENERIC_LOGIN_ERROR);
+      } else {
+        setError(GENERIC_LOGIN_ERROR);
+      }
+      if (showCaptcha) refreshCaptcha();
       focusError();
     } finally {
       setEmailSubmitting(false);
     }
   };
 
-  const handleGoogle = async (idToken: string) => {
+  const submitTwoFactor = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!twoFactorChallenge || twoFactorCode.length !== 6) return;
+    setError('');
+    setTwoFactorSubmitting(true);
+    try {
+      const data = await authApi.verifyTwoFactor(twoFactorChallenge, twoFactorCode);
+      clearPendingSignup();
+      clearOnboardingVerification();
+      setUser(data.user);
+      void syncLocalAnalyticsConsentToBackend();
+      setTwoFactorChallenge(null);
+      setTwoFactorCode('');
+    } catch {
+      setError('Invalid verification code. Try again.');
+      setTwoFactorCode('');
+      focusError();
+    } finally {
+      setTwoFactorSubmitting(false);
+    }
+  };
+
+  const cancelTwoFactor = () => {
+    setTwoFactorChallenge(null);
+    setTwoFactorCode('');
+    setError('');
+  };
+
+  const completeGoogleSignIn = async (
+    idToken: string,
+    consents?: SignupConsents,
+    captchaToken?: string | null,
+  ) => {
     setError('');
     setGoogleSubmitting(true);
     try {
-      await signInWithGoogle(idToken, rememberMe);
-    } catch (err: unknown) {
-      if (isApiError(err)) {
-        setError(err.normalizedMessage || 'Google sign-in failed.');
-      } else if (err instanceof Error) {
-        setError(err.message || 'Google sign-in failed.');
-      } else {
-        setError('Google sign-in failed.');
+      if (consents) {
+        writePendingGoogleConsents(consents);
+        writeAnalyticsConsent(consents.analyticsAccepted);
       }
+      await signInWithGoogle(idToken, rememberMe, consents, captchaToken ?? undefined);
+      setGoogleConsentOpen(false);
+      setPendingGoogleToken(null);
+    } catch (err: unknown) {
+      if (isApiError(err) && err.status === 409) {
+        const code = (err.response?.data as { code?: string } | undefined)?.code;
+        if (code === 'LINK_REQUIRES_VERIFICATION') {
+          writePendingGoogleLink(idToken);
+          setGoogleLinkToken(idToken);
+          setLinkPassword('');
+          setGoogleConsentOpen(false);
+          setPendingGoogleToken(null);
+          setError('Enter your account password to link Google sign-in.');
+          focusError();
+          return;
+        }
+      }
+      if (isApiError(err) && err.status === 400) {
+        const msg = err.normalizedMessage ?? '';
+        if (msg.toLowerCase().includes('terms')) {
+          setPendingGoogleToken(idToken);
+          setGoogleConsentOpen(true);
+          return;
+        }
+      }
+      setError(GENERIC_GOOGLE_ERROR);
+      focusError();
+    } finally {
+      setGoogleSubmitting(false);
+    }
+  };
+
+  const handleGoogle = async (idToken: string) => {
+    const pending = readPendingGoogleConsents();
+    if (!pending?.termsAccepted) {
+      setPendingGoogleToken(idToken);
+      setGoogleConsentOpen(true);
+      return;
+    }
+    await completeGoogleSignIn(idToken, pending);
+  };
+
+  const handleGoogleConsentSubmit = async (consents: SignupConsents, captchaToken: string | null) => {
+    if (!pendingGoogleToken) return;
+    await completeGoogleSignIn(pendingGoogleToken, consents, captchaToken);
+  };
+
+  const handleGoogleConsentCancel = () => {
+    setGoogleConsentOpen(false);
+    setPendingGoogleToken(null);
+  };
+
+  const submitGoogleLink = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!googleLinkToken || !linkPassword) return;
+    if (CAPTCHA_ENABLED && !linkCaptchaToken) {
+      setError('Complete the security check below.');
+      focusError();
+      return;
+    }
+    setError('');
+    setGoogleSubmitting(true);
+    try {
+      const data = await authApi.confirmGoogleLink(
+        googleLinkToken,
+        linkPassword,
+        rememberMe,
+        linkCaptchaToken ?? undefined,
+      );
+      setGoogleLinkToken(null);
+      clearPendingGoogleLink();
+      setLinkPassword('');
+      setLinkCaptchaToken(null);
+      linkCaptchaRef.current?.reset();
+      setUser(data.user);
+    } catch {
+      setError(GENERIC_LOGIN_ERROR);
+      linkCaptchaRef.current?.reset();
+      setLinkCaptchaToken(null);
       focusError();
     } finally {
       setGoogleSubmitting(false);
@@ -156,14 +324,77 @@ export default function Login() {
           </div>
         )}
 
+        {error && (
+          <div
+            ref={errorRef}
+            role="alert"
+            aria-live="polite"
+            tabIndex={-1}
+            className="mb-5 px-4 py-3 rounded-xl bg-error-container border border-error text-on-error-container text-sm outline-none"
+          >
+            {error}
+          </div>
+        )}
+
         <div className="mb-5 space-y-5">
           <LoginGoogleButton
             label={LOGIN_GOOGLE_LABEL}
             disabled={busy}
             loading={googleSubmitting}
             onCredential={handleGoogle}
-            onError={msg => setError(msg)}
+            onError={() => {
+              setError(GENERIC_GOOGLE_ERROR);
+              focusError();
+            }}
           />
+
+          {googleLinkToken && (
+            <form onSubmit={submitGoogleLink} className="space-y-3 rounded-xl border border-gray-200 bg-gray-50 p-4">
+              <p className="text-sm text-gray-700">
+                This email already has a password. Confirm it to link Google sign-in.
+              </p>
+              <input
+                className={inputClass}
+                type="password"
+                autoComplete="current-password"
+                placeholder="Account password"
+                value={linkPassword}
+                onChange={e => setLinkPassword(e.target.value)}
+                disabled={busy}
+                required
+              />
+              {CAPTCHA_ENABLED && (
+                <RecaptchaBlock
+                  ref={linkCaptchaRef}
+                  onChange={setLinkCaptchaToken}
+                />
+              )}
+              <div className="flex gap-2">
+                <button
+                  type="submit"
+                  disabled={busy || !linkPassword}
+                  className="flex-1 rounded-xl bg-[#022c22] px-4 py-2.5 text-sm font-semibold text-white disabled:opacity-60"
+                >
+                  Link Google
+                </button>
+                <button
+                  type="button"
+                  disabled={busy}
+                  onClick={() => {
+                    setGoogleLinkToken(null);
+                    clearPendingGoogleLink();
+                    setLinkPassword('');
+                    setLinkCaptchaToken(null);
+                    linkCaptchaRef.current?.reset();
+                    setError('');
+                  }}
+                  className="rounded-xl border border-gray-200 px-4 py-2.5 text-sm font-medium text-gray-700"
+                >
+                  Cancel
+                </button>
+              </div>
+            </form>
+          )}
 
           <div className="flex items-center gap-4">
             <div className="flex-1 h-px bg-gray-200" />
@@ -172,19 +403,42 @@ export default function Login() {
           </div>
         </div>
 
-        <form onSubmit={submit} className="space-y-5" noValidate>
-          {error && (
-            <div
-              ref={errorRef}
-              role="alert"
-              aria-live="polite"
-              tabIndex={-1}
-              className="px-4 py-3 rounded-xl bg-error-container border border-error text-on-error-container text-sm outline-none"
+        {showTwoFactorStep ? (
+          <form onSubmit={submitTwoFactor} className="space-y-5" noValidate>
+            <p className="text-sm text-gray-600">
+              Enter the 6-digit code from your authenticator app to finish signing in.
+            </p>
+            <OtpInput
+              value={twoFactorCode}
+              onChange={setTwoFactorCode}
+              length={6}
+              disabled={busy}
+            />
+            <button
+              type="submit"
+              disabled={busy || twoFactorCode.length !== 6}
+              className="w-full bg-[#022c22] hover:bg-[#011b16] text-white py-3.5 px-4 rounded-xl font-medium text-sm transition-colors duration-200 flex items-center justify-center gap-2 shadow-md disabled:opacity-60"
             >
-              {error}
-            </div>
-          )}
-
+              {twoFactorSubmitting ? (
+                <Loader2 size={17} className="animate-spin" />
+              ) : (
+                <>
+                  Verify & sign in
+                  <ArrowRight size={16} />
+                </>
+              )}
+            </button>
+            <button
+              type="button"
+              disabled={busy}
+              onClick={cancelTwoFactor}
+              className="w-full text-sm text-gray-500 hover:text-gray-700"
+            >
+              Back to password
+            </button>
+          </form>
+        ) : (
+        <form onSubmit={submit} className="space-y-5" noValidate>
           <div className="space-y-1.5">
             <label htmlFor="email" className="block text-xs font-semibold text-gray-700">
               {LOGIN_EMAIL_LABEL}
@@ -240,7 +494,7 @@ export default function Login() {
             </div>
           </div>
 
-          {LOGIN_WORD_CAPTCHA_REQUIRED && (
+          {showCaptcha && (
             <WordCaptchaField
               key={captchaKey}
               value={captchaToken}
@@ -279,6 +533,7 @@ export default function Login() {
             )}
           </button>
         </form>
+        )}
 
         <p className="mt-8 text-center text-sm text-gray-500">
           {LOGIN_FOOTER_PREFIX}{' '}
@@ -290,6 +545,13 @@ export default function Login() {
           </Link>
         </p>
       </div>
+
+      <GoogleConsentSheet
+        open={googleConsentOpen}
+        busy={googleSubmitting}
+        onCancel={handleGoogleConsentCancel}
+        onSubmit={handleGoogleConsentSubmit}
+      />
     </LoginPageShell>
   );
 }

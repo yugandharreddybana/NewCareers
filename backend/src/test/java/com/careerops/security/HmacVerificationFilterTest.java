@@ -1,5 +1,6 @@
 package com.careerops.security;
 
+import org.springframework.mock.env.MockEnvironment;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -18,7 +19,7 @@ class HmacVerificationFilterTest {
     @BeforeEach
     void setUp() {
         InternalHmacSigner signer = InternalHmacSigner.forTest(InternalRequestHeaders.TEST_SECRET.getBytes(StandardCharsets.UTF_8));
-        filter = new HmacVerificationFilter(signer, new PublicPathPolicy());
+        filter = new HmacVerificationFilter(signer, new PublicPathPolicy(new MockEnvironment()));
     }
 
     @Test
@@ -90,5 +91,20 @@ class HmacVerificationFilterTest {
 
         assertThat(chain.getRequest()).isNull();
         assertThat(response.getStatus()).isEqualTo(401);
+    }
+
+    @Test
+    @DisplayName("H-3: /auth/me requires HMAC — BFF-only protected route")
+    void authMeRequiresHmac() throws Exception {
+        MockHttpServletRequest request = new MockHttpServletRequest("GET", "/auth/me");
+        request.setServletPath("/auth/me");
+        MockHttpServletResponse response = new MockHttpServletResponse();
+        MockFilterChain chain = new MockFilterChain();
+
+        filter.doFilter(request, response, chain);
+
+        assertThat(chain.getRequest()).isNull();
+        assertThat(response.getStatus()).isEqualTo(401);
+        assertThat(response.getContentAsString()).contains("invalid or expired signature");
     }
 }

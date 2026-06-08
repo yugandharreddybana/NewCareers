@@ -1,5 +1,7 @@
 package com.careerops.security;
 
+import com.careerops.model.RevokedJwtJti;
+import com.careerops.repository.RevokedJwtJtiRepository;
 import io.jsonwebtoken.Claims;
 import io.jsonwebtoken.Jwts;
 import org.springframework.beans.factory.annotation.Value;
@@ -9,12 +11,14 @@ import org.springframework.stereotype.Service;
 import java.security.PrivateKey;
 import java.security.PublicKey;
 import java.security.interfaces.RSAPublicKey;
+import java.time.Instant;
 import java.util.Date;
 
 /**
  * JWT utility service — RS256 with RSA key pair (PKCS#8 private, SPKI public).
  *
  * 3.012 — Added @RefreshScope for dynamic key rotation.
+ * H-1/H-2 — Revoked JTIs persisted via {@link RevokedJwtJtiRepository}.
  */
 @Service
 @RefreshScope
@@ -25,12 +29,14 @@ public class JwtService {
 
     private final PrivateKey privateKey;
     private final PublicKey publicKey;
+    private final RevokedJwtJtiRepository revokedJtis;
 
     @Value("${jwt.expiry.ms}")
     private long expiryMs;
 
     public JwtService(@Value("${jwt.private-key-pem:}") String privateKeyPem,
-                      @Value("${jwt.public-key-pem:}") String publicKeyPem) {
+                      @Value("${jwt.public-key-pem:}") String publicKeyPem,
+                      RevokedJwtJtiRepository revokedJtis) {
         if (privateKeyPem == null || privateKeyPem.isBlank() || publicKeyPem == null || publicKeyPem.isBlank()) {
             throw new IllegalStateException(
                     "JWT RSA keypair must be configured via JWT_PRIVATE_KEY_PEM / JWT_PUBLIC_KEY_PEM "
@@ -43,6 +49,7 @@ public class JwtService {
         } catch (RsaKeyMaterialParser.GeneralSecurityExceptionWrapper e) {
             throw new IllegalStateException("Failed to initialize RSA keys for JWT", e.getCause());
         }
+        this.revokedJtis = revokedJtis;
     }
 
     @jakarta.annotation.PostConstruct
@@ -55,9 +62,7 @@ public class JwtService {
         }
     }
 
-    private static final java.util.Set<String> revokedJtis = java.util.concurrent.ConcurrentHashMap.newKeySet();
-
-    // ---- token minting -------------------------------------------------------
+    private static final long TWO_FACTOR_CHALLENGE_MS = 300_000L;
 
     public String issue(String userId, String email) {
         Date now = new Date();
@@ -73,27 +78,55 @@ public class JwtService {
             .compact();
     }
 
+    public String issueTwoFactorChallenge(String userId, boolean rememberMe) {
+        Date now = new Date();
+        return Jwts.builder()
+            .issuer("careerops")
+            .audience().add("web|mobile").and()
+            .id(java.util.UUID.randomUUID().toString())
+            .subject(userId)
+            .claim("purpose", "2fa_challenge")
+            .claim("rememberMe", rememberMe)
+            .issuedAt(now)
+            .expiration(new Date(now.getTime() + TWO_FACTOR_CHALLENGE_MS))
+            .signWith(privateKey, Jwts.SIG.RS256)
+            .compact();
+    }
+
+    public Claims parseTwoFactorChallenge(String token) {
+        Claims cl = claims(token);
+        if (!"2fa_challenge".equals(cl.get("purpose", String.class))) {
+            throw com.careerops.exception.ApiException.unauthorized("Invalid two-factor challenge");
+        }
+        return cl;
+    }
+
+    public java.util.UUID parseTwoFactorChallengeUserId(String token) {
+        return java.util.UUID.fromString(parseTwoFactorChallenge(token).getSubject());
+    }
+
+    public boolean parseTwoFactorRememberMe(String token) {
+        Boolean remember = parseTwoFactorChallenge(token).get("rememberMe", Boolean.class);
+        return Boolean.TRUE.equals(remember);
+    }
+
     public void revokeToken(String token) {
         try {
             Claims cl = Jwts.parser().verifyWith(publicKey).build().parseSignedClaims(token).getPayload();
-            if (cl.getId() != null) {
-                revokedJtis.add(cl.getId());
-            }
+            persistRevokedJti(cl.getId(), cl.getExpiration());
         } catch (Exception ignored) {
         }
     }
 
     public void revokeTokenByJti(String jti) {
         if (jti != null) {
-            revokedJtis.add(jti);
+            persistRevokedJti(jti, null);
         }
     }
 
     public PublicKey getPublicKey() {
         return publicKey;
     }
-
-    // ---- claim extraction ----------------------------------------------------
 
     public String parseUserId(String token) {
         return claims(token).getSubject();
@@ -110,9 +143,6 @@ public class JwtService {
         }
         return email;
     }
-
-
-    // ---- validation ----------------------------------------------------------
 
     public Claims validate(String token) {
         return claims(token);
@@ -137,9 +167,6 @@ public class JwtService {
         }
     }
 
-
-    // ---- internal ------------------------------------------------------------
-
     private Claims claims(String token) {
         Claims cl = Jwts.parser()
             .verifyWith(publicKey)
@@ -153,9 +180,26 @@ public class JwtService {
         if (cl.getAudience() == null || !cl.getAudience().contains("web|mobile")) {
             throw new io.jsonwebtoken.JwtException("Invalid token audience");
         }
-        if (cl.getId() != null && revokedJtis.contains(cl.getId())) {
+        if (cl.getId() != null && revokedJtis.existsByJti(cl.getId())) {
             throw new io.jsonwebtoken.JwtException("Token has been revoked");
         }
         return cl;
+    }
+
+    private void persistRevokedJti(String jti, Date expiration) {
+        if (jti == null || jti.isBlank()) {
+            return;
+        }
+        if (revokedJtis.existsByJti(jti)) {
+            return;
+        }
+        Instant expiresAt = expiration != null
+                ? expiration.toInstant()
+                : Instant.now().plusMillis(expiryMs);
+        revokedJtis.save(RevokedJwtJti.builder()
+                .jti(jti)
+                .expiresAt(expiresAt)
+                .revokedAt(Instant.now())
+                .build());
     }
 }

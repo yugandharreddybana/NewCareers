@@ -1,19 +1,37 @@
 import express from 'express';
 import { authGuard } from '../authGuard.js';
 import { forward, bubble } from '../services/backendProxy.js';
+import { resolveClientIp } from '../trustedClientIp.js';
 
 const router = express.Router();
 router.use(authGuard);
 
-function clientIp(req: express.Request): string | undefined {
-  return (typeof req.headers['x-forwarded-for'] === 'string'
-    ? req.headers['x-forwarded-for']
-    : undefined) || req.ip;
-}
+const REFRESH_COOKIE = 'co_refresh';
 
 function clientForwardHeaders(req: express.Request): Record<string, string> {
   const ua = req.headers['user-agent'];
-  return typeof ua === 'string' ? { 'user-agent': ua } : {};
+  const headers: Record<string, string> = typeof ua === 'string' ? { 'user-agent': ua } : {};
+  const refresh = req.cookies?.[REFRESH_COOKIE] as string | undefined;
+  if (refresh) {
+    headers['X-Refresh-Token'] = refresh;
+  }
+  return headers;
+}
+
+async function forwardAccount(
+  req: express.Request,
+  method: 'GET' | 'POST' | 'PATCH' | 'DELETE',
+  path: string,
+  data?: unknown,
+) {
+  return forward({
+    method,
+    path,
+    userId: req.userId,
+    data,
+    ip: resolveClientIp(req),
+    headers: clientForwardHeaders(req),
+  });
 }
 
 router.get('/export', async (req, res, next) => {
@@ -22,7 +40,7 @@ router.get('/export', async (req, res, next) => {
       method: 'GET',
       path: '/account/export',
       userId: req.userId,
-      ip: clientIp(req),
+      ip: resolveClientIp(req),
       headers: clientForwardHeaders(req),
       responseType: 'arraybuffer',
     });
@@ -39,7 +57,7 @@ router.delete('/', async (req, res, next) => {
       path: '/account',
       userId: req.userId,
       data: req.body,
-      ip: clientIp(req),
+      ip: resolveClientIp(req),
       headers: clientForwardHeaders(req),
     });
     bubble(r, res);
@@ -56,9 +74,94 @@ router.post('/delete', async (req, res, next) => {
       path: '/account/delete',
       userId: req.userId,
       data: req.body,
-      ip: clientIp(req),
+      ip: resolveClientIp(req),
       headers: clientForwardHeaders(req),
     });
+    bubble(r, res);
+  } catch (e) {
+    next(e);
+  }
+});
+
+router.patch('/password', async (req, res, next) => {
+  try {
+    const r = await forwardAccount(req, 'PATCH', '/account/password', req.body);
+    bubble(r, res);
+  } catch (e) {
+    next(e);
+  }
+});
+
+router.get('/sessions', async (req, res, next) => {
+  try {
+    const r = await forwardAccount(req, 'GET', '/account/sessions');
+    bubble(r, res);
+  } catch (e) {
+    next(e);
+  }
+});
+
+router.delete('/sessions/:sessionId', async (req, res, next) => {
+  try {
+    const r = await forwardAccount(req, 'DELETE', `/account/sessions/${req.params.sessionId}`);
+    bubble(r, res);
+  } catch (e) {
+    next(e);
+  }
+});
+
+router.post('/sessions/revoke-others', async (req, res, next) => {
+  try {
+    const r = await forwardAccount(req, 'POST', '/account/sessions/revoke-others', req.body);
+    bubble(r, res);
+  } catch (e) {
+    next(e);
+  }
+});
+
+router.get('/security/activity', async (req, res, next) => {
+  try {
+    const qs = new URLSearchParams();
+    if (req.query.page != null) qs.set('page', String(req.query.page));
+    if (req.query.size != null) qs.set('size', String(req.query.size));
+    const suffix = qs.toString() ? `?${qs.toString()}` : '';
+    const r = await forwardAccount(req, 'GET', `/account/security/activity${suffix}`);
+    bubble(r, res);
+  } catch (e) {
+    next(e);
+  }
+});
+
+router.get('/two-factor/status', async (req, res, next) => {
+  try {
+    const r = await forwardAccount(req, 'GET', '/account/two-factor/status');
+    bubble(r, res);
+  } catch (e) {
+    next(e);
+  }
+});
+
+router.post('/two-factor/setup', async (req, res, next) => {
+  try {
+    const r = await forwardAccount(req, 'POST', '/account/two-factor/setup', req.body);
+    bubble(r, res);
+  } catch (e) {
+    next(e);
+  }
+});
+
+router.post('/two-factor/enable', async (req, res, next) => {
+  try {
+    const r = await forwardAccount(req, 'POST', '/account/two-factor/enable', req.body);
+    bubble(r, res);
+  } catch (e) {
+    next(e);
+  }
+});
+
+router.post('/two-factor/disable', async (req, res, next) => {
+  try {
+    const r = await forwardAccount(req, 'POST', '/account/two-factor/disable', req.body);
     bubble(r, res);
   } catch (e) {
     next(e);

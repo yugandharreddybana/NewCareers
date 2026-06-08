@@ -33,7 +33,7 @@ public final class OnboardingVerificationTestSupport {
                     .contentType(MediaType.APPLICATION_JSON)
                     .content(objectMapper.writeValueAsString(Map.of(
                             "email", email,
-                            "otp", "000000",
+                            "otp", "00000000",
                             "captchaToken", ""))))
             .andExpect(status().isOk())
             .andReturn();

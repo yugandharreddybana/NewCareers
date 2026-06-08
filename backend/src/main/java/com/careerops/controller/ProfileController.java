@@ -1,5 +1,6 @@
 package com.careerops.controller;
 
+import com.careerops.annotation.PlanGated;
 import com.careerops.dto.ProfileDtos.*;
 import com.careerops.exception.ApiException;
 import com.careerops.model.UserProfile;
@@ -62,6 +63,7 @@ public class ProfileController {
     // ── CV ────────────────────────────────────────────────────────────────
 
     @PostMapping(value = "/cv", consumes = "multipart/form-data")
+    @PlanGated("cv_upload")
     public Map<String, Object> uploadCv(
             @RequestPart("file") MultipartFile file) {
         scanner.scan(file);

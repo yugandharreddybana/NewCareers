@@ -1,26 +1,93 @@
+import { useCallback, useState } from 'react';
 import { Loader2 } from 'lucide-react';
+import { CAPTCHA_ENABLED, RecaptchaBlock } from '@/components/auth/RecaptchaBlock';
 import { CvUploadDropzone } from '@/components/onboarding/CvUploadDropzone';
+import { isLikelyValidUrl } from '@/lib/normalizeUrl';
 
 export type BasicInfoValues = {
   fullName: string;
   headline: string;
   experienceYears: string;
   location: string;
+  linkedInUrl: string;
+  portfolioUrl: string;
+  githubUrl: string;
   cvFile: File | null;
 };
+
+type LinkField = 'linkedInUrl' | 'portfolioUrl' | 'githubUrl';
 
 type Props = {
   values: BasicInfoValues;
   onChange: (patch: Partial<BasicInfoValues>) => void;
   onSubmit: () => void;
   parsingCv?: boolean;
+  parseCaptchaToken?: string | null;
+  onParseCaptchaChange?: (token: string | null) => void;
 };
 
-export function BasicInfoStep({ values, onChange, onSubmit, parsingCv = false }: Props) {
+function linkLabel(field: LinkField): string {
+  if (field === 'linkedInUrl') return 'LinkedIn';
+  if (field === 'portfolioUrl') return 'Portfolio website';
+  return 'GitHub';
+}
+
+export function BasicInfoStep({
+  values,
+  onChange,
+  onSubmit,
+  parsingCv = false,
+  parseCaptchaToken: _parseCaptchaToken,
+  onParseCaptchaChange,
+}: Props) {
+  const [linkErrors, setLinkErrors] = useState<Partial<Record<LinkField, string>>>({});
+
+  const validateLink = useCallback((field: LinkField, raw: string): string | null => {
+    const trimmed = raw.trim();
+    if (!trimmed) return null;
+    return isLikelyValidUrl(trimmed) ? null : `Enter a valid ${linkLabel(field)} URL`;
+  }, []);
+
+  const validateAllLinks = useCallback((): boolean => {
+    const next: Partial<Record<LinkField, string>> = {};
+    let valid = true;
+    (['linkedInUrl', 'portfolioUrl', 'githubUrl'] as const).forEach(field => {
+      const err = validateLink(field, values[field]);
+      if (err) {
+        next[field] = err;
+        valid = false;
+      }
+    });
+    setLinkErrors(next);
+    return valid;
+  }, [validateLink, values]);
+
+  const handleLinkBlur = (field: LinkField) => {
+    const err = validateLink(field, values[field]);
+    setLinkErrors(prev => {
+      const next = { ...prev };
+      if (err) next[field] = err;
+      else delete next[field];
+      return next;
+    });
+  };
+
+  const handleSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!validateAllLinks()) return;
+    onSubmit();
+  };
+
+  const linkInputClass = (field: LinkField) =>
+    [
+      'block w-full p-[12px] bg-surface-container-lowest border rounded-lg text-on-surface font-body-md focus:outline-none focus:ring-2 focus:ring-primary focus:ring-offset-2 transition-shadow',
+      linkErrors[field] ? 'border-error' : 'border-outline-variant',
+    ].join(' ');
+
   return (
     <>
-      <div className="mb-10 mt-4">
-        <h1 className="font-headline-xl text-headline-xl text-on-surface mb-2">
+      <div className="mb-8">
+        <h1 className="onboarding-basic-info__title">
           Let&apos;s build your professional profile
         </h1>
         <p className="font-body-lg text-body-lg text-on-surface-variant">
@@ -28,13 +95,7 @@ export function BasicInfoStep({ values, onChange, onSubmit, parsingCv = false }:
         </p>
       </div>
 
-      <form
-        className="onboarding-form"
-        onSubmit={e => {
-          e.preventDefault();
-          onSubmit();
-        }}
-      >
+      <form className="onboarding-form" onSubmit={handleSubmit}>
         <div className="flex flex-col gap-4">
           <div>
             <label
@@ -130,6 +191,85 @@ export function BasicInfoStep({ values, onChange, onSubmit, parsingCv = false }:
               </div>
             </div>
           </div>
+
+          <div className="flex flex-col gap-3 pt-1">
+            <p className="font-label-md text-label-md text-on-surface">Professional links</p>
+
+            <div>
+              <label className="block font-label-sm text-label-sm text-on-surface-variant mb-[6px]" htmlFor="linkedInUrl">
+                LinkedIn
+              </label>
+              <input
+                className={linkInputClass('linkedInUrl')}
+                id="linkedInUrl"
+                name="linkedInUrl"
+                placeholder="linkedin.com/in/yourname"
+                type="url"
+                inputMode="url"
+                autoComplete="url"
+                value={values.linkedInUrl}
+                onChange={e => onChange({ linkedInUrl: e.target.value })}
+                onBlur={() => handleLinkBlur('linkedInUrl')}
+                aria-invalid={Boolean(linkErrors.linkedInUrl)}
+                aria-describedby={linkErrors.linkedInUrl ? 'linkedInUrl-error' : undefined}
+              />
+              {linkErrors.linkedInUrl && (
+                <p id="linkedInUrl-error" className="mt-1 text-sm text-error" role="alert">
+                  {linkErrors.linkedInUrl}
+                </p>
+              )}
+            </div>
+
+            <div>
+              <label className="block font-label-sm text-label-sm text-on-surface-variant mb-[6px]" htmlFor="portfolioUrl">
+                Portfolio website
+              </label>
+              <input
+                className={linkInputClass('portfolioUrl')}
+                id="portfolioUrl"
+                name="portfolioUrl"
+                placeholder="yourdomain.com"
+                type="url"
+                inputMode="url"
+                autoComplete="url"
+                value={values.portfolioUrl}
+                onChange={e => onChange({ portfolioUrl: e.target.value })}
+                onBlur={() => handleLinkBlur('portfolioUrl')}
+                aria-invalid={Boolean(linkErrors.portfolioUrl)}
+                aria-describedby={linkErrors.portfolioUrl ? 'portfolioUrl-error' : undefined}
+              />
+              {linkErrors.portfolioUrl && (
+                <p id="portfolioUrl-error" className="mt-1 text-sm text-error" role="alert">
+                  {linkErrors.portfolioUrl}
+                </p>
+              )}
+            </div>
+
+            <div>
+              <label className="block font-label-sm text-label-sm text-on-surface-variant mb-[6px]" htmlFor="githubUrl">
+                GitHub
+              </label>
+              <input
+                className={linkInputClass('githubUrl')}
+                id="githubUrl"
+                name="githubUrl"
+                placeholder="github.com/yourname"
+                type="url"
+                inputMode="url"
+                autoComplete="url"
+                value={values.githubUrl}
+                onChange={e => onChange({ githubUrl: e.target.value })}
+                onBlur={() => handleLinkBlur('githubUrl')}
+                aria-invalid={Boolean(linkErrors.githubUrl)}
+                aria-describedby={linkErrors.githubUrl ? 'githubUrl-error' : undefined}
+              />
+              {linkErrors.githubUrl && (
+                <p id="githubUrl-error" className="mt-1 text-sm text-error" role="alert">
+                  {linkErrors.githubUrl}
+                </p>
+              )}
+            </div>
+          </div>
         </div>
 
         <CvUploadDropzone
@@ -138,6 +278,14 @@ export function BasicInfoStep({ values, onChange, onSubmit, parsingCv = false }:
           variant="hero"
           required
         />
+
+        {CAPTCHA_ENABLED && onParseCaptchaChange && (
+          <RecaptchaBlock
+            onChange={onParseCaptchaChange}
+            onExpired={() => onParseCaptchaChange(null)}
+            className="flex justify-center py-2"
+          />
+        )}
 
         <div className="onboarding-actions">
           <div className="onboarding-trust">

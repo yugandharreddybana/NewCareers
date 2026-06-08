@@ -39,6 +39,7 @@ export function useFileUpload<T>(options: UseFileUploadOptions<T>): UseFileUploa
   const { uploader, onSuccess, onError } = options;
   const abortRef = useRef<AbortController | null>(null);
   const resetTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const uploadIdRef = useRef(0);
 
   const [progress, setProgress] = useState<number | null>(null);
   const [uploading, setUploading] = useState(false);
@@ -59,6 +60,7 @@ export function useFileUpload<T>(options: UseFileUploadOptions<T>): UseFileUploa
   }, [clearResetTimer]);
 
   const abort = useCallback(() => {
+    uploadIdRef.current += 1;
     abortRef.current?.abort();
     abortRef.current = null;
     reset();
@@ -66,6 +68,7 @@ export function useFileUpload<T>(options: UseFileUploadOptions<T>): UseFileUploa
 
   useEffect(() => () => {
     clearResetTimer();
+    uploadIdRef.current += 1;
     abortRef.current?.abort();
   }, [clearResetTimer]);
 
@@ -75,6 +78,7 @@ export function useFileUpload<T>(options: UseFileUploadOptions<T>): UseFileUploa
     setProgress(0);
     setUploading(true);
 
+    const uploadId = ++uploadIdRef.current;
     const controller = new AbortController();
     abortRef.current = controller;
 
@@ -84,20 +88,30 @@ export function useFileUpload<T>(options: UseFileUploadOptions<T>): UseFileUploa
         (pct: number) => setProgress(Math.round(pct)),
         controller.signal,
       );
+      if (uploadId !== uploadIdRef.current) return null;
+
       setProgress(100);
       onSuccess?.(result, file);
-      // Brief pause so the user sees 100% before reset
+      setUploading(false);
+      // Brief pause so the user sees 100% before progress clears
       resetTimerRef.current = setTimeout(() => {
         resetTimerRef.current = null;
-        reset();
+        if (uploadId === uploadIdRef.current) {
+          setProgress(null);
+        }
       }, 800);
+      if (abortRef.current === controller) {
+        abortRef.current = null;
+      }
       return result;
     } catch (err: unknown) {
+      if (uploadId !== uploadIdRef.current) return null;
       if (controller.signal.aborted) {
-        // Abort is handled by abort() already — just silently return
         return null;
       }
-      abortRef.current = null;
+      if (abortRef.current === controller) {
+        abortRef.current = null;
+      }
       const msg = err instanceof Error ? err.message : 'Upload failed.';
       setError(msg);
       setUploading(false);
@@ -105,7 +119,7 @@ export function useFileUpload<T>(options: UseFileUploadOptions<T>): UseFileUploa
       onError?.(err, file);
       return null;
     }
-  }, [uploader, onSuccess, onError, reset, clearResetTimer]);
+  }, [uploader, onSuccess, onError, clearResetTimer]);
 
   return { upload, progress, uploading, error, abort, reset };
 }

@@ -3,6 +3,7 @@ package com.careerops.controller;
 import com.careerops.exception.ApiException;
 import com.careerops.model.User;
 import com.careerops.repository.UserRepository;
+import com.careerops.service.AuditLogService;
 import com.careerops.service.AuthService;
 import com.careerops.service.GdprExportService;
 import com.careerops.service.GoogleOAuthService;
@@ -39,10 +40,14 @@ public class AccountController {
     private final GdprExportService gdprExportService;
     private final UserAnonymizationService anonymizationService;
     private final GoogleOAuthService googleOAuth;
+    private final AuditLogService audit;
 
     record ChangePasswordRequest(
         @jakarta.validation.constraints.NotBlank String currentPassword,
-        @jakarta.validation.constraints.NotBlank @Size(min = 8, max = 128) String newPassword
+        @jakarta.validation.constraints.NotBlank
+        @Size(min = 8, max = 128)
+        @jakarta.validation.constraints.Pattern(regexp = "^(?=.*[a-z])(?=.*[A-Z])(?=.*\\d).{8,128}$")
+        String newPassword
     ) {}
 
     record DeleteAccountRequest(
@@ -52,7 +57,8 @@ public class AccountController {
 
     @PatchMapping("/password")
     public com.careerops.dto.AuthDtos.AuthResponse changePassword(
-            @RequestBody @Valid ChangePasswordRequest req
+            @RequestBody @Valid ChangePasswordRequest req,
+            HttpServletRequest httpRequest
     ) {
         UUID userId = AuthUtil.currentUserId();
 
@@ -67,11 +73,14 @@ public class AccountController {
             throw ApiException.badRequest("Incorrect current password");
         }
 
+        authService.validateAccountPasswordChange(req.newPassword());
+
         user.setPasswordHash(passwordEncoder.encode(req.newPassword()));
         userRepository.save(user);
 
         authService.revokeAllTokensForUser(userId);
-        return authService.createAuthResponse(user);
+        audit.log(userId, "PASSWORD_CHANGED", httpRequest);
+        return authService.createAuthResponse(user, httpRequest);
     }
 
     @GetMapping(value = "/export", produces = MediaType.APPLICATION_JSON_VALUE)

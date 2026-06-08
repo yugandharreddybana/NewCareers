@@ -52,7 +52,7 @@ export function usernameFromEmail(email: string): string {
 export async function completeOnboardingVerificationViaApi(
   request: APIRequestContext,
   email: string,
-  otp = '000000',
+  otp = '00000000',
 ): Promise<string> {
   const send = await postWithRateLimitRetry(request, `${E2E_API_URL}/auth/onboarding/send-verification-otp`, {
     email,
@@ -77,6 +77,7 @@ export async function completeOnboardingVerificationViaApi(
   return body.verificationId;
 }
 
+/** @deprecated Signup uses POST /auth/signup-intent; always returns { available: true } for anti-enumeration. */
 export async function checkSignupEmailViaApi(
   request: APIRequestContext,
   email: string,
@@ -84,6 +85,25 @@ export async function checkSignupEmailViaApi(
   const r = await postWithRateLimitRetry(request, `${E2E_API_URL}/auth/onboarding/check-email`, { email });
   const body = r.ok() ? ((await r.json()) as { available?: boolean }) : undefined;
   return { status: r.status(), available: body?.available };
+}
+
+export async function createSignupIntentViaApi(
+  request: APIRequestContext,
+  creds: TestCredentials,
+): Promise<{ status: number; body?: unknown }> {
+  const r = await postWithRateLimitRetry(request, `${E2E_API_URL}/auth/signup-intent`, {
+    email: creds.email,
+    password: creds.password,
+    name: creds.name,
+    consents: {
+      termsAccepted: true,
+      aiProcessingAccepted: true,
+      marketingAccepted: false,
+      analyticsAccepted: false,
+    },
+  });
+  const body = r.ok() ? await r.json().catch(() => undefined) : await r.text().catch(() => undefined);
+  return { status: r.status(), body };
 }
 
 /** Internal — use ensureTestUser from specs instead of calling directly. */
@@ -183,13 +203,20 @@ export async function ensureTestUser(request: APIRequestContext): Promise<void> 
     }
     return;
   }
-  const check = await checkSignupEmailViaApi(request, TEST_USER.email);
-  if (check.status === 409) {
+  try {
+    await registerUserViaApi(request, TEST_USER);
+  } catch (err) {
+    const probe = await createSignupIntentViaApi(request, TEST_USER);
+    if (probe.status === 409) {
+      throw new Error(
+        `Test user ${TEST_USER.email} exists but login failed — verify E2E_TEST_PASSWORD matches the registered account or delete the user manually.`,
+      );
+    }
+    const detail = err instanceof Error ? err.message : String(err);
     throw new Error(
-      `Test user ${TEST_USER.email} exists but login failed — verify password hash (V118) and captcha settings.`,
+      `Test user ${TEST_USER.email} setup failed after login miss: ${detail}`,
     );
   }
-  await registerUserViaApi(request, TEST_USER);
   const auth = await loginUserViaApi(request, TEST_USER.email, TEST_USER.password);
   if (auth.token) {
     await markTestUserOnboardedViaApi(request, auth.token);

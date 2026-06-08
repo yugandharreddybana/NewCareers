@@ -2,8 +2,6 @@ import { useCallback, useId, useMemo, useState } from 'react';
 import toast from 'react-hot-toast';
 import { SectionLabel } from '@/components/onboarding/RequiredLabel';
 import { MinMatchPercentField } from '@/components/onboarding/MinMatchPercentField';
-import { CvUploadDropzone } from '@/components/onboarding/CvUploadDropzone';
-
 export const SUGGESTED_ROLES = [
   'Senior Product Designer',
   'UX Lead',
@@ -474,7 +472,6 @@ export function PreferencesStep({
   const summaryParts = [
     values.selectedRoles.length > 0 ? `${values.selectedRoles.length} role${values.selectedRoles.length === 1 ? '' : 's'}` : null,
     values.selectedTech.length > 0 ? `${values.selectedTech.length} skill${values.selectedTech.length === 1 ? '' : 's'}` : null,
-    values.cvFile ? 'CV ready' : 'CV required',
   ].filter(Boolean);
 
   return (
@@ -586,34 +583,6 @@ export function PreferencesStep({
         />
       </div>
 
-      {values.cvFile ? (
-        <div className="onboarding-pref-cv-ready" role="status">
-          <span className="material-symbols-outlined text-primary" aria-hidden="true">
-            check_circle
-          </span>
-          <div>
-            <p className="onboarding-pref-cv-ready__title">CV ready for matching</p>
-            <p className="onboarding-pref-cv-ready__name">{values.cvFile.name}</p>
-          </div>
-        </div>
-      ) : (
-        <div className="onboarding-pref-card onboarding-pref-card--accent">
-          <section className="onboarding-pref-section">
-            <SectionLabel required>Upload CV / resume</SectionLabel>
-            <p className="onboarding-pref-hint onboarding-pref-hint--tight">
-              Go back to Basic Identity to upload your CV, or add it here. PDF or DOCX, max 5 MB.
-            </p>
-            <CvUploadDropzone
-              file={values.cvFile}
-              onFile={f => onChange({ cvFile: f })}
-              id="cvUploadPreferences"
-              variant="hero"
-              showLabel={false}
-            />
-          </section>
-        </div>
-      )}
-
       <div className="onboarding-actions">
         <button type="button" className="onboarding-btn-outline" onClick={onBack} disabled={saving}>
           Back
@@ -632,9 +601,6 @@ export function PreferencesStep({
           )}
         </button>
       </div>
-      {!values.cvFile && (
-        <p className="onboarding-pref-footer-hint">Upload your CV to enable job matching.</p>
-      )}
     </div>
   );
 }

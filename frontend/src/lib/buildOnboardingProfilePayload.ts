@@ -4,29 +4,22 @@ import type {
   UpdateProfilePayload,
 } from '@/context/AuthContext';
 import type { PreferencesStepValues, WorkSettings } from '@/components/onboarding/PreferencesStep';
+import { degreeLevelLabel, parseDegree, type DegreeLevel } from '@/lib/degreeNormalization';
+import type { MappedEducationEntry, MappedProjectEntry } from '@/lib/mapCvParseToOnboarding';
+import { normalizeUrl } from '@/lib/normalizeUrl';
+
+export type OnboardingWorkInput = OnboardingWorkEntry;
+export type OnboardingEducationInput = OnboardingEducationEntry | MappedEducationEntry;
 
 export type OnboardingBasicInfo = {
   fullName: string;
   headline: string;
   experienceYears: string;
   location: string;
+  linkedInUrl?: string;
+  portfolioUrl?: string;
+  githubUrl?: string;
   jobDomain?: string;
-};
-
-export type OnboardingWorkInput = {
-  jobTitle: string;
-  companyName: string;
-  startDate: string;
-  endDate: string;
-  current: boolean;
-  description: string;
-};
-
-export type OnboardingEducationInput = {
-  schoolName: string;
-  degree: string;
-  fieldOfStudy: string;
-  graduationYear: string;
 };
 
 const EXPERIENCE_YEARS_TO_LEVEL: Record<string, string> = {
@@ -54,18 +47,52 @@ function mapWorkExperience(entries: OnboardingWorkInput[]): OnboardingWorkEntry[
       endDate: w.current ? '' : w.endDate,
       current: w.current,
       description: w.description.trim(),
+      location: (w.location ?? '').trim(),
     }));
 }
 
 function mapEducation(entries: OnboardingEducationInput[]): OnboardingEducationEntry[] {
   return entries
-    .filter(e => e.schoolName.trim())
-    .map(e => ({
-      schoolName: e.schoolName.trim(),
-      degree: e.degree.trim(),
-      fieldOfStudy: e.fieldOfStudy.trim(),
-      graduationYear: e.graduationYear.trim(),
-    }));
+    .filter(e => {
+      const legacyDegree = 'degree' in e ? (e.degree ?? '').trim() : '';
+      return Boolean(
+        e.schoolName.trim()
+        || (e.degreeTitle ?? '').trim()
+        || e.degreeLevel
+        || legacyDegree
+        || e.fieldOfStudy.trim(),
+      );
+    })
+    .map(e => {
+      const legacySource = 'degree' in e ? (e.degree ?? '') : '';
+      const parsed = e.degreeLevel
+        ? null
+        : parseDegree((e.degreeTitle ?? legacySource).trim());
+      const degreeLevel = (e.degreeLevel || parsed?.level || '') as DegreeLevel | '';
+      const degreeTitle = (e.degreeTitle ?? parsed?.title ?? legacySource).trim();
+      const legacyDegree =
+        degreeTitle || (degreeLevel ? degreeLevelLabel(degreeLevel as DegreeLevel) : legacySource.trim());
+      const row: OnboardingEducationEntry = {
+        schoolName: e.schoolName.trim(),
+        degree: legacyDegree,
+        fieldOfStudy: e.fieldOfStudy.trim() || parsed?.fieldHint || '',
+        graduationYear: e.graduationYear.trim(),
+        location: (e.location ?? '').trim(),
+      };
+      if (degreeLevel) row.degreeLevel = degreeLevel;
+      if (degreeTitle) row.degreeTitle = degreeTitle;
+      return row;
+    });
+}
+
+export function filterProjectEntries(entries: MappedProjectEntry[]): MappedProjectEntry[] {
+  return entries.filter(
+    p =>
+      p.projectName.trim()
+      || p.projectLink.trim()
+      || p.techStack.trim()
+      || p.projectDetails.trim(),
+  );
 }
 
 /**
@@ -89,8 +116,15 @@ export function buildOnboardingProfilePayload(
         ? [trimmedHeadline]
         : [];
 
+  const linkedIn = basic.linkedInUrl?.trim() ?? '';
+  const portfolio = basic.portfolioUrl?.trim() ?? '';
+  const github = basic.githubUrl?.trim() ?? '';
+
   return {
     name: trimmedName,
+    ...(linkedIn ? { linkedInUrl: normalizeUrl(linkedIn) } : {}),
+    ...(portfolio ? { websiteUrl: normalizeUrl(portfolio) } : {}),
+    ...(github ? { githubUrl: normalizeUrl(github) } : {}),
     ...(basic.jobDomain?.trim()
       ? { jobDomain: basic.jobDomain.trim().toUpperCase() }
       : {}),

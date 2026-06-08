@@ -7,6 +7,7 @@ import {
   BarChart2, Users, Share2,
   Zap, MessageSquare, Bell, MemoryStick, Layers,
   ChevronLeft, ChevronRight, Sparkles,
+  FlaskConical, Gauge,
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { cn } from '@/lib/utils';
@@ -57,8 +58,14 @@ const NAV_GROUPS: { label: string; items: NavItem[] }[] = [
   },
 ];
 
+const ADMIN_NAV: NavItem[] = [
+  { to: '/admin/saas', icon: <Gauge size={17} />, label: 'SaaS Ops' },
+  { to: '/admin/experiments', icon: <FlaskConical size={17} />, label: 'Experiments' },
+];
+
 export default function Sidebar() {
   const { user } = useAuth();
+  const isAdmin = user?.role === 'ADMIN';
   const [collapsed, setCollapsed] = useState(false);
 
   const width = collapsed ? 64 : 240;
@@ -138,6 +145,30 @@ export default function Sidebar() {
             </div>
           </div>
         ))}
+        {isAdmin && (
+          <div>
+            <AnimatePresence>
+              {!collapsed && (
+                <motion.p
+                  initial={{ opacity: 0 }}
+                  animate={{ opacity: 1 }}
+                  exit={{ opacity: 0 }}
+                  transition={{ duration: 0.1 }}
+                  className="px-3 mb-1.5 text-[9px] font-bold tracking-[0.12em] text-white/25 uppercase"
+                >
+                  Admin
+                </motion.p>
+              )}
+            </AnimatePresence>
+            <div className="flex flex-col gap-1 w-full">
+              {ADMIN_NAV.map(item => (
+                <div key={item.to} className="w-full block">
+                  <SidebarLink item={item} collapsed={collapsed} />
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
       </nav>
 
       {/* ── Profile display only — not clickable ── */}

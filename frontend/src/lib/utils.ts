@@ -60,3 +60,21 @@ export function getInitials(name?: string): string {
   if (!name) return '?';
   return name.split(' ').map(n => n[0]).slice(0, 2).join('').toUpperCase();
 }
+
+/** Read localStorage safely (private browsing / blocked storage returns null). */
+export function readLocalStorage(key: string): string | null {
+  try {
+    return localStorage.getItem(key);
+  } catch {
+    return null;
+  }
+}
+
+/** Write localStorage safely (ignores quota / security errors). */
+export function writeLocalStorage(key: string, value: string): void {
+  try {
+    localStorage.setItem(key, value);
+  } catch {
+    /* ignore */
+  }
+}

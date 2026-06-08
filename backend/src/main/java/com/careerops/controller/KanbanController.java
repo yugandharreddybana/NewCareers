@@ -1,5 +1,6 @@
 package com.careerops.controller;
 
+import com.careerops.annotation.PlanGated;
 import com.careerops.dto.JobDtos.KanbanUpdateRequest;
 import com.careerops.exception.ApiException;
 import com.careerops.model.UserJob;
@@ -42,6 +43,7 @@ public class KanbanController {
     }
 
     @PostMapping(value = "/{userJobId}/cv", consumes = "multipart/form-data")
+    @PlanGated("cv_upload")
     public KanbanCvResponse attachCv(@PathVariable UUID userJobId, @RequestPart("file") MultipartFile file) {
         scanner.scan(file); // 2.050 — Security: Scan for viruses before processing
         String contentType = file.getContentType();

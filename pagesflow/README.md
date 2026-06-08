@@ -68,7 +68,7 @@ Cursor rule: [`.cursor/rules/pagesflow-sync.mdc`](../.cursor/rules/pagesflow-syn
 | Folder | Route | Guard | Layout | Summary |
 |--------|-------|-------|--------|---------|
 | [dashboard](./dashboard/PAGE.md) | `/dashboard` | `ProtectedRoute` | full-width | Home dashboard — jobs, welcome, analytics widgets |
-| [account-settings](./account-settings/PAGE.md) | `/account` | `ProtectedRoute` | full-width | Profile settings, CV, privacy/GDPR |
+| [account-settings](./account-settings/PAGE.md) | `/account/*` | `ProtectedRoute` | full-width | Settings shell — profile, security, billing, GDPR |
 | [notifications](./notifications/PAGE.md) | *(TopBar)* | `ProtectedRoute` | AppShell | Bell + drawer — not a standalone route |
 | [profile](./profile/PAGE.md) | `/profile` | `ProtectedRoute` | AppShell | Public-facing profile view |
 | [pipeline](./pipeline/PAGE.md) | `/pipeline` | `ProtectedRoute` | AppShell | Job pipeline dashboard |
@@ -100,6 +100,7 @@ Cursor rule: [`.cursor/rules/pagesflow-sync.mdc`](../.cursor/rules/pagesflow-syn
 
 | Folder | Route | Guard | Summary |
 |--------|-------|-------|---------|
+| [admin-saas](./admin-saas/PAGE.md) | `/admin/saas` | `AdminRoute` | SaaS metrics, subscriptions, feature flags, AI usage |
 | [admin-experiments](./admin-experiments/PAGE.md) | `/admin/experiments` | `AdminRoute` | A/B experiment dashboard |
 
 ---

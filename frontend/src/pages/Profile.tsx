@@ -72,7 +72,7 @@ const ProfilePage: React.FC = () => {
 
   // Portfolio modal state
   const [addingPortfolio, setAddingPortfolio] = useState(false);
-  const [newItem, setNewItem] = useState({ title: '', url: '', description: '' });
+  const [newItem, setNewItem] = useState({ title: '', url: '', description: '', location: '' });
 
   const cvInputRef = useRef<HTMLInputElement>(null);
 
@@ -89,7 +89,8 @@ const ProfilePage: React.FC = () => {
     if (!profile) return;
     setSaving(true);
     try {
-      await updateProfile(profile as Record<string, unknown>);
+      const savedProfile = await updateProfile(profile as Record<string, unknown>);
+      setProfile(savedProfile);
       setSaved(true);
       setTimeout(() => setSaved(false), 2500);
       toast.success('Profile saved!');
@@ -120,7 +121,7 @@ const ProfilePage: React.FC = () => {
       await profileApi.addPortfolioItem(newItem);
       const updated = await profileApi.get();
       setProfile(updated);
-      setNewItem({ title: '', url: '', description: '' });
+      setNewItem({ title: '', url: '', description: '', location: '' });
       setAddingPortfolio(false);
       toast.success('Portfolio item added!');
     } catch {
@@ -354,6 +355,7 @@ const ProfilePage: React.FC = () => {
                         {item.url}
                       </a>
                     )}
+                    {item.location && <p className="text-xs text-gray-500 mt-0.5">{item.location}</p>}
                     {item.description && <p className="text-xs text-gray-500 mt-0.5">{item.description}</p>}
                   </div>
                   <button  aria-label={`Remove portfolio item ${item.title}`} onClick={() => removePortfolioItem(item.id)} className="text-gray-400 hover:text-red-500 transition-colors flex-shrink-0">
@@ -374,6 +376,12 @@ const ProfilePage: React.FC = () => {
                     placeholder="URL (optional)"
                     value={newItem.url}
                     onChange={e => setNewItem(i => ({ ...i, url: e.target.value }))}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400"
+                  />
+                  <input
+                    placeholder="Location (optional)"
+                    value={newItem.location}
+                    onChange={e => setNewItem(i => ({ ...i, location: e.target.value }))}
                     className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400"
                   />
                   <textarea

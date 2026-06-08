@@ -45,16 +45,32 @@ export type JobEvaluationPdfPayload = {
 
 const PDF_TEXT_MAX = 12_000;
 
+/** Drop lone UTF-16 surrogates (ES5-safe — no lookbehind). */
+function stripLoneSurrogates(s: string): string {
+  let result = '';
+  for (let i = 0; i < s.length; i++) {
+    const c = s.charCodeAt(i);
+    if (c >= 0xD800 && c <= 0xDBFF) {
+      const next = s.charCodeAt(i + 1);
+      if (next >= 0xDC00 && next <= 0xDFFF) {
+        result += s[i]! + s[i + 1]!;
+        i++;
+      }
+    } else if (c < 0xDC00 || c > 0xDFFF) {
+      result += s[i]!;
+    }
+  }
+  return result;
+}
+
 /** Strip control chars and cap length so Jackson never sees truncated/invalid JSON strings. */
 function sanitizePdfText(value: string | undefined, maxLen = PDF_TEXT_MAX): string | undefined {
   if (value == null) return undefined;
-  const cleaned = value
-    .replace(/\u0000/g, '')
-    .replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F-\u009F]/g, ' ')
-    // Drop lone UTF-16 surrogates that can break downstream UTF-8 JSON decoding.
-    .replace(/[\uD800-\uDBFF](?![\uDC00-\uDFFF])/g, '')
-    .replace(/(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/g, '')
-    .trim();
+  const cleaned = stripLoneSurrogates(
+    value
+      .replace(/\u0000/g, '')
+      .replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F-\u009F]/g, ' '),
+  ).trim();
   if (!cleaned) return undefined;
   // Slice by code points so we never split surrogate pairs.
   const points = Array.from(cleaned);
@@ -171,9 +187,7 @@ export function sanitizeJobEvaluationPdfPayload(
   const sections = sectionsPayload(payload.sections as EvaluationSections | undefined);
   if (sections) out.sections = sections;
 
-  JSON.parse(JSON.stringify(out));
-
-  return out;
+  return JSON.parse(JSON.stringify(out)) as JobEvaluationPdfPayload;
 }
 
 export function buildJobEvaluationPdfPayload(

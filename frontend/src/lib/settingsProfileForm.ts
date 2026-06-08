@@ -51,6 +51,7 @@ export function emptyWorkEntry(): OnboardingWorkEntry {
     endDate: '',
     current: false,
     description: '',
+    location: '',
   };
 }
 
@@ -60,6 +61,7 @@ export function emptyEducationEntry(): OnboardingEducationEntry {
     degree: '',
     fieldOfStudy: '',
     graduationYear: '',
+    location: '',
   };
 }
 
@@ -89,17 +91,25 @@ export function profileToSettingsForm(profile: Profile, user: User | null): Sett
           endDate: normalizeYearMonth(w.endDate),
           current: w.current ?? false,
           description: w.description ?? '',
+          location: w.location ?? '',
         }))
       : [emptyWorkEntry()];
 
   const edu =
     profile.education && profile.education.length > 0
-      ? profile.education.map(e => ({
-          schoolName: e.schoolName ?? '',
-          degree: e.degree ?? '',
-          fieldOfStudy: e.fieldOfStudy ?? '',
-          graduationYear: e.graduationYear ?? '',
-        }))
+      ? profile.education.map(e => {
+          const row: OnboardingEducationEntry = {
+            schoolName: e.schoolName ?? '',
+            degree: e.degree ?? '',
+            fieldOfStudy: e.fieldOfStudy ?? '',
+            graduationYear: e.graduationYear ?? '',
+            location: e.location ?? '',
+          };
+          if (e.degreeLevel) row.degreeLevel = e.degreeLevel;
+          if (e.degreeTitle) row.degreeTitle = e.degreeTitle;
+          else if (e.degree) row.degreeTitle = e.degree;
+          return row;
+        })
       : [emptyEducationEntry()];
 
   const availability =

@@ -1,5 +1,6 @@
 package com.careerops.controller;
 
+import com.careerops.annotation.PlanGated;
 import com.careerops.dto.ResumeVersionDtos.*;
 import com.careerops.service.ResumeVersionService;
 import com.careerops.util.AuthUtil;
@@ -51,6 +52,7 @@ public class ResumeVersionController {
 
     // Batch 3: upload file to Supabase
     @PostMapping(value = "/{id}/upload", consumes = "multipart/form-data")
+    @PlanGated("cv_upload")
     public ResumeVersionResponse uploadFile(
             @PathVariable UUID id,
             @RequestPart("file") MultipartFile file

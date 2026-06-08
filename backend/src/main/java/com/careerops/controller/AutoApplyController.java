@@ -1,5 +1,6 @@
 package com.careerops.controller;
 
+import com.careerops.annotation.PlanGated;
 import com.careerops.dto.AutoApplyDtos.*;
 import com.careerops.service.ApplicationAutomationService;
 import com.careerops.util.AuthUtil;
@@ -59,6 +60,7 @@ public class AutoApplyController {
 
     @PostMapping("/start/{userJobId}")
     @ResponseStatus(HttpStatus.CREATED)
+    @PlanGated("job_application")
     public ApplicationRunResponse startRun(
             @PathVariable UUID userJobId,
             @RequestBody(required = false) StartRunRequest req) {

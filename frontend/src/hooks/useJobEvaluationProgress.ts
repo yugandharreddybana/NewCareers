@@ -80,7 +80,7 @@ export function useJobEvaluationProgress(userId: string | null | undefined) {
     disconnect(); // clean up any previous connection
 
     const apiBase = (import.meta as any).env?.VITE_API_URL ?? '';
-    const url = `${apiBase}/api/jobs/evaluation-progress?userId=${id}`;
+    const url = `${apiBase}/api/jobs/evaluation-progress?userId=${encodeURIComponent(id)}`;
 
     const es = new EventSource(url);
     eventSourceRef.current = es;
@@ -95,18 +95,19 @@ export function useJobEvaluationProgress(userId: string | null | undefined) {
       try {
         const data: SseEvent = JSON.parse(e.data);
 
-        setProgress(prev => {
-          if (data.status === 'COMPLETE') {
-            es.close();
-            return {
-              ...prev,
-              status: 'complete',
-              evaluated: data.evaluated ?? prev.evaluated,
-              total: data.total ?? prev.total,
-              message: data.message ?? 'All jobs evaluated — loading your dashboard…',
-            };
-          }
+        if (data.status === 'COMPLETE') {
+          setProgress(prev => ({
+            ...prev,
+            status: 'complete',
+            evaluated: data.evaluated ?? prev.evaluated,
+            total: data.total ?? prev.total,
+            message: data.message ?? 'All jobs evaluated — loading your dashboard…',
+          }));
+          disconnect();
+          return;
+        }
 
+        setProgress(prev => {
           if (data.status === 'SOURCE_FOUND' && data.source) {
             const updatedSources = prev.sources.map(s =>
               s.source.toLowerCase() === data.source!.toLowerCase()

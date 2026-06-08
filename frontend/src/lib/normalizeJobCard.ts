@@ -23,7 +23,7 @@ function readId(raw: RawJob, camel: 'userJobId' | 'jobId'): string {
 }
 
 /** Maps Java JobCardResponse JSON (UUID fields) into frontend JobCard. */
-export function normalizeJobCard(raw: Partial<JobCard>): JobCard {
+export function normalizeJobCard(raw: RawJob): JobCard {
   const r = raw as RawJob;
   const col = r.kanbanColumn ?? r.kanban_column;
   const kanbanColumn: KanbanColumn =
@@ -36,9 +36,10 @@ export function normalizeJobCard(raw: Partial<JobCard>): JobCard {
       : 'Discovered';
 
   const userJobId = readId(r, 'userJobId');
-  const jobId = readId(r, 'jobId') || userJobId;
+  const jobId = readId(r, 'jobId');
 
   const card: JobCard = {
+    id: userJobId,
     userJobId,
     jobId,
     title: String(raw.title ?? 'Role'),
@@ -66,8 +67,10 @@ export function normalizeJobCard(raw: Partial<JobCard>): JobCard {
   if (deliveredAt) card.deliveredAt = String(deliveredAt);
   const postedAt = r.postedAt ?? r.posted_at;
   if (postedAt) card.postedAt = String(postedAt);
-  if (r.matchedSkills) card.matchedSkills = r.matchedSkills;
-  if (r.unmatchedSkills) card.unmatchedSkills = r.unmatchedSkills;
+  const matched = r.matchedSkills ?? r.matched_skills;
+  if (matched?.length) card.matchedSkills = matched;
+  const unmatched = r.unmatchedSkills ?? r.unmatched_skills;
+  if (unmatched?.length) card.unmatchedSkills = unmatched;
 
   return card;
 }

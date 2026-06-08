@@ -1,6 +1,6 @@
 # ─────────────────────────────────────────────────────────────
 # Cache profile configuration (activated via spring.profiles.include=cache
-# in application.properties)
+# in application-dev.yml)
 # ─────────────────────────────────────────────────────────────
 spring:
   cache:

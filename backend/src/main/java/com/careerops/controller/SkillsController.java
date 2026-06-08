@@ -1,5 +1,6 @@
 package com.careerops.controller;
 
+import com.careerops.annotation.PlanGated;
 import com.careerops.dto.ApplyQuestionRequest;
 import com.careerops.dto.ApplyQuestionResponse;
 import com.careerops.dto.ConversationReplyRequest;
@@ -78,6 +79,7 @@ public class SkillsController {
      */
     @PostMapping("/start")
     @RateLimited(capacity = 5, requestsPerMinute = 5)
+    @PlanGated("ai_skill_run")
     public SkillRunResponse startSkill(
             @Valid @RequestBody SkillStartRequest req) {
 
@@ -104,6 +106,7 @@ public class SkillsController {
      */
     @PostMapping("/apply/answer")
     @RateLimited(capacity = 10, requestsPerMinute = 10)
+    @PlanGated("ai_skill_run")
     public ApplyQuestionResponse applyAnswer(@Valid @RequestBody ApplyQuestionRequest req) {
         UUID userId = AuthUtil.currentUserId();
         return applyAssist.answerQuestion(userId, req.userJobId(), req.question(), req.rerun());
@@ -114,6 +117,7 @@ public class SkillsController {
      */
     @PostMapping("/outreach/draft")
     @RateLimited(capacity = 10, requestsPerMinute = 10)
+    @PlanGated("ai_skill_run")
     public ObjectNode outreachDraft(
             @RequestParam UUID userJobId,
             @RequestParam(defaultValue = "linkedin") String channel,
@@ -124,6 +128,7 @@ public class SkillsController {
 
     @PostMapping("/conversation/reply")
     @RateLimited(capacity = 5, requestsPerMinute = 5)
+    @PlanGated("ai_skill_run")
     public SkillRunResponse replyToConversation(
             @Valid @RequestBody ConversationReplyRequest req) {
 
@@ -145,6 +150,7 @@ public class SkillsController {
      */
     @PostMapping("/run-all/{userJobId}")
     @RateLimited(capacity = 2, requestsPerMinute = 2)
+    @PlanGated(value = "ai_skill_run", cost = 9)
     public RunAllSkillsResponse runAll(
             @PathVariable UUID userJobId) {
 
@@ -160,6 +166,7 @@ public class SkillsController {
      */
     @PostMapping("/run-all-async/{userJobId}")
     @RateLimited(capacity = 2, requestsPerMinute = 2)
+    @PlanGated(value = "ai_skill_run", cost = 9)
     public BatchRunStatusResponse runAllAsync(
             @PathVariable UUID userJobId) {
 

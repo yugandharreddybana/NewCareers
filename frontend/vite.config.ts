@@ -18,7 +18,18 @@ import react from '@vitejs/plugin-react';
 import { VitePWA } from 'vite-plugin-pwa';
 import path from 'node:path';
 
+const isProdBuild = process.env.NODE_ENV === 'production';
+if (isProdBuild && !String(process.env.VITE_RECAPTCHA_SITE_KEY ?? '').trim()) {
+  throw new Error(
+    'Production build requires VITE_RECAPTCHA_SITE_KEY (onboarding email verification CAPTCHA).',
+  );
+}
+
+// M-35: DEV_BYPASS cannot compile into production bundles.
 export default defineConfig({
+  define: isProdBuild
+    ? { 'import.meta.env.VITE_DEV_BYPASS_GUARDS': JSON.stringify('false') }
+    : undefined,
   plugins: [
     react(),
     VitePWA({
@@ -51,7 +62,13 @@ export default defineConfig({
             },
           },
           {
-            urlPattern: /^\/api\/.*/i,
+            urlPattern: ({ url }: { url: string }) => {
+              const path = url.pathname;
+              if (path.startsWith('/api/v1/auth') || path.startsWith('/api/v1/profile')) {
+                return false;
+              }
+              return path.startsWith('/api/');
+            },
             handler: 'NetworkFirst',
             options: {
               cacheName: 'api-cache',

@@ -39,8 +39,20 @@ class ExperienceSectionParserTest {
         """);
     assertThat(role.title()).isEqualTo("Full Stack Software Developer");
     assertThat(role.dates()).isEqualTo("Sept 2024 – Present");
-    assertThat(role.company()).isEqualTo("Independent Developer | Dublin, Ireland");
+    assertThat(role.company()).isEqualTo("Independent Developer");
+    assertThat(role.location()).isEqualTo("Dublin, Ireland");
     assertThat(role.bullets()).containsExactly("Built apps end to end.");
+  }
+
+  @Test
+  void parseRoleBlock_splitsCompanyAndLocationWithPipe() {
+    var role = ExperienceSectionParser.parseRoleBlock("""
+        Software Engineer Aug 2021 – Jan 2024
+        Incedo Technologies Solution Ltd (Client: Verizon) | Hyderabad, India
+        ▪ Optimised search by 67%.
+        """);
+    assertThat(role.company()).isEqualTo("Incedo Technologies Solution Ltd (Client: Verizon)");
+    assertThat(role.location()).isEqualTo("Hyderabad, India");
   }
 
   @Test

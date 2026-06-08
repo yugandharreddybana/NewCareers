@@ -1,49 +1,22 @@
 /**
  * Signup.tsx — account creation page.
  */
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
-import { isAxiosError } from 'axios';
 import { Loader2 } from 'lucide-react';
+import ReCAPTCHA from 'react-google-recaptcha';
 import { PageMeta } from '@/components/PageMeta';
 import { SignupPageShell } from '@/components/auth/SignupPageShell';
+import { CAPTCHA_ENABLED, RecaptchaBlock } from '@/components/auth/RecaptchaBlock';
 import { legalPaths } from '@/lib/brand';
 import { authApi } from '@/services/api';
 import { clearOnboardingVerification } from '@/lib/onboardingVerification';
 import { clearPendingSignup, writePendingSignup } from '@/lib/pendingSignup';
 import { tokenStore } from '@/lib/tokenStore';
-import { isApiError } from '@/types';
 import { writePendingGoogleConsents } from '@/lib/pendingGoogleConsents';
 import { writeAnalyticsConsent } from '@/lib/cookieConsent';
-
-type StrengthLabel = '' | 'Too short' | 'Weak' | 'Fair' | 'Good' | 'Strong';
-
-interface Strength {
-  label: StrengthLabel;
-  acceptable: boolean;
-}
-
-function evaluatePassword(p: string): Strength {
-  if (!p) return { label: '', acceptable: false };
-  if (p.length < 8) return { label: 'Too short', acceptable: false };
-
-  let score = 0;
-  if (/[A-Z]/.test(p)) score++;
-  if (/[0-9]/.test(p)) score++;
-  if (/[^A-Za-z0-9]/.test(p)) score++;
-  if (p.length >= 12) score++;
-
-  if (score <= 1) return { label: 'Weak', acceptable: false };
-  if (score === 2) return { label: 'Fair', acceptable: false };
-  if (score === 3) return { label: 'Good', acceptable: true };
-  return { label: 'Strong', acceptable: true };
-}
-
-function isDuplicateEmailError(err: unknown): boolean {
-  if (isAxiosError(err) && err.response?.status === 409) return true;
-  if (isApiError(err) && err.normalizedMessage.toLowerCase().includes('already exists')) return true;
-  return false;
-}
+import { evaluatePasswordStrength, passwordComplexityHint } from '@/lib/passwordRules';
+import { mapSignupIntentError } from '@/lib/authErrors';
 
 export default function Signup() {
   const navigate = useNavigate();
@@ -69,8 +42,10 @@ export default function Signup() {
   const [analyticsAccepted, setAnalyticsAccepted] = useState(false);
   const [error, setError] = useState('');
   const [submitting, setSubmitting] = useState(false);
+  const [captchaToken, setCaptchaToken] = useState<string | null>(null);
+  const captchaRef = useRef<ReCAPTCHA>(null);
 
-  const strength = evaluatePassword(password);
+  const strength = evaluatePasswordStrength(password);
   const busy = submitting;
 
   const buildConsents = () => ({
@@ -83,6 +58,9 @@ export default function Signup() {
   const validateConsents = (): string | null => {
     if (!termsAccepted) {
       return 'You must accept the Terms of Service and Privacy Policy to continue.';
+    }
+    if (!aiProcessingAccepted) {
+      return 'AI processing consent is required to upload and parse your CV during onboarding.';
     }
     return null;
   };
@@ -105,7 +83,7 @@ export default function Signup() {
       setError(
         password.length === 0
           ? 'Please choose a password.'
-          : 'Password is too weak. Use at least 8 characters with a mix of upper-case letters, numbers, and symbols.',
+          : passwordComplexityHint(),
       );
       return;
     }
@@ -114,27 +92,33 @@ export default function Signup() {
       setError(consentError);
       return;
     }
+    if (CAPTCHA_ENABLED && !captchaToken) {
+      setError('Complete the security check below.');
+      return;
+    }
 
     setSubmitting(true);
     try {
       const trimmedEmail = email.trim();
-      await authApi.checkSignupEmail(trimmedEmail);
-
       const consents = buildConsents();
-      persistConsents();
-      writePendingSignup({
+      const intent = await authApi.createSignupIntent({
         email: trimmedEmail,
         password,
+        consents,
+        ...(name.trim() ? { name: name.trim() } : {}),
+        ...(captchaToken ? { captchaToken } : {}),
+      });
+
+      persistConsents();
+      writePendingSignup({
+        signupIntentId: intent.signupIntentId,
+        email: trimmedEmail,
         ...(name.trim() ? { name: name.trim() } : {}),
         consents,
       });
       navigate('/onboarding', { replace: true });
     } catch (err: unknown) {
-      if (isDuplicateEmailError(err)) {
-        setError('An account is already associated with this email.');
-        return;
-      }
-      setError('Could not continue. Please try again.');
+      setError(mapSignupIntentError(err));
     } finally {
       setSubmitting(false);
     }
@@ -294,14 +278,11 @@ export default function Signup() {
               checked={aiProcessingAccepted}
               onChange={e => setAiProcessingAccepted(e.target.checked)}
               disabled={busy}
+              required
             />
             <span className="font-body-md text-body-md leading-relaxed text-on-surface-variant transition-colors group-hover:text-on-surface">
               I consent to AI processing of my CV and profile by third-party providers (Anthropic,
-              Google, NVIDIA) for job matching and career skills{' '}
-              <span className="text-secondary">
-                (optional — enable later in Account settings)
-              </span>
-              .
+              Google, NVIDIA) for job matching and career skills.
             </span>
           </label>
 
@@ -333,6 +314,15 @@ export default function Signup() {
             </span>
           </label>
         </div>
+
+        {CAPTCHA_ENABLED && (
+          <RecaptchaBlock
+            ref={captchaRef}
+            onChange={setCaptchaToken}
+            onExpired={() => setCaptchaToken(null)}
+            className="flex justify-center py-2"
+          />
+        )}
 
         <button
           className="btn-primary mt-2 flex w-full items-center justify-center gap-2 rounded py-3 font-label-md text-label-md"

@@ -136,7 +136,9 @@ final class ExperienceSectionParser {
         return !hasRoleStructure(rewritten);
     }
 
-    record ParsedRole(String title, String dates, String company, List<String> bullets) {}
+    private static final Pattern PAREN_LOCATION = Pattern.compile("\\(([^)]+)\\)\\s*$");
+
+    record ParsedRole(String title, String dates, String company, String location, List<String> bullets) {}
 
     static ParsedRole parseRoleBlock(String block) {
         String[] lines = block.split("\\r?\\n");
@@ -144,6 +146,7 @@ final class ExperienceSectionParser {
         String title = titleLine;
         String dates = "";
         String company = "";
+        String location = "";
 
         Matcher monthDates = TRAILING_MONTH_RANGE.matcher(titleLine);
         if (monthDates.find()) {
@@ -165,6 +168,11 @@ final class ExperienceSectionParser {
             }
         }
 
+        location = extractLocation(company);
+        if (!location.isBlank()) {
+            company = stripLocationSuffix(company);
+        }
+
         List<String> bullets = new ArrayList<>();
         for (int i = 1; i < lines.length; i++) {
             String line = lines[i].strip();
@@ -179,16 +187,82 @@ final class ExperienceSectionParser {
             }
             if (isBulletLine(line)) {
                 bullets.add(normalizeBullet(line));
+            } else if (location.isBlank() && looksLikeLocation(line)) {
+                location = line;
             } else if (company.isBlank()
                     && !line.toLowerCase(Locale.ROOT).startsWith("challenge")
                     && !line.toLowerCase(Locale.ROOT).startsWith("action")
                     && !line.toLowerCase(Locale.ROOT).startsWith("key achievements")) {
                 company = line;
+                String loc = extractLocation(company);
+                if (!loc.isBlank()) {
+                    location = loc;
+                    company = stripLocationSuffix(company);
+                }
             } else {
                 bullets.add(normalizeBullet(line));
             }
         }
-        return new ParsedRole(title, dates, company, bullets);
+
+        String[] finalized = finalizeCompanyLocation(company, location);
+        company = finalized[0];
+        location = finalized[1];
+
+        return new ParsedRole(title, dates, company, location, bullets);
+    }
+
+    private static String[] finalizeCompanyLocation(String company, String location) {
+        String comp = company != null ? company.trim() : "";
+        String loc = location != null ? location.trim() : "";
+
+        if (!comp.isBlank()) {
+            CvPipeFields.TwoPart split = CvPipeFields.splitCompanyLocation(comp);
+            comp = split.left();
+            if (loc.isBlank()) {
+                loc = split.right();
+            }
+        }
+        if (comp.isBlank() && loc.contains("|")) {
+            CvPipeFields.TwoPart split = CvPipeFields.splitCompanyLocation(loc);
+            comp = split.left();
+            loc = split.right();
+        }
+        return new String[] { comp, loc };
+    }
+
+    private static boolean looksLikeLocation(String line) {
+        String t = line.strip();
+        if (t.isBlank() || t.length() > 60) {
+            return false;
+        }
+        String lower = t.toLowerCase(Locale.ROOT);
+        if (lower.equals("remote") || lower.equals("hybrid") || lower.contains("ireland")
+            || lower.contains("dublin") || lower.contains("london") || lower.contains("uk")) {
+            return true;
+        }
+        return t.matches("^[A-Z][a-zA-Z .,'-]{1,48}$") && !ROLE_HEADER_DATES.matcher(t).find();
+    }
+
+    private static String extractLocation(String text) {
+        if (text == null || text.isBlank()) {
+            return "";
+        }
+        Matcher paren = PAREN_LOCATION.matcher(text);
+        if (paren.find()) {
+            return paren.group(1).trim();
+        }
+        return "";
+    }
+
+    private static String stripLocationSuffix(String text) {
+        if (text == null) {
+            return "";
+        }
+        Matcher paren = PAREN_LOCATION.matcher(text);
+        if (paren.find()) {
+            return text.substring(0, paren.start()).trim();
+        }
+        return text;
     }
 
     private static String normalizeBullet(String line) {

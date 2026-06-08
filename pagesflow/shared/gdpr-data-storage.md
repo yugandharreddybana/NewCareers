@@ -60,6 +60,18 @@ flowchart TB
 | **Supabase Storage** | CV files, application assets, resume versions (when configured) | Purged on account deletion via `SupabaseStorageService.purgeUserFiles`. Metadata also in `user_cvs.storage_path`. |
 | **Browser** | Access token (memory), refresh token (sessionStorage or HttpOnly cookie), pending signup, analytics cookie consent flag | Not server DB; cleared on sign-out. See [auth-infrastructure.md](./auth-infrastructure.md). |
 
+### Browser sessionStorage — UX handoff only (M-26 / M-33)
+
+Some onboarding and OAuth flows stash **non-authoritative** handoff state in `sessionStorage`. The server always re-validates before any mutation.
+
+| Key / module | Contents | Authoritative store | Cleared when |
+|--------------|----------|---------------------|--------------|
+| `co_pending_signup_v2` (`pendingSignup.ts`) | `signupIntentId`, email, consents | `signup_intents` table (server) | Login, signup finish, sign-out |
+| `co_onboarding_verification_v1` (`onboardingVerification.ts`) | `emailVerificationId`, intent binding | `email_verifications` (hashed OTP) | Consumed on register / TTL |
+| `co_google_consents_v1` (`pendingGoogleConsents.ts`) | Consent booleans for Google | `user_consents` rows on successful `/auth/google` | Login success / sign-out |
+
+**GDPR note:** These keys are **not** proof of consent or verified email. They exist so multi-step UI can resume after navigation. XSS could tamper with handoff flags — server endpoints reject invalid intents, unconsumed verification IDs, and missing terms. Consent records are written only after successful authenticated API calls with validated payloads.
+
 ---
 
 ## Personal data categories

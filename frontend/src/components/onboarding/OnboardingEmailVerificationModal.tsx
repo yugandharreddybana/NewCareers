@@ -4,6 +4,11 @@ import { Loader2, Mail, ShieldCheck } from 'lucide-react';
 import { OtpInput } from '@/components/auth/OtpInput';
 import { CAPTCHA_ENABLED, RecaptchaBlock } from '@/components/auth/RecaptchaBlock';
 import { authApi } from '@/services/api';
+import {
+  GENERIC_OTP_ERROR,
+  GENERIC_OTP_SEND_ERROR,
+  GENERIC_SECURITY_ERROR,
+} from '@/lib/authErrors';
 import { isApiError } from '@/types';
 
 function maskEmail(email: string): string {
@@ -24,6 +29,8 @@ type Props = {
   email: string;
   firstName?: string;
   initialResendsRemaining?: number;
+  /** When true, modal sends OTP after captcha instead of assuming code was already sent. */
+  awaitingInitialSend?: boolean;
   onVerified: (verificationId: string) => void;
   onCancel: () => void;
 };
@@ -33,6 +40,7 @@ export function OnboardingEmailVerificationModal({
   email,
   firstName,
   initialResendsRemaining = 3,
+  awaitingInitialSend = false,
   onVerified,
   onCancel,
 }: Props) {
@@ -40,8 +48,10 @@ export function OnboardingEmailVerificationModal({
   const [otp, setOtp] = useState('');
   const [captchaToken, setCaptchaToken] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  const [sendLoading, setSendLoading] = useState(false);
   const [resendLoading, setResendLoading] = useState(false);
   const [error, setError] = useState('');
+  const [otpSent, setOtpSent] = useState(!awaitingInitialSend);
   const [resendsRemaining, setResendsRemaining] = useState(initialResendsRemaining);
   const [resendCooldown, setResendCooldown] = useState(0);
 
@@ -52,8 +62,9 @@ export function OnboardingEmailVerificationModal({
     setError('');
     setResendCooldown(0);
     setResendsRemaining(initialResendsRemaining);
+    setOtpSent(!awaitingInitialSend);
     captchaRef.current?.reset();
-  }, [open, email, initialResendsRemaining]);
+  }, [open, email, initialResendsRemaining, awaitingInitialSend]);
 
   useEffect(() => {
     if (resendCooldown <= 0) return;
@@ -63,34 +74,60 @@ export function OnboardingEmailVerificationModal({
     return () => window.clearInterval(t);
   }, [resendCooldown]);
 
+  const handleInitialSend = useCallback(async () => {
+    setError('');
+    if (CAPTCHA_ENABLED && !captchaToken) {
+      setError('Complete the security check below.');
+      return;
+    }
+    setSendLoading(true);
+    try {
+      const body: { email: string; firstName?: string; captchaToken?: string } = { email };
+      if (firstName) body.firstName = firstName;
+      if (captchaToken) body.captchaToken = captchaToken;
+      const resp = await authApi.sendOnboardingVerificationOtp(body);
+      setResendsRemaining(resp.resendsRemaining);
+      setOtpSent(true);
+    } catch {
+      setError(GENERIC_OTP_SEND_ERROR);
+      captchaRef.current?.reset();
+      setCaptchaToken(null);
+    } finally {
+      setSendLoading(false);
+    }
+  }, [captchaToken, email, firstName]);
+
   const handleResend = useCallback(async () => {
     setError('');
+    if (CAPTCHA_ENABLED && !captchaToken) {
+      setError('Complete the security check below.');
+      return;
+    }
     setResendLoading(true);
     try {
-      const resp = await authApi.resendOnboardingVerificationOtp(email);
+      const resp = await authApi.resendOnboardingVerificationOtp(
+        email,
+        captchaToken ?? undefined,
+      );
       setResendsRemaining(resp.resendsRemaining);
       setResendCooldown(resp.retryAfterSeconds > 0 ? resp.retryAfterSeconds : 300);
       setOtp('');
       captchaRef.current?.reset();
       setCaptchaToken(null);
     } catch (err: unknown) {
-      if (isApiError(err)) {
-        setError(err.normalizedMessage);
-        if (err.retryAfterSeconds) {
-          setResendCooldown(err.retryAfterSeconds);
-        }
-      } else {
-        setError('Could not resend code. Please try again.');
+      setError(GENERIC_OTP_SEND_ERROR);
+      if (isApiError(err) && err.retryAfterSeconds) {
+        setResendCooldown(err.retryAfterSeconds);
       }
     } finally {
       setResendLoading(false);
     }
-  }, [email]);
+  }, [captchaToken, email]);
 
   const handleSubmit = useCallback(async () => {
     setError('');
-    if (otp.length !== 6) {
-      setError('Enter the 6-digit code from your email.');
+    if (otp.length !== 8) {
+      setError('Enter the 8-digit code from your email.');
       return;
     }
     if (CAPTCHA_ENABLED && !captchaToken) {
@@ -105,10 +142,11 @@ export function OnboardingEmailVerificationModal({
       const resp = await authApi.verifyOnboardingEmail(verifyBody);
       onVerified(resp.verificationId);
     } catch (err: unknown) {
-      if (isApiError(err)) {
-        setError(err.normalizedMessage);
+      if (isApiError(err) && err.status === 400
+          && err.normalizedMessage?.toLowerCase().includes('security')) {
+        setError(GENERIC_SECURITY_ERROR);
       } else {
-        setError('Verification failed. Please try again.');
+        setError(GENERIC_OTP_ERROR);
       }
       captchaRef.current?.reset();
       setCaptchaToken(null);
@@ -137,44 +175,48 @@ export function OnboardingEmailVerificationModal({
                 Verify your email
               </h2>
               <p className="text-sm text-slate-500">
-                Code sent to <span className="font-medium text-slate-700">{maskEmail(email)}</span>
+                {otpSent ? 'Code sent to' : 'We will send a code to'}{' '}
+                <span className="font-medium text-slate-700">{maskEmail(email)}</span>
               </p>
             </div>
           </div>
           <p className="text-sm text-slate-600 leading-relaxed">
-            Enter the code from your inbox and complete the security check to finish creating your account
-            {firstName ? `, ${firstName}` : ''}.
+            {otpSent
+              ? `Enter the 8-digit code from your inbox and complete the security check to finish creating your account${firstName ? `, ${firstName}` : ''}.`
+              : `Complete the security check and we will email you an 8-digit verification code${firstName ? `, ${firstName}` : ''}.`}
           </p>
         </div>
 
         <div className="px-6 py-5 space-y-6">
-          <div className="space-y-3">
-            <label className="block text-xs font-semibold uppercase tracking-wide text-slate-500">
-              Email verification code
-            </label>
-            <OtpInput value={otp} onChange={setOtp} disabled={loading} />
-            <div className="flex items-center justify-between text-xs text-slate-500">
-              <span>Resends remaining: {resendsRemaining}</span>
-              <button
-                type="button"
-                disabled={resendLoading || resendCooldown > 0 || resendsRemaining <= 0 || loading}
-                onClick={() => void handleResend()}
-                className="font-medium text-[#0d9488] hover:text-[#022c22] disabled:opacity-50 disabled:cursor-not-allowed"
-              >
-                {resendLoading ? (
-                  <span className="inline-flex items-center gap-1">
-                    <Loader2 size={12} className="animate-spin" /> Sending…
-                  </span>
-                ) : resendCooldown > 0 ? (
-                  `Resend in ${formatCooldown(resendCooldown)}`
-                ) : resendsRemaining <= 0 ? (
-                  'Resend limit reached'
-                ) : (
-                  'Resend code'
-                )}
-              </button>
+          {otpSent && (
+            <div className="space-y-3">
+              <label className="block text-xs font-semibold uppercase tracking-wide text-slate-500">
+                Email verification code
+              </label>
+              <OtpInput value={otp} onChange={setOtp} disabled={loading} />
+              <div className="flex items-center justify-between text-xs text-slate-500">
+                <span>Resends remaining: {resendsRemaining}</span>
+                <button
+                  type="button"
+                  disabled={resendLoading || resendCooldown > 0 || resendsRemaining <= 0 || loading}
+                  onClick={() => void handleResend()}
+                  className="font-medium text-[#0d9488] hover:text-[#022c22] disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  {resendLoading ? (
+                    <span className="inline-flex items-center gap-1">
+                      <Loader2 size={12} className="animate-spin" /> Sending…
+                    </span>
+                  ) : resendCooldown > 0 ? (
+                    `Resend in ${formatCooldown(resendCooldown)}`
+                  ) : resendsRemaining <= 0 ? (
+                    'Resend limit reached'
+                  ) : (
+                    'Resend code'
+                  )}
+                </button>
+              </div>
             </div>
-          </div>
+          )}
 
           <div className="space-y-3 pt-2 border-t border-slate-100">
             <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-slate-500">
@@ -204,19 +246,30 @@ export function OnboardingEmailVerificationModal({
             <button
               type="button"
               onClick={onCancel}
-              disabled={loading}
+              disabled={loading || sendLoading}
               className="flex-1 py-3 rounded-xl border border-slate-200 text-sm font-medium text-slate-600 hover:bg-slate-50 disabled:opacity-60"
             >
               Cancel
             </button>
-            <button
-              type="button"
-              onClick={() => void handleSubmit()}
-              disabled={loading || otp.length !== 6 || (CAPTCHA_ENABLED && !captchaToken)}
-              className="flex-1 py-3 rounded-xl bg-[#022c22] hover:bg-[#011b16] text-white text-sm font-medium shadow-md disabled:opacity-60 flex items-center justify-center gap-2"
-            >
-              {loading ? <Loader2 size={16} className="animate-spin" /> : 'Verify & continue'}
-            </button>
+            {!otpSent ? (
+              <button
+                type="button"
+                onClick={() => void handleInitialSend()}
+                disabled={sendLoading || (CAPTCHA_ENABLED && !captchaToken)}
+                className="flex-1 py-3 rounded-xl bg-[#022c22] hover:bg-[#011b16] text-white text-sm font-medium shadow-md disabled:opacity-60 flex items-center justify-center gap-2"
+              >
+                {sendLoading ? <Loader2 size={16} className="animate-spin" /> : 'Send code'}
+              </button>
+            ) : (
+              <button
+                type="button"
+                onClick={() => void handleSubmit()}
+                disabled={loading || otp.length !== 8 || (CAPTCHA_ENABLED && !captchaToken)}
+                className="flex-1 py-3 rounded-xl bg-[#022c22] hover:bg-[#011b16] text-white text-sm font-medium shadow-md disabled:opacity-60 flex items-center justify-center gap-2"
+              >
+                {loading ? <Loader2 size={16} className="animate-spin" /> : 'Verify & continue'}
+              </button>
+            )}
           </div>
         </div>
       </div>

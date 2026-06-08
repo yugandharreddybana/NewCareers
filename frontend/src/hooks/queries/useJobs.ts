@@ -26,21 +26,38 @@ import {
   type InfiniteData,
 } from '@tanstack/react-query';
 import { jobsApi, kanbanApi } from '@/services/api';
+import { queryClient } from '@/lib/queryClient';
 import { queryKeys } from '@/lib/queryKeys';
 import type { JobCard, JobDetail, JobsListResponse, KanbanColumn, Stats } from '@/types';
 
 export const FEED_PAGE_SIZE = 20; // exported so PipelineDashboard can reference it
 
+const REFRESH_SKILLS_BACKOFF_MS = 60_000;
+
 /** One pipeline-wide skill resync per browser session. */
 let pipelineSkillsSynced = false;
+let lastRefreshSkillsFailureAt = 0;
+
+/** Reset on logout so the next user triggers refreshSkills on first feed load. */
+export function resetPipelineSkillsSync(): void {
+  pipelineSkillsSynced = false;
+  lastRefreshSkillsFailureAt = 0;
+}
+
+/** After profile/CV edits that affect match scores — force re-sync on next feed load. */
+export function invalidatePipelineAfterProfileChange(): void {
+  resetPipelineSkillsSync();
+  void queryClient.invalidateQueries({ queryKey: queryKeys.jobs.all });
+}
 
 async function ensurePipelineSkillsSynced(): Promise<void> {
   if (pipelineSkillsSynced) return;
+  if (Date.now() - lastRefreshSkillsFailureAt < REFRESH_SKILLS_BACKOFF_MS) return;
   try {
     await jobsApi.refreshSkills();
-    pipelineSkillsSynced = true; // P5 – only mark done on success
+    pipelineSkillsSynced = true;
   } catch {
-    // leave flag false so next mount retries (but silently)
+    lastRefreshSkillsFailureAt = Date.now();
   }
 }
 
@@ -104,10 +121,7 @@ export function useJobsList(options?: { enabled?: boolean }) {
 export function useJobDetail(userJobId: string | undefined) {
   return useQuery({
     queryKey: queryKeys.jobs.detail(userJobId ?? ''),
-    queryFn: async (): Promise<JobDetail> => {
-      await ensurePipelineSkillsSynced();
-      return jobsApi.detail(userJobId!);
-    },
+    queryFn: async (): Promise<JobDetail> => jobsApi.detail(userJobId!),
     enabled: Boolean(userJobId),
     staleTime: 0,
     refetchOnMount: 'always',
@@ -219,6 +233,7 @@ export function useKanbanPatchMutation() {
 
     onMutate: async ({ userJobId, body }) => {
       await qc.cancelQueries({ queryKey: queryKeys.jobs.list() });
+      await qc.cancelQueries({ queryKey: [...queryKeys.jobs.list(), 'infinite'] });
       // snapshot both caches for rollback
       const prevFlat = qc.getQueryData<JobsListResponse>(queryKeys.jobs.list());
       const prevInfinite = qc.getQueriesData<InfiniteData<InfiniteJobsPage>>({
@@ -240,7 +255,7 @@ export function useKanbanPatchMutation() {
     },
 
     onSettled: (_data, _err, { userJobId }) => {
-      void qc.invalidateQueries({ queryKey: queryKeys.jobs.all });
+      void qc.invalidateQueries({ queryKey: queryKeys.jobs.list() });
       void qc.invalidateQueries({ queryKey: queryKeys.jobs.detail(userJobId) });
       void qc.invalidateQueries({ queryKey: queryKeys.jobs.stats() });
     },
@@ -256,6 +271,7 @@ export function useJobFavoriteMutation() {
 
     onMutate: async ({ userJobId, isFavorite }) => {
       await qc.cancelQueries({ queryKey: queryKeys.jobs.list() });
+      await qc.cancelQueries({ queryKey: [...queryKeys.jobs.list(), 'infinite'] });
       const prevFlat = qc.getQueryData<JobsListResponse>(queryKeys.jobs.list());
       const prevInfinite = qc.getQueriesData<InfiniteData<InfiniteJobsPage>>({
         queryKey: [...queryKeys.jobs.list(), 'infinite'],
@@ -273,8 +289,10 @@ export function useJobFavoriteMutation() {
       }
     },
 
-    onSettled: () => {
+    onSettled: (_data, _err, { userJobId }) => {
       void qc.invalidateQueries({ queryKey: queryKeys.jobs.list() });
+      void qc.invalidateQueries({ queryKey: queryKeys.jobs.detail(userJobId) });
+      void qc.invalidateQueries({ queryKey: queryKeys.jobs.stats() });
     },
   });
 }

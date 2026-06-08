@@ -23,16 +23,28 @@ Three-step profile setup for new users: basic info + CV upload, work/education b
 | Headline | No | Free text; may prefill from CV parse | Step 0 |
 | Years of experience | Yes | Selected value | Step 0 |
 | Location | Yes | Default "Dublin, Ireland" | Step 0 |
+| LinkedIn | No | Valid URL when provided; shown before CV upload | Step 0 |
+| Portfolio website | No | Valid URL when provided; persisted as `websiteUrl` | Step 0 |
+| GitHub | No | Valid URL when provided | Step 0 |
 | CV file | Yes | PDF or DOCX, max 5 MB | Step 0 |
 
-### Step 1 — Background
+Empty link fields may be prefilled from CV header text after parse (user-entered values take precedence).
 
-| Field | Required | Validation | When shown |
-|-------|----------|------------|------------|
-| Work entries | No* | Job title, company, dates, description; "current" clears end date | Step 1 |
-| Education entries | No* | School, degree, field, graduation year | Step 1 |
+### Step 1 — Experience (collapsible sections)
 
-\*Prefilled from CV parse; user can add/remove entries.
+Three collapsible sections: **Work Experience**, **Education**, and **Projects**. Each section shows an entry count badge and expands by default when CV parse found rows in that section.
+
+| Section | Fields per entry | Required | When shown |
+|---------|------------------|----------|------------|
+| Work Experience | Job title, company, start/end date, location, "I currently work here", description | No* | Step 1 |
+| Education | School/university, degree (smart combobox: B.Tech/MSc/etc.), field of study, graduation year, location | No* | Step 1 |
+| Projects | Project name, project link (GitHub/demo URL), location, project details | No* | Step 1 |
+
+\*Prefilled from `parse-cv`; user can add/remove entries. Projects are saved to `portfolioItems` on finish (via `addPortfolioItem` after profile update).
+
+**Degree combobox:** Parsed free-text degrees (e.g. `BSc`, `B.Tech`, `MSc`) map to level labels; users can type or pick from the list.
+
+**Finish flow for projects:** `completeOnboardingFinish` calls `profileApi.addPortfolioItem` per non-empty project row (URLs normalized to `https://`).
 
 ### Step 2 — Preferences (`PreferencesStep`)
 
@@ -44,7 +56,8 @@ Three-step profile setup for new users: basic info + CV upload, work/education b
 | Salary range | No | Min/max in k, currency | Step 2 |
 | Availability | No | Default "2 weeks notice" | Step 2 |
 | Sponsorship, match %, job age | No | Filter toggles | Step 2 |
-| CV file | Yes (re-validated) | Must still be set to finish | Step 2 |
+
+CV is uploaded on Step 0 only; finish still requires `cvFile` in wizard state (no re-upload UI on Step 2).
 
 ### Email verification modal
 
@@ -57,8 +70,8 @@ Three-step profile setup for new users: basic info + CV upload, work/education b
 
 | Action | Trigger | Result |
 |--------|---------|--------|
-| Continue (step 0) | Basic info submit | `authApi.parseOnboardingCv` → map to work/education → advance to step 1 |
-| Continue (step 1) | Form submit | Advance to step 2 |
+| Continue (step 0) | Basic info submit | `authApi.parseOnboardingCv` → map to work/education/projects → advance to step 1 |
+| Continue (step 1) | Experience form submit | Optional invalid project URL toast; advance to step 2 |
 | Back | Buttons on steps 1–2 | Return to previous step |
 | Complete profile / Find my jobs | `PreferencesStep.onComplete` → `handleFinish` | Email verify modal (if needed) → `proceedFinish` |
 | Verify email | Modal OTP submit | `authApi.verifyOnboardingEmail` → `writeOnboardingVerification` → `proceedFinish` |
@@ -68,9 +81,10 @@ Three-step profile setup for new users: basic info + CV upload, work/education b
 ### `completeOnboardingFinish` order
 
 1. **Register** (if `pendingSignup`): `signUp` with `emailVerificationId` from session
-2. **Save profile**: `profileApi.update` with `onboarded: true`
+2. **Save profile**: `profileApi.update` with `onboarded: true` (work + education JSONB, including `location`, `degreeLevel`, `degreeTitle`)
 3. **Upload CV**: `profileApi.uploadCv`
-4. **Start delivery**: `onboardingApi.startDelivery`
+4. **Save projects**: `profileApi.addPortfolioItem` per onboarding project row
+5. **Start delivery**: `onboardingApi.startDelivery`
 5. Caller polls `onboardingApi.deliveryStatus` until `ready` or `readyPartial`
 
 ## Auth and session
@@ -114,7 +128,7 @@ Session expiry during onboarding: toast + `redirectOnSessionExpired('/onboarding
 | CV → form mapping | `frontend/src/lib/mapCvParseToOnboarding.ts` |
 | Profile payload builder | `frontend/src/lib/buildOnboardingProfilePayload.ts` |
 | Session expiry helpers | `frontend/src/lib/onboardingSession.ts` |
-| Step components | `frontend/src/components/onboarding/BasicInfoStep.tsx`, `PreferencesStep.tsx`, `OnboardingStepper.tsx`, `OnboardingPageShell.tsx` |
+| Step components | `BasicInfoStep.tsx`, `ExperienceStep.tsx`, `WorkExperienceSection.tsx`, `EducationSection.tsx`, `ProjectsSection.tsx`, `CollapsibleOnboardingSection.tsx`, `DegreeCombobox.tsx`, `PreferencesStep.tsx`, `OnboardingStepper.tsx`, `OnboardingPageShell.tsx` |
 | Email modal | `frontend/src/components/onboarding/OnboardingEmailVerificationModal.tsx` |
 | Delivery UI | `frontend/src/components/onboarding/JobSearchRadarLoader.tsx`, `JobEvaluationProgressModal.tsx` |
 | Welcome flag | `frontend/src/components/dashboard/CareersHomeDashboard.tsx` |

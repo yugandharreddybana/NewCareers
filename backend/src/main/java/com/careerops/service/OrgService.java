@@ -23,19 +23,22 @@ public class OrgService {
     private final OrgTeamRepository teamRepo;
     private final SsoProviderRepository ssoRepo;
     private final UserRepository userRepo;
+    private final OrganizationSubscriptionResolver subscriptionResolver;
 
     public OrgService(OrgRepository orgRepo,
                       OrgMemberRepository memberRepo,
                       OrgInvitationRepository inviteRepo,
                       OrgTeamRepository teamRepo,
                       SsoProviderRepository ssoRepo,
-                      UserRepository userRepo) {
+                      UserRepository userRepo,
+                      OrganizationSubscriptionResolver subscriptionResolver) {
         this.orgRepo   = orgRepo;
         this.memberRepo = memberRepo;
         this.inviteRepo = inviteRepo;
         this.teamRepo   = teamRepo;
         this.ssoRepo    = ssoRepo;
         this.userRepo   = userRepo;
+        this.subscriptionResolver = subscriptionResolver;
     }
 
     // ── Organizations ──────────────────────────────────────────────────────────
@@ -59,6 +62,8 @@ public class OrgService {
             .role("owner")
             .build();
         memberRepo.save(owner);
+
+        subscriptionResolver.createSubscriptionForOrg(org.getId(), org.getPlan());
 
         return toOrgResponse(org, 1);
     }

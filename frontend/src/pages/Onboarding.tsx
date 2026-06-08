@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+﻿import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 
 import { useNavigate } from 'react-router-dom';
@@ -13,6 +13,7 @@ import {
   readPendingSignup,
 } from '@/lib/pendingSignup';
 import { OnboardingEmailVerificationModal } from '@/components/onboarding/OnboardingEmailVerificationModal';
+import { TrialStartedConfirmation } from '@/components/onboarding/TrialStartedConfirmation';
 import {
   completeOnboardingFinish,
   messageForDeliveryStage,
@@ -24,17 +25,16 @@ import { queryKeys } from '@/lib/queryKeys';
 import {
   AUTH_LOGGED_OUT_EVENT,
   authApi,
+  ensureFreshSession,
   onboardingApi,
   profileApi,
   type OnboardingDeliveryStatus,
 } from '@/services/api';
-import { tokenStore } from '@/lib/tokenStore';
 import {
   isAuthFailureError,
   isOnboardingPath,
   redirectOnSessionExpired,
 } from '@/lib/onboardingSession';
-
 import { PageMeta } from '@/components/PageMeta';
 
 import {
@@ -43,9 +43,17 @@ import {
   mergeWorkSettings,
   type PreferencesStepValues,
 } from '@/components/onboarding/PreferencesStep';
-import { MonthYearField } from '@/components/onboarding/MonthYearField';
+import { ExperienceStep } from '@/components/onboarding/ExperienceStep';
 import { buildOnboardingProfilePayload } from '@/lib/buildOnboardingProfilePayload';
-import { mapCvParseToOnboarding } from '@/lib/mapCvParseToOnboarding';
+import {
+  emptyEducation,
+  emptyProject,
+  emptyWork,
+  mapCvParseToOnboarding,
+  type MappedEducationEntry,
+  type MappedProjectEntry,
+  type MappedWorkEntry,
+} from '@/lib/mapCvParseToOnboarding';
 import {
   readOnboardingCvDraft,
   writeOnboardingCvDraft,
@@ -54,6 +62,7 @@ import {
 import { OnboardingPageShell } from '@/components/onboarding/OnboardingPageShell';
 import { OnboardingStepper } from '@/components/onboarding/OnboardingStepper';
 import { BasicInfoStep } from '@/components/onboarding/BasicInfoStep';
+import { CAPTCHA_ENABLED } from '@/components/auth/RecaptchaBlock';
 import { JobSearchRadarLoader } from '@/components/onboarding/JobSearchRadarLoader';
 import { JobEvaluationProgressModal } from '@/components/JobEvaluationProgressModal';
 import { useJobEvaluationProgress } from '@/hooks/useJobEvaluationProgress';
@@ -69,6 +78,12 @@ function sleep(ms: number): Promise<void> {
   return new Promise(resolve => window.setTimeout(resolve, ms));
 }
 
+import {
+  GENERIC_CV_PARSE_ERROR,
+  GENERIC_ONBOARDING_MATCH_ERROR,
+  GENERIC_ONBOARDING_PROFILE_ERROR,
+  GENERIC_ONBOARDING_SIGNUP_ERROR,
+} from '@/lib/authErrors';
 import toast from 'react-hot-toast';
 
 import '@/styles/onboarding.css';
@@ -91,398 +106,6 @@ function defaultPreferences(): PreferencesStepValues {
     maxAgeDays: 7,
   };
 }
-
-type WorkEntry = {
-
-  jobTitle: string;
-
-  companyName: string;
-
-  startDate: string;
-
-  endDate: string;
-
-  current: boolean;
-
-  description: string;
-
-};
-
-
-
-type EducationEntry = {
-
-  schoolName: string;
-
-  degree: string;
-
-  fieldOfStudy: string;
-
-  graduationYear: string;
-
-};
-
-
-
-function emptyWork(): WorkEntry {
-
-  return {
-
-    jobTitle: '',
-
-    companyName: '',
-
-    startDate: '',
-
-    endDate: '',
-
-    current: false,
-
-    description: '',
-
-  };
-
-}
-
-
-
-function emptyEducation(): EducationEntry {
-
-  return {
-
-    schoolName: '',
-
-    degree: '',
-
-    fieldOfStudy: '',
-
-    graduationYear: '',
-
-  };
-
-}
-
-
-
-function WorkPanel({
-
-  entry,
-
-  index,
-
-  onChange,
-
-  onRemove,
-
-}: {
-
-  entry: WorkEntry;
-
-  index: number;
-
-  onChange: (index: number, patch: Partial<WorkEntry>) => void;
-
-  onRemove?: () => void;
-
-}) {
-
-  const id = (field: string) => `work-${index}-${field}`;
-
-  return (
-
-    <div className="onboarding-panel">
-
-      <div className="onboarding-grid-2">
-
-        <div className="onboarding-field onboarding-field--muted">
-
-          <label htmlFor={id('jobTitle')}>Job Title</label>
-
-          <input
-
-            className="onboarding-input-sm"
-
-            id={id('jobTitle')}
-
-            placeholder="e.g. Software Engineer"
-
-            type="text"
-
-            value={entry.jobTitle}
-
-            onChange={e => onChange(index, { jobTitle: e.target.value })}
-
-          />
-
-        </div>
-
-        <div className="onboarding-field onboarding-field--muted">
-
-          <label htmlFor={id('companyName')}>Company Name</label>
-
-          <input
-
-            className="onboarding-input-sm"
-
-            id={id('companyName')}
-
-            placeholder="e.g. Acme Corp"
-
-            type="text"
-
-            value={entry.companyName}
-
-            onChange={e => onChange(index, { companyName: e.target.value })}
-
-          />
-
-        </div>
-
-      </div>
-
-      <div className="onboarding-grid-2" style={{ marginTop: '1.5rem' }}>
-
-        <MonthYearField
-          label="Start Date"
-          idPrefix={id('start')}
-          value={entry.startDate}
-          onChange={next => onChange(index, { startDate: next })}
-        />
-
-        <MonthYearField
-          label="End Date"
-          idPrefix={id('end')}
-          value={entry.endDate}
-          disabled={entry.current}
-          onChange={next => onChange(index, { endDate: next })}
-          {...(entry.current ? { hint: 'Leave blank while you still work here' } : {})}
-        />
-
-      </div>
-
-      <div className="onboarding-checkbox-row" style={{ marginTop: '1rem' }}>
-
-        <input
-
-          id={id('current')}
-
-          type="checkbox"
-
-          checked={entry.current}
-
-          onChange={e =>
-
-            onChange(index, { current: e.target.checked, endDate: e.target.checked ? '' : entry.endDate })
-
-          }
-
-        />
-
-        <label htmlFor={id('current')}>I currently work here</label>
-
-      </div>
-
-      <div className="onboarding-field onboarding-field--muted">
-
-        <label htmlFor={id('description')}>Description</label>
-
-        <textarea
-
-          className="onboarding-input-sm"
-
-          id={id('description')}
-
-          rows={3}
-
-          placeholder="Describe your responsibilities and achievements..."
-
-          value={entry.description}
-
-          onChange={e => onChange(index, { description: e.target.value })}
-
-          style={{ resize: 'none' }}
-
-        />
-
-      </div>
-
-      {onRemove && (
-        <div className="onboarding-panel__delete-row">
-          <button
-            type="button"
-            className="onboarding-panel__delete"
-            onClick={onRemove}
-            aria-label="Remove position"
-          >
-            <span className="material-symbols-outlined" aria-hidden="true">
-              delete
-            </span>
-          </button>
-        </div>
-      )}
-
-    </div>
-
-  );
-
-}
-
-
-
-function EducationPanel({
-
-  entry,
-
-  index,
-
-  onChange,
-
-  onRemove,
-
-}: {
-
-  entry: EducationEntry;
-
-  index: number;
-
-  onChange: (index: number, patch: Partial<EducationEntry>) => void;
-
-  onRemove?: () => void;
-
-}) {
-
-  const id = (field: string) => `edu-${index}-${field}`;
-
-  return (
-
-    <div className="onboarding-panel">
-
-      <div className="onboarding-field onboarding-field--muted" style={{ marginBottom: '1.5rem' }}>
-
-        <label htmlFor={id('schoolName')}>School / University</label>
-
-        <input
-
-          className="onboarding-input-sm"
-
-          id={id('schoolName')}
-
-          placeholder="e.g. State University"
-
-          type="text"
-
-          value={entry.schoolName}
-
-          onChange={e => onChange(index, { schoolName: e.target.value })}
-
-        />
-
-      </div>
-
-      <div className="onboarding-grid-3">
-
-        <div className="onboarding-field onboarding-field--muted">
-
-          <label htmlFor={id('degree')}>Degree</label>
-
-          <select
-
-            className="onboarding-select-sm"
-
-            id={id('degree')}
-
-            value={entry.degree}
-
-            onChange={e => onChange(index, { degree: e.target.value })}
-
-          >
-
-            <option value="">Select degree</option>
-
-            <option value="bachelors">Bachelor&apos;s</option>
-
-            <option value="masters">Master&apos;s</option>
-
-            <option value="phd">Ph.D.</option>
-
-            <option value="other">Other</option>
-
-          </select>
-
-        </div>
-
-        <div className="onboarding-field onboarding-field--muted">
-
-          <label htmlFor={id('fieldOfStudy')}>Field of Study</label>
-
-          <input
-
-            className="onboarding-input-sm"
-
-            id={id('fieldOfStudy')}
-
-            placeholder="e.g. Computer Science"
-
-            type="text"
-
-            value={entry.fieldOfStudy}
-
-            onChange={e => onChange(index, { fieldOfStudy: e.target.value })}
-
-          />
-
-        </div>
-
-        <div className="onboarding-field onboarding-field--muted">
-
-          <label htmlFor={id('graduationYear')}>Graduation Year</label>
-
-          <input
-
-            className="onboarding-input-sm"
-
-            id={id('graduationYear')}
-
-            type="number"
-
-            min={1950}
-
-            max={2030}
-
-            placeholder="YYYY"
-
-            value={entry.graduationYear}
-
-            onChange={e => onChange(index, { graduationYear: e.target.value })}
-
-          />
-
-        </div>
-
-      </div>
-
-      {onRemove && (
-        <div className="onboarding-panel__delete-row">
-          <button
-            type="button"
-            className="onboarding-panel__delete"
-            onClick={onRemove}
-            aria-label="Remove school"
-          >
-            <span className="material-symbols-outlined" aria-hidden="true">
-              delete
-            </span>
-          </button>
-        </div>
-      )}
-
-    </div>
-
-  );
-
-}
-
-
 
 export default function Onboarding() {
 
@@ -549,6 +172,7 @@ export default function Onboarding() {
   const [step, setStep] = useState(0);
   const [step0Submitted, setStep0Submitted] = useState(false);
   const [parsingCv, setParsingCv] = useState(false);
+  const [parseCaptchaToken, setParseCaptchaToken] = useState<string | null>(null);
   const [cvParseSummary, setCvParseSummary] = useState<{
     rolesFound: number;
     educationFound: number;
@@ -570,7 +194,9 @@ export default function Onboarding() {
   const [deliveryStatus, setDeliveryStatus] = useState<OnboardingDeliveryStatus | null>(null);
   const [deliveryFailed, setDeliveryFailed] = useState<string | null>(null);
   const [verificationModalOpen, setVerificationModalOpen] = useState(false);
-  const [verificationResendsRemaining, setVerificationResendsRemaining] = useState(3);
+  const [verificationResendsRemaining] = useState(3);
+  const [trialConfirmationOpen, setTrialConfirmationOpen] = useState(false);
+  const [trialConfirmContinuing, setTrialConfirmContinuing] = useState(false);
 
   const [fullName, setFullName] = useState(
     () => user?.name || readPendingSignup()?.name || '',
@@ -582,9 +208,15 @@ export default function Onboarding() {
 
   const [location, setLocation] = useState('Dublin, Ireland');
 
-  const [workEntries, setWorkEntries] = useState<WorkEntry[]>([emptyWork()]);
+  const [linkedInUrl, setLinkedInUrl] = useState('');
+  const [portfolioUrl, setPortfolioUrl] = useState('');
+  const [githubUrl, setGithubUrl] = useState('');
 
-  const [educationEntries, setEducationEntries] = useState<EducationEntry[]>([emptyEducation()]);
+  const [workEntries, setWorkEntries] = useState<MappedWorkEntry[]>([emptyWork()]);
+
+  const [educationEntries, setEducationEntries] = useState<MappedEducationEntry[]>([emptyEducation()]);
+
+  const [projectEntries, setProjectEntries] = useState<MappedProjectEntry[]>([emptyProject()]);
 
 
 
@@ -600,31 +232,19 @@ export default function Onboarding() {
 
 
 
-  function updateWork(index: number, patch: Partial<WorkEntry>) {
-
+  function updateWork(index: number, patch: Partial<MappedWorkEntry>) {
     setWorkEntries(prev => prev.map((w, i) => (i === index ? { ...w, ...patch } : w)));
-
   }
 
-
-
-  function updateEducation(index: number, patch: Partial<EducationEntry>) {
-
+  function updateEducation(index: number, patch: Partial<MappedEducationEntry>) {
     setEducationEntries(prev => prev.map((e, i) => (i === index ? { ...e, ...patch } : e)));
+  }
 
+  function updateProject(index: number, patch: Partial<MappedProjectEntry>) {
+    setProjectEntries(prev => prev.map((p, i) => (i === index ? { ...p, ...patch } : p)));
   }
 
 
-
-  async function ensureFreshSession(): Promise<void> {
-    const refresh = tokenStore.getRefresh();
-    if (!refresh) return;
-    try {
-      await authApi.refresh(refresh);
-    } catch {
-      // Interceptor handles redirect; save handler surfaces the error.
-    }
-  }
 
   async function pollDeliveryUntilReady(): Promise<void> {
     const deadline = Date.now() + DELIVERY_TIMEOUT_MS;
@@ -688,7 +308,15 @@ export default function Onboarding() {
       }
 
       const payload = buildOnboardingProfilePayload(
-        { fullName, headline, experienceYears, location },
+        {
+          fullName,
+          headline,
+          experienceYears,
+          location,
+          linkedInUrl,
+          portfolioUrl,
+          githubUrl,
+        },
         workEntries,
         educationEntries,
         p,
@@ -702,6 +330,7 @@ export default function Onboarding() {
           registerName,
           profilePayload: payload,
           cvFile: p.cvFile,
+          projectEntries,
         },
         {
           signUp,
@@ -709,6 +338,7 @@ export default function Onboarding() {
           ensureFreshSession,
           updateProfile,
           uploadCv: async file => { await profileApi.uploadCv(file); },
+          addPortfolioItem: async body => { await profileApi.addPortfolioItem(body); },
           startDelivery: () => onboardingApi.startDelivery(),
           onPhase: setDeliveryStatus,
         },
@@ -720,7 +350,7 @@ export default function Onboarding() {
           return;
         }
         if (finishResult.reason === 'signup_failed') {
-          toast.error(finishResult.message ?? 'Could not create your account. Please try again.');
+          toast.error(finishResult.message ?? GENERIC_ONBOARDING_SIGNUP_ERROR);
           return;
         }
         if (finishResult.reason === 'missing_user_id') {
@@ -764,8 +394,7 @@ export default function Onboarding() {
           return;
         }
         setDeliveryFailed(
-          pollMsg ??
-            'Matching could not complete. Your profile is saved — try again or continue to the dashboard.',
+          pollMsg?.includes('longer than expected') ? pollMsg : GENERIC_ONBOARDING_MATCH_ERROR,
         );
         keepDeliveryOverlay = true;
         return;
@@ -778,16 +407,7 @@ export default function Onboarding() {
         handleSessionExpiredOnOnboarding();
         return;
       }
-      const message =
-        err && typeof err === 'object' && 'response' in err
-          ? (err as { response?: { data?: { message?: string; error?: string } } }).response?.data
-              ?.message ??
-            (err as { response?: { data?: { error?: string } } }).response?.data?.error
-          : err instanceof Error
-            ? err.message
-            : undefined;
-
-      toast.error(message ?? 'Could not save your profile — please try again.');
+      toast.error(GENERIC_ONBOARDING_PROFILE_ERROR);
     } finally {
       if (!keepDeliveryOverlay) {
         setSaving(false);
@@ -807,30 +427,7 @@ export default function Onboarding() {
     }
 
     if (pending && !readOnboardingVerification(pending.email)) {
-      setSaving(true);
-      try {
-        const registerName = fullName.trim() || pending.name?.trim() || 'User';
-        const firstName = registerName.split(/\s+/)[0];
-        const sendBody: { email: string; firstName?: string } = { email: pending.email };
-        if (firstName) sendBody.firstName = firstName;
-        const sent = await authApi.sendOnboardingVerificationOtp(sendBody);
-        setVerificationResendsRemaining(sent.resendsRemaining);
-        setVerificationModalOpen(true);
-      } catch (err: unknown) {
-        if (isAuthFailureError(err)) {
-          handleSessionExpiredOnOnboarding();
-          return;
-        }
-        const message =
-          err && typeof err === 'object' && 'normalizedMessage' in err
-            ? String((err as { normalizedMessage: string }).normalizedMessage)
-            : err instanceof Error
-              ? err.message
-              : 'Could not send verification code. Please try again.';
-        toast.error(message);
-      } finally {
-        setSaving(false);
-      }
+      setVerificationModalOpen(true);
       return;
     }
 
@@ -840,10 +437,20 @@ export default function Onboarding() {
   function handleVerificationComplete(verificationId: string) {
     const pending = readPendingSignup();
     if (pending) {
-      writeOnboardingVerification(verificationId, pending.email);
+      writeOnboardingVerification(verificationId, pending.email, pending.signupIntentId);
     }
     setVerificationModalOpen(false);
-    void proceedFinish();
+    setTrialConfirmationOpen(true);
+  }
+
+  async function handleTrialConfirmationContinue() {
+    setTrialConfirmContinuing(true);
+    try {
+      await proceedFinish();
+    } finally {
+      setTrialConfirmContinuing(false);
+      setTrialConfirmationOpen(false);
+    }
   }
 
 
@@ -857,17 +464,38 @@ export default function Onboarding() {
       toast.error('Upload your CV to continue.');
       return;
     }
+    if (CAPTCHA_ENABLED && !parseCaptchaToken) {
+      toast.error('Complete the security check below.');
+      return;
+    }
 
     setParsingCv(true);
     try {
-      const parsed = await authApi.parseOnboardingCv(preferences.cvFile);
+      const pending = readPendingSignup();
+      const parsed = await authApi.parseOnboardingCv(
+        preferences.cvFile,
+        pending?.signupIntentId,
+        pending?.email,
+        parseCaptchaToken ?? undefined,
+      );
       const mapped = mapCvParseToOnboarding(parsed);
 
       setWorkEntries(mapped.workEntries);
       setEducationEntries(mapped.educationEntries);
+      setProjectEntries(mapped.projectEntries);
 
       if (!headline.trim() && parsed.headline?.trim()) {
         setHeadline(parsed.headline.trim());
+      }
+
+      if (!linkedInUrl.trim() && parsed.linkedInUrl?.trim()) {
+        setLinkedInUrl(parsed.linkedInUrl.trim());
+      }
+      if (!portfolioUrl.trim() && parsed.websiteUrl?.trim()) {
+        setPortfolioUrl(parsed.websiteUrl.trim());
+      }
+      if (!githubUrl.trim() && parsed.githubUrl?.trim()) {
+        setGithubUrl(parsed.githubUrl.trim());
       }
 
       writeOnboardingCvDraft({
@@ -897,15 +525,7 @@ export default function Onboarding() {
         handleSessionExpiredOnOnboarding();
         return;
       }
-      const message =
-        err && typeof err === 'object' && 'response' in err
-          ? (err as { response?: { data?: { message?: string; error?: string } } }).response?.data
-              ?.message ??
-            (err as { response?: { data?: { error?: string } } }).response?.data?.error
-          : err instanceof Error
-            ? err.message
-            : undefined;
-      toast.error(message ?? 'Could not read your CV. Try a different PDF or DOCX file.');
+      toast.error(GENERIC_CV_PARSE_ERROR);
     } finally {
       setParsingCv(false);
     }
@@ -929,12 +549,18 @@ export default function Onboarding() {
     headline?: string;
     experienceYears?: string;
     location?: string;
+    linkedInUrl?: string;
+    portfolioUrl?: string;
+    githubUrl?: string;
     cvFile?: File | null;
   }) {
     if (patch.fullName !== undefined) setFullName(patch.fullName);
     if (patch.headline !== undefined) setHeadline(patch.headline);
     if (patch.experienceYears !== undefined) setExperienceYears(patch.experienceYears);
     if (patch.location !== undefined) setLocation(patch.location);
+    if (patch.linkedInUrl !== undefined) setLinkedInUrl(patch.linkedInUrl);
+    if (patch.portfolioUrl !== undefined) setPortfolioUrl(patch.portfolioUrl);
+    if (patch.githubUrl !== undefined) setGithubUrl(patch.githubUrl);
     if (patch.cvFile !== undefined) patchPreferences({ cvFile: patch.cvFile });
   }
 
@@ -976,6 +602,13 @@ export default function Onboarding() {
         step0Submitted={step0Submitted}
       >
         <div className="onboarding-shell__scroll" ref={scrollRef}>
+          {trialConfirmationOpen ? (
+            <TrialStartedConfirmation
+              onContinue={() => void handleTrialConfirmationContinue()}
+              continuing={trialConfirmContinuing}
+            />
+          ) : (
+            <>
           <OnboardingStepper activeStep={step} basicIdentityComplete={basicIdentityComplete} />
 
           {step === 0 && (
@@ -985,174 +618,36 @@ export default function Onboarding() {
                 headline,
                 experienceYears,
                 location,
+                linkedInUrl,
+                portfolioUrl,
+                githubUrl,
                 cvFile: preferences.cvFile,
               }}
               onChange={handleBasicInfoChange}
               onSubmit={() => void handleBasicInfoSubmit()}
               parsingCv={parsingCv}
+              parseCaptchaToken={parseCaptchaToken}
+              onParseCaptchaChange={setParseCaptchaToken}
             />
           )}
 
 
 
           {step === 1 && (
-            <>
-              <div className="onboarding-card__title onboarding-card__title--experience">
-                <h1>Tell us about your background</h1>
-                <p>Add your work experience and education to help us find the best roles for you.</p>
-              </div>
-
-              {cvParseSummary && (cvParseSummary.rolesFound > 0 || cvParseSummary.educationFound > 0) && (
-                <div className="onboarding-parse-banner" role="status">
-                  <span className="material-symbols-outlined" aria-hidden="true">
-                    auto_awesome
-                  </span>
-                  <p>
-                    We found{' '}
-                    {cvParseSummary.rolesFound > 0
-                      ? `${cvParseSummary.rolesFound} role${cvParseSummary.rolesFound === 1 ? '' : 's'}`
-                      : 'no roles'}
-                    {cvParseSummary.educationFound > 0
-                      ? ` and ${cvParseSummary.educationFound} school${cvParseSummary.educationFound === 1 ? '' : 's'}`
-                      : ''}{' '}
-                    from your CV — review and edit below.
-                  </p>
-                </div>
-              )}
-
-
-
-                <form
-
-                  className="onboarding-form"
-
-                  onSubmit={e => {
-
-                    e.preventDefault();
-
-                    setStep(2);
-
-                  }}
-
-                >
-
-                  <section className="onboarding-section">
-
-                    <div className="onboarding-section__heading">
-
-                      <span className="material-symbols-outlined" aria-hidden="true">
-
-                        work
-
-                      </span>
-
-                      <h2>Work Experience</h2>
-
-                    </div>
-
-                    {workEntries.map((entry, i) => (
-
-                      <WorkPanel
-                        key={i}
-                        entry={entry}
-                        index={i}
-                        onChange={updateWork}
-                        {...(i > 0 && {
-                          onRemove: () => setWorkEntries(prev => prev.filter((_, idx) => idx !== i)),
-                        })}
-                      />
-
-                    ))}
-
-                    <button
-
-                      type="button"
-
-                      className="onboarding-btn-text-add"
-
-                      onClick={() => setWorkEntries(prev => [...prev, emptyWork()])}
-
-                    >
-
-                      <span className="material-symbols-outlined" aria-hidden="true">
-
-                        add
-
-                      </span>
-
-                      Add another position
-
-                    </button>
-
-                  </section>
-
-
-
-                  <section className="onboarding-section">
-
-                    <div className="onboarding-section__heading">
-
-                      <span className="material-symbols-outlined" aria-hidden="true">
-
-                        school
-
-                      </span>
-
-                      <h2>Education</h2>
-
-                    </div>
-
-                    {educationEntries.map((entry, i) => (
-
-                      <EducationPanel
-                        key={i}
-                        entry={entry}
-                        index={i}
-                        onChange={updateEducation}
-                        {...(i > 0 && {
-                          onRemove: () => setEducationEntries(prev => prev.filter((_, idx) => idx !== i)),
-                        })}
-                      />
-
-                    ))}
-
-                    <button
-
-                      type="button"
-
-                      className="onboarding-btn-text-add"
-
-                      onClick={() => setEducationEntries(prev => [...prev, emptyEducation()])}
-
-                    >
-
-                      <span className="material-symbols-outlined" aria-hidden="true">
-
-                        add
-
-                      </span>
-
-                      Add another school
-
-                    </button>
-
-                  </section>
-
-
-
-              <div className="onboarding-actions">
-                <button className="onboarding-btn-outline" type="button" onClick={() => setStep(0)}>
-                  Back
-                </button>
-                <button className="onboarding-btn-primary onboarding-btn-primary--full" type="submit">
-                  Continue
-                  <span className="material-symbols-outlined" aria-hidden="true">
-                    arrow_forward
-                  </span>
-                </button>
-              </div>
-            </form>
-            </>
+            <ExperienceStep
+              workEntries={workEntries}
+              educationEntries={educationEntries}
+              projectEntries={projectEntries}
+              cvParseSummary={cvParseSummary}
+              onWorkChange={updateWork}
+              onEducationChange={updateEducation}
+              onProjectChange={updateProject}
+              onWorkEntries={setWorkEntries}
+              onEducationEntries={setEducationEntries}
+              onProjectEntries={setProjectEntries}
+              onBack={() => setStep(0)}
+              onContinue={() => setStep(2)}
+            />
           )}
 
           {step === 2 && (
@@ -1175,6 +670,8 @@ export default function Onboarding() {
               </form>
             </>
           )}
+            </>
+          )}
         </div>
       </OnboardingPageShell>
     </div>
@@ -1186,6 +683,7 @@ export default function Onboarding() {
           ? { firstName: fullName.trim().split(/\s+/)[0] }
           : {})}
         initialResendsRemaining={verificationResendsRemaining}
+        awaitingInitialSend
         onVerified={handleVerificationComplete}
         onCancel={() => setVerificationModalOpen(false)}
       />

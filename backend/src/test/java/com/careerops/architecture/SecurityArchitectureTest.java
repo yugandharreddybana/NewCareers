@@ -38,6 +38,7 @@ public class SecurityArchitectureTest {
                     .should().notHaveRawType(String.class)
                     .as("JPA entities must not store raw/plain-text tokens as String. Use hashed-only or encrypted formats instead.");
 
-    // This is a simplified rule. In a more complex app, we'd verify that
-    // no cookie-based authentication filters are registered for these paths.
+    // CSRF is intentionally disabled on the Java API (SecurityConfig.csrf().disable()).
+    // Browser-facing CSRF protection lives in middleware/server.ts (double-submit cookie).
+    // Invariant: if cookie-based session auth is reintroduced on Java, CSRF MUST be re-enabled.
 }

@@ -1,5 +1,6 @@
 package com.careerops.controller;
 
+import com.careerops.annotation.PlanGated;
 import com.careerops.service.CvService;
 import com.careerops.util.AuthUtil;
 import lombok.RequiredArgsConstructor;
@@ -38,6 +39,7 @@ public class CvController {
 
     @PostMapping(value = "/upload", consumes = "multipart/form-data")
     @ResponseStatus(HttpStatus.CREATED)
+    @PlanGated("cv_upload")
     public com.careerops.dto.UserCvDTO upload(
             @RequestPart("file") MultipartFile file
     ) throws IOException {

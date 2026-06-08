@@ -1,45 +1,24 @@
 /**
- * tokenStore.ts — single source of truth for access/refresh tokens.
+ * tokenStore.ts — single source of truth for access tokens.
  *
- * Pass 6 #6.021 — security model rewritten:
+ * Security model:
  *   - Access token  → in-memory only (zero persistence ⇒ zero XSS surface).
- *   - Refresh token → in-memory only by default; short fallback in
- *                     sessionStorage so a browser-tab refresh does not log
- *                     the user out before the silent /auth/refresh interceptor
- *                     has a chance to run. SessionStorage is cleared on tab
- *                     close, so the long-term threat surface is small.
+ *   - Refresh token → HttpOnly `co_refresh` cookie only (never sessionStorage).
  *
- *   On a tab refresh:
- *     1. Module re-evaluates → access token blank.
- *     2. AuthContext mount calls /auth/me → 401 (cookie absent or expired).
- *     3. Axios interceptor reads refresh from sessionStorage → /auth/refresh.
- *     4. New access + refresh tokens are stored in memory + sessionStorage.
- *
- *   On a new tab / re-open:
- *     1. SessionStorage is empty → user must sign in. Acceptable because
- *        the alternative (localStorage) leaves long-lived tokens that survive
- *        XSS-driven exfiltration.
- *
- * Subscribers are notified on token changes so the axios queue can re-run
- * pending requests after a successful silent refresh.
- *
- * Replaces the previous localStorage(refresh) + sessionStorage(access) split.
- *
- * IMPORTANT: never re-introduce localStorage usage here without a security
- * review. The audit (1.067 / 9.013 family) tracks this guarantee.
+ * On tab refresh the axios interceptor calls /auth/refresh with credentials;
+ * middleware reads the HttpOnly refresh cookie and rotates tokens.
  */
 
-const REFRESH_KEY = 'co_refresh_v2';
-const LEGACY_KEYS = ['co_token', 'co_refresh', 'co_user'] as const;
+const REFRESH_VIA_COOKIE_KEY = 'co_refresh_cookie_v2';
+const LEGACY_KEYS = ['co_token', 'co_refresh', 'co_refresh_v2', 'co_user'] as const;
 
 let accessToken: string | null = null;
-let refreshToken: string | null = null;
-/** True when refresh token lives in HttpOnly cookie (Remember me). */
+/** True when a refresh token may exist in the HttpOnly cookie. */
 let refreshViaCookie = false;
+let legacyEvicted = false;
 
 const listeners = new Set<(t: string | null) => void>();
 
-/** Best-effort safe sessionStorage get/set/remove (handles SSR, locked-down browsers). */
 const safeSession = {
   get(key: string): string | null {
     try { return typeof sessionStorage === 'undefined' ? null : sessionStorage.getItem(key); }
@@ -47,7 +26,7 @@ const safeSession = {
   },
   set(key: string, value: string): void {
     try { if (typeof sessionStorage !== 'undefined') sessionStorage.setItem(key, value); }
-    catch { /* ignore quota / privacy errors */ }
+    catch { /* ignore */ }
   },
   remove(key: string): void {
     try { if (typeof sessionStorage !== 'undefined') sessionStorage.removeItem(key); }
@@ -55,7 +34,6 @@ const safeSession = {
   },
 };
 
-/** Wipe any tokens written by a previous version of this module. */
 function evictLegacyKeys(): void {
   if (typeof window === 'undefined') return;
   for (const k of LEGACY_KEYS) {
@@ -64,80 +42,85 @@ function evictLegacyKeys(): void {
   }
 }
 
-evictLegacyKeys();
+function ensureLegacyEvicted(): void {
+  if (legacyEvicted) return;
+  evictLegacyKeys();
+  legacyEvicted = true;
+}
 
-// Re-hydrate refresh token from sessionStorage on module load so a tab
-// refresh keeps the user signed in until /auth/refresh resolves.
-refreshToken = safeSession.get(REFRESH_KEY);
+function clearCookieRefreshFlag(): void {
+  safeSession.remove(REFRESH_VIA_COOKIE_KEY);
+}
+
+function hydrateCookieRefreshFlag(): void {
+  refreshViaCookie = safeSession.get(REFRESH_VIA_COOKIE_KEY) === '1';
+}
+
+hydrateCookieRefreshFlag();
 
 function notify(): void {
   for (const listener of listeners) listener(accessToken);
 }
 
 export const tokenStore = {
-  // ── Access token (memory only) ─────────────────────────────────────────
   getAccess(): string | null { return accessToken; },
 
   setAccess(token: string | null): void {
+    ensureLegacyEvicted();
     accessToken = token && token.length > 0 ? token : null;
     notify();
   },
 
   hasAccess(): boolean { return accessToken !== null; },
 
-  // ── Refresh token (memory + sessionStorage) ───────────────────────────
-  getRefresh(): string | null { return refreshToken; },
+  /** @deprecated Refresh tokens are HttpOnly cookies only. */
+  getRefresh(): string | null { return null; },
 
-  setRefresh(token: string | null): void {
-    refreshToken = token && token.length > 0 ? token : null;
-    if (refreshToken) safeSession.set(REFRESH_KEY, refreshToken);
-    else              safeSession.remove(REFRESH_KEY);
+  /** @deprecated Refresh tokens are HttpOnly cookies only. */
+  setRefresh(_token: string | null): void {
+    ensureLegacyEvicted();
   },
 
-  hasRefresh(): boolean { return refreshToken !== null; },
+  hasRefresh(): boolean { return false; },
 
-  /** Refresh may be available via HttpOnly cookie after Remember me login. */
-  hasRefreshOrCookie(): boolean { return refreshToken !== null || refreshViaCookie; },
+  hasRefreshOrCookie(): boolean { return refreshViaCookie; },
 
   setRefreshViaCookie(enabled: boolean): void {
+    ensureLegacyEvicted();
     refreshViaCookie = enabled;
-    if (enabled) {
-      this.setRefresh(null);
-    }
+    if (enabled) safeSession.set(REFRESH_VIA_COOKIE_KEY, '1');
+    else clearCookieRefreshFlag();
   },
 
   usesCookieRefresh(): boolean { return refreshViaCookie; },
 
-  /** Atomic write of both tokens after login / signup / silent refresh. */
-  set(access: string, refresh: string): void {
-    refreshViaCookie = false;
-    this.setAccess(access);
-    this.setRefresh(refresh);
+  /** After login / signup / silent refresh — access in memory, refresh in cookie. */
+  set(access: string, _refresh?: string): void {
+    ensureLegacyEvicted();
+    this.setAccessOnly(access);
   },
 
-  /** Remember-me login: access in memory, refresh in HttpOnly cookie. */
   setAccessOnly(access: string): void {
+    ensureLegacyEvicted();
     refreshViaCookie = true;
+    safeSession.set(REFRESH_VIA_COOKIE_KEY, '1');
+    safeSession.remove('co_refresh_v2');
     this.setAccess(access);
-    this.setRefresh(null);
   },
 
-  /** Atomic clear on logout / unrecoverable session error. */
   clear(): void {
+    ensureLegacyEvicted();
     refreshViaCookie = false;
+    clearCookieRefreshFlag();
     this.setAccess(null);
-    this.setRefresh(null);
     evictLegacyKeys();
   },
 
-  /**
-   * Subscribe to access-token changes. Invokes the listener once with the
-   * current value, then on every subsequent change. Returns an unsubscribe
-   * function.
-   */
   subscribe(listener: (t: string | null) => void): () => void {
     listeners.add(listener);
-    listener(accessToken);
+    if (typeof window !== 'undefined') {
+      listener(accessToken);
+    }
     return () => { listeners.delete(listener); };
   },
 };

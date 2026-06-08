@@ -14,7 +14,7 @@
 import { useState, useCallback } from 'react';
 import { type SkillState } from '@/types';
 import toast from 'react-hot-toast';
-import { isApiError } from '@/types';
+import { getUserFacingErrorMessage } from '@/lib/userFacingError';
 
 export function useQuickSkill<T>(fetcher: () => Promise<T>) {
   const [state, setState] = useState<SkillState>('idle');
@@ -31,10 +31,7 @@ export function useQuickSkill<T>(fetcher: () => Promise<T>) {
       setOpen(true);
     } catch (err: unknown) {
       setState('error');
-      const message = isApiError(err)
-        ? err.normalizedMessage
-        : err instanceof Error ? err.message : 'Skill failed — try again';
-      toast.error(message);
+      toast.error(getUserFacingErrorMessage(err, 'Skill failed — try again.'));
       // Reset to idle after a moment so user can retry.
       setTimeout(() => setState('idle'), 3000);
     }

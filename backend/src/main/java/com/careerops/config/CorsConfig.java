@@ -10,6 +10,10 @@ import org.springframework.web.filter.CorsFilter;
 import java.util.Arrays;
 import java.util.List;
 
+/**
+ * CORS for browser clients calling the Java API directly (local dev / tests).
+ * Never use wildcard origins with credentials enabled.
+ */
 @Configuration
 public class CorsConfig {
 

@@ -8,11 +8,16 @@ export function getInternalSecret(): string | undefined {
   return process.env.APP_INTERNAL_SECRET || process.env.INTERNAL_TRUST_SECRET;
 }
 
+/** Binary-safe encoding for HMAC over multipart or raw byte bodies. */
+export function bytesForSigning(buffer: Buffer): string {
+  return buffer.toString('latin1');
+}
+
 export function bodyForSigning(data: unknown): string {
   if (data === undefined || data === null) return '';
   if (typeof data === 'string') return data;
-  if (Buffer.isBuffer(data)) return data.toString('utf8');
-  if (data instanceof ArrayBuffer) return Buffer.from(data).toString('utf8');
+  if (Buffer.isBuffer(data)) return bytesForSigning(data);
+  if (data instanceof ArrayBuffer) return bytesForSigning(Buffer.from(data));
   return JSON.stringify(data);
 }
 

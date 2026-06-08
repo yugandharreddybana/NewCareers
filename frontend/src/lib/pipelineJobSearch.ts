@@ -13,8 +13,26 @@ const ACTIVE_DELIVERY_STAGES = new Set([
 const POLL_MS = 1500;
 const TIMEOUT_MS = 5 * 60 * 1000;
 
-function sleep(ms: number): Promise<void> {
-  return new Promise(resolve => window.setTimeout(resolve, ms));
+function throwIfAborted(signal?: AbortSignal): void {
+  if (signal?.aborted) {
+    throw new DOMException('Aborted', 'AbortError');
+  }
+}
+
+function sleep(ms: number, signal?: AbortSignal): Promise<void> {
+  throwIfAborted(signal);
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => {
+      signal?.removeEventListener('abort', onAbort);
+      resolve();
+    }, ms);
+    const onAbort = () => {
+      clearTimeout(timer);
+      signal?.removeEventListener('abort', onAbort);
+      reject(new DOMException('Aborted', 'AbortError'));
+    };
+    signal?.addEventListener('abort', onAbort, { once: true });
+  });
 }
 
 export function isActiveDeliveryStage(stage?: string): boolean {
@@ -24,9 +42,11 @@ export function isActiveDeliveryStage(stage?: string): boolean {
 /** Poll onboarding delivery until matches are ready or the run fails. */
 export async function pollPipelineJobSearch(
   onProgress?: (status: OnboardingDeliveryStatus) => void,
+  signal?: AbortSignal,
 ): Promise<OnboardingDeliveryStatus> {
   const deadline = Date.now() + TIMEOUT_MS;
   while (Date.now() < deadline) {
+    throwIfAborted(signal);
     const status = await onboardingApi.deliveryStatus();
     const normalized: OnboardingDeliveryStatus = {
       ...status,
@@ -43,7 +63,7 @@ export async function pollPipelineJobSearch(
           'Job matching could not complete. Try again or adjust your profile.',
       );
     }
-    await sleep(POLL_MS);
+    await sleep(POLL_MS, signal);
   }
   throw new Error(
     'Job matching is taking longer than expected. Refresh the page — more roles may still be loading.',
@@ -62,11 +82,16 @@ export type PipelineFetchResult = {
 export async function fetchJobsOrchestrated(
   count: number,
   onProgress?: (status: OnboardingDeliveryStatus) => void,
+  signal?: AbortSignal,
 ): Promise<PipelineFetchResult> {
+  throwIfAborted(signal);
   const summary: FetchSummary = await jobsApi.fetch(count);
   if (summary.fullSearchStarted) {
-    await pollPipelineJobSearch(onProgress);
-    return { delivered: 0, fullSearch: true };
+    const final = await pollPipelineJobSearch(onProgress, signal);
+    return {
+      delivered: final.evaluatedCount ?? summary.delivered ?? 0,
+      fullSearch: true,
+    };
   }
   return { delivered: summary.delivered ?? 0, fullSearch: false };
 }

@@ -46,6 +46,8 @@ export interface User {
   createdAt?: string;
   planId?: string | null;
   planName?: string | null;
+  /** False for Google-only accounts without a password hash. */
+  passwordLoginEnabled?: boolean;
 }
 
 export interface PortfolioItem {
@@ -54,6 +56,7 @@ export interface PortfolioItem {
   url?: string;
   description?: string;
   techTags?: string[];
+  location?: string;
 }
 
 export interface ImportSummary {
@@ -98,12 +101,16 @@ export interface Profile {
     endDate?: string;
     current?: boolean;
     description?: string;
+    location?: string;
   }>;
   education?: Array<{
     schoolName?: string;
     degree?: string;
+    degreeLevel?: string;
+    degreeTitle?: string;
     fieldOfStudy?: string;
     graduationYear?: string;
+    location?: string;
   }>;
   remotePolicy?: string;
   hybridOnsiteDays?: string;
@@ -111,6 +118,9 @@ export interface Profile {
   version?: number;
   /** Career domain for Irish permit analytics (TECH, HEALTHCARE, …). */
   jobDomain?: string;
+  linkedInUrl?: string;
+  githubUrl?: string;
+  websiteUrl?: string;
 }
 
 export const KANBAN_COLUMNS = [
@@ -119,6 +129,8 @@ export const KANBAN_COLUMNS = [
 export type KanbanColumn = typeof KANBAN_COLUMNS[number];
 
 export interface JobCard {
+  /** Stable list key — mirrors userJobId for VirtualJobFeed and react-window. */
+  id: string;
   userJobId: string;
   jobId: string;
   title: string;

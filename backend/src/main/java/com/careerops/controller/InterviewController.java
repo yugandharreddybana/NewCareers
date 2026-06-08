@@ -1,5 +1,6 @@
 package com.careerops.controller;
 
+import com.careerops.annotation.PlanGated;
 import com.careerops.service.InterviewCoachService;
 import com.careerops.service.MockInterviewService;
 import com.careerops.util.AuthUtil;
@@ -52,6 +53,7 @@ public class InterviewController {
 
     @PostMapping("/generate-kit/{userJobId}")
     @ResponseStatus(HttpStatus.CREATED)
+    @PlanGated("ai_skill_run")
     public List<com.careerops.dto.InterviewDTO.QuestionResponse> generateKit(
             @PathVariable UUID userJobId,
             @jakarta.validation.Valid @RequestBody GenerateKitRequest req
@@ -75,6 +77,7 @@ public class InterviewController {
 
     @PostMapping("/mock/start/{userJobId}")
     @ResponseStatus(HttpStatus.CREATED)
+    @PlanGated("ai_skill_run")
     public Map<String, Object> startMock(
             @PathVariable UUID userJobId,
             @jakarta.validation.Valid @jakarta.validation.constraints.NotNull @RequestBody StartMockRequest req
@@ -86,6 +89,7 @@ public class InterviewController {
     }
 
     @PostMapping("/mock/reply/{sessionId}")
+    @PlanGated("ai_skill_run")
     public Map<String, Object> replyMock(
             @PathVariable UUID sessionId,
             @jakarta.validation.Valid @RequestBody ReplyRequest req
@@ -113,6 +117,12 @@ public class InterviewController {
     public List<com.careerops.dto.InterviewDTO.TrackResponse> listTracks() {
         return coachService.listTracks(AuthUtil.currentUserId()).stream()
                 .map(coachService::toTrackResponse).toList();
+    }
+
+    @GetMapping("/tracks/{userJobId}")
+    public com.careerops.dto.InterviewDTO.TrackResponse getTrack(@PathVariable UUID userJobId) {
+        return coachService.toTrackResponse(
+            coachService.getTrack(AuthUtil.currentUserId(), userJobId));
     }
 
     @PatchMapping("/tracks/{userJobId}/stage")

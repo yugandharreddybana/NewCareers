@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { Loader2, RefreshCw } from 'lucide-react';
 import { authApi, type WordCaptchaChallenge } from '@/services/api';
+import { WORD_CAPTCHA_CODE_LENGTH, wordCaptchaSvgDataUrl } from '@/lib/wordCaptcha';
 
 type Props = {
   value: string | null;
@@ -45,7 +46,7 @@ export function WordCaptchaField({ value: _value, onChange, disabled, onRefresh 
       return;
     }
     const trimmed = answer.trim();
-    if (trimmed.length >= challenge.letters.length) {
+    if (trimmed.length >= WORD_CAPTCHA_CODE_LENGTH) {
       onChange(`${challenge.challengeId}:${trimmed}`);
     } else {
       onChange(null);
@@ -77,24 +78,13 @@ export function WordCaptchaField({ value: _value, onChange, disabled, onRefresh 
           </div>
         ) : error ? (
           <p className="flex-1 text-xs text-red-600 py-1">{error}</p>
-        ) : challenge ? (
-          <div
-            className="flex flex-1 flex-wrap items-center justify-center gap-1.5 select-none"
+        ) : challenge?.imageSvg ? (
+          <img
+            src={wordCaptchaSvgDataUrl(challenge.imageSvg)}
+            alt=""
+            className="flex flex-1 items-center justify-center select-none overflow-hidden max-h-14 mx-auto"
             aria-hidden
-          >
-            {challenge.letters.map((glyph, i) => (
-              <span
-                key={`${glyph.character}-${i}`}
-                className="inline-block font-mono text-xl font-bold leading-none"
-                style={{
-                  color: glyph.color,
-                  transform: `rotate(${glyph.rotate}deg) translateY(${glyph.translateY}px)`,
-                }}
-              >
-                {glyph.character}
-              </span>
-            ))}
-          </div>
+          />
         ) : null}
       </div>
 
@@ -107,8 +97,8 @@ export function WordCaptchaField({ value: _value, onChange, disabled, onRefresh 
         autoComplete="off"
         autoCapitalize="characters"
         spellCheck={false}
-        placeholder="Type the characters above"
-        maxLength={8}
+        placeholder="Type the characters shown"
+        maxLength={WORD_CAPTCHA_CODE_LENGTH}
         value={answer}
         onChange={e => setAnswer(e.target.value.toUpperCase())}
         disabled={disabled || loading || !challenge}

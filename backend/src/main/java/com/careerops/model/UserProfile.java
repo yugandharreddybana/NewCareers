@@ -55,6 +55,15 @@ public class UserProfile {
 
     private String location;
 
+    @Column(name = "linkedin_url", length = 500)
+    private String linkedInUrl;
+
+    @Column(name = "github_url", length = 500)
+    private String githubUrl;
+
+    @Column(name = "website_url", length = 500)
+    private String websiteUrl;
+
     @Column(name = "salary_min")     private Integer salaryMin;
     @Column(name = "salary_max")     private Integer salaryMax;
     @Builder.Default
@@ -160,6 +169,9 @@ public class UserProfile {
         private String       description;
 
         private List<String> techTags;
+
+        @jakarta.validation.constraints.Size(max = 100, message = "Location cannot exceed 100 characters")
+        private String       location;
     }
 
     @Getter @Setter @NoArgsConstructor @AllArgsConstructor @Builder
@@ -170,14 +182,18 @@ public class UserProfile {
         private String  endDate;
         private boolean current;
         private String  description;
+        private String  location;
     }
 
     @Getter @Setter @NoArgsConstructor @AllArgsConstructor @Builder
     public static class EducationEntry {
         private String schoolName;
         private String degree;
+        private String degreeLevel;
+        private String degreeTitle;
         private String fieldOfStudy;
         private String graduationYear;
+        private String location;
     }
 }
 

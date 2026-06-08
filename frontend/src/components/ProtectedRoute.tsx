@@ -22,22 +22,33 @@ const PUBLIC_AUTH_PATHS = new Set([
   '/reset-password',
 ]);
 
+const SAFE_REDIRECT_RE = /^\/[a-zA-Z0-9/_-]+$/;
+
+/** Reject open redirects and auth-loop paths from `location.state.from`. */
+export function safeRedirectPath(path?: string): string | null {
+  if (!path || path === '/' || path.includes('//')) return null;
+  if (!SAFE_REDIRECT_RE.test(path)) return null;
+  if (PUBLIC_AUTH_PATHS.has(path)) return null;
+  return path;
+}
+
 function loginRedirectTarget(
   user: { onboarded?: boolean },
   fromPath?: string,
 ): string {
-  if (fromPath && !PUBLIC_AUTH_PATHS.has(fromPath) && fromPath !== '/') {
-    return fromPath;
-  }
+  const safeFrom = safeRedirectPath(fromPath);
+  if (safeFrom) return safeFrom;
   return user.onboarded ? '/dashboard' : '/onboarding';
 }
 
 /** Full-width layouts render without the sidebar shell (onboarding, welcome, job detail). */
 function useFullWidthLayout(): boolean {
   const location = useLocation();
-  const fullWidthPaths = ['/onboarding', '/welcome', '/dashboard', '/account', '/jobs', '/kanban'];
+  const fullWidthPaths = ['/onboarding', '/welcome', '/dashboard', '/jobs', '/kanban'];
   return (
-    fullWidthPaths.includes(location.pathname) || location.pathname.startsWith('/jobs/')
+    fullWidthPaths.includes(location.pathname)
+    || location.pathname.startsWith('/jobs/')
+    || location.pathname.startsWith('/account')
   );
 }
 
@@ -128,7 +139,8 @@ export function OnboardingRoute() {
 }
 
 /**
- * AdminRoute — requires `user.role === 'ADMIN'`.
+ * AdminRoute — UX-only guard; requires `user.role === 'ADMIN'`.
+ * Backend admin endpoints enforce {@code @PreAuthorize} / middleware role checks (M-19).
  * Non-admin authenticated users are redirected to /dashboard with a toast.
  */
 export function AdminRoute() {
