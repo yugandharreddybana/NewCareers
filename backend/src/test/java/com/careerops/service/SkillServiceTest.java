@@ -74,8 +74,8 @@ class SkillServiceTest {
     @Mock private TailorResumeBuilderService tailorResumeBuilder;
     @Mock private SkillMdExecutorService skillMdExecutor;
     @Mock private UserConsentService consentService;
-    @Mock private AiProviderRouter aiProviderRouter;                  // NEW — Prompt 4
-    @Mock private SkillExecutionContextBuilder contextBuilder;        // NEW — Prompt 4
+    @Mock private AiProviderRouter aiProviderRouter;                  // Prompt 4
+    @Mock private SkillExecutionContextBuilder contextBuilder;        // Prompt 4
 
     private final ObjectMapper mapper = new ObjectMapper();
     private final SimpleMeterRegistry meterRegistry = new SimpleMeterRegistry();
@@ -101,11 +101,11 @@ class SkillServiceTest {
                 evaluationValidator, cvHumanScoreService, cvService, tailorResumePending,
                 localFallback, profiles, evaluationEnrichment, skillMatchService,
                 tailorResumeBuilder, skillMdExecutor, consentService, txManager,
-                aiProviderRouter, contextBuilder);  // NEW — Prompt 4 params last
+                aiProviderRouter, contextBuilder);  // Prompt 4
     }
 
     // ================================================================
-    // EXISTING TESTS — constructor args updated only
+    // EXISTING TESTS
     // ================================================================
 
     @Test
@@ -185,12 +185,13 @@ class SkillServiceTest {
         when(registry.handles(skill)).thenReturn(false);
         when(validator.validateForSkill(userId, skill)).thenReturn(Collections.emptyList());
         when(skillMdExecutor.isAvailable()).thenReturn(false);
-        when(localFallback.tryFallback(eq(skill), eq(userId), eq(userJobId), any()))
-                .thenReturn(Optional.empty());
-        // routeSkillViaRouter path: prompts + contextBuilder + router all need stubs
+        // Router tried first (NVIDIA unavailable) — throws so falls to localFallback
         when(prompts.buildBackendSkillSystemPrompt(eq(skill), eq(userId))).thenReturn("sys");
         when(contextBuilder.buildUserMessage(eq(skill), eq(userId), eq(userJobId), any())).thenReturn("usr");
-        when(aiProviderRouter.routePrompt(any(), eq(userId), contains("skill-"))).thenThrow(new RuntimeException("router fail"));
+        when(aiProviderRouter.routePrompt(any(), eq(userId), contains("skill-")))
+                .thenThrow(new RuntimeException("router fail"));
+        when(localFallback.tryFallback(eq(skill), eq(userId), eq(userJobId), any()))
+                .thenReturn(Optional.empty());
 
         skillService.startSkill(
                 new SkillStartRequest(skill, userJobId, null, null, null, null, null, true),
@@ -201,11 +202,11 @@ class SkillServiceTest {
     }
 
     // ================================================================
-    // NEW TESTS — Prompt 4
+    // NEW TESTS — Prompt 4 Part A: AiProviderRouter wiring
     // ================================================================
 
     @Test
-    @DisplayName("routeSkill — NVIDIA unavailable: router succeeds, localFallback NOT called")
+    @DisplayName("routeSkill — NVIDIA unavailable, router succeeds: localFallback NOT called")
     void routeSkill_when_nvidia_unavailable_router_succeeds() {
         UUID userId = UUID.randomUUID();
         UUID userJobId = UUID.randomUUID();
@@ -217,4 +218,127 @@ class SkillServiceTest {
                 eq(userId), eq(skill), eq(userJobId), eq("pending_answer"));
         when(skillRuns.findValidCachedRun(eq(userId), eq(userJobId), eq(skill), any(Instant.class)))
                 .thenReturn(Optional.empty());
-        when
+        when(tokenUsageService.hasExceededBudget(userId, 500_000L)).thenReturn(false);
+        when(catalogSkills.handles(skill)).thenReturn(false);
+        when(registry.handles(skill)).thenReturn(false);
+        when(validator.validateForSkill(userId, skill)).thenReturn(Collections.emptyList());
+        when(skillMdExecutor.isAvailable()).thenReturn(false);
+        when(prompts.buildBackendSkillSystemPrompt(eq(skill), eq(userId))).thenReturn("sys");
+        when(contextBuilder.buildUserMessage(eq(skill), eq(userId), eq(userJobId), any())).thenReturn("usr");
+        when(aiProviderRouter.routePrompt(any(), eq(userId), contains("skill-")))
+                .thenReturn("{\"summary\":\"Company insight\",\"mode\":\"skill_md\"}");
+
+        SkillRun saved = new SkillRun();
+        saved.setSkill(skill);
+        saved.setOutput(mapper.createObjectNode().put("summary", "Company insight"));
+        when(skillRuns.save(any(SkillRun.class))).thenReturn(saved);
+
+        SkillRunResponse response = skillService.startSkill(
+                new SkillStartRequest(skill, userJobId, null, null, null, null, null, null),
+                userId);
+
+        assertThat(response.type()).isEqualTo(SkillRunResponse.Type.RESULT);
+        verify(localFallback, never()).tryFallback(any(), any(), any(), any());
+        verify(aiProviderRouter, times(1)).routePrompt(any(), eq(userId), contains("skill-"));
+    }
+
+    @Test
+    @DisplayName("routeSkill — router throws: localFallback.tryFallback is invoked")
+    void routeSkill_falls_back_to_localFallback_on_router_failure() {
+        UUID userId = UUID.randomUUID();
+        UUID userJobId = UUID.randomUUID();
+        String skill = "prep-interview";
+
+        ReflectionTestUtils.setField(skillService, "dailyTokenBudget", 500_000L);
+        doNothing().when(consentService).validateAiConsent(userId);
+        doNothing().when(conversations).deleteByUserIdAndSkillAndUserJobIdAndStatus(
+                eq(userId), eq(skill), eq(userJobId), eq("pending_answer"));
+        when(skillRuns.findValidCachedRun(eq(userId), eq(userJobId), eq(skill), any(Instant.class)))
+                .thenReturn(Optional.empty());
+        when(tokenUsageService.hasExceededBudget(userId, 500_000L)).thenReturn(false);
+        when(catalogSkills.handles(skill)).thenReturn(false);
+        when(registry.handles(skill)).thenReturn(false);
+        when(validator.validateForSkill(userId, skill)).thenReturn(Collections.emptyList());
+        when(skillMdExecutor.isAvailable()).thenReturn(false);
+        when(prompts.buildBackendSkillSystemPrompt(eq(skill), eq(userId))).thenReturn("sys");
+        when(contextBuilder.buildUserMessage(eq(skill), eq(userId), eq(userJobId), any())).thenReturn("usr");
+        when(aiProviderRouter.routePrompt(any(), eq(userId), contains("skill-")))
+                .thenThrow(new RuntimeException("Gemini 503"));
+        when(localFallback.tryFallback(eq(skill), eq(userId), eq(userJobId), any()))
+                .thenReturn(Optional.empty());
+
+        SkillRunResponse response = skillService.startSkill(
+                new SkillStartRequest(skill, userJobId, null, null, null, null, null, null),
+                userId);
+
+        verify(localFallback, times(1)).tryFallback(eq(skill), eq(userId), eq(userJobId), any());
+        assertThat(response.type()).isEqualTo(SkillRunResponse.Type.ERROR);
+    }
+
+    // ================================================================
+    // NEW TESTS — Prompt 4 Part B: dedup guard
+    // ================================================================
+
+    @Test
+    @DisplayName("dedup — second concurrent call waits on first; executor called exactly once")
+    void dedup_hit_concurrent_calls_execute_once() throws Exception {
+        UUID userId = UUID.randomUUID();
+        UUID userJobId = UUID.randomUUID();
+        String skill = "research";
+
+        ReflectionTestUtils.setField(skillService, "dailyTokenBudget", 500_000L);
+
+        CountDownLatch firstStarted  = new CountDownLatch(1);
+        CountDownLatch releaseFirst  = new CountDownLatch(1);
+        AtomicInteger routerCallCount = new AtomicInteger(0);
+
+        doNothing().when(consentService).validateAiConsent(any());
+        doNothing().when(conversations).deleteByUserIdAndSkillAndUserJobIdAndStatus(
+                any(), any(), any(), any());
+        when(skillRuns.findValidCachedRun(any(), any(), any(), any())).thenReturn(Optional.empty());
+        when(tokenUsageService.hasExceededBudget(any(), any(Long.class))).thenReturn(false);
+        when(catalogSkills.handles(skill)).thenReturn(false);
+        when(registry.handles(skill)).thenReturn(false);
+        when(validator.validateForSkill(any(), any())).thenReturn(Collections.emptyList());
+        when(skillMdExecutor.isAvailable()).thenReturn(false);
+        when(prompts.buildBackendSkillSystemPrompt(any(), any())).thenReturn("sys");
+        when(contextBuilder.buildUserMessage(any(), any(), any(), any())).thenReturn("usr");
+
+        when(aiProviderRouter.routePrompt(any(), any(), any())).thenAnswer(invocation -> {
+            int call = routerCallCount.incrementAndGet();
+            if (call == 1) {
+                firstStarted.countDown();
+                releaseFirst.await(5, TimeUnit.SECONDS);
+            }
+            return "{\"summary\":\"result\",\"mode\":\"skill_md\"}";
+        });
+
+        SkillRun saved = new SkillRun();
+        saved.setSkill(skill);
+        saved.setOutput(mapper.createObjectNode().put("summary", "result"));
+        when(skillRuns.save(any(SkillRun.class))).thenReturn(saved);
+
+        SkillStartRequest req = new SkillStartRequest(skill, userJobId, null, null, null, null, null, null);
+
+        ExecutorService pool = Executors.newFixedThreadPool(2);
+        CompletableFuture<SkillRunResponse> first  = CompletableFuture.supplyAsync(
+                () -> skillService.startSkill(req, userId), pool);
+
+        firstStarted.await(5, TimeUnit.SECONDS);
+        CompletableFuture<SkillRunResponse> second = CompletableFuture.supplyAsync(
+                () -> skillService.startSkill(req, userId), pool);
+
+        releaseFirst.countDown();
+
+        SkillRunResponse r1 = first.get(10, TimeUnit.SECONDS);
+        SkillRunResponse r2 = second.get(10, TimeUnit.SECONDS);
+        pool.shutdown();
+
+        assertThat(routerCallCount.get()).isEqualTo(1);
+        assertThat(r1.type()).isEqualTo(SkillRunResponse.Type.RESULT);
+        assertThat(r2.type()).isEqualTo(SkillRunResponse.Type.RESULT);
+
+        double dedupCount = meterRegistry.counter("skill.dedup.hit", "skill", skill).count();
+        assertThat(dedupCount).isEqualTo(1.0);
+    }
+}
