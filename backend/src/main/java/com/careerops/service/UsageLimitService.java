@@ -3,7 +3,8 @@ package com.careerops.service;
 import com.careerops.dto.UsageDtos.DailyQuota;
 import com.careerops.dto.UsageDtos.RateLimitHint;
 import com.careerops.dto.UsageDtos.UsageLimitsResponse;
-import org.springframework.beans.factory.annotation.Value;
+import com.careerops.model.PlanTier;
+import com.careerops.model.PlanTierLimits;
 import org.springframework.stereotype.Service;
 
 import java.time.Instant;
@@ -18,24 +19,26 @@ public class UsageLimitService {
 
     private final DailyLimitService dailyLimitService;
     private final TokenUsageService tokenUsageService;
-    private final long dailyTokenBudget;
+    private final UserPlanTierService planTierService;
 
     public UsageLimitService(
             DailyLimitService dailyLimitService,
             TokenUsageService tokenUsageService,
-            @Value("${ai.daily.token.budget:500000}") long dailyTokenBudget) {
+            UserPlanTierService planTierService) {
         this.dailyLimitService = dailyLimitService;
         this.tokenUsageService = tokenUsageService;
-        this.dailyTokenBudget = dailyTokenBudget;
+        this.planTierService = planTierService;
     }
 
     public UsageLimitsResponse snapshot(UUID userId) {
+        PlanTier tier = planTierService.resolveForUser(userId);
         int jobUsed = dailyLimitService.getCount(userId);
-        int jobLimit = dailyLimitService.max();
+        int jobLimit = dailyLimitService.maxFor(tier);
         int jobRemaining = dailyLimitService.remaining(userId);
 
+        long tokenBudget = PlanTierLimits.tokenBudget(tier);
         long aiUsed = tokenUsageService.tokensUsedSinceStartOfQuotaDay(userId);
-        long aiRemaining = Math.max(0, dailyTokenBudget - aiUsed);
+        long aiRemaining = Math.max(0, tokenBudget - aiUsed);
 
         Instant resetsAt = nextMidnightInstant();
 
@@ -53,7 +56,7 @@ public class UsageLimitService {
                 "ai_tokens",
                 "AI token budget",
                 aiUsed,
-                dailyTokenBudget,
+                tokenBudget,
                 aiRemaining,
                 resetsAt.toString(),
                 "Resets at midnight (" + QUOTA_ZONE.getId() + ")"

@@ -22,9 +22,6 @@ interface ImportMetaEnv {
   readonly VITE_POSTHOG_HOST: string
   readonly VITE_SENTRY_DSN: string
 
-  // Stripe
-  readonly VITE_STRIPE_PUBLIC_KEY: string
-
   // Google Sign-In
   readonly VITE_GOOGLE_CLIENT_ID: string
 }

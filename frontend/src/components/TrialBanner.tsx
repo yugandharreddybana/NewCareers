@@ -15,7 +15,7 @@ export function TrialBanner() {
 
   return (
     <div
-      className="fixed top-0 inset-x-0 z-[99] bg-primary/10 border-b border-primary/20 text-on-surface shadow-sm"
+      className="w-full bg-primary/10 border-b border-primary/20 text-on-surface shadow-sm"
       role="status"
     >
       <div className="max-w-container-max mx-auto px-margin-mobile md:px-margin-desktop py-3 flex flex-col sm:flex-row sm:items-center gap-3 sm:gap-4">

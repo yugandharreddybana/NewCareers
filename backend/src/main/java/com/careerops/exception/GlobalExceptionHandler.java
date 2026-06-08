@@ -82,6 +82,26 @@ public class GlobalExceptionHandler {
         ));
     }
 
+    @ExceptionHandler(WebhookProcessingException.class)
+    public ResponseEntity<ErrorResponse> handleWebhookProcessing(WebhookProcessingException ex, WebRequest req) {
+        log.error("Stripe webhook processing failed [{}]: {}", path(req), ex.getMessage());
+        return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(error(
+                HttpStatus.INTERNAL_SERVER_ERROR,
+                "Webhook processing failed",
+                "WEBHOOK_PROCESSING_FAILED",
+                req));
+    }
+
+    @ExceptionHandler(BillingGatewayException.class)
+    public ResponseEntity<ErrorResponse> handleBillingGateway(BillingGatewayException ex, WebRequest req) {
+        HttpStatus status = ex.getStatus() != null ? ex.getStatus() : HttpStatus.BAD_GATEWAY;
+        log.warn("Billing gateway error [{}] {}: {}", path(req), status.value(), ex.getMessage());
+        return ResponseEntity.status(status).body(error(status,
+                "Billing service is temporarily unavailable. Please try again.",
+                "BILLING_GATEWAY_ERROR",
+                req));
+    }
+
     @ExceptionHandler(ApiException.class)
     public ResponseEntity<ErrorResponse> handleApiException(ApiException ex, WebRequest req) {
         HttpStatus status = ex.getStatus() != null ? ex.getStatus() : HttpStatus.INTERNAL_SERVER_ERROR;

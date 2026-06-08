@@ -29,6 +29,8 @@ class AdminSaasServiceTest {
     @Mock FeatureFlagRepository featureFlagRepository;
     @Mock AiTokenUsageRepository aiTokenUsageRepository;
     @Mock OrgRepository orgRepository;
+    @Mock BillingStripeSyncService billingStripeSyncService;
+    @Mock OrganizationPlanSyncService organizationPlanSyncService;
 
     SaasBillingProperties saasBillingProperties = new SaasBillingProperties();
     AdminSaasService service;
@@ -41,7 +43,9 @@ class AdminSaasServiceTest {
                 featureFlagRepository,
                 aiTokenUsageRepository,
                 orgRepository,
-                saasBillingProperties);
+                saasBillingProperties,
+                billingStripeSyncService,
+                organizationPlanSyncService);
     }
 
     @Test
@@ -65,6 +69,25 @@ class AdminSaasServiceTest {
         assertThat(metrics.mrr()).isEqualByComparingTo(new BigDecimal("356.00"));
         assertThat(metrics.totalUsers()).isEqualTo(100L);
         assertThat(metrics.activeSubscriptions()).isEqualTo(42L);
+    }
+
+    @Test
+    @DisplayName("activeSubscriptions includes TRIALING but MRR counts ACTIVE rows only")
+    void activeSubscriptionsVsMrrDrift() {
+        when(userRepository.countByDeletedAtIsNull()).thenReturn(50L);
+        when(subscriptionRepository.countByStatusIn(org.mockito.ArgumentMatchers.any())).thenReturn(12L);
+        when(subscriptionRepository.countActiveGroupByPlan()).thenReturn(List.of(
+                new Object[] { SubscriptionPlan.PRO, 2L },
+                new Object[] { SubscriptionPlan.ENTERPRISE, 1L }));
+        when(subscriptionRepository.countByStatus(SubscriptionStatus.ACTIVE)).thenReturn(3L);
+        when(subscriptionRepository.countCancelledSince(org.mockito.ArgumentMatchers.any())).thenReturn(0L);
+        when(subscriptionRepository.countByStatus(SubscriptionStatus.TRIALING)).thenReturn(9L);
+        when(subscriptionRepository.countActiveWithPastTrial(org.mockito.ArgumentMatchers.any())).thenReturn(1L);
+
+        var metrics = service.getMetrics();
+
+        assertThat(metrics.activeSubscriptions()).isEqualTo(12L);
+        assertThat(metrics.mrr()).isEqualByComparingTo(new BigDecimal("337.00"));
     }
 
     @Test

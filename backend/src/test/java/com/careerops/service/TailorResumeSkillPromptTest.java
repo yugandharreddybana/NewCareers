@@ -50,13 +50,14 @@ class TailorResumeSkillPromptTest {
 
     @Test
     void tailorAiService_usesSkillLibrary() {
+        UserPlanTierService planTierService = org.mockito.Mockito.mock(UserPlanTierService.class);
         TailorResumeAiService ai = new TailorResumeAiService(
             null,
             new CvSkillExtractionService(),
             library,
             new com.fasterxml.jackson.databind.ObjectMapper(),
             tokenUsageService,
-            500_000L);
+            planTierService);
         String system = ai.skillSystemPrompt(UUID.randomUUID());
         assertThat(system).contains("BACKEND EXECUTION");
         assertThat(system).contains("Tailor Your Resume");

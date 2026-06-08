@@ -1,7 +1,9 @@
 package com.careerops.service;
 
+import com.careerops.repository.ApplicationCvRepository;
 import com.careerops.repository.ApplicationRunRepository;
 import com.careerops.repository.OrgMemberRepository;
+import com.careerops.repository.ResumeVersionRepository;
 import com.careerops.repository.SkillRunRepository;
 import com.careerops.repository.UserCvRepository;
 import org.springframework.stereotype.Service;
@@ -17,16 +19,22 @@ public class OrgUsageCounter {
     private final SkillRunRepository skillRunRepo;
     private final ApplicationRunRepository applicationRunRepo;
     private final UserCvRepository userCvRepo;
+    private final ApplicationCvRepository applicationCvRepo;
+    private final ResumeVersionRepository resumeVersionRepo;
     private final OrgMemberRepository orgMemberRepo;
 
     public OrgUsageCounter(
             SkillRunRepository skillRunRepo,
             ApplicationRunRepository applicationRunRepo,
             UserCvRepository userCvRepo,
+            ApplicationCvRepository applicationCvRepo,
+            ResumeVersionRepository resumeVersionRepo,
             OrgMemberRepository orgMemberRepo) {
         this.skillRunRepo = skillRunRepo;
         this.applicationRunRepo = applicationRunRepo;
         this.userCvRepo = userCvRepo;
+        this.applicationCvRepo = applicationCvRepo;
+        this.resumeVersionRepo = resumeVersionRepo;
         this.orgMemberRepo = orgMemberRepo;
     }
 
@@ -39,7 +47,9 @@ public class OrgUsageCounter {
     }
 
     public long cvUploadsTotal(UUID orgId) {
-        return userCvRepo.countByOrgId(orgId);
+        return userCvRepo.countByOrgId(orgId)
+                + applicationCvRepo.countByOrgId(orgId)
+                + resumeVersionRepo.countWithFileByOrgId(orgId);
     }
 
     public int teamMembers(UUID orgId) {

@@ -100,6 +100,26 @@ class IpRateLimitFilterTest {
     }
 
     @Test
+    @DisplayName("billing webhook is rate limited at 100 per minute")
+    void webhookRateLimit() throws Exception {
+        for (int i = 0; i < 100; i++) {
+            MockHttpServletRequest request = webhookRequest("192.0.2.50");
+            MockHttpServletResponse response = new MockHttpServletResponse();
+            MockFilterChain chain = new MockFilterChain();
+            filter.doFilter(request, response, chain);
+            assertThat(chain.getRequest()).isNotNull();
+        }
+
+        MockHttpServletRequest blocked = webhookRequest("192.0.2.50");
+        MockHttpServletResponse blockedResponse = new MockHttpServletResponse();
+        MockFilterChain blockedChain = new MockFilterChain();
+        filter.doFilter(blocked, blockedResponse, blockedChain);
+
+        assertThat(blockedChain.getRequest()).isNull();
+        assertThat(blockedResponse.getStatus()).isEqualTo(429);
+    }
+
+    @Test
     @DisplayName("non-auth paths are not limited")
     void healthNotLimited() throws Exception {
         MockHttpServletRequest request = new MockHttpServletRequest("GET", "/health");
@@ -165,6 +185,13 @@ class IpRateLimitFilterTest {
     private static MockHttpServletRequest registerRequest(String remoteAddr) {
         MockHttpServletRequest request = new MockHttpServletRequest("POST", "/auth/register");
         request.setServletPath("/auth/register");
+        request.setRemoteAddr(remoteAddr);
+        return request;
+    }
+
+    private static MockHttpServletRequest webhookRequest(String remoteAddr) {
+        MockHttpServletRequest request = new MockHttpServletRequest("POST", "/billing/webhook");
+        request.setServletPath("/billing/webhook");
         request.setRemoteAddr(remoteAddr);
         return request;
     }

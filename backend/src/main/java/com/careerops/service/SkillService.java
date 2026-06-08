@@ -8,6 +8,8 @@ import com.careerops.dto.SkillRunResponse;
 import com.careerops.dto.SkillStartRequest;
 import com.careerops.dto.TailorResumePreviewResponse;
 import com.careerops.model.Job;
+import com.careerops.model.PlanTier;
+import com.careerops.model.PlanTierLimits;
 import com.careerops.model.UserProfile;
 import com.careerops.exception.ApiException;
 import org.springframework.http.HttpStatus;
@@ -116,6 +118,7 @@ public class SkillService {
     private final TailorResumePendingStore    tailorResumePending;
     private final SkillLocalFallbackService   localFallback;
     private final UserProfileRepository       profiles;
+    private final UserPlanTierService         planTierService;
     private final EvaluationReportEnrichmentService evaluationEnrichment;
     private final UserJobSkillMatchService       skillMatchService;
     private final TailorResumeBuilderService     tailorResumeBuilder;
@@ -180,6 +183,7 @@ public class SkillService {
             TailorResumePendingStore tailorResumePending,
             SkillLocalFallbackService localFallback,
             UserProfileRepository profiles,
+            UserPlanTierService planTierService,
             EvaluationReportEnrichmentService evaluationEnrichment,
             UserJobSkillMatchService skillMatchService,
             TailorResumeBuilderService tailorResumeBuilder,
@@ -209,6 +213,7 @@ public class SkillService {
         this.tailorResumePending  = tailorResumePending;
         this.localFallback        = localFallback;
         this.profiles             = profiles;
+        this.planTierService      = planTierService;
         this.evaluationEnrichment = evaluationEnrichment;
         this.skillMatchService    = skillMatchService;
         this.tailorResumeBuilder  = tailorResumeBuilder;
@@ -286,7 +291,9 @@ public class SkillService {
             String skill, UUID userId, UUID userJobId, SkillStartRequest req) {
 
         // Daily token budget check — skills with deterministic/local fallback still run degraded
-        if (tokenUsageService.hasExceededBudget(userId, dailyTokenBudget)) {
+        PlanTier tier = planTierService.resolveForUser(userId);
+        long tierBudget = PlanTierLimits.tokenBudget(tier);
+        if (tokenUsageService.hasExceededBudget(userId, tierBudget)) {
             log.warn("Daily token budget exhausted for userId={}", userId);
             notifyBudgetExhausted(userId);
             if (!isBudgetDegradableSkill(skill)) {

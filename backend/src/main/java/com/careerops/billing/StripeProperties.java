@@ -10,6 +10,7 @@ public class StripeProperties {
     private PriceIds priceId = new PriceIds();
     private CheckoutUrls checkout = new CheckoutUrls();
     private String portalReturnUrl = "";
+    private String frontendBaseUrl = "";
 
     public String getSecretKey() {
         return secretKey;
@@ -49,6 +50,14 @@ public class StripeProperties {
 
     public void setPortalReturnUrl(String portalReturnUrl) {
         this.portalReturnUrl = portalReturnUrl;
+    }
+
+    public String getFrontendBaseUrl() {
+        return frontendBaseUrl;
+    }
+
+    public void setFrontendBaseUrl(String frontendBaseUrl) {
+        this.frontendBaseUrl = frontendBaseUrl;
     }
 
     public static class PriceIds {

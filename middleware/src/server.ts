@@ -19,8 +19,6 @@ import { verifySessionToken } from './jwtVerification.js';
 const REQUIRED_ENV = [
   'JWT_PUBLIC_KEY',
   'JAVA_BACKEND_URL',
-  'STRIPE_SECRET_KEY',      // Phase 1 fix: billing routes depend on Stripe key being present
-  'STRIPE_WEBHOOK_SECRET',  // Phase 1 fix: webhook signature verification in billing.routes.ts
 ];
 const missingEnv = REQUIRED_ENV.filter(k => !process.env[k]);
 if (missingEnv.length) {
@@ -132,7 +130,7 @@ app.use(helmet({
 // Must come before routes. Skips already-compressed content-types.
 app.use(compression());
 
-// Stripe webhook needs raw body — must be BEFORE express.json()
+// Stripe webhook: preserve raw body for proxy to Java (signature verification runs on the Java backend).
 app.use('/api/billing/webhook', express.raw({ type: 'application/json' }));
 app.use('/api/v1/billing/webhook', express.raw({ type: 'application/json' }));
 

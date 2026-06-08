@@ -29,7 +29,7 @@ import { ApiLoadingOverlay } from './components/ApiLoadingOverlay';
 import { ExperimentProvider } from './context/ExperimentContext';
 import { ErrorBoundary, RouteFallback } from './components/ErrorBoundary';
 import { CookieConsentBanner } from './components/gdpr/CookieConsentBanner';
-import { PlanLimitBanner } from './components/PlanLimitBanner';
+import { StatusBannerStack } from './components/StatusBannerStack';
 
 // ── lazy() with a `.preload()` method for hover-warming chunks ─────────────
 type Importable<T extends ComponentType<any>> = () => Promise<{ default: T }>;
@@ -67,6 +67,14 @@ const AccountProfilePage      = withPreload(() => import('./pages/account/Accoun
 const AccountSecurityPage     = withPreload(() => import('./pages/account/AccountSecurityPage'));
 const AccountNotificationsPage = withPreload(() => import('./pages/account/AccountNotificationsPage'));
 const AccountBillingPage      = withPreload(() => import('./pages/account/AccountBillingPage'));
+const BillingCheckoutSuccessPage = withPreload(() =>
+  import('./pages/account/BillingCheckoutResultPage').then(m => ({
+    default: () => <m.default variant="success" />,
+  })));
+const BillingCheckoutCancelPage = withPreload(() =>
+  import('./pages/account/BillingCheckoutResultPage').then(m => ({
+    default: () => <m.default variant="cancel" />,
+  })));
 const AccountTeamPage         = withPreload(() => import('./pages/account/AccountTeamPage'));
 const InterviewHistoryPage = withPreload(() => import('./pages/InterviewHistoryPage'));
 const InterviewPage        = withPreload(() => import('./pages/InterviewPage'));
@@ -120,7 +128,7 @@ export const App: React.FC = () => (
         <AuthProvider>
           <ExperimentProvider>
             <ApiLoadingOverlay />
-            <PlanLimitBanner />
+            <StatusBannerStack />
             <CookieConsentBanner />
             {/* Top-level Suspense catches the very first paint. */}
             <Suspense fallback={<PageLoader />}>
@@ -161,6 +169,8 @@ export const App: React.FC = () => (
                   <Route path="/pipeline"        element={<RouteWithBoundary label="Job pipeline"><PipelineDashboard /></RouteWithBoundary>} />
                   <Route path="/jobs/:id"         element={<RouteWithBoundary label="Job detail"><JobDetail /></RouteWithBoundary>} />
                   <Route path="/profile"          element={<RouteWithBoundary label="Profile"><Profile /></RouteWithBoundary>} />
+                  <Route path="/billing/success" element={<RouteWithBoundary label="Checkout complete"><BillingCheckoutSuccessPage /></RouteWithBoundary>} />
+                  <Route path="/billing/cancel"  element={<RouteWithBoundary label="Checkout cancelled"><BillingCheckoutCancelPage /></RouteWithBoundary>} />
                   <Route path="/account" element={<RouteWithBoundary label="Account settings"><AccountSettingsLayout /></RouteWithBoundary>}>
                     <Route index element={<Navigate to="profile" replace />} />
                     <Route path="profile"       element={<RouteWithBoundary label="Profile settings"><AccountProfilePage /></RouteWithBoundary>} />

@@ -1,6 +1,7 @@
 package com.careerops.service;
 
 import com.careerops.dto.GdprExportDtos.GdprUserDataExport;
+import com.careerops.dto.GdprExportDtos.SubscriptionExport;
 import com.careerops.dto.GdprExportDtos.SkillRunExport;
 import com.careerops.dto.GdprExportDtos.TokenUsageExport;
 import com.careerops.dto.GdprExportDtos.UserCvExport;
@@ -14,6 +15,8 @@ import com.careerops.repository.UserConsentRepository;
 import com.careerops.repository.UserCvRepository;
 import com.careerops.repository.UserJobRepository;
 import com.careerops.repository.UserProfileRepository;
+import com.careerops.repository.OrgMemberRepository;
+import com.careerops.repository.SubscriptionRepository;
 import com.careerops.repository.UserRepository;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -42,6 +45,8 @@ public class GdprExportService {
     private final AiTokenUsageRepository tokenUsage;
     private final AuditLogService audit;
     private final ObjectMapper objectMapper;
+    private final OrgMemberRepository orgMembers;
+    private final SubscriptionRepository subscriptions;
 
     public GdprExportService(
             UserRepository users,
@@ -53,7 +58,9 @@ public class GdprExportService {
             SkillRunRepository skillRuns,
             AiTokenUsageRepository tokenUsage,
             AuditLogService audit,
-            ObjectMapper objectMapper) {
+            ObjectMapper objectMapper,
+            OrgMemberRepository orgMembers,
+            SubscriptionRepository subscriptions) {
         this.users = users;
         this.profiles = profiles;
         this.cvs = cvs;
@@ -64,6 +71,8 @@ public class GdprExportService {
         this.tokenUsage = tokenUsage;
         this.audit = audit;
         this.objectMapper = objectMapper;
+        this.orgMembers = orgMembers;
+        this.subscriptions = subscriptions;
     }
 
     @Transactional(readOnly = true)
@@ -78,6 +87,13 @@ public class GdprExportService {
         var skillRunRows = skillRuns.findAllByUserIdOrderByCreatedAtDesc(userId);
         var tokenRows = tokenUsage.findByUserIdOrderByCreatedAtDesc(userId);
 
+        var subscriptionRows = orgMembers.findByUserId(userId).stream()
+                .map(member -> subscriptions.findByOrganizationId(member.getOrgId()).orElse(null))
+                .filter(sub -> sub != null)
+                .map(SubscriptionExport::from)
+                .distinct()
+                .toList();
+
         GdprUserDataExport payload = new GdprUserDataExport(
                 Instant.now(),
                 UserExport.from(user),
@@ -87,7 +103,8 @@ public class GdprExportService {
                 auditRows,
                 consentRows,
                 skillRunRows.stream().map(SkillRunExport::from).toList(),
-                tokenRows.stream().map(TokenUsageExport::from).toList());
+                tokenRows.stream().map(TokenUsageExport::from).toList(),
+                subscriptionRows);
 
         audit.log(userId, "DATA_EXPORT_REQUESTED", request, Map.of(
                 "cvCount", cvRows.size(),

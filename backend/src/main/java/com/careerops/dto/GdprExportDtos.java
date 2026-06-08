@@ -7,6 +7,7 @@ import com.careerops.model.User;
 import com.careerops.model.UserConsent;
 import com.careerops.model.UserCv;
 import com.careerops.model.UserJob;
+import com.careerops.model.Subscription;
 import com.careerops.model.UserProfile;
 import com.fasterxml.jackson.annotation.JsonProperty;
 import com.fasterxml.jackson.databind.JsonNode;
@@ -32,8 +33,30 @@ public final class GdprExportDtos {
             List<AuditLog> auditLogs,
             List<UserConsent> consents,
             @JsonProperty("skill_runs") List<SkillRunExport> skillRuns,
-            @JsonProperty("token_usage") List<TokenUsageExport> tokenUsage
+            @JsonProperty("token_usage") List<TokenUsageExport> tokenUsage,
+            List<SubscriptionExport> subscriptions
     ) {}
+
+    public record SubscriptionExport(
+            UUID organizationId,
+            String plan,
+            String status,
+            Instant trialEndsAt,
+            Instant currentPeriodEnd,
+            String stripeCustomerId,
+            String stripeSubscriptionId) {
+
+        public static SubscriptionExport from(Subscription subscription) {
+            return new SubscriptionExport(
+                    subscription.getOrganizationId(),
+                    subscription.getPlan() != null ? subscription.getPlan().name() : null,
+                    subscription.getStatus() != null ? subscription.getStatus().name() : null,
+                    subscription.getTrialEndsAt(),
+                    subscription.getCurrentPeriodEnd(),
+                    subscription.getStripeCustomerId(),
+                    subscription.getStripeSubscriptionId());
+        }
+    }
 
     public record SkillRunExport(
             UUID id,

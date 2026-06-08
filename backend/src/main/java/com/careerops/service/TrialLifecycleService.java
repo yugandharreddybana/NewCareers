@@ -27,16 +27,19 @@ public class TrialLifecycleService {
     private final SaasLifecycleTelemetry lifecycleTelemetry;
     private final TrialEmailService trialEmailService;
     private final UserRepository userRepository;
+    private final OrganizationPlanSyncService organizationPlanSyncService;
 
     public TrialLifecycleService(
             SubscriptionRepository subscriptionRepository,
             SaasLifecycleTelemetry lifecycleTelemetry,
             TrialEmailService trialEmailService,
-            UserRepository userRepository) {
+            UserRepository userRepository,
+            OrganizationPlanSyncService organizationPlanSyncService) {
         this.subscriptionRepository = subscriptionRepository;
         this.lifecycleTelemetry = lifecycleTelemetry;
         this.trialEmailService = trialEmailService;
         this.userRepository = userRepository;
+        this.organizationPlanSyncService = organizationPlanSyncService;
     }
 
     @Transactional
@@ -80,7 +83,9 @@ public class TrialLifecycleService {
             UUID orgId = subscription.getOrganizationId();
             subscription.setStatus(SubscriptionStatus.ACTIVE);
             subscription.setPlan(SubscriptionPlan.FREE);
+            subscription.setTrialEndsAt(null);
             subscriptionRepository.save(subscription);
+            organizationPlanSyncService.syncFromSubscription(orgId, SubscriptionPlan.FREE);
 
             resolveOwner(orgId).ifPresent(owner -> {
                 lifecycleTelemetry.trackTrialEnded(owner.getId(), orgId);

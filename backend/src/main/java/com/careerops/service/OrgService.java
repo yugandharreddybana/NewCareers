@@ -24,6 +24,7 @@ public class OrgService {
     private final SsoProviderRepository ssoRepo;
     private final UserRepository userRepo;
     private final OrganizationSubscriptionResolver subscriptionResolver;
+    private final PlanEnforcementService planEnforcement;
 
     public OrgService(OrgRepository orgRepo,
                       OrgMemberRepository memberRepo,
@@ -31,7 +32,8 @@ public class OrgService {
                       OrgTeamRepository teamRepo,
                       SsoProviderRepository ssoRepo,
                       UserRepository userRepo,
-                      OrganizationSubscriptionResolver subscriptionResolver) {
+                      OrganizationSubscriptionResolver subscriptionResolver,
+                      PlanEnforcementService planEnforcement) {
         this.orgRepo   = orgRepo;
         this.memberRepo = memberRepo;
         this.inviteRepo = inviteRepo;
@@ -39,6 +41,7 @@ public class OrgService {
         this.ssoRepo    = ssoRepo;
         this.userRepo   = userRepo;
         this.subscriptionResolver = subscriptionResolver;
+        this.planEnforcement = planEnforcement;
     }
 
     // ── Organizations ──────────────────────────────────────────────────────────
@@ -144,6 +147,8 @@ public class OrgService {
 
     public InvitationResponse invite(UUID requesterId, UUID orgId, InviteRequest req) {
         requireRole(requesterId, orgId, "admin", "owner");
+        int pendingInvites = inviteRepo.countByOrgIdAndStatus(orgId, "pending");
+        planEnforcement.checkTeamMemberAllowedForOrg(orgId, requesterId, pendingInvites);
         if (inviteRepo.existsByOrgIdAndEmailAndStatus(orgId, req.email(), "pending")) {
             throw new ResponseStatusException(HttpStatus.CONFLICT, "Pending invitation already exists");
         }
@@ -177,6 +182,9 @@ public class OrgService {
             inviteRepo.save(inv);
             throw new ResponseStatusException(HttpStatus.GONE, "Invitation expired");
         }
+        int pendingForOrg = inviteRepo.countByOrgIdAndStatus(inv.getOrgId(), "pending");
+        int pendingExcludingThis = Math.max(0, pendingForOrg - 1);
+        planEnforcement.checkTeamMemberAllowedForOrg(inv.getOrgId(), userId, pendingExcludingThis);
         if (!memberRepo.existsByOrgIdAndUserId(inv.getOrgId(), userId)) {
             OrgMember m = OrgMember.builder()
                 .orgId(inv.getOrgId())

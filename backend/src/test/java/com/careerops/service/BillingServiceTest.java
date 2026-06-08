@@ -1,11 +1,13 @@
 package com.careerops.service;
 
+import com.careerops.config.SaasBillingProperties;
 import com.careerops.billing.BillingWebhookIdempotency;
 import com.careerops.billing.CheckoutSessionResult;
 import com.careerops.billing.PortalSessionResult;
 import com.careerops.billing.StripeGateway;
 import com.careerops.billing.StripePlanMapper;
 import com.careerops.billing.StripeProperties;
+import com.careerops.billing.SubscriptionPlanResolution;
 import com.careerops.dto.BillingDtos.SessionUrlResponse;
 import com.careerops.exception.ApiException;
 import com.careerops.model.OrgMember;
@@ -16,6 +18,7 @@ import com.careerops.model.User;
 import com.careerops.repository.OrgMemberRepository;
 import com.careerops.repository.SubscriptionRepository;
 import com.careerops.repository.UserRepository;
+import com.stripe.exception.SignatureVerificationException;
 import com.stripe.model.Event;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -25,6 +28,7 @@ import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
+import java.nio.charset.StandardCharsets;
 import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
@@ -49,6 +53,8 @@ class BillingServiceTest {
     @Mock BillingWebhookIdempotency webhookIdempotency;
     @Mock OrgUsageCounter orgUsageCounter;
     @Mock SaasLifecycleTelemetry lifecycleTelemetry;
+    @Mock SaasBillingProperties saasBillingProperties;
+    @Mock OrganizationPlanSyncService organizationPlanSyncService;
 
     StripeProperties stripeProperties = new StripeProperties();
 
@@ -73,7 +79,9 @@ class BillingServiceTest {
                 webhookIdempotency,
                 orgUsageCounter,
                 lifecycleTelemetry,
-                "http://localhost:4000");
+                saasBillingProperties,
+                organizationPlanSyncService,
+                "http://localhost:5173,http://localhost:4000");
     }
 
     @Test
@@ -84,15 +92,15 @@ class BillingServiceTest {
                 .thenReturn(new SubscriptionContext(orgId, subscriptionId, SubscriptionPlan.FREE, SubscriptionStatus.TRIALING, null));
         when(orgMemberRepository.findByOrgIdAndUserId(orgId, userId))
                 .thenReturn(Optional.of(ownerMember()));
-        when(subscriptionRepository.findByOrganizationId(orgId)).thenReturn(Optional.of(subscription));
+        when(subscriptionRepository.findByOrganizationIdForUpdate(orgId)).thenReturn(Optional.of(subscription));
         when(userRepository.findById(userId)).thenReturn(Optional.of(user("owner@example.com")));
         when(stripeGateway.createCustomer("owner@example.com", orgId)).thenReturn("cus_new");
         when(planMapper.priceIdForPlan(SubscriptionPlan.PRO)).thenReturn("price_pro_test");
         when(stripeGateway.createCheckoutSession(
                 eq("cus_new"),
                 eq("price_pro_test"),
-                any(),
-                any(),
+                eq("http://localhost:5173/billing/success"),
+                eq("http://localhost:5173/billing/cancel"),
                 any()))
                 .thenReturn(new CheckoutSessionResult("https://checkout.example/session", "cs_test"));
 
@@ -100,7 +108,7 @@ class BillingServiceTest {
 
         assertThat(response.url()).isEqualTo("https://checkout.example/session");
         assertThat(subscription.getStripeCustomerId()).isEqualTo("cus_new");
-        verify(subscriptionRepository).save(subscription);
+        verify(subscriptionRepository).saveAndFlush(subscription);
     }
 
     @Test
@@ -132,17 +140,18 @@ class BillingServiceTest {
     }
 
     @Test
-    @DisplayName("duplicate webhook event is ignored after idempotency acquire fails")
+    @DisplayName("duplicate webhook event is ignored when already processed")
     void duplicateWebhookIgnored() throws Exception {
         Event event = Event.GSON.fromJson("""
                 {"id":"evt_dup","type":"checkout.session.completed","data":{"object":{}}}
                 """, Event.class);
         when(stripeGateway.constructWebhookEvent(any(), eq("mock"))).thenReturn(event);
-        when(webhookIdempotency.acquire("evt_dup")).thenReturn(false);
+        when(webhookIdempotency.isProcessed("evt_dup")).thenReturn(true);
 
-        billingService.handleWebhook("{}", "mock");
+        billingService.handleWebhook("{}".getBytes(StandardCharsets.UTF_8), "mock");
 
         verify(subscriptionRepository, never()).save(any());
+        verify(webhookIdempotency, never()).markProcessed(any());
     }
 
     @Test
@@ -156,6 +165,7 @@ class BillingServiceTest {
                     "object": {
                       "id": "cs_test",
                       "object": "checkout.session",
+                      "payment_status": "paid",
                       "customer": "cus_abc",
                       "subscription": "sub_abc",
                       "metadata": {
@@ -170,16 +180,21 @@ class BillingServiceTest {
         Subscription subscription = subscription(orgId, null, null);
 
         when(stripeGateway.constructWebhookEvent(payload, "mock")).thenReturn(event);
-        when(webhookIdempotency.acquire("evt_checkout")).thenReturn(true);
+        when(webhookIdempotency.isProcessed("evt_checkout")).thenReturn(false);
         when(subscriptionRepository.findByOrganizationId(orgId)).thenReturn(Optional.of(subscription));
+        when(stripeGateway.resolveSubscriptionPlan("sub_abc"))
+                .thenReturn(Optional.of(new SubscriptionPlanResolution(SubscriptionPlan.PRO, 1_900_000_000L)));
+        when(stripeGateway.retrieveSubscriptionCurrentPeriodEnd("sub_abc"))
+                .thenReturn(Optional.of(1_900_000_000L));
 
-        billingService.handleWebhook(payload, "mock");
+        billingService.handleWebhook(payload.getBytes(StandardCharsets.UTF_8), "mock");
 
         assertThat(subscription.getStripeCustomerId()).isEqualTo("cus_abc");
         assertThat(subscription.getStripeSubscriptionId()).isEqualTo("sub_abc");
         assertThat(subscription.getStatus()).isEqualTo(SubscriptionStatus.ACTIVE);
         assertThat(subscription.getPlan()).isEqualTo(SubscriptionPlan.PRO);
         verify(subscriptionRepository).save(subscription);
+        verify(webhookIdempotency).markProcessed("evt_checkout");
     }
 
     @Test
@@ -191,7 +206,7 @@ class BillingServiceTest {
         when(orgMemberRepository.findByOrgIdAndUserId(orgId, userId))
                 .thenReturn(Optional.of(adminMember()));
         when(subscriptionRepository.findByOrganizationId(orgId)).thenReturn(Optional.of(subscription));
-        when(stripeGateway.createCustomerPortalSession("cus_existing", "http://localhost:4000/billing"))
+        when(stripeGateway.createCustomerPortalSession("cus_existing", "http://localhost:5173/account/billing"))
                 .thenReturn(new PortalSessionResult("https://billing.stripe.com/portal"));
 
         SessionUrlResponse response = billingService.createCustomerPortalSession(userId);
@@ -200,26 +215,195 @@ class BillingServiceTest {
     }
 
     @Test
-    @DisplayName("getSubscriptionForUser returns plan and trial metadata")
+    @DisplayName("mock checkout session activates subscription immediately")
+    void mockCheckoutActivatesSubscription() {
+        Subscription subscription = subscription(orgId, "cus_mock_abc", null);
+        when(subscriptionResolver.resolveForUser(userId))
+                .thenReturn(new SubscriptionContext(orgId, subscriptionId, SubscriptionPlan.FREE, SubscriptionStatus.TRIALING, null));
+        when(orgMemberRepository.findByOrgIdAndUserId(orgId, userId))
+                .thenReturn(Optional.of(ownerMember()));
+        when(subscriptionRepository.findByOrganizationIdForUpdate(orgId)).thenReturn(Optional.of(subscription));
+        when(userRepository.findById(userId)).thenReturn(Optional.of(user("owner@example.com")));
+        when(planMapper.priceIdForPlan(SubscriptionPlan.PRO)).thenReturn("price_pro_test");
+        when(stripeGateway.createCheckoutSession(
+                eq("cus_mock_abc"),
+                eq("price_pro_test"),
+                any(),
+                any(),
+                any()))
+                .thenReturn(new CheckoutSessionResult("http://localhost:5173/billing/success?mock=1", "cs_mock_test"));
+
+        billingService.createCheckoutSession(userId, SubscriptionPlan.PRO);
+
+        assertThat(subscription.getStatus()).isEqualTo(SubscriptionStatus.ACTIVE);
+        assertThat(subscription.getPlan()).isEqualTo(SubscriptionPlan.PRO);
+        assertThat(subscription.getStripeSubscriptionId()).startsWith("sub_mock_");
+        verify(subscriptionRepository).save(subscription);
+    }
+
+    @Test
+    @DisplayName("cancelSubscription schedules mock subscription at period end")
+    void cancelSubscriptionMock() {
+        Subscription subscription = subscription(orgId, "cus_mock_abc", "sub_mock_abc");
+        subscription.setPlan(SubscriptionPlan.PRO);
+        subscription.setStatus(SubscriptionStatus.ACTIVE);
+        when(subscriptionResolver.resolveForUser(userId))
+                .thenReturn(new SubscriptionContext(orgId, subscriptionId, SubscriptionPlan.PRO, SubscriptionStatus.ACTIVE, null));
+        when(orgMemberRepository.findByOrgIdAndUserId(orgId, userId))
+                .thenReturn(Optional.of(ownerMember()));
+        when(subscriptionRepository.findByOrganizationId(orgId)).thenReturn(Optional.of(subscription));
+
+        var response = billingService.cancelSubscription(userId);
+
+        assertThat(response.cancelAtPeriodEnd()).isTrue();
+        assertThat(response.currentPeriodEnd()).isNotNull();
+        verify(subscriptionRepository).save(subscription);
+        verify(stripeGateway, never()).cancelSubscriptionAtPeriodEnd(any());
+    }
+
+    @Test
+    @DisplayName("cancelSubscription calls Stripe for real subscription ids")
+    void cancelSubscriptionRealStripe() {
+        Subscription subscription = subscription(orgId, "cus_live", "sub_live_abc");
+        subscription.setPlan(SubscriptionPlan.PRO);
+        subscription.setStatus(SubscriptionStatus.ACTIVE);
+        when(subscriptionResolver.resolveForUser(userId))
+                .thenReturn(new SubscriptionContext(orgId, subscriptionId, SubscriptionPlan.PRO, SubscriptionStatus.ACTIVE, null));
+        when(orgMemberRepository.findByOrgIdAndUserId(orgId, userId))
+                .thenReturn(Optional.of(adminMember()));
+        when(subscriptionRepository.findByOrganizationId(orgId)).thenReturn(Optional.of(subscription));
+
+        var response = billingService.cancelSubscription(userId);
+
+        assertThat(response.cancelAtPeriodEnd()).isTrue();
+        verify(stripeGateway).cancelSubscriptionAtPeriodEnd("sub_live_abc");
+    }
+
+    @Test
+    @DisplayName("webhook rejects invalid Stripe signature")
+    void webhookInvalidSignature() throws Exception {
+        when(stripeGateway.constructWebhookEvent(any(), eq("bad")))
+                .thenThrow(new SignatureVerificationException("bad sig", "sig"));
+
+        assertThatThrownBy(() -> billingService.handleWebhook("{}".getBytes(StandardCharsets.UTF_8), "bad"))
+                .isInstanceOf(ApiException.class)
+                .hasMessageContaining("Invalid Stripe signature");
+    }
+
+    @Test
+    @DisplayName("webhook rejects missing signature header")
+    void webhookMissingSignature() {
+        assertThatThrownBy(() -> billingService.handleWebhook("{}".getBytes(StandardCharsets.UTF_8), null))
+                .isInstanceOf(ApiException.class)
+                .hasMessageContaining("Missing Stripe-Signature");
+    }
+
+    @Test
+    @DisplayName("customer.subscription.updated syncs plan and status")
+    void subscriptionUpdatedWebhook() throws Exception {
+        String payload = """
+                {
+                  "id": "evt_sub_updated",
+                  "type": "customer.subscription.updated",
+                  "data": {
+                    "object": {
+                      "id": "sub_live_abc",
+                      "object": "subscription",
+                      "customer": "cus_abc",
+                      "status": "active",
+                      "current_period_end": 1900000000,
+                      "items": {
+                        "data": [{
+                          "price": { "id": "price_pro_test" }
+                        }]
+                      }
+                    }
+                  }
+                }
+                """;
+        Event event = Event.GSON.fromJson(payload, Event.class);
+        Subscription subscription = subscription(orgId, "cus_abc", "sub_live_abc");
+        subscription.setPlan(SubscriptionPlan.FREE);
+
+        when(stripeGateway.constructWebhookEvent(payload, "mock")).thenReturn(event);
+        when(webhookIdempotency.isProcessed("evt_sub_updated")).thenReturn(false);
+        when(subscriptionRepository.findByStripeSubscriptionId("sub_live_abc"))
+                .thenReturn(Optional.of(subscription));
+        when(planMapper.mapStripeStatus("active")).thenReturn(SubscriptionStatus.ACTIVE);
+        when(planMapper.resolvePlanForPriceId("price_pro_test")).thenReturn(Optional.of(SubscriptionPlan.PRO));
+
+        billingService.handleWebhook(payload.getBytes(StandardCharsets.UTF_8), "mock");
+
+        assertThat(subscription.getPlan()).isEqualTo(SubscriptionPlan.PRO);
+        assertThat(subscription.getStatus()).isEqualTo(SubscriptionStatus.ACTIVE);
+        verify(subscriptionRepository).save(subscription);
+        verify(webhookIdempotency).markProcessed("evt_sub_updated");
+    }
+
+    @Test
+    @DisplayName("customer.subscription.deleted downgrades to FREE")
+    void subscriptionDeletedWebhook() throws Exception {
+        String payload = """
+                {
+                  "id": "evt_sub_deleted",
+                  "type": "customer.subscription.deleted",
+                  "data": {
+                    "object": {
+                      "id": "sub_live_abc",
+                      "object": "subscription",
+                      "customer": "cus_abc",
+                      "status": "canceled"
+                    }
+                  }
+                }
+                """;
+        Event event = Event.GSON.fromJson(payload, Event.class);
+        Subscription subscription = subscription(orgId, "cus_abc", "sub_live_abc");
+        subscription.setPlan(SubscriptionPlan.PRO);
+        subscription.setStatus(SubscriptionStatus.ACTIVE);
+
+        when(stripeGateway.constructWebhookEvent(payload, "mock")).thenReturn(event);
+        when(webhookIdempotency.isProcessed("evt_sub_deleted")).thenReturn(false);
+        when(subscriptionRepository.findByStripeSubscriptionId("sub_live_abc"))
+                .thenReturn(Optional.of(subscription));
+
+        billingService.handleWebhook(payload.getBytes(StandardCharsets.UTF_8), "mock");
+
+        assertThat(subscription.getPlan()).isEqualTo(SubscriptionPlan.FREE);
+        assertThat(subscription.getStatus()).isEqualTo(SubscriptionStatus.CANCELLED);
+        assertThat(subscription.getStripeSubscriptionId()).isNull();
+        verify(subscriptionRepository).save(subscription);
+        verify(webhookIdempotency).markProcessed("evt_sub_deleted");
+    }
+
+    @Test
+    @DisplayName("getSubscriptionForUser returns effective plan and monthly usage")
     void getSubscriptionForUser() {
         Subscription subscription = subscription(orgId, "cus_1", null);
-        subscription.setTrialEndsAt(java.time.Instant.parse("2026-07-01T00:00:00Z"));
+        subscription.setTrialEndsAt(java.time.Instant.parse("2099-07-01T00:00:00Z"));
         subscription.setCurrentPeriodEnd(java.time.Instant.parse("2026-07-15T00:00:00Z"));
 
         when(subscriptionResolver.resolveForUser(userId))
-                .thenReturn(new SubscriptionContext(orgId, subscriptionId, SubscriptionPlan.PRO, SubscriptionStatus.TRIALING, subscription.getTrialEndsAt()));
+                .thenReturn(new SubscriptionContext(
+                        orgId,
+                        subscriptionId,
+                        SubscriptionPlan.FREE,
+                        SubscriptionStatus.TRIALING,
+                        subscription.getTrialEndsAt()));
         when(subscriptionRepository.findByOrganizationId(orgId)).thenReturn(Optional.of(subscription));
         when(orgUsageCounter.aiSkillRunsThisMonth(orgId)).thenReturn(3L);
         when(orgUsageCounter.jobApplicationsThisMonth(orgId)).thenReturn(5L);
+        when(orgUsageCounter.cvUploadsTotal(orgId)).thenReturn(1L);
 
         var response = billingService.getSubscriptionForUser(userId);
 
-        assertThat(response.plan()).isEqualTo(SubscriptionPlan.PRO);
+        assertThat(response.plan()).isEqualTo(SubscriptionPlan.FREE);
+        assertThat(response.effectivePlan()).isEqualTo(SubscriptionPlan.PRO);
         assertThat(response.status()).isEqualTo(SubscriptionStatus.TRIALING);
-        assertThat(response.trialEndsAt()).isEqualTo(subscription.getTrialEndsAt());
-        assertThat(response.currentPeriodEnd()).isEqualTo(subscription.getCurrentPeriodEnd());
+        assertThat(response.hasBillingAccount()).isTrue();
         assertThat(response.usageThisMonth().aiRuns()).isEqualTo(3L);
         assertThat(response.usageThisMonth().applications()).isEqualTo(5L);
+        assertThat(response.cvUploadsTotal()).isEqualTo(1L);
     }
 
     private Subscription subscription(UUID organizationId, String customerId, String subscriptionId) {

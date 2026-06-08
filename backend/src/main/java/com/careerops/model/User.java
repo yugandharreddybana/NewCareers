@@ -83,6 +83,10 @@ public class User {
     @Builder.Default
     private boolean aiProcessingConsent = true;
 
+    /** Preferred org for subscription/billing when the user belongs to multiple orgs. */
+    @Column(name = "primary_billing_organization_id")
+    private UUID primaryBillingOrganizationId;
+
     @PrePersist void onCreate() {
         if (createdAt == null) createdAt = Instant.now();
         if (role == null)      role      = Role.USER;

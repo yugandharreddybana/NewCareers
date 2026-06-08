@@ -78,6 +78,11 @@ public class UserProfile {
     @Column(name = "sponsorship_required") private Boolean sponsorshipRequired;
     private Boolean onboarded;
 
+    @Column(name = "plan_tier")
+    @Enumerated(EnumType.STRING)
+    @Builder.Default
+    private PlanTier planTier = PlanTier.FREE;
+
     // ── Section 10: Portfolio items (JSONB array) ────────────────────────
 
     /**

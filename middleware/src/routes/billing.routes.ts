@@ -8,24 +8,26 @@ import { createJavaRouteProxy, forwardRawBillingWebhook } from '../services/back
 const router = express.Router();
 const proxy = createJavaRouteProxy('/billing');
 
-const handleComingSoon = (_req: express.Request, res: express.Response) => {
-  res.status(501).json({ error: 'Billing services are not yet configured on this server.' });
-};
-
 router.post('/checkout-session', authGuard, proxy);
+router.post('/checkout', authGuard, proxy);
 router.post('/customer-portal', authGuard, proxy);
+router.post('/portal', authGuard, proxy);
 router.get('/subscription', authGuard, proxy);
-
-// Legacy / future endpoints — still not implemented in Java
-router.get('/', authGuard, handleComingSoon);
-router.get('/plans', authGuard, handleComingSoon);
-router.post('/checkout', authGuard, handleComingSoon);
-router.post('/portal', authGuard, handleComingSoon);
-router.get('/invoices', authGuard, handleComingSoon);
-router.get('/usage', authGuard, handleComingSoon);
-router.post('/cancel', authGuard, handleComingSoon);
-router.post('/reactivate', authGuard, handleComingSoon);
+router.get('/', authGuard, proxy);
+router.get('/plans', authGuard, proxy);
+router.get('/invoices', authGuard, proxy);
+router.get('/usage', authGuard, proxy);
+router.post('/cancel', authGuard, proxy);
+router.post('/reactivate', authGuard, proxy);
+router.put('/organization', authGuard, proxy);
 
 router.post('/webhook', forwardRawBillingWebhook);
+
+router.use((req, res) => {
+  res.status(404).json({
+    error: `Unknown billing route: ${req.method} ${req.path}`,
+    code: 'BILLING_ROUTE_NOT_FOUND',
+  });
+});
 
 export default router;

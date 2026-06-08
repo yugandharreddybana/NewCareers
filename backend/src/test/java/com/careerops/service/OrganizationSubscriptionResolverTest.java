@@ -36,6 +36,8 @@ class OrganizationSubscriptionResolverTest {
     private UserRepository userRepository;
     @Mock
     private TrialProvisioningService trialProvisioningService;
+    @Mock
+    private OrganizationPlanSyncService organizationPlanSyncService;
 
     private OrganizationSubscriptionResolver resolver;
     private final UUID userId = UUID.randomUUID();
@@ -44,7 +46,13 @@ class OrganizationSubscriptionResolverTest {
     @BeforeEach
     void setUp() {
         resolver = new OrganizationSubscriptionResolver(
-                orgRepo, memberRepo, subscriptionRepo, userRepository, trialProvisioningService, saasBillingProperties);
+                orgRepo,
+                memberRepo,
+                subscriptionRepo,
+                userRepository,
+                trialProvisioningService,
+                saasBillingProperties,
+                organizationPlanSyncService);
     }
 
     @Test

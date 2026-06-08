@@ -1,6 +1,7 @@
 package com.careerops.service;
 
 import com.careerops.model.Job;
+import com.careerops.model.PlanTierLimits;
 import com.careerops.model.UserProfile;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -8,7 +9,6 @@ import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
 import java.util.LinkedHashSet;
@@ -34,7 +34,7 @@ public class TailorResumeAiService {
     private final SkillPromptLibrary skillPrompts;
     private final ObjectMapper mapper;
     private final TokenUsageService tokenUsage;
-    private final long dailyTokenBudget;
+    private final UserPlanTierService planTierService;
 
     public TailorResumeAiService(
             NvidiaService nvidia,
@@ -42,13 +42,13 @@ public class TailorResumeAiService {
             SkillPromptLibrary skillPrompts,
             ObjectMapper mapper,
             TokenUsageService tokenUsage,
-            @Value("${ai.daily.token.budget:500000}") long dailyTokenBudget) {
+            UserPlanTierService planTierService) {
         this.nvidia = nvidia;
         this.skillExtraction = skillExtraction;
         this.skillPrompts = skillPrompts;
         this.mapper = mapper;
         this.tokenUsage = tokenUsage;
-        this.dailyTokenBudget = dailyTokenBudget;
+        this.planTierService = planTierService;
     }
 
     public boolean isAvailable() {
@@ -65,7 +65,8 @@ public class TailorResumeAiService {
             String cvText,
             List<CvMarkdownSections.Section> parsedSections) {
         try {
-            if (tokenUsage.hasExceededBudget(userId, dailyTokenBudget)) {
+            long tierBudget = PlanTierLimits.tokenBudget(planTierService.resolveForUser(userId));
+            if (tokenUsage.hasExceededBudget(userId, tierBudget)) {
                 log.info("Skipping AI tailor — daily token budget exhausted for userId={}", userId);
                 return Optional.empty();
             }

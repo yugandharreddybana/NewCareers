@@ -30,13 +30,18 @@ class TrialLifecycleServiceTest {
     @Mock SaasLifecycleTelemetry lifecycleTelemetry;
     @Mock TrialEmailService trialEmailService;
     @Mock UserRepository userRepository;
+    @Mock OrganizationPlanSyncService organizationPlanSyncService;
 
     private TrialLifecycleService service;
 
     @BeforeEach
     void setUp() {
         service = new TrialLifecycleService(
-                subscriptionRepository, lifecycleTelemetry, trialEmailService, userRepository);
+                subscriptionRepository,
+                lifecycleTelemetry,
+                trialEmailService,
+                userRepository,
+                organizationPlanSyncService);
     }
 
     @Test
@@ -65,7 +70,9 @@ class TrialLifecycleServiceTest {
 
         assertEquals(SubscriptionStatus.ACTIVE, subscription.getStatus());
         assertEquals(SubscriptionPlan.FREE, subscription.getPlan());
+        assertEquals(null, subscription.getTrialEndsAt());
         verify(subscriptionRepository).save(subscription);
+        verify(organizationPlanSyncService).syncFromSubscription(orgId, SubscriptionPlan.FREE);
         verify(lifecycleTelemetry).trackTrialEnded(ownerId, orgId);
         verify(trialEmailService).sendTrialEndedUpgrade("owner@example.com", "Owner");
     }

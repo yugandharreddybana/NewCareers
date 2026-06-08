@@ -144,12 +144,27 @@ Without NVIDIA key: jobs still scrape; match scores use heuristic fallback.
 
 Without Supabase: CV parsed text saved to DB; file download may be limited.
 
-### Billing (only if using `/billing`)
+### Billing (Stripe + SaaS lifecycle)
 
-| Variable | File | How to get |
-|----------|------|------------|
-| `STRIPE_SECRET_KEY` | `middleware/.env` | Stripe Dashboard → API keys |
-| `STRIPE_WEBHOOK_SECRET` | `middleware/.env` | Stripe webhook endpoint secret |
+Java owns Stripe calls; middleware only proxies authenticated billing routes and forwards webhooks. Configure in repo **`.env`** (Java) — see root `.env.example` billing block.
+
+| Variable | File | Purpose |
+|----------|------|---------|
+| `STRIPE_SECRET_KEY` | repo `.env` | Stripe API secret (`sk_test_...` dev; live key in prod profile) |
+| `STRIPE_WEBHOOK_SECRET` | repo `.env` | Webhook signing secret (`whsec_...`) — verified in Java `BillingController` |
+| `STRIPE_PRICE_ID_PRO` | repo `.env` | Stripe Price ID for Pro checkout |
+| `STRIPE_PRICE_ID_ENTERPRISE` | repo `.env` | Stripe Price ID for Enterprise checkout |
+| `SAAS_TRIAL_DAYS` | repo `.env` | Trial length for new orgs (default `7`) |
+| `SAAS_BILLING_PRICE_FREE` | repo `.env` | Admin MRR metric list price (not Stripe amount) |
+| `SAAS_BILLING_PRICE_PRO` | repo `.env` | Admin MRR metric list price |
+| `SAAS_BILLING_PRICE_ENTERPRISE` | repo `.env` | Admin MRR metric list price |
+| `SAAS_BILLING_ENFORCEMENT_ENABLED` | repo `.env` | Force plan limits in dev/test when `true` |
+| `BILLING_FRONTEND_BASE_URL` | repo `.env` | Base URL for checkout/portal return URLs (default Vite origin) |
+| `BILLING_SUCCESS_URL` | repo `.env` | Optional override for post-checkout redirect |
+| `BILLING_CANCEL_URL` | repo `.env` | Optional override for abandoned checkout |
+| `BILLING_PORTAL_RETURN_URL` | repo `.env` | Optional override for Stripe portal return (default `/account/billing`) |
+
+**Middleware:** no Stripe secrets required — `middleware/src/routes/billing.routes.ts` proxies to Java. Stripe webhooks hit `POST /api/v1/billing/webhook` (middleware) → `POST /api/billing/webhook` (Java, public path).
 
 ### Admin experiments page
 

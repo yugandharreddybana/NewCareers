@@ -2,10 +2,16 @@ package com.careerops.billing;
 
 import com.careerops.model.SubscriptionPlan;
 import com.careerops.model.SubscriptionStatus;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
+
+import java.util.Optional;
 
 @Component
 public class StripePlanMapper {
+
+    private static final Logger log = LoggerFactory.getLogger(StripePlanMapper.class);
 
     private final StripeProperties properties;
 
@@ -21,17 +27,18 @@ public class StripePlanMapper {
         };
     }
 
-    public SubscriptionPlan planForPriceId(String priceId) {
+    public Optional<SubscriptionPlan> resolvePlanForPriceId(String priceId) {
         if (priceId == null || priceId.isBlank()) {
-            return SubscriptionPlan.FREE;
+            return Optional.empty();
         }
         if (priceId.equals(properties.getPriceId().getEnterprise())) {
-            return SubscriptionPlan.ENTERPRISE;
+            return Optional.of(SubscriptionPlan.ENTERPRISE);
         }
         if (priceId.equals(properties.getPriceId().getPro())) {
-            return SubscriptionPlan.PRO;
+            return Optional.of(SubscriptionPlan.PRO);
         }
-        return SubscriptionPlan.FREE;
+        log.error("Unknown Stripe price id configured in webhook/subscription: {}", priceId);
+        return Optional.empty();
     }
 
     public SubscriptionStatus mapStripeStatus(String stripeStatus) {
@@ -41,9 +48,12 @@ public class StripePlanMapper {
         return switch (stripeStatus) {
             case "active" -> SubscriptionStatus.ACTIVE;
             case "trialing" -> SubscriptionStatus.TRIALING;
-            case "past_due" -> SubscriptionStatus.PAST_DUE;
+            case "past_due", "incomplete", "paused" -> SubscriptionStatus.PAST_DUE;
             case "canceled", "unpaid", "incomplete_expired" -> SubscriptionStatus.CANCELLED;
-            default -> SubscriptionStatus.CANCELLED;
+            default -> {
+                log.warn("Unknown Stripe subscription status: {}; treating as ACTIVE", stripeStatus);
+                yield SubscriptionStatus.ACTIVE;
+            }
         };
     }
 }

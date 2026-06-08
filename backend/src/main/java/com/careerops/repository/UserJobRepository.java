@@ -261,4 +261,15 @@ public interface UserJobRepository extends JpaRepository<UserJob, UUID>, JpaSpec
               AND uj.deletedAt IS NULL
             """)
     int softDeleteAllByUserId(@Param("userId") UUID userId, @Param("now") Instant now);
+
+    /** Phase-1 nightly fetch rows awaiting AI scoring in Phase 2. */
+    @Query("""
+            SELECT uj FROM UserJob uj
+            WHERE uj.userId = :userId
+              AND (uj.scoreBreakdown IS NULL
+                   OR uj.matchPercent = 0
+                   OR uj.matchPercent IS NULL)
+            ORDER BY uj.deliveredAt DESC
+            """)
+    List<UserJob> findUnscoredByUserId(@Param("userId") UUID userId, Pageable pageable);
 }

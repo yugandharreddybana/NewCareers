@@ -46,6 +46,8 @@ public class AdminSaasService {
     private final AiTokenUsageRepository aiTokenUsageRepository;
     private final OrgRepository orgRepository;
     private final SaasBillingProperties saasBillingProperties;
+    private final BillingStripeSyncService billingStripeSyncService;
+    private final OrganizationPlanSyncService organizationPlanSyncService;
 
     public AdminSaasService(
             UserRepository userRepository,
@@ -53,13 +55,17 @@ public class AdminSaasService {
             FeatureFlagRepository featureFlagRepository,
             AiTokenUsageRepository aiTokenUsageRepository,
             OrgRepository orgRepository,
-            SaasBillingProperties saasBillingProperties) {
+            SaasBillingProperties saasBillingProperties,
+            BillingStripeSyncService billingStripeSyncService,
+            OrganizationPlanSyncService organizationPlanSyncService) {
         this.userRepository = userRepository;
         this.subscriptionRepository = subscriptionRepository;
         this.featureFlagRepository = featureFlagRepository;
         this.aiTokenUsageRepository = aiTokenUsageRepository;
         this.orgRepository = orgRepository;
         this.saasBillingProperties = saasBillingProperties;
+        this.billingStripeSyncService = billingStripeSyncService;
+        this.organizationPlanSyncService = organizationPlanSyncService;
     }
 
     @Transactional(readOnly = true)
@@ -120,11 +126,28 @@ public class AdminSaasService {
         Subscription subscription = subscriptionRepository.findByOrganizationId(orgId)
                 .orElseThrow(() -> ApiException.notFound("Subscription not found for organization"));
 
+        SubscriptionPlan previousPlan = subscription.getPlan();
         subscription.setPlan(request.plan());
         if (request.status() != null) {
             subscription.setStatus(request.status());
         }
+
+        boolean downgraded = request.plan() == SubscriptionPlan.FREE
+                || request.status() == SubscriptionStatus.CANCELLED;
+        if (downgraded) {
+            billingStripeSyncService.cancelAndDetachStripe(subscription);
+        } else if (subscription.getStripeSubscriptionId() != null
+                && !subscription.getStripeSubscriptionId().isBlank()
+                && !subscription.getStripeSubscriptionId().startsWith("sub_mock_")) {
+            log.warn(
+                    "Admin upgraded plan locally without Stripe checkout orgId={} from={} to={} — reconcile Stripe manually",
+                    orgId,
+                    previousPlan,
+                    request.plan());
+        }
+
         subscriptionRepository.save(subscription);
+        organizationPlanSyncService.syncFromSubscription(orgId, subscription.getPlan());
         log.warn("Admin override plan orgId={} plan={} status={}", orgId, request.plan(), subscription.getStatus());
 
         String orgName = orgRepository.findById(orgId).map(o -> o.getName()).orElse("Unknown");

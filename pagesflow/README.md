@@ -51,6 +51,7 @@ Cursor rule: [`.cursor/rules/pagesflow-sync.mdc`](../.cursor/rules/pagesflow-syn
 | [help](./help/PAGE.md) | `/help` | none | Help center |
 | [accessibility](./accessibility/PAGE.md) | `/accessibility` | none | Accessibility statement |
 | [not-found](./not-found/PAGE.md) | `*` | none | Catch-all 404 (no AppShell) |
+| [billing](./billing/PAGE.md) | `/billing`, `/pricing` | none | Public marketing pricing — `MarketingNav` layout, no AppShell |
 
 ### Auth and onboarding
 
@@ -87,7 +88,6 @@ Cursor rule: [`.cursor/rules/pagesflow-sync.mdc`](../.cursor/rules/pagesflow-syn
 | [cv-manager](./cv-manager/PAGE.md) | `/cv` | CV upload and management |
 | [skills](./skills/PAGE.md) | `/skills` | AI career skills runner |
 | [analytics](./analytics/PAGE.md) | `/analytics` | User analytics + permit intelligence |
-| [billing](./billing/PAGE.md) | `/billing` | Subscription / billing UI |
 | [refer](./refer/PAGE.md) | `/refer` | Referral program |
 | [planner](./planner/PAGE.md) | `/planner` | Application planner / tasks |
 | [auto-apply](./auto-apply/PAGE.md) | `/auto-apply` | Auto-apply feature |

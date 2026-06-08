@@ -2,7 +2,9 @@ package com.careerops.service;
 
 import com.careerops.dto.SkillRunResponse;
 import com.careerops.dto.SkillStartRequest;
+import com.careerops.model.PlanTier;
 import com.careerops.model.SkillRun;
+import com.careerops.model.UserProfile;
 import com.careerops.repository.BatchSkillRunRepository;
 import com.careerops.repository.JobRepository;
 import com.careerops.repository.SkillConversationRepository;
@@ -19,7 +21,6 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
-import org.springframework.test.util.ReflectionTestUtils;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.TransactionDefinition;
 import org.springframework.transaction.support.AbstractPlatformTransactionManager;
@@ -69,6 +70,7 @@ class SkillServiceTest {
     @Mock private TailorResumePendingStore tailorResumePending;
     @Mock private SkillLocalFallbackService localFallback;
     @Mock private UserProfileRepository profiles;
+    @Mock private UserPlanTierService planTierService;
     @Mock private EvaluationReportEnrichmentService evaluationEnrichment;
     @Mock private UserJobSkillMatchService skillMatchService;
     @Mock private TailorResumeBuilderService tailorResumeBuilder;
@@ -99,7 +101,7 @@ class SkillServiceTest {
                 conversations, registry, mapper, emailService, notificationService,
                 tokenUsageService, meterRegistry, catalogSkills,
                 evaluationValidator, cvHumanScoreService, cvService, tailorResumePending,
-                localFallback, profiles, evaluationEnrichment, skillMatchService,
+                localFallback, profiles, planTierService, evaluationEnrichment, skillMatchService,
                 tailorResumeBuilder, skillMdExecutor, consentService, txManager,
                 aiProviderRouter, contextBuilder);  // Prompt 4
     }
@@ -176,11 +178,11 @@ class SkillServiceTest {
         UUID userJobId = UUID.randomUUID();
         String skill = "evaluate";
 
-        ReflectionTestUtils.setField(skillService, "dailyTokenBudget", 500_000L);
+        when(planTierService.resolveForUser(userId)).thenReturn(PlanTier.FREE);
         doNothing().when(consentService).validateAiConsent(userId);
         doNothing().when(conversations).deleteByUserIdAndSkillAndUserJobIdAndStatus(
                 eq(userId), eq(skill), eq(userJobId), eq("pending_answer"));
-        when(tokenUsageService.hasExceededBudget(userId, 500_000L)).thenReturn(false);
+        when(tokenUsageService.hasExceededBudget(userId, 50_000L)).thenReturn(false);
         when(catalogSkills.handles(skill)).thenReturn(false);
         when(registry.handles(skill)).thenReturn(false);
         when(validator.validateForSkill(userId, skill)).thenReturn(Collections.emptyList());
@@ -212,13 +214,13 @@ class SkillServiceTest {
         UUID userJobId = UUID.randomUUID();
         String skill = "research";
 
-        ReflectionTestUtils.setField(skillService, "dailyTokenBudget", 500_000L);
+        when(planTierService.resolveForUser(userId)).thenReturn(PlanTier.FREE);
         doNothing().when(consentService).validateAiConsent(userId);
         doNothing().when(conversations).deleteByUserIdAndSkillAndUserJobIdAndStatus(
                 eq(userId), eq(skill), eq(userJobId), eq("pending_answer"));
         when(skillRuns.findValidCachedRun(eq(userId), eq(userJobId), eq(skill), any(Instant.class)))
                 .thenReturn(Optional.empty());
-        when(tokenUsageService.hasExceededBudget(userId, 500_000L)).thenReturn(false);
+        when(tokenUsageService.hasExceededBudget(userId, 50_000L)).thenReturn(false);
         when(catalogSkills.handles(skill)).thenReturn(false);
         when(registry.handles(skill)).thenReturn(false);
         when(validator.validateForSkill(userId, skill)).thenReturn(Collections.emptyList());
@@ -249,13 +251,13 @@ class SkillServiceTest {
         UUID userJobId = UUID.randomUUID();
         String skill = "prep-interview";
 
-        ReflectionTestUtils.setField(skillService, "dailyTokenBudget", 500_000L);
+        when(planTierService.resolveForUser(userId)).thenReturn(PlanTier.FREE);
         doNothing().when(consentService).validateAiConsent(userId);
         doNothing().when(conversations).deleteByUserIdAndSkillAndUserJobIdAndStatus(
                 eq(userId), eq(skill), eq(userJobId), eq("pending_answer"));
         when(skillRuns.findValidCachedRun(eq(userId), eq(userJobId), eq(skill), any(Instant.class)))
                 .thenReturn(Optional.empty());
-        when(tokenUsageService.hasExceededBudget(userId, 500_000L)).thenReturn(false);
+        when(tokenUsageService.hasExceededBudget(userId, 50_000L)).thenReturn(false);
         when(catalogSkills.handles(skill)).thenReturn(false);
         when(registry.handles(skill)).thenReturn(false);
         when(validator.validateForSkill(userId, skill)).thenReturn(Collections.emptyList());
@@ -286,7 +288,7 @@ class SkillServiceTest {
         UUID userJobId = UUID.randomUUID();
         String skill = "research";
 
-        ReflectionTestUtils.setField(skillService, "dailyTokenBudget", 500_000L);
+        when(planTierService.resolveForUser(any())).thenReturn(PlanTier.FREE);
 
         CountDownLatch firstStarted  = new CountDownLatch(1);
         CountDownLatch releaseFirst  = new CountDownLatch(1);
@@ -340,5 +342,34 @@ class SkillServiceTest {
 
         double dedupCount = meterRegistry.counter("skill.dedup.hit", "skill", skill).count();
         assertThat(dedupCount).isEqualTo(1.0);
+    }
+
+    // ================================================================
+    // NEW TESTS — Prompt 6: tier-aware token budget
+    // ================================================================
+
+    @Test
+    @DisplayName("executeSkillInternal — FREE tier uses 50k token budget")
+    void budgetCheck_usesFreeTierBudget() {
+        UUID userId = UUID.randomUUID();
+        UUID userJobId = UUID.randomUUID();
+        String skill = "research";
+
+        when(planTierService.resolveForUser(userId)).thenReturn(PlanTier.FREE);
+        doNothing().when(consentService).validateAiConsent(userId);
+        doNothing().when(conversations).deleteByUserIdAndSkillAndUserJobIdAndStatus(
+                eq(userId), eq(skill), eq(userJobId), eq("pending_answer"));
+        when(skillRuns.findValidCachedRun(any(), any(), any(), any())).thenReturn(Optional.empty());
+        when(tokenUsageService.hasExceededBudget(userId, 50_000L)).thenReturn(true);
+        when(catalogSkills.handles(skill)).thenReturn(true);
+        when(catalogSkills.execute(eq(skill), eq(userId), any())).thenReturn(
+                SkillRunResponse.result(skill, mapper.createObjectNode()));
+
+        SkillRunResponse response = skillService.startSkill(
+                new SkillStartRequest(skill, userJobId, null, null, null, null, null, null),
+                userId);
+
+        verify(tokenUsageService).hasExceededBudget(userId, 50_000L);
+        assertThat(response.type()).isEqualTo(SkillRunResponse.Type.RESULT);
     }
 }

@@ -25,6 +25,7 @@ import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import org.springframework.data.domain.PageRequest;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.support.TransactionTemplate;
 import java.time.Instant;
@@ -62,6 +63,7 @@ public class JobDeliveryService {
     private final SkillPromptLibrary             prompts;
     private final UserProfileRepository          profiles;
     private final UserJobRepository              userJobs;
+    private final JobRepository                  jobs;
     private final CvService                      cvService;
     private final DailyLimitService              limits;
     private final JobMatchingService             matcher;
@@ -100,6 +102,7 @@ public class JobDeliveryService {
     public JobDeliveryService(JobScrapeService scrape, DeduplicationService dedup,
                               NvidiaService nvidia, SkillPromptLibrary prompts,
                               UserProfileRepository profiles, UserJobRepository userJobs,
+                              JobRepository jobs,
                               CvService cv, DailyLimitService limits,
                               JobMatchingService matcher, ObjectMapper mapper,
                               PlatformTransactionManager transactionManager,
@@ -117,6 +120,7 @@ public class JobDeliveryService {
                               JobFetchSettings fetchSettings) {
         this.scrape              = scrape;    this.dedup    = dedup;    this.nvidia   = nvidia;
         this.prompts             = prompts;   this.profiles = profiles; this.userJobs = userJobs;
+        this.jobs                = jobs;
         this.cvService           = cv;        this.limits   = limits;   this.matcher  = matcher;
         this.mapper              = mapper;
         this.evaluationValidator = evaluationValidator;
@@ -272,6 +276,83 @@ public class JobDeliveryService {
         return deliverScored(userId, p, raw, desiredCount, "daily_delivery");
     }
 
+    /**
+     * Phase 1 nightly cron: scrape, dedup, heuristic pre-rank, persist without AI scoring.
+     */
+    public void fetchAndStoreOnly(UUID userId) {
+        UserProfile p = profiles.findByUserId(userId)
+            .orElseThrow(() -> new RuntimeException("Profile not found: " + userId));
+        List<Job> raw = applyDeliveryFilters(scrape.fetchRaw(p), p);
+        logSourceMix(userId, raw);
+        List<Job> deduped = dedup.dedupForPipelineDelivery(userId, raw);
+        if (deduped.isEmpty()) {
+            log.info("fetchAndStoreOnly: no new raw jobs for userId={}", userId);
+            return;
+        }
+        int poolLimit = Math.max(batchSize() * 5, preRankPool);
+        List<JobMatchingService.ScoredJob> ranked = matcher.topN(
+            deduped.stream().filter(j -> j.getCompany() != null && !j.getCompany().isBlank()).toList(),
+            p, poolLimit);
+        int stored = 0;
+        List<Job> newlyStored = new ArrayList<>();
+        for (JobMatchingService.ScoredJob candidate : ranked) {
+            Job j = candidate.job();
+            if (userJobs.findByUserIdAndJobId(userId, j.getId()).isPresent()) continue;
+            if (!titleMatchesDesiredRoles(p, j)) continue;
+            boolean inserted = transactionTemplate.execute(
+                status -> insertHeuristicUserJob(userId, j, candidate.score()));
+            if (Boolean.TRUE.equals(inserted)) {
+                stored++;
+                newlyStored.add(j);
+            }
+        }
+        if (!newlyStored.isEmpty()) dedup.markSeen(userId, newlyStored);
+        log.info("fetchAndStoreOnly: stored {} raw jobs for userId={}", stored, userId);
+    }
+
+    /**
+     * Phase 2 nightly cron: AI-score jobs stored in Phase 1 (cache-aware evaluateDeep).
+     */
+    public void scoreStoredJobs(UUID userId, int desiredCount) {
+        UserProfile p = profiles.findByUserId(userId)
+            .orElseThrow(() -> new RuntimeException("Profile not found: " + userId));
+        int remaining = limits.remaining(userId);
+        if (remaining <= 0) {
+            log.info("scoreStoredJobs: daily limit reached for userId={}", userId);
+            return;
+        }
+        int target = Math.min(desiredCount, remaining);
+        List<UserJob> unscored = userJobs.findUnscoredByUserId(userId, PageRequest.of(0, target));
+        if (unscored.isEmpty()) {
+            log.info("scoreStoredJobs: no unscored jobs for userId={}", userId);
+            return;
+        }
+        int scored = 0;
+        for (UserJob uj : unscored) {
+            try {
+                Job j = jobs.findById(uj.getJobId()).orElse(null);
+                if (j == null) continue;
+                JobMatchingService.ScoredJob candidate = new JobMatchingService.ScoredJob(
+                    j,
+                    uj.getMatchPercent() != null ? uj.getMatchPercent() : 0,
+                    List.of(),
+                    List.of());
+                ParallelJobEvaluationService.ScoredResult deep =
+                    parallelEval.evaluateDeep(candidate, p, userId, "nightly_score");
+                transactionTemplate.executeWithoutResult(status -> {
+                    applyScoredToUserJob(uj, new Scored(j, deep.scoreBreakdown(), deep.matchPercent()));
+                    userJobs.save(uj);
+                });
+                scored++;
+                if (scored >= target) break;
+            } catch (Exception ex) {
+                log.warn("scoreStoredJobs: scoring failed for userJobId={}: {}", uj.getId(), ex.getMessage());
+            }
+        }
+        if (scored > 0) limits.increment(userId, scored);
+        log.info("scoreStoredJobs: scored {} jobs for userId={}", scored, userId);
+    }
+
     private static boolean titleMatchesDesiredRoles(UserProfile profile, Job job) {
         return job != null && JobDeliveryFilters.titleMatchesDesiredRoles(profile, job.getTitle());
     }
@@ -307,7 +388,7 @@ public class JobDeliveryService {
             p, poolLimit);
         log.info("User {} pre-ranked {} candidates (target {} new)", userId, preRankedCandidates.size(), target);
         if (preRankedCandidates.isEmpty())
-            return new FetchSummary(0, limits.getCount(userId), limits.max(), limits.remaining(userId));
+            return new FetchSummary(0, limits.getCount(userId), limits.maxForUser(userId), limits.remaining(userId));
 
         int minPct = profileMinMatchFloor(p);
         Set<String> companies = new HashSet<>();
@@ -332,7 +413,7 @@ public class JobDeliveryService {
         Integer saved = transactionTemplate.execute(status -> persistResults(userId, toPersist));
         int delivered = saved == null ? 0 : saved;
         log.info("User {} delivered {} new jobs (tag {})", userId, delivered, sourceTag);
-        return new FetchSummary(delivered, limits.getCount(userId), limits.max(), limits.remaining(userId));
+        return new FetchSummary(delivered, limits.getCount(userId), limits.maxForUser(userId), limits.remaining(userId));
     }
 
     private List<Job> fetchSourceWithTimeout(JobSource source, UserProfile profile) {
@@ -445,6 +526,40 @@ public class JobDeliveryService {
     }
 
     // ── FIX DB-001: Atomic upsert ────────────────────────────────────────────
+
+    /** Inserts heuristic pre-rank only — scoreBreakdown left null for Phase 2 AI scoring. */
+    private boolean insertHeuristicUserJob(UUID userId, Job job, int matchPercent) {
+        UUID jobId = job.getId();
+        if (userJobs.findByUserIdAndJobId(userId, jobId).isPresent()) {
+            return false;
+        }
+        if (userJobs.findRowIdByUserIdAndJobIdIncludingDeleted(userId, jobId).isPresent()) {
+            userJobs.reactivateSoftDeleted(userId, jobId);
+            Optional<UserJob> restored = userJobs.findByUserIdAndJobId(userId, jobId);
+            if (restored.isPresent()) {
+                UserJob uj = restored.get();
+                uj.setMatchPercent(matchPercent);
+                uj.setScoreBreakdown(null);
+                userJobs.save(uj);
+                return true;
+            }
+        }
+        try {
+            UserJob uj = UserJob.builder()
+                .userId(userId)
+                .jobId(jobId)
+                .matchPercent(matchPercent)
+                .scoreBreakdown(null)
+                .build();
+            userJobs.save(uj);
+            return true;
+        } catch (RuntimeException ex) {
+            if (isDuplicateUserJob(ex)) {
+                return false;
+            }
+            throw ex;
+        }
+    }
 
     private boolean upsertUserJob(UUID userId, Scored s) {
         UUID jobId = s.job().getId();

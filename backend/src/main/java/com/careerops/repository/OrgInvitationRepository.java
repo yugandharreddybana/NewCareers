@@ -13,4 +13,6 @@ public interface OrgInvitationRepository extends JpaRepository<OrgInvitation, UU
     List<OrgInvitation> findByOrgId(UUID orgId);
     Optional<OrgInvitation> findByTokenHash(String tokenHash);
     boolean existsByOrgIdAndEmailAndStatus(UUID orgId, String email, String status);
+
+    int countByOrgIdAndStatus(UUID orgId, String status);
 }

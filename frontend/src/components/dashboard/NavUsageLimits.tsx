@@ -1,3 +1,4 @@
+import { Link } from 'react-router-dom';
 import { useAuth } from '@/context/AuthContext';
 import { useUsageLimits } from '@/hooks/queries/useUsageLimits';
 import { Tooltip } from '@/components/ui/Tooltip';
@@ -194,24 +195,33 @@ export function NavUsageLimits() {
   const tz = data.timezoneId || 'Europe/Dublin';
 
   return (
-    <div
-      className="flex items-stretch gap-1.5 min-w-0"
-      role="status"
-      aria-label="Daily usage limits"
-      aria-busy={isFetching}
-    >
-      <UsagePill
-        label="Jobs today"
-        quota={data.jobDelivery}
-        timeZone={tz}
-        valueFormatter={n => String(n)}
-      />
-      <UsagePill
-        label="AI tokens"
-        quota={data.aiTokens}
-        timeZone={tz}
-        valueFormatter={formatTokens}
-      />
+    <div className="flex flex-col gap-0.5 min-w-0" role="status" aria-busy={isFetching}>
+      <div className="flex items-center justify-between gap-2 px-0.5">
+        <span className="text-[9px] uppercase tracking-wide text-secondary leading-none">
+          Daily quotas
+        </span>
+        <Link
+          to="/account/billing"
+          className="text-[9px] text-primary hover:underline leading-none whitespace-nowrap"
+          title="Monthly plan limits live on Subscription & Billing"
+        >
+          Monthly limits →
+        </Link>
+      </div>
+      <div className="flex items-stretch gap-1.5 min-w-0" aria-label="Daily usage limits">
+        <UsagePill
+          label="Jobs today"
+          quota={data.jobDelivery}
+          timeZone={tz}
+          valueFormatter={n => String(n)}
+        />
+        <UsagePill
+          label="AI tokens"
+          quota={data.aiTokens}
+          timeZone={tz}
+          valueFormatter={formatTokens}
+        />
+      </div>
     </div>
   );
 }

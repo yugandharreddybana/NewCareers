@@ -1,5 +1,6 @@
 package com.careerops.security;
 
+import com.careerops.billing.BillingWebhookIdempotency;
 import com.careerops.model.IdempotencyKey;
 import com.careerops.repository.IdempotencyRepository;
 import com.careerops.util.AuthUtil;
@@ -41,6 +42,14 @@ public class IdempotencyFilter extends OncePerRequestFilter {
         String key = request.getHeader("Idempotency-Key");
         if (key == null || key.isBlank()) {
             filterChain.doFilter(request, response);
+            return;
+        }
+
+        if (key.startsWith(BillingWebhookIdempotency.STORAGE_KEY_PREFIX)) {
+            log.warn("Rejected client idempotency key using reserved Stripe webhook prefix");
+            response.setStatus(HttpServletResponse.SC_BAD_REQUEST);
+            response.setContentType("application/json");
+            response.getWriter().write("{\"error\":\"Idempotency-Key uses a reserved prefix\"}");
             return;
         }
 

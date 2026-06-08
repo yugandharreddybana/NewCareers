@@ -19,6 +19,17 @@ function planDisplayName(plan: string): string {
   }
 }
 
+function upgradeCtaLabel(currentPlan: string): string {
+  switch (currentPlan.toUpperCase()) {
+    case 'FREE':
+      return 'Upgrade to Pro';
+    case 'PRO':
+      return 'Upgrade to Elite';
+    default:
+      return 'View plans';
+  }
+}
+
 export function PlanLimitBanner() {
   const [payload, setPayload] = useState<PlanLimitPayload | null>(null);
 
@@ -28,10 +39,11 @@ export function PlanLimitBanner() {
 
   const featureLabel = formatPlanLimitFeature(payload.feature);
   const planLabel = planDisplayName(payload.currentPlan);
+  const upgradeLabel = upgradeCtaLabel(payload.currentPlan);
 
   return (
     <div
-      className="fixed top-0 inset-x-0 z-[100] bg-amber-50 border-b border-amber-200 text-amber-950 shadow-sm"
+      className="w-full bg-amber-50 border-b border-amber-200 text-amber-950 shadow-sm"
       role="alert"
     >
       <div className="max-w-container-max mx-auto px-margin-mobile md:px-margin-desktop py-3 flex flex-col sm:flex-row sm:items-center gap-3 sm:gap-4">
@@ -41,7 +53,7 @@ export function PlanLimitBanner() {
             to={payload.upgradeUrl.startsWith('/') ? payload.upgradeUrl : '/pricing'}
             className="font-label-md text-label-md text-primary underline underline-offset-2 hover:text-primary/80"
           >
-            Upgrade to Pro
+            {upgradeLabel}
           </Link>{' '}
           to continue.
         </p>

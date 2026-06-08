@@ -1,16 +1,27 @@
 package com.careerops.service;
 
 import com.careerops.billing.BillingWebhookIdempotency;
+import com.careerops.billing.WebhookDisposition;
 import com.careerops.billing.CheckoutSessionResult;
 import com.careerops.billing.PortalSessionResult;
 import com.careerops.billing.StripeGateway;
+import com.careerops.billing.StripeInvoiceRecord;
 import com.careerops.billing.StripePlanMapper;
 import com.careerops.billing.StripeProperties;
+import com.careerops.billing.SubscriptionPlanResolution;
+import com.careerops.config.SaasBillingProperties;
+import com.careerops.dto.BillingDtos.CancelSubscriptionResponse;
+import com.careerops.dto.BillingDtos.InvoiceResponse;
+import com.careerops.dto.BillingDtos.PlanLimitsResponse;
+import com.careerops.dto.BillingDtos.PlanResponse;
 import com.careerops.dto.BillingDtos.SessionUrlResponse;
 import com.careerops.dto.BillingDtos.SubscriptionResponse;
+import com.careerops.dto.BillingDtos.UsageMetricsResponse;
 import com.careerops.dto.BillingDtos.UsageThisMonth;
 import com.careerops.exception.ApiException;
+import com.careerops.exception.WebhookProcessingException;
 import com.careerops.model.OrgMember;
+import com.careerops.model.PlanLimit;
 import com.careerops.model.Subscription;
 import com.careerops.model.SubscriptionPlan;
 import com.careerops.model.SubscriptionStatus;
@@ -32,14 +43,18 @@ import java.time.Instant;
 import java.time.LocalDate;
 import java.time.ZoneOffset;
 import java.time.temporal.ChronoUnit;
+import java.util.Arrays;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.UUID;
 
 @Service
 public class BillingService {
 
     private static final Logger log = LoggerFactory.getLogger(BillingService.class);
+    private static final int MAX_WEBHOOK_BYTES = 1_048_576;
 
     private final OrganizationSubscriptionResolver subscriptionResolver;
     private final SubscriptionRepository subscriptionRepository;
@@ -51,6 +66,8 @@ public class BillingService {
     private final BillingWebhookIdempotency webhookIdempotency;
     private final OrgUsageCounter orgUsageCounter;
     private final SaasLifecycleTelemetry lifecycleTelemetry;
+    private final SaasBillingProperties saasBillingProperties;
+    private final OrganizationPlanSyncService organizationPlanSyncService;
     private final String corsAllowedOrigins;
 
     public BillingService(
@@ -64,6 +81,8 @@ public class BillingService {
             BillingWebhookIdempotency webhookIdempotency,
             OrgUsageCounter orgUsageCounter,
             SaasLifecycleTelemetry lifecycleTelemetry,
+            SaasBillingProperties saasBillingProperties,
+            OrganizationPlanSyncService organizationPlanSyncService,
             @Value("${cors.allowed.origins}") String corsAllowedOrigins) {
         this.subscriptionResolver = subscriptionResolver;
         this.subscriptionRepository = subscriptionRepository;
@@ -75,6 +94,8 @@ public class BillingService {
         this.webhookIdempotency = webhookIdempotency;
         this.orgUsageCounter = orgUsageCounter;
         this.lifecycleTelemetry = lifecycleTelemetry;
+        this.saasBillingProperties = saasBillingProperties;
+        this.organizationPlanSyncService = organizationPlanSyncService;
         this.corsAllowedOrigins = corsAllowedOrigins;
     }
 
@@ -84,15 +105,118 @@ public class BillingService {
         Subscription subscription = subscriptionRepository.findByOrganizationId(ctx.orgId())
                 .orElseThrow(() -> ApiException.notFound("Subscription not found for organization"));
 
+        SubscriptionPlan effectivePlan = PlanEnforcementService.effectivePlan(ctx);
+        PlanLimit limits = PlanLimit.forPlan(effectivePlan);
+
         return new SubscriptionResponse(
+                ctx.orgId(),
                 ctx.plan(),
+                effectivePlan,
                 ctx.status(),
                 subscription.getTrialEndsAt(),
                 subscription.getCurrentPeriodEnd(),
                 computeDaysRemaining(subscription),
+                hasBillingAccount(subscription),
+                canManageBilling(userId, ctx.orgId()),
                 new UsageThisMonth(
                         orgUsageCounter.aiSkillRunsThisMonth(ctx.orgId()),
-                        orgUsageCounter.jobApplicationsThisMonth(ctx.orgId())));
+                        orgUsageCounter.jobApplicationsThisMonth(ctx.orgId())),
+                PlanLimitsResponse.from(limits),
+                orgUsageCounter.cvUploadsTotal(ctx.orgId()));
+    }
+
+    @Transactional(readOnly = true)
+    public List<PlanResponse> listPlans() {
+        return Arrays.stream(SubscriptionPlan.values())
+                .map(plan -> new PlanResponse(
+                        plan.name().toLowerCase(),
+                        plan.name(),
+                        saasBillingProperties.priceFor(plan),
+                        "EUR",
+                        "month",
+                        planFeatures(plan)))
+                .toList();
+    }
+
+    @Transactional(readOnly = true)
+    public UsageMetricsResponse getUsageForUser(UUID userId) {
+        SubscriptionResponse subscription = getSubscriptionForUser(userId);
+        int aiLimit = subscription.limits().aiRunsPerMonth();
+        int appLimit = subscription.limits().applicationsPerMonth();
+        return new UsageMetricsResponse(
+                subscription.usageThisMonth().aiRuns(),
+                aiLimit,
+                subscription.usageThisMonth().applications(),
+                appLimit,
+                monthResetInstant());
+    }
+
+    @Transactional
+    public void setPrimaryBillingOrganization(UUID userId, UUID organizationId) {
+        orgMemberRepository.findByOrgIdAndUserId(organizationId, userId)
+                .filter(m -> "active".equals(m.getStatus()))
+                .orElseThrow(() -> ApiException.forbidden("Not an active member of that organization"));
+
+        User user = userRepository.findById(userId)
+                .orElseThrow(() -> ApiException.notFound("User not found"));
+        user.setPrimaryBillingOrganizationId(organizationId);
+        userRepository.save(user);
+    }
+
+    private static List<String> planFeatures(SubscriptionPlan plan) {
+        PlanLimit limits = PlanLimit.forPlan(plan);
+        return switch (plan) {
+            case FREE -> List.of(
+                    limits.aiSkillRunsPerMonth() + " AI runs per month",
+                    limits.jobApplicationsPerMonth() + " job applications",
+                    limits.cvUploads() + " CV profile(s)");
+            case PRO -> List.of(
+                    "200 AI runs per month",
+                    "Unlimited job tracking",
+                    "10 CV profiles",
+                    "Interview Prep Suite");
+            case ENTERPRISE -> List.of(
+                    "Unlimited AI runs",
+                    "Unlimited job tracking",
+                    "Unlimited CV profiles",
+                    "Priority support");
+        };
+    }
+
+    private static Instant monthResetInstant() {
+        LocalDate firstOfNextMonth = LocalDate.now(ZoneOffset.UTC).plusMonths(1).withDayOfMonth(1);
+        return firstOfNextMonth.atStartOfDay(ZoneOffset.UTC).toInstant();
+    }
+
+    @Transactional(readOnly = true)
+    public List<InvoiceResponse> getInvoicesForUser(UUID userId) {
+        SubscriptionContext ctx = subscriptionResolver.resolveForUser(userId);
+        assertBillingAdmin(userId, ctx.orgId());
+
+        Subscription subscription = subscriptionRepository.findByOrganizationId(ctx.orgId())
+                .orElseThrow(() -> ApiException.notFound("Subscription not found for organization"));
+
+        if (!hasBillingAccount(subscription)) {
+            return List.of();
+        }
+
+        return stripeGateway.listInvoices(subscription.getStripeCustomerId()).stream()
+                .map(this::toInvoiceResponse)
+                .toList();
+    }
+
+    private InvoiceResponse toInvoiceResponse(StripeInvoiceRecord invoice) {
+        return new InvoiceResponse(
+                invoice.id(),
+                invoice.amountDue(),
+                invoice.currency(),
+                invoice.status(),
+                invoice.createdAt(),
+                invoice.pdfUrl());
+    }
+
+    private static boolean hasBillingAccount(Subscription subscription) {
+        return subscription.getStripeCustomerId() != null && !subscription.getStripeCustomerId().isBlank();
     }
 
     private static int computeDaysRemaining(Subscription subscription) {
@@ -113,8 +237,18 @@ public class BillingService {
         SubscriptionContext ctx = subscriptionResolver.resolveForUser(userId);
         assertBillingAdmin(userId, ctx.orgId());
 
-        Subscription subscription = subscriptionRepository.findByOrganizationId(ctx.orgId())
+        Subscription subscription = subscriptionRepository.findByOrganizationIdForUpdate(ctx.orgId())
                 .orElseThrow(() -> ApiException.notFound("Subscription not found for organization"));
+
+        SubscriptionPlan effectivePlan = PlanEnforcementService.effectivePlan(ctx);
+        if (effectivePlan != SubscriptionPlan.FREE
+                && ctx.status() != SubscriptionStatus.CANCELLED
+                && ctx.status() != SubscriptionStatus.PAST_DUE
+                && subscription.getStripeSubscriptionId() != null
+                && !subscription.getStripeSubscriptionId().isBlank()) {
+            throw new ApiException(HttpStatus.CONFLICT,
+                    "An active subscription already exists. Use the customer portal to change plans.");
+        }
 
         User user = userRepository.findById(userId)
                 .orElseThrow(() -> ApiException.notFound("User not found"));
@@ -122,7 +256,7 @@ public class BillingService {
         if (subscription.getStripeCustomerId() == null || subscription.getStripeCustomerId().isBlank()) {
             String customerId = stripeGateway.createCustomer(user.getEmail(), ctx.orgId());
             subscription.setStripeCustomerId(customerId);
-            subscriptionRepository.save(subscription);
+            subscriptionRepository.saveAndFlush(subscription);
         }
 
         String priceId = planMapper.priceIdForPlan(plan);
@@ -138,7 +272,46 @@ public class BillingService {
                 resolveCancelUrl(),
                 metadata);
 
+        if (result.sessionId() != null && result.sessionId().startsWith("cs_mock_")) {
+            String mockSubscriptionId = "sub_mock_" + UUID.randomUUID();
+            activateSubscriptionFromCheckout(
+                    subscription,
+                    plan,
+                    subscription.getStripeCustomerId(),
+                    mockSubscriptionId);
+        }
+
         return new SessionUrlResponse(result.url());
+    }
+
+    @Transactional
+    public CancelSubscriptionResponse cancelSubscription(UUID userId) {
+        SubscriptionContext ctx = subscriptionResolver.resolveForUser(userId);
+        assertBillingAdmin(userId, ctx.orgId());
+
+        Subscription subscription = subscriptionRepository.findByOrganizationId(ctx.orgId())
+                .orElseThrow(() -> ApiException.notFound("Subscription not found for organization"));
+
+        SubscriptionPlan effectivePlan = PlanEnforcementService.effectivePlan(ctx);
+        if (effectivePlan == SubscriptionPlan.FREE && !hasBillingAccount(subscription)) {
+            throw new ApiException(HttpStatus.BAD_REQUEST, "No paid subscription to cancel");
+        }
+
+        String stripeSubscriptionId = subscription.getStripeSubscriptionId();
+        if (stripeSubscriptionId == null || stripeSubscriptionId.isBlank()) {
+            throw new ApiException(HttpStatus.BAD_REQUEST, "No active Stripe subscription for this organization");
+        }
+
+        if (isMockStripeId(stripeSubscriptionId)) {
+            if (subscription.getCurrentPeriodEnd() == null) {
+                subscription.setCurrentPeriodEnd(Instant.now().plus(30, ChronoUnit.DAYS));
+            }
+            subscriptionRepository.save(subscription);
+            return new CancelSubscriptionResponse(true, subscription.getCurrentPeriodEnd());
+        }
+
+        stripeGateway.cancelSubscriptionAtPeriodEnd(stripeSubscriptionId);
+        return new CancelSubscriptionResponse(true, subscription.getCurrentPeriodEnd());
     }
 
     @Transactional(readOnly = true)
@@ -149,7 +322,7 @@ public class BillingService {
         Subscription subscription = subscriptionRepository.findByOrganizationId(ctx.orgId())
                 .orElseThrow(() -> ApiException.notFound("Subscription not found for organization"));
 
-        if (subscription.getStripeCustomerId() == null || subscription.getStripeCustomerId().isBlank()) {
+        if (!hasBillingAccount(subscription)) {
             throw new ApiException(HttpStatus.BAD_REQUEST, "No billing account exists for this organization");
         }
 
@@ -161,7 +334,18 @@ public class BillingService {
     }
 
     @Transactional
-    public void handleWebhook(String payload, String signatureHeader) {
+    public WebhookDisposition handleWebhook(byte[] payloadBytes, String signatureHeader) {
+        if (payloadBytes == null || payloadBytes.length == 0) {
+            throw new ApiException(HttpStatus.BAD_REQUEST, "Empty webhook payload");
+        }
+        if (payloadBytes.length > MAX_WEBHOOK_BYTES) {
+            throw new ApiException(HttpStatus.PAYLOAD_TOO_LARGE, "Webhook payload too large");
+        }
+        if (signatureHeader == null || signatureHeader.isBlank()) {
+            throw new ApiException(HttpStatus.BAD_REQUEST, "Missing Stripe-Signature header");
+        }
+
+        String payload = new String(payloadBytes, java.nio.charset.StandardCharsets.UTF_8);
         Event event;
         try {
             event = stripeGateway.constructWebhookEvent(payload, signatureHeader);
@@ -170,65 +354,149 @@ public class BillingService {
             throw new ApiException(HttpStatus.BAD_REQUEST, "Invalid Stripe signature");
         }
 
-        if (!webhookIdempotency.acquire(event.getId())) {
+        if (webhookIdempotency.isProcessed(event.getId())) {
             log.debug("Stripe webhook event already processed: {}", event.getId());
-            return;
+            return WebhookDisposition.DUPLICATE;
         }
 
-        switch (event.getType()) {
-            case "checkout.session.completed" -> handleCheckoutSessionCompleted(event);
-            case "customer.subscription.updated" -> handleSubscriptionUpdated(event);
-            case "customer.subscription.deleted" -> handleSubscriptionDeleted(event);
-            default -> log.debug("Ignoring unsupported Stripe event type: {}", event.getType());
-        }
+        WebhookDisposition disposition = dispatchEvent(event);
+        webhookIdempotency.markProcessed(event.getId());
+        return disposition;
+    }
+
+    private WebhookDisposition dispatchEvent(Event event) {
+        return switch (event.getType()) {
+            case "checkout.session.completed" -> {
+                handleCheckoutSessionCompleted(event);
+                yield WebhookDisposition.PROCESSED;
+            }
+            case "customer.subscription.updated" -> {
+                handleSubscriptionUpdated(event);
+                yield WebhookDisposition.PROCESSED;
+            }
+            case "customer.subscription.deleted" -> {
+                handleSubscriptionDeleted(event);
+                yield WebhookDisposition.PROCESSED;
+            }
+            case "invoice.payment_failed" -> {
+                handleInvoicePaymentFailed(event);
+                yield WebhookDisposition.PROCESSED;
+            }
+            case "invoice.paid" -> {
+                handleInvoicePaid(event);
+                yield WebhookDisposition.PROCESSED;
+            }
+            default -> {
+                log.info("Ignoring unsupported Stripe event type: {}", event.getType());
+                yield WebhookDisposition.IGNORED_UNSUPPORTED;
+            }
+        };
     }
 
     private void handleCheckoutSessionCompleted(Event event) {
         com.stripe.model.checkout.Session session = deserialize(event, com.stripe.model.checkout.Session.class);
         if (session == null) {
-            log.warn("checkout.session.completed missing session payload eventId={}", event.getId());
-            return;
+            throw new WebhookProcessingException("checkout.session.completed missing session payload");
+        }
+
+        String paymentStatus = session.getPaymentStatus();
+        if (paymentStatus != null
+                && !"paid".equals(paymentStatus)
+                && !"no_payment_required".equals(paymentStatus)) {
+            throw new WebhookProcessingException("checkout.session.completed unpaid status=" + paymentStatus);
         }
 
         String orgIdRaw = session.getMetadata() != null ? session.getMetadata().get("organizationId") : null;
         if (orgIdRaw == null || orgIdRaw.isBlank()) {
-            log.warn("checkout.session.completed missing organizationId metadata eventId={}", event.getId());
-            return;
+            throw new WebhookProcessingException("checkout.session.completed missing organizationId metadata");
         }
 
         UUID orgId = UUID.fromString(orgIdRaw);
         Subscription subscription = subscriptionRepository.findByOrganizationId(orgId)
-                .orElseThrow(() -> new IllegalStateException("Subscription missing for org " + orgId));
+                .orElseThrow(() -> new WebhookProcessingException("Subscription missing for org " + orgId));
 
+        SubscriptionPlan plan = resolveCheckoutPlan(session, subscription);
+
+        activateSubscriptionFromCheckout(
+                subscription,
+                plan,
+                session.getCustomer(),
+                session.getSubscription());
+    }
+
+    private SubscriptionPlan resolveCheckoutPlan(
+            com.stripe.model.checkout.Session session,
+            Subscription subscription) {
+        String metadataPlan = session.getMetadata() != null ? session.getMetadata().get("plan") : null;
+        String stripeSubId = session.getSubscription();
+
+        if (stripeSubId == null || stripeSubId.isBlank()) {
+            if (metadataPlan != null && !metadataPlan.isBlank()) {
+                return SubscriptionPlan.valueOf(metadataPlan);
+            }
+            return subscription.getPlan();
+        }
+
+        SubscriptionPlan stripePlan = stripeGateway.resolveSubscriptionPlan(stripeSubId)
+                .map(SubscriptionPlanResolution::plan)
+                .orElseThrow(() -> new WebhookProcessingException(
+                        "checkout.session.completed could not resolve plan for subscription " + stripeSubId));
+
+        if (metadataPlan != null && !metadataPlan.isBlank()) {
+            SubscriptionPlan metadataResolved = SubscriptionPlan.valueOf(metadataPlan);
+            if (metadataResolved != stripePlan) {
+                log.warn("Checkout metadata plan {} differs from Stripe plan {}; using Stripe",
+                        metadataPlan, stripePlan);
+            }
+        }
+        return stripePlan;
+    }
+
+    private void activateSubscriptionFromCheckout(
+            Subscription subscription,
+            SubscriptionPlan plan,
+            String customerId,
+            String subscriptionId) {
         SubscriptionPlan previousPlan = subscription.getPlan();
 
-        subscription.setStripeCustomerId(session.getCustomer());
-        subscription.setStripeSubscriptionId(session.getSubscription());
+        if (customerId != null && !customerId.isBlank()) {
+            subscription.setStripeCustomerId(customerId);
+        }
+        if (subscriptionId != null && !subscriptionId.isBlank()) {
+            subscription.setStripeSubscriptionId(subscriptionId);
+            Optional<Long> periodEnd = stripeGateway.retrieveSubscriptionCurrentPeriodEnd(subscriptionId);
+            if (periodEnd.isPresent()) {
+                subscription.setCurrentPeriodEnd(Instant.ofEpochSecond(periodEnd.get()));
+            } else if (isMockStripeId(subscriptionId)) {
+                subscription.setCurrentPeriodEnd(Instant.now().plus(30, ChronoUnit.DAYS));
+            } else {
+                log.warn("Stripe subscription {} has no current_period_end; leaving period end unset", subscriptionId);
+            }
+        }
         subscription.setStatus(SubscriptionStatus.ACTIVE);
-
-        String planRaw = session.getMetadata().get("plan");
-        if (planRaw != null && !planRaw.isBlank()) {
-            subscription.setPlan(SubscriptionPlan.valueOf(planRaw));
+        subscription.setPlan(plan);
+        if (subscription.getCurrentPeriodEnd() == null && isMockStripeId(
+                subscription.getStripeSubscriptionId() != null ? subscription.getStripeSubscriptionId() : "")) {
+            subscription.setCurrentPeriodEnd(Instant.now().plus(30, ChronoUnit.DAYS));
         }
 
         subscriptionRepository.save(subscription);
-        trackPlanChangeForOrg(orgId, previousPlan, subscription.getPlan());
+        trackPlanChangeForOrg(subscription.getOrganizationId(), previousPlan, subscription.getPlan());
     }
 
     private void handleSubscriptionUpdated(Event event) {
         com.stripe.model.Subscription stripeSubscription =
                 deserialize(event, com.stripe.model.Subscription.class);
         if (stripeSubscription == null) {
-            log.warn("customer.subscription.updated missing subscription payload eventId={}", event.getId());
-            return;
+            throw new WebhookProcessingException("customer.subscription.updated missing subscription payload");
         }
 
         Subscription subscription = subscriptionRepository.findByStripeSubscriptionId(stripeSubscription.getId())
                 .orElseGet(() -> resolveSubscriptionFromCustomer(stripeSubscription.getCustomer()));
 
         if (subscription == null) {
-            log.warn("No local subscription for Stripe subscription {}", stripeSubscription.getId());
-            return;
+            throw new WebhookProcessingException("No local subscription for Stripe subscription "
+                    + stripeSubscription.getId());
         }
 
         SubscriptionPlan previousPlan = subscription.getPlan();
@@ -241,8 +509,7 @@ public class BillingService {
         com.stripe.model.Subscription stripeSubscription =
                 deserialize(event, com.stripe.model.Subscription.class);
         if (stripeSubscription == null) {
-            log.warn("customer.subscription.deleted missing subscription payload eventId={}", event.getId());
-            return;
+            throw new WebhookProcessingException("customer.subscription.deleted missing subscription payload");
         }
 
         subscriptionRepository.findByStripeSubscriptionId(stripeSubscription.getId())
@@ -250,12 +517,47 @@ public class BillingService {
                     SubscriptionPlan previousPlan = subscription.getPlan();
                     subscription.setStatus(SubscriptionStatus.CANCELLED);
                     subscription.setPlan(SubscriptionPlan.FREE);
+                    subscription.setStripeSubscriptionId(null);
+                    subscription.setCurrentPeriodEnd(null);
                     subscriptionRepository.save(subscription);
                     trackPlanChangeForOrg(subscription.getOrganizationId(), previousPlan, subscription.getPlan());
                 });
     }
 
+    private void handleInvoicePaymentFailed(Event event) {
+        com.stripe.model.Invoice invoice = deserialize(event, com.stripe.model.Invoice.class);
+        if (invoice == null) {
+            throw new WebhookProcessingException("invoice.payment_failed missing invoice payload");
+        }
+        markPastDueFromCustomer(invoice.getCustomer());
+    }
+
+    private void handleInvoicePaid(Event event) {
+        com.stripe.model.Invoice invoice = deserialize(event, com.stripe.model.Invoice.class);
+        if (invoice == null) {
+            throw new WebhookProcessingException("invoice.paid missing invoice payload");
+        }
+        subscriptionRepository.findByStripeCustomerId(invoice.getCustomer())
+                .filter(sub -> sub.getStatus() == SubscriptionStatus.PAST_DUE)
+                .ifPresent(sub -> {
+                    sub.setStatus(SubscriptionStatus.ACTIVE);
+                    subscriptionRepository.save(sub);
+                });
+    }
+
+    private void markPastDueFromCustomer(String customerId) {
+        if (customerId == null || customerId.isBlank()) {
+            throw new WebhookProcessingException("invoice event missing customer id");
+        }
+        subscriptionRepository.findByStripeCustomerId(customerId)
+                .ifPresent(sub -> {
+                    sub.setStatus(SubscriptionStatus.PAST_DUE);
+                    subscriptionRepository.save(sub);
+                });
+    }
+
     private void trackPlanChangeForOrg(UUID orgId, SubscriptionPlan fromPlan, SubscriptionPlan toPlan) {
+        organizationPlanSyncService.syncFromSubscription(orgId, toPlan);
         lifecycleTelemetry.findOrgOwnerUserId(orgId).ifPresent(userId ->
                 lifecycleTelemetry.trackPlanChange(userId, fromPlan, toPlan));
     }
@@ -283,7 +585,7 @@ public class BillingService {
                 && !stripeSubscription.getItems().getData().isEmpty()
                 && stripeSubscription.getItems().getData().getFirst().getPrice() != null) {
             String priceId = stripeSubscription.getItems().getData().getFirst().getPrice().getId();
-            subscription.setPlan(planMapper.planForPriceId(priceId));
+            planMapper.resolvePlanForPriceId(priceId).ifPresent(subscription::setPlan);
         }
     }
 
@@ -296,11 +598,16 @@ public class BillingService {
     }
 
     private void assertBillingAdmin(UUID userId, UUID orgId) {
-        OrgMember member = orgMemberRepository.findByOrgIdAndUserId(orgId, userId)
-                .orElseThrow(() -> ApiException.forbidden("Not a member of this organization"));
-        if (!"owner".equals(member.getRole()) && !"admin".equals(member.getRole())) {
+        if (!canManageBilling(userId, orgId)) {
             throw ApiException.forbidden("Only organization owners or admins can manage billing");
         }
+    }
+
+    private boolean canManageBilling(UUID userId, UUID orgId) {
+        return orgMemberRepository.findByOrgIdAndUserId(orgId, userId)
+                .filter(m -> "active".equals(m.getStatus()))
+                .map(m -> "owner".equals(m.getRole()) || "admin".equals(m.getRole()))
+                .orElse(false);
     }
 
     private String resolveSuccessUrl() {
@@ -308,7 +615,7 @@ public class BillingService {
         if (configured != null && !configured.isBlank()) {
             return configured;
         }
-        return firstCorsOrigin() + "/billing/success";
+        return billingFrontendBaseUrl() + "/billing/success";
     }
 
     private String resolveCancelUrl() {
@@ -316,7 +623,7 @@ public class BillingService {
         if (configured != null && !configured.isBlank()) {
             return configured;
         }
-        return firstCorsOrigin() + "/billing/cancel";
+        return billingFrontendBaseUrl() + "/billing/cancel";
     }
 
     private String resolvePortalReturnUrl() {
@@ -324,13 +631,40 @@ public class BillingService {
         if (configured != null && !configured.isBlank()) {
             return configured;
         }
-        return firstCorsOrigin() + "/billing";
+        return billingFrontendBaseUrl() + "/account/billing";
     }
 
-    private String firstCorsOrigin() {
-        if (corsAllowedOrigins == null || corsAllowedOrigins.isBlank()) {
-            return "http://localhost:4000";
+    private String billingFrontendBaseUrl() {
+        String configured = stripeProperties.getFrontendBaseUrl();
+        if (configured != null && !configured.isBlank()) {
+            return trimTrailingSlash(configured);
         }
-        return corsAllowedOrigins.split(",")[0].trim();
+        if (corsAllowedOrigins != null && !corsAllowedOrigins.isBlank()) {
+            for (String origin : corsAllowedOrigins.split(",")) {
+                String trimmed = origin.trim();
+                if (trimmed.contains(":5173") || trimmed.contains(":5174")) {
+                    return trimmed;
+                }
+            }
+            for (String origin : corsAllowedOrigins.split(",")) {
+                String trimmed = origin.trim();
+                if (!trimmed.contains(":4000")) {
+                    return trimmed;
+                }
+            }
+            return corsAllowedOrigins.split(",")[0].trim();
+        }
+        return "http://localhost:5173";
+    }
+
+    private static String trimTrailingSlash(String url) {
+        if (url.endsWith("/")) {
+            return url.substring(0, url.length() - 1);
+        }
+        return url;
+    }
+
+    private static boolean isMockStripeId(String id) {
+        return id.startsWith("sub_mock_") || id.startsWith("cus_mock_");
     }
 }

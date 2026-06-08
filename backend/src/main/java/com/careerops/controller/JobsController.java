@@ -126,7 +126,7 @@ public class JobsController {
         return new JobListResponse(
             cards,
             limits.getCount(uid),
-            limits.max(),
+            limits.maxForUser(uid),
             limits.remaining(uid),
             userJobPage.getTotalElements(),
             page,
@@ -258,12 +258,12 @@ public class JobsController {
 
     @PostMapping("/fetch")
     public FetchSummary fetchMore(@RequestParam(defaultValue = "5") int count) {
-        int dailyCap = limits.max();
+        UUID uid = AuthUtil.currentUserId();
+        int dailyCap = limits.maxForUser(uid);
         if (count < 1 || count > dailyCap) {
             throw new ApiException(HttpStatus.BAD_REQUEST,
                     "Count must be between 1 and " + dailyCap);
         }
-        UUID uid = AuthUtil.currentUserId();
         if (userJobs.countByUserIdAndDeletedAtIsNull(uid) == 0) {
             return startFullPipelineSearch(uid);
         }
@@ -271,7 +271,7 @@ public class JobsController {
             return delivery.deliver(uid, count);
         } catch (Exception e) {
             log.error("Job fetch failed for user {}: {}", uid, e.getMessage(), e);
-            return new FetchSummary(0, limits.getCount(uid), limits.max(), limits.remaining(uid));
+            return new FetchSummary(0, limits.getCount(uid), limits.maxForUser(uid), limits.remaining(uid));
         }
     }
 
@@ -304,7 +304,7 @@ public class JobsController {
         return new FetchSummary(
                 0,
                 limits.getCount(uid),
-                limits.max(),
+                limits.maxForUser(uid),
                 limits.remaining(uid),
                 true,
                 started.message());
@@ -326,7 +326,7 @@ public class JobsController {
     @Transactional(readOnly = true)
     public FetchSummary limits() {
         UUID uid = AuthUtil.currentUserId();
-        return new FetchSummary(0, limits.getCount(uid), limits.max(), limits.remaining(uid));
+        return new FetchSummary(0, limits.getCount(uid), limits.maxForUser(uid), limits.remaining(uid));
     }
 
     @GetMapping("/stats")

@@ -1,6 +1,7 @@
 package com.careerops.service;
 
 import com.careerops.exception.PlanLimitExceededException;
+import com.careerops.model.Subscription;
 import com.careerops.model.SubscriptionPlan;
 import com.careerops.model.SubscriptionStatus;
 import org.junit.jupiter.api.BeforeEach;
@@ -13,6 +14,7 @@ import org.springframework.core.env.Profiles;
 
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
+import java.util.Optional;
 import java.util.UUID;
 
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
@@ -34,6 +36,14 @@ class PlanEnforcementServiceTest {
     private OrgUsageCounter usageCounter;
     @Mock
     private SaasLifecycleTelemetry lifecycleTelemetry;
+    @Mock
+    private com.careerops.repository.SubscriptionRepository subscriptionRepository;
+    @Mock
+    private com.careerops.config.SaasBillingProperties saasBillingProperties;
+    @Mock
+    private com.careerops.repository.OrgRepository orgRepository;
+    @Mock
+    private OrganizationPlanSyncService organizationPlanSyncService;
 
     private PlanEnforcementService service;
     private final UUID userId = UUID.randomUUID();
@@ -41,7 +51,16 @@ class PlanEnforcementServiceTest {
 
     @BeforeEach
     void setUp() {
-        service = new PlanEnforcementService(environment, resolver, usageCounter, lifecycleTelemetry);
+        service = new PlanEnforcementService(
+                environment,
+                saasBillingProperties,
+                resolver,
+                subscriptionRepository,
+                orgRepository,
+                usageCounter,
+                lifecycleTelemetry,
+                organizationPlanSyncService);
+        when(saasBillingProperties.isEnforcementEnabled()).thenReturn(true);
     }
 
     @Test
@@ -123,6 +142,32 @@ class PlanEnforcementServiceTest {
         when(usageCounter.jobApplicationsThisMonth(orgId)).thenReturn(10L);
 
         assertThrows(PlanLimitExceededException.class, () -> service.checkApplicationAllowed(userId));
+    }
+
+    @Test
+    void blocksTeamMemberInviteWhenFreeSeatCapReached() {
+        when(environment.acceptsProfiles(Profiles.of("dev", "test"))).thenReturn(false);
+        when(resolver.resolveForUser(userId)).thenReturn(activeContext(SubscriptionPlan.FREE));
+        Subscription locked = new Subscription();
+        locked.setId(UUID.randomUUID());
+        locked.setOrganizationId(orgId);
+        when(subscriptionRepository.findByOrganizationIdForUpdate(orgId)).thenReturn(Optional.of(locked));
+        when(usageCounter.teamMembers(orgId)).thenReturn(1);
+
+        assertThrows(PlanLimitExceededException.class, () -> service.checkTeamMemberAllowed(userId));
+    }
+
+    @Test
+    void allowsTeamMemberInviteWhenUnderCap() {
+        when(environment.acceptsProfiles(Profiles.of("dev", "test"))).thenReturn(false);
+        when(resolver.resolveForUser(userId)).thenReturn(activeContext(SubscriptionPlan.PRO));
+        Subscription locked = new Subscription();
+        locked.setId(UUID.randomUUID());
+        locked.setOrganizationId(orgId);
+        when(subscriptionRepository.findByOrganizationIdForUpdate(orgId)).thenReturn(Optional.of(locked));
+        when(usageCounter.teamMembers(orgId)).thenReturn(2);
+
+        assertDoesNotThrow(() -> service.checkTeamMemberAllowed(userId, 1));
     }
 
     @Test

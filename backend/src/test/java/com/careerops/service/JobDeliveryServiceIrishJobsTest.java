@@ -33,6 +33,7 @@ class JobDeliveryServiceIrishJobsTest {
     @Mock SkillPromptLibrary prompts;
     @Mock UserProfileRepository profiles;
     @Mock UserJobRepository userJobs;
+    @Mock com.careerops.repository.JobRepository jobs;
     @Mock CvService cvService;
     @Mock DailyLimitService limits;
     @Mock JobMatchingService matcher;
@@ -55,7 +56,7 @@ class JobDeliveryServiceIrishJobsTest {
     void setUp() {
         lenient().when(fetchSettings.maxAgeDays()).thenReturn(14);
         delivery = new JobDeliveryService(
-            scrape, dedup, nvidia, prompts, profiles, userJobs, cvService, limits, matcher,
+            scrape, dedup, nvidia, prompts, profiles, userJobs, jobs, cvService, limits, matcher,
             new ObjectMapper(), org.mockito.Mockito.mock(PlatformTransactionManager.class),
             evaluationValidator,
             org.mockito.Mockito.mock(StructuredJobEvaluationBuilder.class),

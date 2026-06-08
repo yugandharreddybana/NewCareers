@@ -60,9 +60,10 @@ Full profile and preference editor for signed-in, onboarded users. Consolidates 
 | Enable / disable 2FA | Buttons on `/account/security` | `POST /account/two-factor/*` (rollout-gated via `TWO_FACTOR_ROLLOUT_ENABLED`) |
 | End session / End all | Links on `/account/security` | `DELETE /account/sessions/:id`, `POST /account/sessions/revoke-others` |
 | View audit log | Link on `/account/security` | `GET /account/security/activity` (paginated modal) |
-| Manage subscription | Button on `/account/billing` | `POST /billing/customer-portal` → Stripe redirect |
-| Upgrade plan | Button on `/account/billing` | `POST /billing/checkout-session` |
-| Cancel plan | Modal on `/account/billing` | `POST /billing/cancel` (falls back to portal if unavailable) |
+| Manage subscription | Button on `/account/billing` (owner/admin + Stripe customer) | `POST /billing/customer-portal` → Stripe redirect |
+| Upgrade plan | Button on `/account/billing` (owner/admin) | `POST /billing/checkout-session` |
+| Cancel plan | Modal on `/account/billing` (owner/admin + active Stripe sub) | `POST /billing/cancel` → Java `BillingService.cancelSubscription` (mock: local cancel; prod: Stripe `cancel_at_period_end`) |
+| View invoices | Table on `/account/billing` | `GET /billing/invoices` → Stripe invoice list (empty when no customer) |
 | Turn on marketing / analytics | Toggle in `PrivacySettingsSection` | `POST /consents` |
 | Turn off AI processing | Toggle off | `DELETE /user/consent/ai` → withdraws consent + purges `skill_runs` older than 30 days |
 | Turn on AI processing | Toggle on | `POST /consents` with `AI_PROCESSING` accepted |
@@ -82,9 +83,12 @@ Full profile and preference editor for signed-in, onboarded users. Consolidates 
 | Withdraw AI consent | `DELETE /user/consent/ai` | `DELETE /user/consent/ai` | `UserConsentController` `DELETE /user/consent/ai` |
 | Export data | `GET /account/export` | `GET /account/export` | `AccountController` `GET /export` |
 | Delete account | `POST /account/delete` | `POST /account/delete` | `AccountController` `POST /delete` |
-| Subscription | `GET /billing/subscription` | `GET /billing/subscription` | `BillingController` `GET /subscription` |
-| Checkout | `POST /billing/checkout-session` | `POST /billing/checkout-session` | `BillingController` `POST /checkout-session` |
-| Customer portal | `POST /billing/customer-portal` | `POST /billing/customer-portal` | `BillingController` `POST /customer-portal` |
+| Subscription | `GET /billing/subscription` | `GET /billing/subscription` | `BillingController` `GET /subscription` — any active org member; response includes `canManageBilling` |
+| Invoices | `GET /billing/invoices` | `GET /billing/invoices` | `BillingController` `GET /invoices` — any active org member |
+| Checkout | `POST /billing/checkout-session` | `POST /billing/checkout-session` | `BillingController` `POST /checkout-session` — owner/admin only |
+| Customer portal | `POST /billing/customer-portal` | `POST /billing/customer-portal` | `BillingController` `POST /customer-portal` — owner/admin only; 400 when no Stripe customer |
+| Cancel subscription | `POST /billing/cancel` | `POST /billing/cancel` | `BillingController` `POST /cancel` — owner/admin only |
+| Set billing org | — | `PUT /billing/organization` | `BillingController` `PUT /organization` — multi-org users set `primary_billing_organization_id` |
 | Change password | `PATCH /account/password` | `PATCH /account/password` | `AccountController` `PATCH /password` |
 | List sessions | `GET /account/sessions` | `GET /account/sessions` | `SecurityController` `GET /sessions` |
 | Revoke session | `DELETE /account/sessions/:id` | `DELETE /account/sessions/:id` | `SecurityController` `DELETE /sessions/{id}` |
@@ -163,6 +167,11 @@ sequenceDiagram
 - **Not onboarded**: Redirected to `/onboarding` by `ProtectedRoute`.
 - **AI consent off**: Dedicated withdrawal endpoint; does not use `POST /consents` with `accepted: false`.
 - **Account delete body**: `POST /account/delete` used by frontend (reliable JSON body); equivalent to `DELETE /account`.
+- **Billing load failure**: `AccountBillingPage` shows error banner; retry via React Query refetch.
+- **Non-admin billing mutations**: Checkout, portal, and cancel return **403**; UI hides management actions when `canManageBilling` is false.
+- **Portal without Stripe customer**: `POST /billing/customer-portal` returns **400** (`No billing account`); portal button hidden when `hasBillingAccount` is false.
+- **Cancel errors**: Gateway failures surface as **502**; missing subscription returns **400**; success returns `cancelAtPeriodEnd` + `currentPeriodEnd`.
+- **Invoice load failure**: Invoice table shows error state; empty list when user has no Stripe customer (not an error).
 
 ## Related docs
 

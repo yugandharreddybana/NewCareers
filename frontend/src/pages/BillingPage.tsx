@@ -9,8 +9,6 @@ import { BRAND_NAME, SALES_EMAIL } from '@/lib/brand';
 import { subscriptionPlanToCardId } from '@/lib/subscriptionUtils';
 import { billingApi, type SubscriptionPlanCode } from '@/services/billingApi';
 
-type BillingInterval = 'monthly' | 'yearly';
-
 interface PlanFeature {
   text: string;
   iconColor?: 'primary' | 'secondary' | 'tertiary';
@@ -81,11 +79,7 @@ const PLANS: PricingPlan[] = [
   },
 ];
 
-function displayPrice(monthlyPrice: number, interval: BillingInterval): number {
-  if (monthlyPrice === 0) return 0;
-  if (interval === 'yearly') {
-    return Math.round(monthlyPrice * 0.9);
-  }
+function displayPrice(monthlyPrice: number): number {
   return monthlyPrice;
 }
 
@@ -101,10 +95,16 @@ function checkIconColor(color: PlanFeature['iconColor']): string {
 }
 
 export default function BillingPage() {
-  const [billingInterval, setBillingInterval] = useState<BillingInterval>('monthly');
   const [checkoutLoading, setCheckoutLoading] = useState<string | null>(null);
   const { user } = useAuth();
-  const { subscription, isTrialing, daysRemaining, isLoading: subscriptionLoading } = useSubscription();
+  const {
+    subscription,
+    isTrialing,
+    daysRemaining,
+    isLoading: subscriptionLoading,
+    error: subscriptionError,
+    refetch: refetchSubscription,
+  } = useSubscription();
   const navigate = useNavigate();
 
   const currentPlanId = subscription ? subscriptionPlanToCardId(subscription.plan) : null;
@@ -160,7 +160,22 @@ export default function BillingPage() {
             </p>
           </div>
 
-          {user && isTrialing && (
+          {user && subscriptionError && (
+            <div className="w-full mb-stack-lg rounded-lg border border-amber-200 bg-amber-50 px-6 py-4 flex flex-col sm:flex-row sm:items-center gap-3 justify-between">
+              <p className="font-body-md text-body-md text-amber-950">
+                Could not load your subscription. You can still browse plans below.
+              </p>
+              <button
+                type="button"
+                className="font-label-sm text-label-sm text-amber-900 underline shrink-0"
+                onClick={() => void refetchSubscription()}
+              >
+                Retry
+              </button>
+            </div>
+          )}
+
+          {user && isTrialing && !subscriptionError && (
             <div className="w-full mb-stack-lg rounded-lg border border-primary/20 bg-primary/5 px-6 py-4 text-center">
               <p className="font-label-md text-label-md text-primary">
                 {daysRemaining} {daysRemaining === 1 ? 'day' : 'days'} left in your trial
@@ -171,34 +186,28 @@ export default function BillingPage() {
           <div className="flex items-center gap-stack-md mb-stack-xl bg-surface-container p-1 rounded-full border border-outline-variant/30 shadow-sm">
             <button
               type="button"
-              className={`font-label-md text-label-md px-6 py-2 rounded-full transition-all ${
-                billingInterval === 'monthly'
-                  ? 'bg-surface text-on-surface shadow-sm'
-                  : 'text-on-surface-variant hover:text-on-surface'
-              }`}
-              onClick={() => setBillingInterval('monthly')}
+              className="font-label-md text-label-md px-6 py-2 rounded-full bg-surface text-on-surface shadow-sm transition-all"
+              aria-pressed
             >
               Monthly
             </button>
             <button
               type="button"
-              className={`font-label-md text-label-md px-6 py-2 rounded-full flex items-center gap-2 transition-all ${
-                billingInterval === 'yearly'
-                  ? 'bg-surface text-on-surface shadow-sm'
-                  : 'text-on-surface-variant hover:text-on-surface'
-              }`}
-              onClick={() => setBillingInterval('yearly')}
+              disabled
+              title="Annual billing is coming soon — all plans are billed monthly today"
+              className="font-label-md text-label-md px-6 py-2 rounded-full flex items-center gap-2 text-on-surface-variant opacity-60 cursor-not-allowed"
+              aria-pressed={false}
             >
               Yearly{' '}
-              <span className="bg-primary/10 text-primary text-[10px] px-2 py-0.5 rounded-full font-bold uppercase tracking-wider">
-                Save 10%
+              <span className="bg-surface-container-high text-on-surface-variant text-[10px] px-2 py-0.5 rounded-full font-bold uppercase tracking-wider">
+                Coming soon
               </span>
             </button>
           </div>
 
           <div className="grid grid-cols-1 md:grid-cols-3 gap-gutter w-full mb-stack-xl">
             {PLANS.map((plan) => {
-              const price = displayPrice(plan.monthlyPrice, billingInterval);
+              const price = displayPrice(plan.monthlyPrice);
               const featureTextClass =
                 plan.highlighted ? 'text-on-surface' : 'text-on-surface-variant';
               const isCurrentPlan =

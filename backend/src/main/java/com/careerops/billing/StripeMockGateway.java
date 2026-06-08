@@ -1,5 +1,6 @@
 package com.careerops.billing;
 
+import com.careerops.model.SubscriptionPlan;
 import com.stripe.exception.SignatureVerificationException;
 import com.stripe.model.Event;
 import org.slf4j.Logger;
@@ -7,7 +8,12 @@ import org.slf4j.LoggerFactory;
 import org.springframework.context.annotation.Profile;
 import org.springframework.stereotype.Component;
 
+import java.time.Instant;
+import java.time.temporal.ChronoUnit;
+import java.util.Collections;
+import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.UUID;
 
 @Component
@@ -15,7 +21,12 @@ import java.util.UUID;
 public class StripeMockGateway implements StripeGateway {
 
     private static final Logger log = LoggerFactory.getLogger(StripeMockGateway.class);
-    static final String MOCK_SIGNATURE = "mock";
+
+    private final StripeProperties properties;
+
+    public StripeMockGateway(StripeProperties properties) {
+        this.properties = properties;
+    }
 
     @Override
     public String createCustomer(String email, UUID organizationId) {
@@ -51,14 +62,64 @@ public class StripeMockGateway implements StripeGateway {
     }
 
     @Override
+    public void cancelSubscriptionAtPeriodEnd(String stripeSubscriptionId) {
+        log.debug("MOCK STRIPE: cancelSubscriptionAtPeriodEnd subId={}", stripeSubscriptionId);
+    }
+
+    @Override
+    public void cancelSubscriptionImmediately(String stripeSubscriptionId) {
+        log.debug("MOCK STRIPE: cancelSubscriptionImmediately subId={}", stripeSubscriptionId);
+    }
+
+    @Override
+    public void deleteCustomer(String stripeCustomerId) {
+        log.debug("MOCK STRIPE: deleteCustomer customerId={}", stripeCustomerId);
+    }
+
+    @Override
+    public List<StripeInvoiceRecord> listInvoices(String stripeCustomerId) {
+        if (stripeCustomerId == null || stripeCustomerId.isBlank()) {
+            return List.of();
+        }
+        return List.of(new StripeInvoiceRecord(
+                "in_mock_" + UUID.randomUUID().toString().substring(0, 8),
+                2900L,
+                "usd",
+                "paid",
+                Instant.now().minus(5, ChronoUnit.DAYS),
+                null));
+    }
+
+    @Override
+    public Optional<Long> retrieveSubscriptionCurrentPeriodEnd(String stripeSubscriptionId) {
+        if (stripeSubscriptionId == null || stripeSubscriptionId.isBlank()) {
+            return Optional.empty();
+        }
+        return Optional.of(Instant.now().plus(30, ChronoUnit.DAYS).getEpochSecond());
+    }
+
+    @Override
+    public Optional<SubscriptionPlanResolution> resolveSubscriptionPlan(String stripeSubscriptionId) {
+        if (stripeSubscriptionId == null || stripeSubscriptionId.isBlank()) {
+            return Optional.empty();
+        }
+        long periodEnd = Instant.now().plus(30, ChronoUnit.DAYS).getEpochSecond();
+        return Optional.of(new SubscriptionPlanResolution(SubscriptionPlan.PRO, periodEnd));
+    }
+
+    @Override
     public Event constructWebhookEvent(String payload, String signatureHeader)
             throws SignatureVerificationException {
         log.debug("MOCK STRIPE: constructWebhookEvent");
         if (signatureHeader == null || signatureHeader.isBlank()) {
             throw new SignatureVerificationException("Missing stripe-signature header", signatureHeader);
         }
-        if (!MOCK_SIGNATURE.equals(signatureHeader) && !signatureHeader.startsWith("mock_")) {
-            throw new SignatureVerificationException("Invalid mock signature", signatureHeader);
+        String secret = properties.getWebhookSecret();
+        if (secret == null || secret.isBlank()) {
+            throw new SignatureVerificationException("Mock webhook secret not configured", signatureHeader);
+        }
+        if (!StripeMockWebhookSigner.verify(payload, signatureHeader, secret)) {
+            throw new SignatureVerificationException("Invalid mock webhook HMAC signature", signatureHeader);
         }
         return Event.GSON.fromJson(payload, Event.class);
     }

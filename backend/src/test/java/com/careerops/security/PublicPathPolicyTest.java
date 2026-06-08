@@ -130,5 +130,33 @@ class PublicPathPolicyTest {
 
     }
 
+
+
+    @Test
+
+    void v1PrefixedBillingWebhookIsPublic() {
+
+        assertThat(devPolicy().isPublic("/v1/billing/webhook")).isTrue();
+
+    }
+
+
+
+    @Test
+
+    void billingMutationsAreNotPublic() {
+
+        PublicPathPolicy policy = devPolicy();
+
+        assertThat(policy.isPublic("/billing/checkout-session")).isFalse();
+
+        assertThat(policy.isPublic("/billing/cancel")).isFalse();
+
+        assertThat(policy.isPublic("/billing/customer-portal")).isFalse();
+
+        assertThat(policy.isPublic("/billing/subscription")).isFalse();
+
+    }
+
 }
 

@@ -24,6 +24,7 @@ public class OrganizationSubscriptionResolver {
     private final UserRepository userRepository;
     private final TrialProvisioningService trialProvisioningService;
     private final SaasBillingProperties saasBillingProperties;
+    private final OrganizationPlanSyncService organizationPlanSyncService;
 
     public OrganizationSubscriptionResolver(
             OrgRepository orgRepo,
@@ -31,13 +32,15 @@ public class OrganizationSubscriptionResolver {
             SubscriptionRepository subscriptionRepo,
             UserRepository userRepository,
             TrialProvisioningService trialProvisioningService,
-            SaasBillingProperties saasBillingProperties) {
+            SaasBillingProperties saasBillingProperties,
+            OrganizationPlanSyncService organizationPlanSyncService) {
         this.orgRepo = orgRepo;
         this.memberRepo = memberRepo;
         this.subscriptionRepo = subscriptionRepo;
         this.userRepository = userRepository;
         this.trialProvisioningService = trialProvisioningService;
         this.saasBillingProperties = saasBillingProperties;
+        this.organizationPlanSyncService = organizationPlanSyncService;
     }
 
     @Transactional
@@ -49,7 +52,22 @@ public class OrganizationSubscriptionResolver {
         final UUID orgId = resolvedOrgId;
         Subscription subscription = subscriptionRepo.findByOrganizationId(orgId)
                 .orElseGet(() -> trialProvisioningService.createTrialSubscription(orgId));
+        subscription = downgradeExpiredTrialIfNeeded(subscription);
         return toContext(orgId, subscription);
+    }
+
+    private Subscription downgradeExpiredTrialIfNeeded(Subscription subscription) {
+        if (subscription.getStatus() == SubscriptionStatus.TRIALING
+                && subscription.getTrialEndsAt() != null
+                && subscription.getTrialEndsAt().isBefore(Instant.now())) {
+            subscription.setStatus(SubscriptionStatus.ACTIVE);
+            subscription.setPlan(SubscriptionPlan.FREE);
+            subscription.setTrialEndsAt(null);
+            Subscription saved = subscriptionRepo.save(subscription);
+            organizationPlanSyncService.syncFromSubscription(saved.getOrganizationId(), SubscriptionPlan.FREE);
+            return saved;
+        }
+        return subscription;
     }
 
     @Transactional
@@ -70,6 +88,18 @@ public class OrganizationSubscriptionResolver {
         if (memberships.isEmpty()) {
             return null;
         }
+
+        UUID preferred = userRepository.findById(userId)
+                .map(User::getPrimaryBillingOrganizationId)
+                .orElse(null);
+        if (preferred != null) {
+            boolean activeMember = memberships.stream()
+                    .anyMatch(m -> preferred.equals(m.getOrgId()) && "active".equals(m.getStatus()));
+            if (activeMember) {
+                return preferred;
+            }
+        }
+
         return memberships.stream()
                 .filter(m -> "active".equals(m.getStatus()))
                 .sorted(Comparator.comparing(m -> "owner".equals(m.getRole()) ? 0 : 1))

@@ -79,3 +79,29 @@ These paths are excluded from `from` redirect after login:
 ## Loading state
 
 All guards show `PageLoader` while `AuthContext.loading` is true.
+
+## Billing RBAC (subscription API)
+
+| Action | Who can do it | API signal |
+|--------|---------------|------------|
+| View subscription, usage, invoices | Any **active** org member | `GET /billing/subscription` always allowed when authenticated |
+| Checkout, portal, cancel | Org **owner** or **admin** only | `canManageBilling: true` in subscription response; mutations return 403 otherwise |
+| Stripe portal / payment method | Owner/admin **and** `hasBillingAccount: true` (Stripe customer exists) | UI gates portal buttons on both flags |
+
+Multi-org users: billing resolves `users.primary_billing_organization_id` when set and the user is an active member; otherwise falls back to the first owned org membership.
+
+## Plan limits (API enforcement, not route guards)
+
+Frontend route guards (`ProtectedRoute`, etc.) do **not** block navigation when a plan limit is exceeded. Limits are enforced on the **Java API** via `@PlanGated` + `PlanEnforcementService`:
+
+| Mechanism | Behavior |
+|-----------|----------|
+| `PlanGatingAspect` | Intercepts `@PlanGated` controller methods before execution |
+| `PlanEnforcementService` | Compares org usage vs `PlanLimit.forPlan(effectivePlan)` |
+| Over limit | HTTP **402 Payment Required** with `PlanLimitErrorResponse` (`error: PLAN_LIMIT_EXCEEDED`, `feature`, `currentPlan`, `upgradeUrl`) |
+| Frontend UX | `api.ts` intercepts 402 → `emitPlanLimitExceeded` → `PlanLimitBanner` in `App.tsx` |
+| Dev/test bypass | `dev`/`test` Spring profiles skip enforcement unless `SAAS_BILLING_ENFORCEMENT_ENABLED=true` |
+
+Gated features include `ai_skill_run`, `cv_upload`, `job_application`, and team invites (`team_member` via `OrgService`).
+
+Users can always open protected pages; hitting a gated action (e.g. run skill, upload CV, auto-apply) triggers the 402 + upgrade banner — not a route redirect.

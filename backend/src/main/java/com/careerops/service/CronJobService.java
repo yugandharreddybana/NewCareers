@@ -19,6 +19,7 @@ import java.time.LocalDate;
 import java.time.temporal.ChronoUnit;
 import java.util.List;
 import java.util.Map;
+import java.util.Random;
 import io.micrometer.core.instrument.MeterRegistry;
 import net.javacrumbs.shedlock.spring.annotation.SchedulerLock;
 import java.util.concurrent.ExecutorService;
@@ -35,7 +36,8 @@ import jakarta.annotation.PreDestroy;
  *   03:00        — runGdprRetentionCleanup
  *   03:15        — pruneFetchLogs
  *   07:50        — pruneSeenJobs
- *   06:00        — dailyJobRefresh
+ *   06:00        — nightlyJobFetch
+ *   06:15        — nightlyJobScore
  *   08:30        — sendDeadlineReminders   ← Phase 3 addition
  *   09:05        — dailyDigestEmail
  *   08:00 MON    — weeklyDigestEmail
@@ -191,37 +193,55 @@ public class CronJobService {
         }
     }
 
-    // ─── 06:00 Dublin — daily job delivery ────────────────────────────────────
+    // ─── 06:00 Dublin — Phase 1: fetch and store raw jobs (no AI) ─────────────
 
     @Scheduled(cron = "0 0 6 * * *", zone = "Europe/Dublin")
-    @SchedulerLock(name = "dailyJobRefresh", lockAtMostFor = "1h", lockAtLeastFor = "5m")
-    public void dailyJobRefresh() {
-        // 3.090 — Add jitter to prevent thundering herd
-        try { Thread.sleep(new java.util.Random().nextInt(30000)); } 
+    @SchedulerLock(name = "nightly_job_fetch", lockAtMostFor = "45m", lockAtLeastFor = "5m")
+    public void nightlyJobFetch() {
+        try { Thread.sleep(new Random().nextInt(30000)); }
         catch (InterruptedException e) { Thread.currentThread().interrupt(); }
- 
-        log.info("Daily job delivery cron firing");
-        int share = delivery.batchSize();
+        log.info("Phase 1 job fetch cron firing");
         var allProfiles = profiles.findAllByOnboardedTrue();
-        
-        // 3.067 — Parallelise delivery to prevent cron overlap using dedicated pool
         CompletableFuture.allOf(
             allProfiles.stream()
                 .map(p -> CompletableFuture.runAsync(() -> {
                     try {
-                        // 3.090 — Add per-user jitter (sleep up to 600 seconds / 10 minutes)
-                        long jitterMs = (long) (Math.random() * 600000);
-                        Thread.sleep(jitterMs);
-                        delivery.deliver(p.getUserId(), share);
-                    } catch (InterruptedException e) {
-                        Thread.currentThread().interrupt();
+                        try { Thread.sleep(new Random().nextInt(30000)); }
+                        catch (InterruptedException ie) { Thread.currentThread().interrupt(); }
+                        delivery.fetchAndStoreOnly(p.getUserId());
                     } catch (Exception e) {
-                        log.warn("cron deliver failed for {}: {}", p.getUserId(), e.getMessage());
+                        log.warn("fetchAndStoreOnly failed for {}: {}", p.getUserId(), e.getMessage());
                     }
                 }, deliveryExecutor))
                 .toArray(CompletableFuture[]::new)
         ).join();
-        log.info("Daily job delivery cron completed for {} users", allProfiles.size());
+        log.info("Phase 1 fetch complete for {} users", allProfiles.size());
+    }
+
+    // ─── 06:15 Dublin — Phase 2: AI score stored unscored jobs ───────────────
+
+    @Scheduled(cron = "0 15 6 * * *", zone = "Europe/Dublin")
+    @SchedulerLock(name = "nightly_job_score", lockAtMostFor = "90m", lockAtLeastFor = "5m")
+    public void nightlyJobScore() {
+        try { Thread.sleep(new Random().nextInt(30000)); }
+        catch (InterruptedException e) { Thread.currentThread().interrupt(); }
+        log.info("Phase 2 AI scoring cron firing");
+        var allProfiles = profiles.findAllByOnboardedTrue();
+        CompletableFuture.allOf(
+            allProfiles.stream()
+                .map(p -> CompletableFuture.runAsync(() -> {
+                    try {
+                        try { Thread.sleep(new Random().nextInt(30000)); }
+                        catch (InterruptedException ie) { Thread.currentThread().interrupt(); }
+                        delivery.scoreStoredJobs(p.getUserId(), delivery.batchSize());
+                    } catch (Exception e) {
+                        log.warn("scoreStoredJobs failed for {}: {}", p.getUserId(), e.getMessage());
+                        meterRegistry.counter("cron.job.failed", "job", "nightlyJobScore").increment();
+                    }
+                }, deliveryExecutor))
+                .toArray(CompletableFuture[]::new)
+        ).join();
+        log.info("Phase 2 scoring complete for {} users", allProfiles.size());
     }
 
     // ─── 08:30 — deadline reminders (Phase 3) ─────────────────────────────────

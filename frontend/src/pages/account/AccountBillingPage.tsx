@@ -1,13 +1,13 @@
 import { useCallback, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import toast from 'react-hot-toast';
+import { useSubscription } from '@/hooks/useSubscription';
 import {
   billingApi,
-  type Invoice,
+  type BillingInvoice,
   type SubscriptionPlanCode,
   type SubscriptionResponse,
 } from '@/services/billingApi';
-import { useUsageLimits } from '@/hooks/queries/useUsageLimits';
 import { getUserFacingErrorMessage } from '@/lib/userFacingError';
 import { AccountSettingsPageHeader } from './AccountSettingsPageHeader';
 
@@ -36,9 +36,12 @@ function statusLabel(status: SubscriptionResponse['status']): string {
   return status.replace(/_/g, ' ');
 }
 
+function isUnlimitedLimit(limit: number): boolean {
+  return limit < 0;
+}
+
 function usagePercent(used: number, limit: number): number {
-  if (limit <= 0) return 0;
-  if (limit === Number.MAX_SAFE_INTEGER || limit > 1_000_000) return Math.min((used / 100) * 15, 100);
+  if (isUnlimitedLimit(limit) || limit <= 0) return Math.min((used / 100) * 15, 100);
   return Math.min((used / limit) * 100, 100);
 }
 
@@ -53,7 +56,7 @@ function UsageBar({
   limit: number;
   unlimitedLabel?: string;
 }) {
-  const unlimited = limit <= 0 || limit > 1_000_000;
+  const unlimited = isUnlimitedLimit(limit);
   const displayLimit = unlimited ? unlimitedLabel : String(limit);
   const pct = unlimited ? usagePercent(used, 100) : usagePercent(used, limit);
 
@@ -78,11 +81,12 @@ export default function AccountBillingPage() {
   const [checkoutLoading, setCheckoutLoading] = useState(false);
   const [cancelLoading, setCancelLoading] = useState(false);
 
-  const subscriptionQuery = useQuery({
-    queryKey: ['billing', 'subscription'],
-    queryFn: () => billingApi.getSubscription(),
-    staleTime: 30_000,
-  });
+  const {
+    subscription,
+    isLoading: subscriptionLoading,
+    isError: subscriptionError,
+    refetch: refetchSubscription,
+  } = useSubscription();
 
   const invoicesQuery = useQuery({
     queryKey: ['billing', 'invoices'],
@@ -91,10 +95,7 @@ export default function AccountBillingPage() {
     retry: false,
   });
 
-  const usageLimitsQuery = useUsageLimits();
-
-  const subscription = subscriptionQuery.data;
-  const invoices: Invoice[] = invoicesQuery.data ?? [];
+  const invoices: BillingInvoice[] = invoicesQuery.isError ? [] : (invoicesQuery.data ?? []);
 
   const openPortal = useCallback(async () => {
     setPortalLoading(true);
@@ -124,29 +125,34 @@ export default function AccountBillingPage() {
       await billingApi.cancel();
       toast.success('Subscription will cancel at the end of your billing period.');
       setCancelModalOpen(false);
-      await subscriptionQuery.refetch();
+      await refetchSubscription();
     } catch (err) {
       toast.error(getUserFacingErrorMessage(err, 'Could not cancel subscription. Try the billing portal.'));
     } finally {
       setCancelLoading(false);
     }
-  }, [subscriptionQuery]);
+  }, [refetchSubscription]);
 
-  const plan = subscription?.plan ?? 'FREE';
+  const storedPlan = subscription?.plan ?? 'FREE';
+  const displayPlan = subscription?.effectivePlan ?? storedPlan;
   const status = subscription?.status ?? 'ACTIVE';
   const isTrialing = status === 'TRIALING';
-  const planPrice = PLAN_PRICES[plan] ?? 0;
+  const planPrice = PLAN_PRICES[displayPlan] ?? 0;
   const chargeDate = subscription?.trialEndsAt ?? subscription?.currentPeriodEnd;
+  const canManageBilling = Boolean(subscription?.canManageBilling);
+  const hasBillingAccount = Boolean(subscription?.hasBillingAccount);
 
-  const aiUsed = usageLimitsQuery.data
-    ? Math.max(0, Number(usageLimitsQuery.data.aiTokens.limit) - Number(usageLimitsQuery.data.aiTokens.remaining))
-    : 0;
-  const aiLimit = Number(usageLimitsQuery.data?.aiTokens.limit ?? 200);
+  const aiUsed = subscription?.usageThisMonth.aiRuns ?? 0;
+  const aiLimit = subscription?.limits.aiRunsPerMonth ?? 5;
+  const appsUsed = subscription?.usageThisMonth.applications ?? 0;
+  const appsLimit = subscription?.limits.applicationsPerMonth ?? 10;
+  const cvUsed = subscription?.cvUploadsTotal ?? 0;
+  const cvLimit = subscription?.limits.cvUploads ?? 1;
 
-  const appsUsed = usageLimitsQuery.data
-    ? Math.max(0, Number(usageLimitsQuery.data.jobDelivery.limit) - Number(usageLimitsQuery.data.jobDelivery.remaining))
-    : 0;
-  const appsLimit = Number(usageLimitsQuery.data?.jobDelivery.limit ?? 0);
+  const trialDaysLabel =
+    subscription?.daysRemaining && subscription.daysRemaining > 0
+      ? `${subscription.daysRemaining}-day`
+      : 'trial';
 
   const showTrialBanner = isTrialing && subscription?.trialEndsAt;
 
@@ -157,7 +163,22 @@ export default function AccountBillingPage() {
         subtitle="Manage your plan, billing cycle, and payment methods."
       />
 
-      {showTrialBanner && (
+      {subscriptionError && (
+        <div className="bg-error-container border border-error/30 rounded p-stack-md flex flex-col sm:flex-row sm:items-center gap-stack-md">
+          <p className="font-body-md text-body-md text-on-error-container flex-1">
+            Could not load your subscription. Billing actions are unavailable until this is resolved.
+          </p>
+          <button
+            type="button"
+            className="font-label-md text-label-md text-on-error-container underline shrink-0"
+            onClick={() => void refetchSubscription()}
+          >
+            Retry
+          </button>
+        </div>
+      )}
+
+      {showTrialBanner && !subscriptionError && (
         <div className="bg-secondary-container border border-secondary-container rounded p-stack-md flex items-start sm:items-center gap-stack-md">
           <span
             className="material-symbols-outlined text-on-secondary-container"
@@ -168,7 +189,7 @@ export default function AccountBillingPage() {
           </span>
           <div className="flex-1">
             <p className="font-label-md text-label-md text-on-secondary-container">
-              Your 14-day Pro trial ends on {formatDate(subscription.trialEndsAt)}
+              Your {trialDaysLabel} Pro trial ends on {formatDate(subscription.trialEndsAt)}
             </p>
           </div>
           <button
@@ -195,30 +216,34 @@ export default function AccountBillingPage() {
               )}
             </div>
             <div className="flex items-baseline gap-stack-sm mb-stack-md">
-              <span className="font-display text-display text-on-surface">{plan}</span>
+              <span className="font-display text-display text-on-surface">
+                {isTrialing ? `${displayPlan} Trial` : displayPlan}
+              </span>
               <span className="font-body-md text-body-md text-on-surface-variant">/ month</span>
             </div>
-            {subscriptionQuery.isLoading ? (
+            {subscriptionLoading ? (
               <p className="font-body-md text-body-md text-on-surface-variant">Loading plan details…</p>
             ) : (
               <p className="font-body-md text-body-md text-on-surface-variant mb-stack-lg">
                 {isTrialing
                   ? `You will be charged ${formatCurrency(planPrice)} on ${formatDate(chargeDate)}.`
-                  : plan === 'FREE'
+                  : displayPlan === 'FREE'
                     ? 'You are on the free plan. Upgrade to unlock Pro features.'
                     : `Your plan renews on ${formatDate(subscription?.currentPeriodEnd)}.`}
               </p>
             )}
           </div>
           <div className="flex flex-wrap gap-stack-md">
-            <button
-              type="button"
-              disabled={portalLoading}
-              onClick={() => void openPortal()}
-              className="font-label-md text-label-md bg-primary text-on-primary px-5 py-2.5 rounded transition-all duration-200 hover:bg-primary/90 disabled:opacity-50"
-            >
-              {portalLoading ? 'Opening…' : 'Manage Subscription'}
-            </button>
+            {canManageBilling && hasBillingAccount && (
+              <button
+                type="button"
+                disabled={portalLoading}
+                onClick={() => void openPortal()}
+                className="font-label-md text-label-md bg-primary text-on-primary px-5 py-2.5 rounded transition-all duration-200 hover:bg-primary/90 disabled:opacity-50"
+              >
+                {portalLoading ? 'Opening…' : 'Manage Subscription'}
+              </button>
+            )}
             {invoices[0]?.pdfUrl && (
               <a
                 href={invoices[0].pdfUrl}
@@ -235,13 +260,16 @@ export default function AccountBillingPage() {
 
         <section className="glass-panel rounded p-gutter flex flex-col gap-stack-md">
           <h3 className="account-settings-card-label mb-stack-sm">Current Usage</h3>
-          {usageLimitsQuery.isLoading ? (
+          {subscriptionLoading ? (
             <p className="font-body-sm text-on-surface-variant">Loading usage…</p>
           ) : (
             <>
+              <p className="font-label-sm text-label-sm text-on-surface-variant -mt-1 mb-1">
+                Monthly plan usage (resets each calendar month)
+              </p>
               <UsageBar label="AI Skill Runs" used={aiUsed} limit={aiLimit} />
-              <UsageBar label="Applications" used={appsUsed} limit={appsLimit || 1_000_000} />
-              <UsageBar label="CV Versions" used={0} limit={plan === 'FREE' ? 1 : plan === 'PRO' ? 10 : 1_000_000} />
+              <UsageBar label="Applications" used={appsUsed} limit={appsLimit} />
+              <UsageBar label="CV Versions" used={cvUsed} limit={cvLimit} />
             </>
           )}
         </section>
@@ -254,27 +282,33 @@ export default function AccountBillingPage() {
             </div>
             <div className="flex-1">
               <p className="font-label-md text-label-md text-on-surface">
-                {plan === 'FREE' ? 'No card on file' : 'Managed via Stripe'}
+                {hasBillingAccount ? 'Managed via Stripe' : 'No card on file'}
               </p>
               <p className="font-label-sm text-label-sm text-on-surface-variant">
                 Update payment details in the customer portal
               </p>
             </div>
           </div>
-          <button
-            type="button"
-            disabled={portalLoading}
-            onClick={() => void openPortal()}
-            className="w-full font-label-md text-label-md border border-outline hover:bg-surface-container text-on-surface px-4 py-2 rounded transition-all duration-200 disabled:opacity-50"
-          >
-            Update Payment Method
-          </button>
+          {canManageBilling && hasBillingAccount && (
+            <button
+              type="button"
+              disabled={portalLoading}
+              onClick={() => void openPortal()}
+              className="w-full font-label-md text-label-md border border-outline hover:bg-surface-container text-on-surface px-4 py-2 rounded transition-all duration-200 disabled:opacity-50"
+            >
+              Update Payment Method
+            </button>
+          )}
         </section>
 
         <section className="glass-panel rounded p-gutter lg:col-span-2 overflow-x-auto">
           <h3 className="account-settings-card-label mb-stack-md">Billing History</h3>
           {invoicesQuery.isLoading ? (
             <p className="font-body-sm text-on-surface-variant">Loading invoices…</p>
+          ) : invoicesQuery.isError ? (
+            <p className="font-body-md text-on-surface-variant">
+              Could not load billing history. Try again later.
+            </p>
           ) : invoices.length === 0 ? (
             <p className="font-body-md text-on-surface-variant">No invoices yet.</p>
           ) : (
@@ -328,7 +362,7 @@ export default function AccountBillingPage() {
         </section>
       </div>
 
-      {plan !== 'FREE' && (
+      {displayPlan !== 'FREE' && canManageBilling && hasBillingAccount && !subscriptionError && (
         <section className="border border-error/30 bg-error-container rounded p-gutter flex flex-col sm:flex-row items-start sm:items-center justify-between gap-stack-md">
           <div>
             <h3 className="font-headline-md text-headline-md text-on-error-container mb-1">

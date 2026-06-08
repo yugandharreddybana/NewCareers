@@ -11,6 +11,12 @@ public class SaasBillingProperties {
     /** Default Pro trial length for new signups (days). */
     private int trialDays = 7;
 
+    /**
+     * When set, overrides profile-based enforcement disable in dev/test.
+     * Defaults to true in application.properties for production safety.
+     */
+    private boolean enforcementEnabled = true;
+
     private final Price price = new Price();
 
     public int getTrialDays() {
@@ -19,6 +25,14 @@ public class SaasBillingProperties {
 
     public void setTrialDays(int trialDays) {
         this.trialDays = trialDays;
+    }
+
+    public boolean isEnforcementEnabled() {
+        return enforcementEnabled;
+    }
+
+    public void setEnforcementEnabled(boolean enforcementEnabled) {
+        this.enforcementEnabled = enforcementEnabled;
     }
 
     public Price getPrice() {

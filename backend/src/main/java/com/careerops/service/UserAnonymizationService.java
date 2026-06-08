@@ -9,6 +9,11 @@ import com.careerops.repository.CareerMemoryRepository;
 import com.careerops.repository.SkillConversationRepository;
 import com.careerops.repository.SkillRunRepository;
 import com.careerops.repository.UserProfileRepository;
+import com.careerops.model.Subscription;
+import com.careerops.model.SubscriptionPlan;
+import com.careerops.model.SubscriptionStatus;
+import com.careerops.repository.OrgMemberRepository;
+import com.careerops.repository.SubscriptionRepository;
 import com.careerops.repository.UserRepository;
 import jakarta.servlet.http.HttpServletRequest;
 import org.slf4j.Logger;
@@ -36,6 +41,9 @@ public class UserAnonymizationService {
     private final AiTokenUsageRepository tokenUsage;
     private final CareerMemoryRepository careerMemories;
     private final SkillConversationRepository skillConversations;
+    private final OrgMemberRepository orgMembers;
+    private final SubscriptionRepository subscriptions;
+    private final BillingStripeSyncService billingStripeSync;
 
     public UserAnonymizationService(
             UserRepository users,
@@ -48,7 +56,10 @@ public class UserAnonymizationService {
             SkillRunRepository skillRuns,
             AiTokenUsageRepository tokenUsage,
             CareerMemoryRepository careerMemories,
-            SkillConversationRepository skillConversations) {
+            SkillConversationRepository skillConversations,
+            OrgMemberRepository orgMembers,
+            SubscriptionRepository subscriptions,
+            BillingStripeSyncService billingStripeSync) {
         this.users = users;
         this.profiles = profiles;
         this.authService = authService;
@@ -60,6 +71,9 @@ public class UserAnonymizationService {
         this.tokenUsage = tokenUsage;
         this.careerMemories = careerMemories;
         this.skillConversations = skillConversations;
+        this.orgMembers = orgMembers;
+        this.subscriptions = subscriptions;
+        this.billingStripeSync = billingStripeSync;
     }
 
     @Transactional(timeout = 30)
@@ -71,6 +85,8 @@ public class UserAnonymizationService {
         }
 
         authService.revokeAllTokensForUser(userId);
+
+        cancelBillingForOwnedOrganizations(userId);
 
         cvService.deleteAllForUser(userId);
 
@@ -107,6 +123,23 @@ public class UserAnonymizationService {
         }
 
         log.info("Anonymized and deleted userId={}", userId);
+    }
+
+    private void cancelBillingForOwnedOrganizations(UUID userId) {
+        orgMembers.findByUserId(userId).stream()
+                .filter(member -> "owner".equals(member.getRole()))
+                .map(member -> subscriptions.findByOrganizationId(member.getOrgId()).orElse(null))
+                .filter(sub -> sub != null)
+                .forEach(this::cancelAndScrubSubscription);
+    }
+
+    private void cancelAndScrubSubscription(Subscription subscription) {
+        billingStripeSync.cancelAndDetachStripe(subscription);
+        subscription.setPlan(SubscriptionPlan.FREE);
+        subscription.setStatus(SubscriptionStatus.CANCELLED);
+        subscription.setCurrentPeriodEnd(null);
+        subscription.setTrialEndsAt(null);
+        subscriptions.save(subscription);
     }
 
     private void scrubProfile(UUID userId) {
