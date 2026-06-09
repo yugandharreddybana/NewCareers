@@ -1,5 +1,7 @@
 # Career-Ops — Comprehensive Engineering Audit
 
+> **NOTICE:** Several critical security findings reported by automated scanners (such as Command Injection in regex, SQL Injection in parameterized psycopg2 queries, and SSRF in web scrapers) have been manually investigated and confirmed as **false positives**. Please refer to [`docs/SECURITY_EXCEPTIONS.md`](docs/SECURITY_EXCEPTIONS.md) for details and justifications.
+
 **Auditor:** Claude Opus 4.7 (Staff-Level Principal Engineer / Lead Security Auditor / System Architect)
 **Date Started:** 2026-05-03
 **Scope:** `backend/`, `frontend/`, `middleware/`, `db/` (excludes `skills/`, `e2e/`, `node_modules/`, `backend/target/`, `docs/`, `.kilo/`)
