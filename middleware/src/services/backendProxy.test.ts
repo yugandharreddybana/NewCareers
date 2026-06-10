@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import FormData from 'form-data';
+import { createHmac } from 'node:crypto';
 import {
   hmacSigningPath,
   isMultipartFormData,
@@ -8,6 +9,7 @@ import {
   resolveJavaBackendRoot,
   sanitizeProxyHeaders,
 } from './backendProxy.js';
+import { bytesForSigning, signInternalRequest } from './internalHmac.js';
 
 test('isMultipartFormData detects node form-data instances', () => {
   const fd = new FormData();
@@ -53,6 +55,31 @@ test('prepareForwardBody JSON-serializes plain objects', async () => {
   assert.equal(requestBody, '{"limit":10}');
   assert.equal(bodyText, '{"limit":10}');
   assert.deepEqual(formHeaders, {});
+});
+
+test('prepareForwardBody JSON signing matches Java ISO-8859-1 for non-ASCII profile fields', async () => {
+  const TEST_SECRET = 'test-internal-trust-secret-minimum-32-characters-long';
+  const payload = { name: 'José', goalTitle: 'Développeur', onboarded: true };
+  const { requestBody, bodyText } = await prepareForwardBody(payload);
+  const json = JSON.stringify(payload);
+  assert.equal(requestBody, json);
+  assert.equal(bodyText, bytesForSigning(Buffer.from(json, 'utf8')));
+
+  const timestamp = '1700000000000';
+  const method = 'PUT';
+  const path = '/profile';
+  const javaPayload = `${timestamp}${method}${path}${bodyText}`;
+  const javaSig = createHmac('sha256', TEST_SECRET).update(javaPayload).digest('hex');
+
+  const originalNow = Date.now;
+  Date.now = () => Number(timestamp);
+  try {
+    const signed = signInternalRequest(method, path, bodyText, TEST_SECRET);
+    assert.ok(signed);
+    assert.equal(signed!.signature, javaSig);
+  } finally {
+    Date.now = originalNow;
+  }
 });
 
 test('sanitizeProxyHeaders strips cookie, authorization, and trust headers', () => {

@@ -143,7 +143,10 @@ export async function prepareForwardBody(data: unknown): Promise<{
     };
   }
   const json = JSON.stringify(data);
-  return { requestBody: json, bodyText: json, formHeaders: {} };
+  // Sign UTF-8 wire bytes as ISO-8859-1 code units — matches Java InternalHmacSigner.buildPayload.
+  // Using the JSON string directly breaks verification when the body contains non-ASCII (e.g. CV parse).
+  const bodyText = bytesForSigning(Buffer.from(json, 'utf8'));
+  return { requestBody: json, bodyText, formHeaders: {} };
 }
 
 /** Java HMAC verification uses servlet path only — never include `?query` in the signed path. */

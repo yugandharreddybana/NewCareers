@@ -23,6 +23,13 @@ public final class EvaluationReportValidator {
     public static final double APPLY_THRESHOLD_STRETCH = 3.0;
     public static final double DEFAULT_WEIGHT = 0.1;
 
+    public static String inferMatchTier(int matchPercent) {
+        if (matchPercent >= 85) return "PERFECT_MATCH";
+        if (matchPercent >= 70) return "STRONG_MATCH";
+        if (matchPercent >= 55) return "GOOD_MATCH";
+        return "WEAK_MATCH";
+    }
+
     private static final List<DimensionDef> DIMENSIONS = List.of(
         new DimensionDef("role_fit", "Role fit"),
         new DimensionDef("skills_match", "Skills match"),
@@ -73,6 +80,9 @@ public final class EvaluationReportValidator {
             }
             if (!out.hasNonNull("matchPercent") && out.has("overallScore")) {
                 out.put("matchPercent", out.path("overallScore").asInt());
+            }
+            if (!out.hasNonNull("matchTier") || out.path("matchTier").asText("").isBlank()) {
+                out.put("matchTier", inferMatchTier(out.path("matchPercent").asInt(0)));
             }
 
             coerceVerdict(out, applyScore);

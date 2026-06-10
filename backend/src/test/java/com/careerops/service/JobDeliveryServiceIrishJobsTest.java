@@ -56,6 +56,7 @@ class JobDeliveryServiceIrishJobsTest {
     @BeforeEach
     void setUp() {
         lenient().when(fetchSettings.maxAgeDays()).thenReturn(14);
+        lenient().when(parallelEval.getEvalExecutor()).thenReturn(Runnable::run);
         delivery = new JobDeliveryService(
             scrape, dedup, nvidia, prompts, profiles, userJobs, jobs, cvService, limits, matcher,
             new ObjectMapper(), org.mockito.Mockito.mock(PlatformTransactionManager.class),

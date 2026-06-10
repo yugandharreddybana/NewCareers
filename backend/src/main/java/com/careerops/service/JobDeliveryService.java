@@ -31,6 +31,9 @@ import org.springframework.transaction.support.TransactionTemplate;
 import java.time.Instant;
 import java.util.*;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
 import java.util.function.Consumer;
 import java.util.stream.Collectors;
 
@@ -416,24 +419,42 @@ public class JobDeliveryService {
             return new FetchSummary(0, limits.getCount(userId), limits.maxForUser(userId), limits.remaining(userId));
 
         int minPct = profileMinMatchFloor(p);
-        Set<String> companies = new HashSet<>();
-        List<Scored> toPersist = new ArrayList<>();
 
-        for (JobMatchingService.ScoredJob candidate : preRankedCandidates) {
-            if (toPersist.size() >= target) break;
-            if (!titleMatchesDesiredRoles(p, candidate.job())) continue;
-            Job j = candidate.job();
-            if (userJobs.findByUserIdAndJobId(userId, j.getId()).isPresent()) continue;
-            if (!companies.add(normalizeCompany(j.getCompany()))) continue;
+        List<JobMatchingService.ScoredJob> filteredCandidates = preRankedCandidates.stream()
+            .filter(c -> titleMatchesDesiredRoles(p, c.job()))
+            .filter(c -> userJobs.findByUserIdAndJobId(userId, c.job().getId()).isEmpty())
+            .limit(target * 3)
+            .toList();
 
-            // B1-G3: route through evaluateDeep() — cache-aware full evaluation
-            ParallelJobEvaluationService.ScoredResult deep =
+        List<CompletableFuture<Scored>> evalFutures = filteredCandidates.stream()
+            .map(candidate -> CompletableFuture.supplyAsync(() -> {
+                ParallelJobEvaluationService.ScoredResult deep =
                     parallelEval.evaluateDeep(candidate, p, userId, sourceTag);
-            Scored scored = new Scored(j, deep.scoreBreakdown(), deep.matchPercent());
+                return new Scored(candidate.job(), deep.scoreBreakdown(), deep.matchPercent());
+            }, parallelEval.getEvalExecutor())
+            .orTimeout(30, TimeUnit.SECONDS)
+            .exceptionally(ex -> {
+                log.warn("Parallel eval failed for job {}: {}", candidate.job().getId(), ex.getMessage());
+                return null;
+            }))
+            .toList();
 
-            if (!passesProfileMinMatch(scored.match(), p)) continue;
-            toPersist.add(scored);
-        }
+        CompletableFuture.allOf(evalFutures.toArray(new CompletableFuture[0])).join();
+
+        Set<String> companies = new HashSet<>();
+        List<Scored> toPersist = evalFutures.stream()
+            .map(f -> { try { return f.join(); } catch (Exception e) { return null; } })
+            .filter(Objects::nonNull)
+            .filter(s -> passesProfileMinMatch(s.match(), p))
+            .peek(s -> {
+                if (s.match() >= 85) {
+                    log.info("PERFECT MATCH: userId={} jobId={} title={} score={}%",
+                        userId, s.job().getId(), s.job().getTitle(), s.match());
+                }
+            })
+            .filter(s -> companies.add(normalizeCompany(s.job().getCompany())))
+            .limit(target)
+            .toList();
 
         Integer saved = transactionTemplate.execute(status -> persistResults(userId, toPersist));
         int delivered = saved == null ? 0 : saved;
@@ -482,6 +503,10 @@ public class JobDeliveryService {
             boolean cachedPath) {
         List<Job> deduped = dedup.dedupForPipelineDelivery(userId, raw);
         log.info("Onboarding user {} dedup pool size: {}", userId, deduped.size());
+        onProgress.accept(new OnboardingDeliveryProgress(
+            com.careerops.dto.OnboardingDeliveryDtos.Stage.evaluating_jobs,
+            "Found " + deduped.size() + " potential roles — running AI matching…",
+            0, targetCount, minRequired, deduped.size(), null));
 
         String cvText = cvService.activeCvText(userId);
         int minPct = profileMinMatchFloor(p);
@@ -490,7 +515,13 @@ public class JobDeliveryService {
             // Onboarding pool: intentionally uses evaluationBuilder directly (not cache)
             poolSaved = persistDiscoveryPoolHeuristic(userId, deduped, p, minPct, cvText);
             log.info("Onboarding user {} discovery pool saved {} jobs (cap {})", userId, poolSaved, discoveryPoolCap);
-            if (poolSaved > 0) dedup.markSeen(userId, deduped.stream().limit(discoveryPoolCap).toList());
+            if (poolSaved > 0) {
+                onProgress.accept(new OnboardingDeliveryProgress(
+                    com.careerops.dto.OnboardingDeliveryDtos.Stage.evaluating_jobs,
+                    "Screened " + poolSaved + " roles — finding your best matches…",
+                    poolSaved, targetCount, minRequired, deduped.size(), null));
+                dedup.markSeen(userId, deduped.stream().limit(discoveryPoolCap).toList());
+            }
         }
 
         onProgress.accept(new OnboardingDeliveryProgress(
@@ -532,6 +563,10 @@ public class JobDeliveryService {
             if (evaluated >= targetCount) break;
             if (!titleMatchesDesiredRoles(p, rankedJob.job())) continue;
             Job j = rankedJob.job();
+            onProgress.accept(new OnboardingDeliveryProgress(
+                com.careerops.dto.OnboardingDeliveryDtos.Stage.evaluating_jobs,
+                "Deep-evaluating: " + j.getTitle() + " at " + j.getCompany() + "…",
+                evaluated, targetCount, minRequired, deduped.size(), null));
             try {
                 Scored scored = scoreOnboardingJob(j, rankedJob, p, cvText, systemPrompt, userId, minPct);
                 int match = scored.match();
@@ -557,9 +592,6 @@ public class JobDeliveryService {
                 if (evaluated >= minRequired) break;
             } catch (Exception ex) {
                 log.warn("Onboarding scoring failed for job {}: {}", j.getId(), ex.getMessage());
-            }
-            if (!cachedPath) {
-                try { Thread.sleep(400); } catch (InterruptedException ie) { Thread.currentThread().interrupt(); break; }
             }
         }
 
@@ -676,8 +708,11 @@ public class JobDeliveryService {
     private void persistSingle(UUID userId, Scored s) { upsertUserJob(userId, s); }
 
     protected int persistResults(UUID userId, List<Scored> top) {
+        List<Scored> sorted = top.stream()
+            .sorted(Comparator.comparingInt(Scored::match).reversed())
+            .toList();
         List<Job> newlySaved = new ArrayList<>();
-        for (Scored s : top) {
+        for (Scored s : sorted) {
             boolean inserted = upsertUserJob(userId, s);
             if (inserted) newlySaved.add(s.job());
         }
@@ -712,6 +747,27 @@ public class JobDeliveryService {
             Salary: %s-%s | Sponsorship: %s
             Description:
             %s
+
+            MATCH TIER RULES (must follow strictly):
+            - PERFECT_MATCH: score 85-100 — candidate meets ALL required skills,
+              experience level matches exactly, location/remote fits, salary in range
+            - STRONG_MATCH:  score 70-84 — meets >80%% of requirements, minor gaps only
+            - GOOD_MATCH:    score 55-69 — meets core requirements, some skill gaps
+            - WEAK_MATCH:    score 0-54  — significant gaps, missing core requirements
+
+            Be strict. Only award PERFECT_MATCH if the candidate genuinely qualifies
+            for this exact role as posted.
+
+            Respond with JSON only:
+            {
+              "matchPercent": 0-100,
+              "matchTier": "PERFECT_MATCH|STRONG_MATCH|GOOD_MATCH|WEAK_MATCH",
+              "verdict": "...",
+              "humanSummary": "...",
+              "matchedSkills": [...],
+              "unmatchedSkills": [...],
+              "cvImprovementTips": [...]
+            }
             """,
             headline,
             arr(p.getTargetRoles()), arr(p.getTechStack()), arr(p.getSectors()),
@@ -731,15 +787,41 @@ public class JobDeliveryService {
         if (candidates.isEmpty()) return 0;
         int cap = Math.max(1, discoveryPoolCap);
         List<JobMatchingService.ScoredJob> ranked = matcher.topN(candidates, p, Math.min(cap, candidates.size()));
+
+        // Parallel fan-out — evaluate up to 8 concurrently
+        int concurrency = Math.min(8, ranked.size());
+        ExecutorService pool = Executors.newFixedThreadPool(concurrency);
+
+        List<CompletableFuture<Scored>> futures = ranked.stream()
+            .map(rankedJob -> CompletableFuture.supplyAsync(() -> {
+                Job j = rankedJob.job();
+                JsonNode report = evaluationBuilder.build(
+                    userId, j, p, cvText, rankedJob, "onboarding_pool", "complete_local");
+                return toScored(j, report, "onboarding_pool");
+            }, pool)
+            .orTimeout(25, TimeUnit.SECONDS)
+            .exceptionally(ex -> {
+                log.warn("Discovery pool eval failed for job {}: {}", rankedJob.job().getId(), ex.getMessage());
+                return null;
+            }))
+            .toList();
+
+        CompletableFuture.allOf(futures.toArray(new CompletableFuture[0])).join();
+        pool.shutdown();
+
         int saved = 0;
-        for (JobMatchingService.ScoredJob rankedJob : ranked) {
-            Job j = rankedJob.job();
-            JsonNode report = evaluationBuilder.build(userId, j, p, cvText, rankedJob, "onboarding_pool", "complete_local");
-            Scored scored = toScored(j, report, "onboarding_pool");
-            if (!passesProfileMinMatch(scored.match(), p)) continue;
-            if (!titleMatchesDesiredRoles(p, j)) continue;
-            boolean inserted = transactionTemplate.execute(status -> upsertUserJob(userId, scored));
-            if (Boolean.TRUE.equals(inserted)) saved++;
+        for (CompletableFuture<Scored> future : futures) {
+            try {
+                Scored scored = future.join();
+                if (scored == null) continue;
+                if (!passesProfileMinMatch(scored.match(), p)) continue;
+                if (!titleMatchesDesiredRoles(p, scored.job())) continue;
+                boolean inserted = transactionTemplate.execute(
+                    status -> upsertUserJob(userId, scored));
+                if (Boolean.TRUE.equals(inserted)) saved++;
+            } catch (Exception e) {
+                log.warn("Discovery pool persist failed: {}", e.getMessage());
+            }
         }
         return saved;
     }

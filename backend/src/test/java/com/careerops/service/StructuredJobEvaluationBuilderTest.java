@@ -73,6 +73,7 @@ class StructuredJobEvaluationBuilderTest {
         assertThat(report.path("dimensions")).hasSize(10);
         assertThat(report.path("matchedSkills").size()).isGreaterThan(0);
         assertThat(report.path("applyScore").asDouble()).isGreaterThan(0);
+        assertThat(report.path("matchTier").asText()).isNotBlank();
     }
 
     @Test

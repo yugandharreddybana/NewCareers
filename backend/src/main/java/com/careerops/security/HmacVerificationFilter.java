@@ -11,11 +11,6 @@ import org.springframework.web.filter.OncePerRequestFilter;
 import org.springframework.web.multipart.MultipartHttpServletRequest;
 import org.springframework.web.multipart.MultipartResolver;
 import java.io.IOException;
-import java.nio.file.Files;
-import java.nio.file.Path;
-import java.nio.file.StandardOpenOption;
-import java.util.LinkedHashMap;
-import java.util.Map;
 
 /**
  * Verifies HMAC signatures on internal middleware → Java requests.
@@ -65,19 +60,8 @@ public class HmacVerificationFilter extends OncePerRequestFilter {
             return;
         }
 
-        boolean timestampFresh = signer.isTimestampFresh(timestampMs);
-        boolean verifyIso = signer.verify(timestampMs, req.getMethod(), path, body, signature);
-        if (!timestampFresh || !verifyIso) {
-            // #region agent log
-            agentDebugLog("A", "hmac verify failed", Map.of(
-                    "path", path,
-                    "method", req.getMethod(),
-                    "bodyLen", body.length,
-                    "timestampFresh", timestampFresh,
-                    "verifyIso", verifyIso,
-                    "verifyUtf8", verifyWithUtf8Body(timestampMs, req.getMethod(), path, body, signature)
-            ));
-            // #endregion
+        if (!signer.isTimestampFresh(timestampMs)
+                || !signer.verify(timestampMs, req.getMethod(), path, body, signature)) {
             log.warn("HMAC verification failed on path={} from IP={}", path, req.getRemoteAddr());
             reject(res, path);
             return;
@@ -110,29 +94,4 @@ public class HmacVerificationFilter extends OncePerRequestFilter {
         res.setContentType("application/json");
         res.getWriter().write("{\"error\":\"Unauthorized: invalid or expired signature\"}");
     }
-
-    /** Debug-only: would the pre-ISO-8859-1 UTF-8 verifier have accepted this signature? */
-    private boolean verifyWithUtf8Body(long timestampMs, String method, String path, byte[] body, String signature) {
-        return signer.verifyLegacyUtf8Body(timestampMs, method, path, body, signature);
-    }
-
-    // #region agent log
-    private static void agentDebugLog(String hypothesisId, String message, Map<String, Object> data) {
-        try {
-            Map<String, Object> payload = new LinkedHashMap<>();
-            payload.put("sessionId", "12c5a2");
-            payload.put("hypothesisId", hypothesisId);
-            payload.put("location", "HmacVerificationFilter.java");
-            payload.put("message", message);
-            payload.put("data", data);
-            payload.put("timestamp", System.currentTimeMillis());
-            String line = new com.fasterxml.jackson.databind.ObjectMapper().writeValueAsString(payload);
-            Path logPath = Path.of("..", "debug-12c5a2.log").toAbsolutePath().normalize();
-            Files.writeString(logPath, line + System.lineSeparator(),
-                    StandardOpenOption.CREATE, StandardOpenOption.APPEND);
-        } catch (Exception ignored) {
-            // ignore
-        }
-    }
-    // #endregion
 }

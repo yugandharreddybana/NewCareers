@@ -145,6 +145,8 @@ public class ParallelJobEvaluationService {
         }
     }
 
+    public Executor getEvalExecutor() { return this.evalExecutor; }
+
     // ── PUBLIC: Light evaluation for the feed ──────────────────────────────────
 
     /**

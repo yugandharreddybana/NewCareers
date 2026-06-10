@@ -90,6 +90,7 @@ public class StructuredJobEvaluationBuilder {
 
         ObjectNode raw = mapper.createObjectNode();
         raw.put("matchPercent", match);
+        raw.put("matchTier", EvaluationReportValidator.inferMatchTier(match));
         raw.put("overallScore", match);
         raw.put("verdict", verdictFor(match));
         raw.put("evaluationStatus", evaluationStatus);

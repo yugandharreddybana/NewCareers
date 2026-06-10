@@ -166,6 +166,32 @@ class HmacVerificationFilterTest {
     }
 
     @Test
+    @DisplayName("PUT /profile with UTF-8 JSON (non-ASCII) verifies when signed via latin1 wire bytes")
+    void putProfileUtf8Json() throws Exception {
+        String json = "{\"name\":\"José\",\"goalTitle\":\"Développeur\",\"onboarded\":true}";
+        byte[] body = json.getBytes(StandardCharsets.UTF_8);
+        long ts = System.currentTimeMillis();
+        InternalHmacSigner signer = InternalHmacSigner.forTest(
+                InternalRequestHeaders.TEST_SECRET.getBytes(StandardCharsets.UTF_8));
+        String sig = signer.sign(ts, "PUT", "/profile", body);
+
+        MockHttpServletRequest request = new MockHttpServletRequest("PUT", "/profile");
+        request.setServletPath("/profile");
+        request.setContent(body);
+        request.setContentType("application/json");
+        request.addHeader(InternalHmacSigner.TIMESTAMP_HEADER, String.valueOf(ts));
+        request.addHeader(InternalHmacSigner.SIGNATURE_HEADER, sig);
+
+        MockHttpServletResponse response = new MockHttpServletResponse();
+        MockFilterChain chain = new MockFilterChain();
+
+        filter.doFilter(request, response, chain);
+
+        assertThat(chain.getRequest()).isNotNull();
+        assertThat(response.getStatus()).isEqualTo(200);
+    }
+
+    @Test
     @DisplayName("H-3: /auth/me requires HMAC — BFF-only protected route")
     void authMeRequiresHmac() throws Exception {
         MockHttpServletRequest request = new MockHttpServletRequest("GET", "/auth/me");

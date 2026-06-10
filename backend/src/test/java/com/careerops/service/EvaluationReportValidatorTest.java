@@ -98,6 +98,35 @@ class EvaluationReportValidatorTest {
     }
 
     @Test
+    void inferMatchTier_mapsScoreBands() {
+        assertEquals("PERFECT_MATCH", EvaluationReportValidator.inferMatchTier(88));
+        assertEquals("STRONG_MATCH", EvaluationReportValidator.inferMatchTier(75));
+        assertEquals("GOOD_MATCH", EvaluationReportValidator.inferMatchTier(60));
+        assertEquals("WEAK_MATCH", EvaluationReportValidator.inferMatchTier(40));
+    }
+
+    @Test
+    void normalizeInfersMatchTierWhenMissing() {
+        ObjectNode raw = basePayload();
+        raw.put("matchPercent", 88);
+
+        var result = validator.normalize(raw, "test");
+        assertTrue(result.valid());
+        assertEquals("PERFECT_MATCH", result.report().path("matchTier").asText());
+    }
+
+    @Test
+    void normalizePreservesExplicitMatchTier() {
+        ObjectNode raw = basePayload();
+        raw.put("matchPercent", 88);
+        raw.put("matchTier", "STRONG_MATCH");
+
+        var result = validator.normalize(raw, "test");
+        assertTrue(result.valid());
+        assertEquals("STRONG_MATCH", result.report().path("matchTier").asText());
+    }
+
+    @Test
     void emptyPayloadReturnsPartial() {
         var result = validator.normalizeOrPartial(mapper.nullNode(), "test");
         assertFalse(result.valid());

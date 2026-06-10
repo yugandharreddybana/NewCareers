@@ -1,27 +1,8 @@
 import express from 'express';
-import fs from 'node:fs';
-import path from 'node:path';
-import { fileURLToPath } from 'node:url';
 import multer from 'multer';
 import FormData from 'form-data';
 import { authGuard } from '../authGuard.js';
 import { forward, bubble } from '../services/backendProxy.js';
-
-const DEBUG_LOG_PATH = path.resolve(
-  path.dirname(fileURLToPath(import.meta.url)),
-  '../../../debug-d86187.log',
-);
-
-function agentDebugLog(payload: Record<string, unknown>) {
-  try {
-    fs.appendFileSync(
-      DEBUG_LOG_PATH,
-      `${JSON.stringify({ sessionId: 'd86187', ...payload, timestamp: Date.now() })}\n`,
-    );
-  } catch {
-    /* ignore */
-  }
-}
 
 const router = express.Router();
 
@@ -64,18 +45,6 @@ router.put('/', async (req, res, next) => {
       method: 'PUT', path: '/profile',
       userId: req.userId, data: req.body,
     });
-    // #region agent log
-    agentDebugLog({
-      hypothesisId: 'H1,H2',
-      location: 'profile.routes.ts:PUT/profile',
-      message: r.status >= 400 ? 'Profile save forward failed' : 'Profile save forward ok',
-      data: {
-        status: r.status,
-        remotePolicy: (req.body as { remotePolicy?: string })?.remotePolicy,
-        ...(r.status >= 400 ? { bodyPreview: String(r.data).slice(0, 200) } : {}),
-      },
-    });
-    // #endregion
     bubble(r, res);
   } catch (e) { next(e); }
 });
@@ -94,20 +63,6 @@ router.post('/cv', cvUpload.single('file'), async (req, res, next) => {
       method: 'POST', path: '/profile/cv',
       userId: req.userId, data: fd, headers: fd.getHeaders(),
     });
-    // #region agent log
-    agentDebugLog({
-      runId: 'post-fix',
-      hypothesisId: 'A',
-      location: 'profile.routes.ts:POST/cv',
-      message: r.status >= 400 ? 'Java CV forward failed' : 'Java CV forward ok',
-      data: {
-        status: r.status,
-        fileName: req.file.originalname,
-        fileSize: req.file.size,
-        ...(r.status >= 400 ? { bodyPreview: String(r.data).slice(0, 200) } : {}),
-      },
-    });
-    // #endregion
     bubble(r, res);
   } catch (e) { next(e); }
 });
