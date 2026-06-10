@@ -26,7 +26,7 @@ public class AesFieldEncryptor {
     }
 
     /** Test-only factory — not a Spring bean constructor. */
-    static AesFieldEncryptor forTest(UserKeyService userKeyService, byte[] legacyKeyBytes) {
+    public static AesFieldEncryptor forTest(UserKeyService userKeyService, byte[] legacyKeyBytes) {
         SecretKeySpec legacy = legacyKeyBytes != null ? AesGcmCodec.secretKey(legacyKeyBytes) : null;
         return new AesFieldEncryptor(userKeyService, legacy);
     }

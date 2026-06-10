@@ -19,7 +19,7 @@ Full profile and preference editor for signed-in, onboarded users. Consolidates 
 | Property | Value |
 |----------|-------|
 | Guard | `ProtectedRoute` |
-| Layout | `AccountSettingsLayout` — `DashboardTopNav` + left settings sidebar + `<Outlet />` (no `AppShell`) |
+| Layout | `DashboardLayout` + `AccountSettingsLayout` (left settings sidebar + `<Outlet />`) |
 | Redirects | Cancel → `/dashboard`; Forgot password → `/forgot-password` with email in location state |
 
 ## Fields and inputs
@@ -34,7 +34,8 @@ Full profile and preference editor for signed-in, onboarded users. Consolidates 
 | Preferred job location | No | Free text | Professional summary |
 | Years of experience | No | `0-2`, `3-5`, `6-10`, `10+` | Professional summary |
 | Work experience rows | No | Job title, company, dates, location, description | Work experience (min 1 row) |
-| Education rows | No | School, degree combobox (B.Tech/MSc mapping), field, graduation year, location | Education (min 1 row) |
+| Education rows | No | School, degree combobox (B.Tech/MSc mapping), field, start year, end year, location | Education (min 1 row) |
+| Projects / portfolio | No | Title, URL, location, tech tags, description; CRUD via portfolio API | Projects section (edit mode); read-only in saved snapshot Background |
 | Target roles | No | Chips + custom role | Job preferences |
 | Tech stack | No | Chips + custom tech | Job preferences |
 | Work types | Yes (on save) | At least one of Full-time, Part-time, Contract, etc. | Job preferences |
@@ -55,6 +56,7 @@ Full profile and preference editor for signed-in, onboarded users. Consolidates 
 | Cancel | Link | Navigate to `/dashboard` |
 | Upload / replace CV | File input | `POST /profile/cv`; reload profile into form |
 | Download CV | Button when CV on file | `GET /profile/cv/download` → open signed URL or blob |
+| View current CV | Link in saved snapshot hero or edit CV section | Modal with PDF iframe preview (DOCX shows download prompt) |
 | Add/remove work or education | Buttons | Local form state only until save |
 | Change password | Form on `/account/security` | `PATCH /account/password` → new tokens; revokes other sessions |
 | Enable / disable 2FA | Buttons on `/account/security` | `POST /account/two-factor/*` (rollout-gated via `TWO_FACTOR_ROLLOUT_ENABLED`) |
@@ -63,7 +65,7 @@ Full profile and preference editor for signed-in, onboarded users. Consolidates 
 | Manage subscription | Button on `/account/billing` (owner/admin + Stripe customer) | `POST /billing/customer-portal` → Stripe redirect |
 | Upgrade plan | Button on `/account/billing` (owner/admin) | `POST /billing/checkout-session` |
 | Cancel plan | Modal on `/account/billing` (owner/admin + active Stripe sub) | `POST /billing/cancel` → Java `BillingService.cancelSubscription` (mock: local cancel; prod: Stripe `cancel_at_period_end`) |
-| View invoices | Table on `/account/billing` | `GET /billing/invoices` → Stripe invoice list (empty when no customer) |
+| View invoices | Table on `/account/billing` (owner/admin + Stripe customer) | `GET /billing/invoices` → Stripe invoice list (empty when no customer) |
 | Turn on marketing / analytics | Toggle in `PrivacySettingsSection` | `POST /consents` |
 | Turn off AI processing | Toggle off | `DELETE /user/consent/ai` → withdraws consent + purges `skill_runs` older than 30 days |
 | Turn on AI processing | Toggle on | `POST /consents` with `AI_PROCESSING` accepted |
@@ -84,7 +86,7 @@ Full profile and preference editor for signed-in, onboarded users. Consolidates 
 | Export data | `GET /account/export` | `GET /account/export` | `AccountController` `GET /export` |
 | Delete account | `POST /account/delete` | `POST /account/delete` | `AccountController` `POST /delete` |
 | Subscription | `GET /billing/subscription` | `GET /billing/subscription` | `BillingController` `GET /subscription` — any active org member; response includes `canManageBilling` |
-| Invoices | `GET /billing/invoices` | `GET /billing/invoices` | `BillingController` `GET /invoices` — any active org member |
+| Invoices | `GET /billing/invoices` | `GET /billing/invoices` | `BillingController` `GET /invoices` — owner/admin only; UI skips the call for read-only members |
 | Checkout | `POST /billing/checkout-session` | `POST /billing/checkout-session` | `BillingController` `POST /checkout-session` — owner/admin only |
 | Customer portal | `POST /billing/customer-portal` | `POST /billing/customer-portal` | `BillingController` `POST /customer-portal` — owner/admin only; 400 when no Stripe customer |
 | Cancel subscription | `POST /billing/cancel` | `POST /billing/cancel` | `BillingController` `POST /cancel` — owner/admin only |

@@ -13,6 +13,8 @@ import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.test.util.ReflectionTestUtils;
 
 import java.io.InputStream;
+import java.nio.charset.StandardCharsets;
+import java.util.Base64;
 import java.util.Properties;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -64,10 +66,13 @@ class JwtServiceTest {
     @Test
     @DisplayName("tampered token fails validation")
     void tamperedTokenFailsValidation() {
-        when(revokedJtis.existsByJti(any())).thenReturn(false);
         String token = jwtService.issue("user-123", "dev@careerops.test");
-        String tampered = token.substring(0, token.length() - 1)
-                + (token.endsWith("a") ? "b" : "a");
+        String[] parts = token.split("\\.");
+        String payload = new String(Base64.getUrlDecoder().decode(parts[1]), StandardCharsets.UTF_8)
+                .replace("user-123", "user-999");
+        String tampered = parts[0] + "."
+                + Base64.getUrlEncoder().withoutPadding().encodeToString(payload.getBytes(StandardCharsets.UTF_8))
+                + "." + parts[2];
         assertThat(jwtService.isTokenValid(tampered)).isFalse();
         assertThatThrownBy(() -> jwtService.validate(tampered)).isInstanceOf(JwtException.class);
     }

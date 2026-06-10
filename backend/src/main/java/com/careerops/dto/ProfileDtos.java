@@ -39,6 +39,9 @@ public class ProfileDtos {
 
         String[]  sectors,
 
+        @jakarta.validation.constraints.Size(max = 10, message = "Maximum 10 work types allowed")
+        String[]  workTypes,
+
         @jakarta.validation.constraints.Min(value = 1, message = "Freshness must be at least 1 hour")
         @jakarta.validation.constraints.Max(value = 720, message = "Freshness cannot exceed 30 days")
         Integer   freshnessHours,

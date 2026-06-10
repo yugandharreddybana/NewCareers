@@ -1,6 +1,38 @@
 /* Account settings shell — teal M3 tokens aligned with billing mockup */
+.account-settings-shell {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+@media (min-width: 768px) {
+  .account-settings-shell {
+    flex-direction: row;
+    align-items: stretch;
+  }
+
+  .account-settings-nav {
+    position: sticky;
+    top: 0;
+    align-self: flex-start;
+    max-height: 100%;
+    overflow-y: auto;
+  }
+}
+
+.account-settings-content {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
 .account-settings-page {
   --nc-primary: #0d9488;
+  --nc-primary-hover: #0f766e;
+  --nc-primary-active: #115e59;
   --nc-primary-container: #85f8e6;
   --nc-on-primary: #ffffff;
   --nc-background: #f8f9fa;
@@ -73,21 +105,245 @@
   background-size: 12px;
 }
 
+.account-settings-page .settings-snapshot-panel {
+  overflow: hidden;
+}
+
+.account-settings-page .settings-snapshot-hero {
+  padding: 1.25rem 1.35rem;
+  margin: 0 0 1.25rem;
+  border-radius: 0.75rem;
+  background: linear-gradient(
+    135deg,
+    color-mix(in srgb, var(--nc-primary) 8%, var(--nc-surface-container-low)) 0%,
+    var(--nc-surface-container-low) 100%
+  );
+  border: 1px solid color-mix(in srgb, var(--nc-primary) 14%, transparent);
+}
+
+.account-settings-page .settings-snapshot-hero__name {
+  margin: 0;
+  font-family: var(--font-display, inherit);
+  font-size: 1.35rem;
+  line-height: 1.3;
+  font-weight: 600;
+  color: var(--nc-on-surface);
+}
+
+.account-settings-page .settings-snapshot-hero__headline {
+  margin: 0.35rem 0 0;
+  font-size: 0.98rem;
+  line-height: 1.45;
+  color: var(--nc-on-surface-variant);
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.account-settings-page .settings-snapshot-hero__headline--muted {
+  font-style: italic;
+  opacity: 0.75;
+}
+
+.account-settings-page .settings-snapshot-hero__meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.65rem 1rem;
+  margin-top: 0.85rem;
+}
+
+.account-settings-page .settings-snapshot-meta-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  font-size: 0.8125rem;
+  color: var(--nc-on-surface);
+}
+
+.account-settings-page .settings-snapshot-meta-item .material-symbols-outlined {
+  font-size: 1rem;
+  color: var(--nc-primary);
+}
+
+.account-settings-page .settings-snapshot-sections {
+  display: flex;
+  flex-direction: column;
+  gap: 1.25rem;
+}
+
+.account-settings-page .settings-snapshot-section__title {
+  margin: 0 0 0.75rem;
+  font-size: 0.72rem;
+  line-height: 1.2;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--nc-on-surface-variant);
+}
+
 .account-settings-page .settings-snapshot-grid {
   display: grid;
   grid-template-columns: 1fr;
-  gap: 1rem 1.5rem;
+  gap: 0.85rem 1.25rem;
   margin: 0;
 }
 
 @media (min-width: 640px) {
   .account-settings-page .settings-snapshot-grid {
-    grid-template-columns: 1fr 1fr;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }
 
-.account-settings-page .settings-snapshot-row {
+.account-settings-page .settings-snapshot-field {
   margin: 0;
+  min-width: 0;
+}
+
+.account-settings-page .settings-snapshot-field--full {
+  grid-column: 1 / -1;
+}
+
+.account-settings-page .settings-snapshot-field__label {
+  margin: 0;
+  font-size: 0.72rem;
+  line-height: 1.2;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--nc-on-surface-variant);
+}
+
+.account-settings-page .settings-snapshot-field__value {
+  margin: 0.25rem 0 0;
+  font-size: 0.92rem;
+  line-height: 1.45;
+  color: var(--nc-on-surface);
+  overflow-wrap: anywhere;
+}
+
+.account-settings-page .settings-snapshot-chip-group {
+  margin-top: 0.9rem;
+}
+
+.account-settings-page .settings-snapshot-chip-group__label {
+  margin: 0 0 0.45rem;
+  font-size: 0.72rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--nc-on-surface-variant);
+}
+
+.account-settings-page .settings-snapshot-chip-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+}
+
+.account-settings-page .settings-snapshot-chip {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.28rem 0.65rem;
+  border-radius: 999px;
+  font-size: 0.78rem;
+  line-height: 1.3;
+  color: var(--nc-on-primary-container);
+  background: color-mix(in srgb, var(--nc-primary) 12%, var(--nc-surface-container-high));
+  border: 1px solid color-mix(in srgb, var(--nc-primary) 18%, transparent);
+}
+
+.account-settings-page .settings-snapshot-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.65rem;
+}
+
+.account-settings-page .settings-snapshot-list--spaced {
+  margin-top: 0.85rem;
+  padding-top: 0.85rem;
+  border-top: 1px solid var(--nc-outline-variant);
+}
+
+.account-settings-page .settings-snapshot-list li {
+  padding: 0.65rem 0.75rem;
+  border-radius: 0.5rem;
+  background: var(--nc-surface-container-low);
+}
+
+.account-settings-page .settings-snapshot-list__title {
+  display: block;
+  font-size: 0.9rem;
+  font-weight: 600;
+  color: var(--nc-on-surface);
+}
+
+.account-settings-page .settings-snapshot-list__sub {
+  display: block;
+  margin-top: 0.15rem;
+  font-size: 0.82rem;
+  color: var(--nc-on-surface-variant);
+}
+
+.account-settings-page .settings-snapshot-list__meta {
+  display: block;
+  margin-top: 0.35rem;
+  font-size: 0.78rem;
+  color: var(--nc-on-surface-variant);
+}
+
+.account-settings-page .settings-snapshot-list__body {
+  margin: 0.45rem 0 0;
+  font-size: 0.82rem;
+  line-height: 1.45;
+  color: var(--nc-on-surface);
+  white-space: pre-wrap;
+}
+
+.account-settings-page .settings-snapshot-chip-row--tight {
+  margin-top: 0.45rem;
+}
+
+.account-settings-page .settings-snapshot-cv-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  padding: 0;
+  border: none;
+  background: none;
+  font-size: 0.82rem;
+  font-weight: 500;
+  color: var(--nc-primary);
+  cursor: pointer;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.account-settings-page .settings-snapshot-cv-link:hover {
+  opacity: 0.85;
+}
+
+.account-settings-page .settings-snapshot-cv-link .material-symbols-outlined {
+  font-size: 1rem;
+  text-decoration: none;
+}
+
+.account-settings-page .settings-portfolio-item {
+  padding: 0.85rem;
+  border-radius: 0.5rem;
+  background: var(--nc-surface-container-low);
+  border: 1px solid var(--nc-outline-variant);
+}
+
+.account-settings-page .cv-preview-modal__frame {
+  width: 100%;
+  min-height: 70vh;
+  border: none;
+  border-radius: 0.375rem;
+  background: var(--nc-surface-container-low);
 }
 
 .account-settings-page .onboarding-pref-section__label {
@@ -333,4 +589,95 @@
   font-size: 12px;
   color: var(--nc-on-surface-variant);
   max-width: 20rem;
+}
+
+/* Profile edit form */
+.account-settings-page .account-settings-form {
+  min-width: 0;
+}
+
+/* End-of-page actions — static bar so fields never slide under buttons */
+.account-settings-page .account-settings-form-actions {
+  margin-top: 1.5rem;
+  padding-top: 1.25rem;
+  border-top: 1px solid var(--nc-outline-variant);
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  background: var(--nc-background);
+}
+
+@media (min-width: 640px) {
+  .account-settings-page .account-settings-form-actions {
+    flex-direction: row;
+    justify-content: flex-end;
+    align-items: center;
+    gap: 0.75rem;
+  }
+}
+
+.account-settings-page .settings-btn-outline {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 2.75rem;
+  padding: 0.625rem 1.5rem;
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--nc-on-surface);
+  background: var(--nc-surface);
+  border: 1px solid var(--nc-outline-variant);
+  border-radius: 0.375rem;
+  cursor: pointer;
+  transition: background 0.15s, border-color 0.15s;
+}
+
+.account-settings-page .settings-btn-outline:hover:not(:disabled) {
+  background: var(--nc-surface-high);
+  border-color: var(--nc-outline);
+}
+
+.account-settings-page .settings-btn-outline:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.account-settings-page .settings-btn-primary {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 2.75rem;
+  padding: 0.625rem 1.5rem;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--nc-on-primary);
+  background-color: var(--nc-primary);
+  border: 1px solid var(--nc-primary);
+  border-radius: 0.375rem;
+  cursor: pointer;
+  transition: background-color 0.15s, border-color 0.15s;
+}
+
+.account-settings-page .settings-btn-primary:hover:not(:disabled) {
+  background-color: var(--nc-primary-hover);
+  border-color: var(--nc-primary-hover);
+}
+
+.account-settings-page .settings-btn-primary:active:not(:disabled) {
+  background-color: var(--nc-primary-active);
+  border-color: var(--nc-primary-active);
+}
+
+.account-settings-page .settings-btn-primary:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* Onboarding button classes reused on settings pages */
+.account-settings-page .onboarding-btn-primary:hover:not(:disabled) {
+  background-color: var(--nc-primary-hover) !important;
+}
+
+.account-settings-page .onboarding-btn-primary:active:not(:disabled) {
+  background-color: var(--nc-primary-active) !important;
 }

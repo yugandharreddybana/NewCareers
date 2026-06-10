@@ -2,11 +2,17 @@ package com.careerops.service;
 
 import com.careerops.model.User;
 import com.careerops.model.UserProfile;
+import com.careerops.model.OrgMember;
+import com.careerops.model.Subscription;
+import com.careerops.model.SubscriptionPlan;
+import com.careerops.model.SubscriptionStatus;
 import com.careerops.repository.AiTokenUsageRepository;
 import com.careerops.repository.AuditLogRepository;
 import com.careerops.repository.CareerMemoryRepository;
+import com.careerops.repository.OrgMemberRepository;
 import com.careerops.repository.SkillConversationRepository;
 import com.careerops.repository.SkillRunRepository;
+import com.careerops.repository.SubscriptionRepository;
 import com.careerops.repository.UserProfileRepository;
 import com.careerops.repository.UserRepository;
 import jakarta.servlet.http.HttpServletRequest;
@@ -19,6 +25,7 @@ import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
+import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
@@ -44,6 +51,10 @@ class UserAnonymizationServiceTest {
     @Mock AiTokenUsageRepository tokenUsage;
     @Mock CareerMemoryRepository careerMemories;
     @Mock SkillConversationRepository skillConversations;
+    @Mock OrgMemberRepository orgMembers;
+    @Mock SubscriptionRepository subscriptions;
+    @Mock BillingStripeSyncService billingStripeSync;
+    @Mock OrganizationPlanSyncService organizationPlanSyncService;
     @Mock HttpServletRequest request;
 
     @InjectMocks UserAnonymizationService service;
@@ -72,6 +83,7 @@ class UserAnonymizationServiceTest {
                 .build();
 
         when(users.findById(userId)).thenReturn(Optional.of(user));
+        when(orgMembers.findByUserId(userId)).thenReturn(List.of());
         when(profiles.findByUserId(userId)).thenReturn(Optional.of(profile));
         when(users.save(any(User.class))).thenAnswer(inv -> inv.getArgument(0));
         when(profiles.save(any(UserProfile.class))).thenAnswer(inv -> inv.getArgument(0));
@@ -118,5 +130,44 @@ class UserAnonymizationServiceTest {
         verify(audit).log(eq(userId), eq("ACCOUNT_DELETED_GDPR"), eq(request), metaCap.capture());
         assertThat(metaCap.getValue()).containsKey("deletedAt");
         assertThat(metaCap.getValue().get("deletedAt")).isEqualTo(saved.getDeletedAt().toString());
+    }
+
+    @Test
+    @DisplayName("anonymizeAndDelete cancels owned org billing and syncs organization plan")
+    void anonymizeAndDeleteCancelsOwnedOrgBilling() {
+        UUID orgId = UUID.randomUUID();
+        User user = User.builder()
+                .id(userId)
+                .name("Alice")
+                .email("alice@example.com")
+                .username("alice")
+                .passwordHash("hash")
+                .build();
+        OrgMember owner = new OrgMember();
+        owner.setUserId(userId);
+        owner.setOrgId(orgId);
+        owner.setRole("owner");
+        Subscription subscription = new Subscription();
+        subscription.setOrganizationId(orgId);
+        subscription.setPlan(SubscriptionPlan.PRO);
+        subscription.setStatus(SubscriptionStatus.ACTIVE);
+        subscription.setStripeCustomerId("cus_abc");
+        subscription.setStripeSubscriptionId("sub_abc");
+        subscription.setCancelAtPeriodEnd(true);
+
+        when(users.findById(userId)).thenReturn(Optional.of(user));
+        when(orgMembers.findByUserId(userId)).thenReturn(List.of(owner));
+        when(subscriptions.findByOrganizationId(orgId)).thenReturn(Optional.of(subscription));
+        when(profiles.findByUserId(userId)).thenReturn(Optional.empty());
+        when(users.save(any(User.class))).thenAnswer(inv -> inv.getArgument(0));
+
+        service.anonymizeAndDelete(userId, request);
+
+        verify(billingStripeSync).cancelAndDetachStripe(subscription);
+        assertThat(subscription.getPlan()).isEqualTo(SubscriptionPlan.FREE);
+        assertThat(subscription.getStatus()).isEqualTo(SubscriptionStatus.CANCELLED);
+        assertThat(subscription.isCancelAtPeriodEnd()).isFalse();
+        verify(subscriptions).save(subscription);
+        verify(organizationPlanSyncService).syncFromSubscription(orgId, SubscriptionPlan.FREE);
     }
 }

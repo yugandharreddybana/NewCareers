@@ -52,16 +52,12 @@ class AdminSaasServiceTest {
     @DisplayName("MRR sums ACTIVE subscriptions by configured plan prices")
     void mrrCalculation() {
         when(userRepository.countByDeletedAtIsNull()).thenReturn(100L);
-        when(subscriptionRepository.countByStatusIn(
-                org.mockito.ArgumentMatchers.any())).thenReturn(42L);
+        when(subscriptionRepository.countByStatus(SubscriptionStatus.ACTIVE)).thenReturn(42L);
         when(subscriptionRepository.countActiveGroupByPlan()).thenReturn(List.of(
                 new Object[] { SubscriptionPlan.PRO, 3L },
                 new Object[] { SubscriptionPlan.ENTERPRISE, 1L },
                 new Object[] { SubscriptionPlan.FREE, 5L }));
-        when(subscriptionRepository.countByStatus(SubscriptionStatus.ACTIVE)).thenReturn(9L);
         when(subscriptionRepository.countCancelledSince(org.mockito.ArgumentMatchers.any())).thenReturn(1L);
-        when(subscriptionRepository.countByStatus(SubscriptionStatus.TRIALING)).thenReturn(2L);
-        when(subscriptionRepository.countActiveWithPastTrial(org.mockito.ArgumentMatchers.any())).thenReturn(4L);
 
         var metrics = service.getMetrics();
 
@@ -72,17 +68,14 @@ class AdminSaasServiceTest {
     }
 
     @Test
-    @DisplayName("activeSubscriptions includes TRIALING but MRR counts ACTIVE rows only")
+    @DisplayName("activeSubscriptions counts ACTIVE rows only")
     void activeSubscriptionsVsMrrDrift() {
         when(userRepository.countByDeletedAtIsNull()).thenReturn(50L);
-        when(subscriptionRepository.countByStatusIn(org.mockito.ArgumentMatchers.any())).thenReturn(12L);
+        when(subscriptionRepository.countByStatus(SubscriptionStatus.ACTIVE)).thenReturn(12L);
         when(subscriptionRepository.countActiveGroupByPlan()).thenReturn(List.of(
                 new Object[] { SubscriptionPlan.PRO, 2L },
                 new Object[] { SubscriptionPlan.ENTERPRISE, 1L }));
-        when(subscriptionRepository.countByStatus(SubscriptionStatus.ACTIVE)).thenReturn(3L);
         when(subscriptionRepository.countCancelledSince(org.mockito.ArgumentMatchers.any())).thenReturn(0L);
-        when(subscriptionRepository.countByStatus(SubscriptionStatus.TRIALING)).thenReturn(9L);
-        when(subscriptionRepository.countActiveWithPastTrial(org.mockito.ArgumentMatchers.any())).thenReturn(1L);
 
         var metrics = service.getMetrics();
 
@@ -94,12 +87,9 @@ class AdminSaasServiceTest {
     @DisplayName("Churn denominator uses max(1, active + cancelled) to avoid divide-by-zero")
     void churnDenominatorEdgeCase() {
         when(userRepository.countByDeletedAtIsNull()).thenReturn(0L);
-        when(subscriptionRepository.countByStatusIn(org.mockito.ArgumentMatchers.any())).thenReturn(0L);
-        when(subscriptionRepository.countActiveGroupByPlan()).thenReturn(List.of());
         when(subscriptionRepository.countByStatus(SubscriptionStatus.ACTIVE)).thenReturn(0L);
+        when(subscriptionRepository.countActiveGroupByPlan()).thenReturn(List.of());
         when(subscriptionRepository.countCancelledSince(org.mockito.ArgumentMatchers.any())).thenReturn(0L);
-        when(subscriptionRepository.countByStatus(SubscriptionStatus.TRIALING)).thenReturn(0L);
-        when(subscriptionRepository.countActiveWithPastTrial(org.mockito.ArgumentMatchers.any())).thenReturn(0L);
 
         var metrics = service.getMetrics();
 

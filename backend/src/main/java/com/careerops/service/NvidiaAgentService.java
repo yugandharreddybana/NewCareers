@@ -10,6 +10,7 @@ import com.fasterxml.jackson.databind.node.ObjectNode;
 import io.github.resilience4j.circuitbreaker.CircuitBreakerRegistry;
 import io.micrometer.core.instrument.MeterRegistry;
 import io.micrometer.core.instrument.Timer;
+import jakarta.annotation.PostConstruct;
 import jakarta.annotation.PreDestroy;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -57,10 +58,7 @@ public class NvidiaAgentService {
     private static final Logger log = LoggerFactory.getLogger(NvidiaAgentService.class);
     private static final String BASE_URL = "https://integrate.api.nvidia.com/v1";
 
-    private static final Map<String, Integer> SKILL_MAX_TOKENS = Map.of(
-        "tailor-resume",   5000,
-        "cover-letter",    1800,
-        "evaluate",        1200,
+    private static final Map<String, Integer> FAST_SKILL_MAX_TOKENS = Map.of(
         "research",        2500,
         "prep-interview",  2500,
         "compare",         1500
@@ -72,10 +70,6 @@ public class NvidiaAgentService {
         "research",        7,
         "prep-interview",  6,
         "compare",         5
-    );
-    private static final Map<String, String> SKILL_MODEL_OVERRIDE = Map.of(
-        "evaluate",      "meta/llama-3.1-8b-instruct",
-        "cover-letter",  "meta/llama-3.1-8b-instruct"
     );
     private static final Map<String, Set<String>> SKILL_TOOLS = Map.of(
         "tailor-resume",   Set.of("ask_user", "save_resume_html"),
@@ -92,15 +86,29 @@ public class NvidiaAgentService {
     @Value("${nvidia.api.key:}")
     private String apiKey;
 
-    @Value("${nvidia.agent.model:meta/llama-3.3-70b-instruct}")
+    @Value("${nvidia.agent.model:nvidia/nemotron-3-ultra-550b-a55b}")
     private String model;
 
     @Value("${nvidia.fallback.model:meta/llama-3.1-70b-instruct}")
     private String fallbackModel;
 
-    // legacy property; per-skill maps take precedence in run()
-    @Value("${nvidia.max.tokens:8192}")
+    @Value("${nvidia.max.tokens:16384}")
     private int maxTokens;
+
+    @Value("${nvidia.reasoning.budget:8192}")
+    private int reasoningBudget;
+
+    @Value("${nvidia.temperature:1}")
+    private double temperature;
+
+    @Value("${nvidia.top_p:0.95}")
+    private double topP;
+
+    @Value("${nvidia.read.timeout.ms:300000}")
+    private int readTimeoutMs;
+
+    @Value("${nvidia.connect.timeout.ms:10000}")
+    private int connectTimeoutMs;
 
     // legacy property; per-skill maps take precedence in run()
     @Value("${anthropic.max.tool.iterations:25}")
@@ -111,10 +119,10 @@ public class NvidiaAgentService {
      * multi-step skills enough room to complete all tool calls plus final generation.
      * Override with nvidia.agent.deadline.seconds in application.properties.
      */
-    @Value("${nvidia.agent.deadline.seconds:160}")
+    @Value("${nvidia.agent.deadline.seconds:240}")
     private int agentDeadlineSeconds;
 
-    private final RestClient         restClient;
+    private RestClient restClient;
     private final SkillToolDispatcher dispatcher;
     private final ObjectMapper        mapper;
     private final JsonNode            allToolDefinitions;
@@ -156,23 +164,28 @@ public class NvidiaAgentService {
                 .ignoreExceptions(com.careerops.exception.ApiException.class)
                 .build());
 
-        // Explicit timeouts on the RestClient: connect 10s, read 150s.
-        // Without these, a hung NVIDIA response blocks Tomcat threads indefinitely.
+        this.allToolDefinitions = buildAllToolDefinitions();
+    }
+
+    @PostConstruct
+    public void initRestClient() {
         SimpleClientHttpRequestFactory factory = new SimpleClientHttpRequestFactory();
-        factory.setConnectTimeout(10_000);
-        factory.setReadTimeout(150_000);
+        factory.setConnectTimeout(connectTimeoutMs);
+        factory.setReadTimeout(readTimeoutMs);
         this.restClient = RestClient.builder()
             .baseUrl(BASE_URL)
             .defaultHeader(HttpHeaders.CONTENT_TYPE, MediaType.APPLICATION_JSON_VALUE)
             .requestFactory(factory)
             .build();
-
-        this.allToolDefinitions = buildAllToolDefinitions();
     }
 
     @PreDestroy
     public void shutdown() {
         toolExecutor.shutdown();
+    }
+
+    private NvidiaRequestSupport.NemotronConfig nemotronConfig() {
+        return new NvidiaRequestSupport.NemotronConfig(maxTokens, reasoningBudget, temperature, topP);
     }
 
     // ─── Public agentic loop ─────────────────────────────────────────────────
@@ -186,8 +199,11 @@ public class NvidiaAgentService {
     }
 
     static int resolveMaxTokens(String skillName, int configuredDefault) {
+        if (skillName != null && NvidiaRequestSupport.shouldUseThinking(skillName)) {
+            return configuredDefault;
+        }
         String key = normalizeSkillName(skillName);
-        return key == null ? 4096 : SKILL_MAX_TOKENS.getOrDefault(key, 4096);
+        return key == null ? 4096 : FAST_SKILL_MAX_TOKENS.getOrDefault(key, 4096);
     }
 
     static int resolveMaxIterations(String skillName, int configuredDefault) {
@@ -196,8 +212,7 @@ public class NvidiaAgentService {
     }
 
     static String resolveModel(String skillName, String defaultModel) {
-        String key = normalizeSkillName(skillName);
-        return key == null ? defaultModel : SKILL_MODEL_OVERRIDE.getOrDefault(key, defaultModel);
+        return defaultModel;
     }
 
     static Set<String> resolveAllowedTools(String skillName) {
@@ -336,6 +351,7 @@ public class NvidiaAgentService {
         Set<String> allowedTools = resolveAllowedTools(skillName);
         body.set("tools", buildToolDefinitions(allowedTools));
         body.put("tool_choice", "auto");
+        NvidiaRequestSupport.applyNemotronOptions(body, skillName, true, nemotronConfig(), mapper);
         return body;
     }
 

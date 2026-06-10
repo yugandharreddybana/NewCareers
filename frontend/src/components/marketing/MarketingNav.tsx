@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { Link } from 'react-router-dom';
+import { useAuth } from '@/context/authCtx';
 import { BRAND_NAME } from '@/lib/brand';
 
 export type MarketingActiveLink = 'home' | 'pricing' | 'features' | 'blog';
@@ -14,6 +15,7 @@ const linkBase =
 const linkActive = 'font-body-md text-body-md text-primary font-bold border-b-2 border-primary pb-1';
 
 export const MarketingNav: React.FC<MarketingNavProps> = ({ activeLink }) => {
+  const { user, signOut, loading } = useAuth();
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
 
   const closeMobile = () => setMobileMenuOpen(false);
@@ -33,8 +35,48 @@ export const MarketingNav: React.FC<MarketingNavProps> = ({ activeLink }) => {
   const linkClass = (key: string) =>
     activeLink === key ? linkActive : linkBase;
 
+  const appEntryHref = user?.onboarded ? '/dashboard' : '/onboarding';
+  const appEntryLabel = user?.onboarded ? 'Dashboard' : 'Continue setup';
+
+  const authActions = loading ? (
+    <span className="hidden md:inline font-label-md text-label-md text-on-surface-variant px-4 py-2">
+      …
+    </span>
+  ) : user ? (
+    <>
+      <Link
+        className="hidden md:inline-flex font-label-md text-label-md text-on-surface hover:bg-surface-variant/50 transition-all duration-200 px-4 py-2 rounded-md border border-outline-variant"
+        to={appEntryHref}
+      >
+        {appEntryLabel}
+      </Link>
+      <button
+        type="button"
+        className="hidden md:inline-flex font-label-md text-label-md text-on-surface-variant hover:text-primary transition-colors px-3 py-2"
+        onClick={() => void signOut()}
+      >
+        Log out
+      </button>
+    </>
+  ) : (
+    <>
+      <Link
+        className="hidden md:inline-flex font-label-md text-label-md text-on-surface hover:bg-surface-variant/50 transition-all duration-200 px-4 py-2 rounded-md border border-outline-variant"
+        to="/login"
+      >
+        Log In
+      </Link>
+      <Link
+        className="font-label-md text-label-md bg-primary text-on-primary px-4 py-2 rounded-md btn-glow transition-all duration-200 shadow-sm"
+        to="/get-started"
+      >
+        Start Free
+      </Link>
+    </>
+  );
+
   return (
-    <div className="fixed top-0 w-full z-50 flex flex-col bg-surface/80 backdrop-blur-xl border-b border-outline-variant/30 shadow-sm">
+    <div className="fixed top-[var(--status-banner-height,0px)] w-full z-50 flex flex-col bg-surface/80 backdrop-blur-xl border-b border-outline-variant/30 shadow-sm transition-[top] duration-200">
       <nav className="flex justify-between items-center px-margin-mobile md:px-margin-desktop h-20 max-w-container-max mx-auto w-full">
         <Link
           className="font-headline-md text-headline-md font-bold bg-gradient-to-r from-primary to-secondary bg-clip-text text-transparent"
@@ -62,18 +104,7 @@ export const MarketingNav: React.FC<MarketingNavProps> = ({ activeLink }) => {
         </div>
 
         <div className="flex items-center gap-stack-md">
-          <Link
-            className="hidden md:inline-flex font-label-md text-label-md text-on-surface hover:bg-surface-variant/50 transition-all duration-200 px-4 py-2 rounded-md border border-outline-variant"
-            to="/login"
-          >
-            Log In
-          </Link>
-          <Link
-            className="font-label-md text-label-md bg-primary text-on-primary px-4 py-2 rounded-md btn-glow transition-all duration-200 shadow-sm"
-            to="/get-started"
-          >
-            Start Free
-          </Link>
+          {authActions}
           <button
             type="button"
             className="md:hidden text-on-surface p-2 rounded hover:bg-surface-container transition-colors"
@@ -111,13 +142,35 @@ export const MarketingNav: React.FC<MarketingNavProps> = ({ activeLink }) => {
               ),
             )}
             <hr className="border-outline-variant/30" />
-            <Link
-              className="font-label-md text-label-md text-on-surface-variant hover:text-primary transition-colors"
-              to="/login"
-              onClick={closeMobile}
-            >
-              Log In
-            </Link>
+            {loading ? null : user ? (
+              <>
+                <Link
+                  className="font-label-md text-label-md text-on-surface-variant hover:text-primary transition-colors"
+                  to={appEntryHref}
+                  onClick={closeMobile}
+                >
+                  {appEntryLabel}
+                </Link>
+                <button
+                  type="button"
+                  className="font-label-md text-label-md text-left text-on-surface-variant hover:text-primary transition-colors"
+                  onClick={() => {
+                    closeMobile();
+                    void signOut();
+                  }}
+                >
+                  Log out
+                </button>
+              </>
+            ) : (
+              <Link
+                className="font-label-md text-label-md text-on-surface-variant hover:text-primary transition-colors"
+                to="/login"
+                onClick={closeMobile}
+              >
+                Log In
+              </Link>
+            )}
           </div>
         </div>
       )}

@@ -4,6 +4,7 @@ import com.careerops.model.AgentResult;
 import com.careerops.ratelimit.RateLimitFilter;
 import com.careerops.service.ClaudeAgentService;
 import com.careerops.service.ClaudeDirectService;
+import com.careerops.service.NvidiaService;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import org.junit.jupiter.api.BeforeEach;
@@ -47,6 +48,7 @@ class SkillsControllerIntegrationTest {
 
     @MockBean ClaudeAgentService claudeAgentService;
     @MockBean ClaudeDirectService claudeDirectService;
+    @MockBean NvidiaService nvidiaService;
 
     private static final String USER_JOB_ID = "00000000-0000-0000-0000-000000000111";
     private static final String INTERNAL_SECRET = "test-internal-trust-secret-minimum-32-characters-long";
@@ -105,6 +107,7 @@ class SkillsControllerIntegrationTest {
                 true,
                 userId
             );
+            ensureSkillUserConsents(userId);
             return;
         }
 
@@ -133,6 +136,7 @@ class SkillsControllerIntegrationTest {
             0,
             true
         );
+        ensureSkillUserConsents(userId);
     }
 
     @BeforeEach
@@ -145,12 +149,18 @@ class SkillsControllerIntegrationTest {
                 .put("source", "mock-direct")
                 .put("feature", invocation.getArgument(3, String.class))
             );
+
+        lenient().when(nvidiaService.isConfigured()).thenReturn(true);
+        lenient().when(nvidiaService.generateJson(anyString(), anyString(), any(UUID.class), anyString()))
+            .thenAnswer(invocation -> mapper.createObjectNode()
+                .put("source", "mock-nvidia")
+                .put("feature", invocation.getArgument(3, String.class))
+            );
     }
 
     @BeforeEach
     void resetRateLimitBuckets() {
         clearRateLimitCache("buckets");
-        clearRateLimitCache("ipBuckets");
     }
 
     @ParameterizedTest(name = "POST /skills/start — skill: {0}")
@@ -209,6 +219,44 @@ class SkillsControllerIntegrationTest {
         if (cache instanceof com.github.benmanes.caffeine.cache.Cache<?, ?> caffeineCache) {
             caffeineCache.invalidateAll();
         }
+    }
+
+    private void ensureSkillUserConsents(UUID userId) {
+        jdbc.update("DELETE FROM careerops.user_consents WHERE user_id = ?", userId);
+        jdbc.update(
+            """
+            INSERT INTO careerops.user_consents (
+                id,
+                user_id,
+                consent_type,
+                version,
+                accepted,
+                accepted_at
+            ) VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP())
+            """,
+            UUID.fromString("00000000-0000-0000-0000-000000000101"),
+            userId,
+            "ESSENTIAL",
+            "v1.0",
+            true
+        );
+        jdbc.update(
+            """
+            INSERT INTO careerops.user_consents (
+                id,
+                user_id,
+                consent_type,
+                version,
+                accepted,
+                accepted_at
+            ) VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP())
+            """,
+            UUID.fromString("00000000-0000-0000-0000-000000000102"),
+            userId,
+            "AI_PROCESSING",
+            "v1.0",
+            true
+        );
     }
 }
 

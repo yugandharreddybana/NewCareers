@@ -1,5 +1,8 @@
 package com.careerops.dto;
 
+import com.careerops.service.HumanSummarySanitizer;
+import com.careerops.service.JobDescriptionNormalizer;
+import com.careerops.service.JobSalaryExtractor;
 import com.fasterxml.jackson.databind.JsonNode;
 
 import java.time.Instant;
@@ -26,7 +29,7 @@ public class JobDtos {
                 uj.getId(), j.getId(), j.getTitle(), j.getCompany(), j.getLocation(),
                 j.getSalaryMin(), j.getSalaryMax(), j.getCurrency(), j.getSponsorship(),
                 uj.getMatchPercent(), uj.getVerdict(),
-                uj.getHumanSummary(), j.getSourceName(),
+                HumanSummarySanitizer.sanitize(uj.getHumanSummary()), j.getSourceName(),
                 j.getPostedAt(), uj.getDeliveredAt(),
                 uj.getKanbanColumn(), uj.getStatus(), j.getSourceUrl(),
                 uj.getMatchedSkills(), uj.getUnmatchedSkills()
@@ -44,13 +47,29 @@ public class JobDtos {
         JsonNode scoreBreakdown
     ) {
         public static JobDetailResponse from(com.careerops.model.UserJob uj, com.careerops.model.Job j) {
+            String description = JobDescriptionNormalizer.normalize(j.getDescription());
+            Integer salaryMin = j.getSalaryMin();
+            Integer salaryMax = j.getSalaryMax();
+            String currency = j.getCurrency();
+
+            if (salaryMin == null && salaryMax == null) {
+                JobSalaryExtractor.SalaryInfo parsed = JobSalaryExtractor.parse(description);
+                if (parsed.hasStructured()) {
+                    salaryMin = parsed.min();
+                    salaryMax = parsed.max();
+                    if (parsed.currency() != null) currency = parsed.currency();
+                }
+            }
+
             return new JobDetailResponse(
                 uj.getId(), j.getId(), j.getTitle(), j.getCompany(), j.getLocation(),
-                j.getSalaryMin(), j.getSalaryMax(), j.getCurrency(), j.getSponsorship(),
-                j.getDescription(), j.getSourceUrl(), j.getSourceName(), j.getSector(),
+                salaryMin, salaryMax, currency, j.getSponsorship(),
+                description,
+                j.getSourceUrl(), j.getSourceName(), j.getSector(),
                 j.getPostedAt(), uj.getMatchPercent(), uj.getAiScore(),
                 uj.getMatchedSkills(), uj.getUnmatchedSkills(), uj.getCvImprovementTips(),
-                uj.getHumanSummary(), uj.getVerdict(), uj.getKanbanColumn(), uj.getStatus(),
+                HumanSummarySanitizer.sanitize(uj.getHumanSummary()), uj.getVerdict(),
+                uj.getKanbanColumn(), uj.getStatus(),
                 uj.getScoreBreakdown()
             );
         }

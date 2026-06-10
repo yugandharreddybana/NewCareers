@@ -39,7 +39,7 @@ public interface JobSource {
                 String url = listing.getUrl() != null ? listing.getUrl() : "";
                 String key = url.isBlank()
                         ? (listing.getTitle() + "|" + listing.getCompany())
-                        : url;
+                        : JobPostingFingerprint.canonicalPostingUrl(url);
                 byUrl.putIfAbsent(key, listing);
             }
         }

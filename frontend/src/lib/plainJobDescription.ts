@@ -1,4 +1,4 @@
-import { cleanJobDescriptionText } from '@/lib/jobDescriptionFormat';
+import { cleanJobDescriptionText, preprocessJobDescription } from '@/lib/jobDescriptionFormat';
 
 /** Strip HTML and normalize whitespace for job posting display. */
 export function plainJobDescription(raw: string | undefined | null): string {
@@ -12,7 +12,7 @@ export function plainJobDescription(raw: string | undefined | null): string {
     });
     text = doc.body?.textContent ?? text;
   }
-  return cleanJobDescriptionText(text);
+  return preprocessJobDescription(cleanJobDescriptionText(text));
 }
 
 export function hasUsableJobDescription(raw: string | undefined | null): boolean {

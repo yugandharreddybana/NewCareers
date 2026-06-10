@@ -1,21 +1,20 @@
 /**
- * Persists Google link step-up idToken across refresh (tab-scoped).
+ * Holds the Google link step-up id token only in tab memory.
  */
-const KEY = 'co_google_link_v1';
+const LEGACY_KEY = 'co_google_link_v1';
+
+let pendingIdToken: string | null = null;
 
 export function writePendingGoogleLink(idToken: string): void {
-  sessionStorage.setItem(KEY, idToken);
+  pendingIdToken = idToken;
+  sessionStorage.removeItem(LEGACY_KEY);
 }
 
 export function readPendingGoogleLink(): string | null {
-  try {
-    const raw = sessionStorage.getItem(KEY);
-    return raw?.trim() ? raw : null;
-  } catch {
-    return null;
-  }
+  return pendingIdToken?.trim() ? pendingIdToken : null;
 }
 
 export function clearPendingGoogleLink(): void {
-  sessionStorage.removeItem(KEY);
+  pendingIdToken = null;
+  sessionStorage.removeItem(LEGACY_KEY);
 }

@@ -133,7 +133,7 @@ export const KanbanBoard: React.FC<Props> = ({ jobs: initialJobs, onJobClick, on
 
   return (
     <>
-      <div className="flex overflow-x-auto gap-0 pb-8 select-none">
+      <div className="flex flex-1 w-full h-full min-h-0 max-lg:overflow-x-auto max-lg:scrollbar-thin select-none items-stretch">
         {DISPLAY_COLUMNS.map((col, index) => {
           const meta = COLUMN_META[col];
           const colJobs = byColumn(col);
@@ -143,14 +143,21 @@ export const KanbanBoard: React.FC<Props> = ({ jobs: initialJobs, onJobClick, on
             <div
               key={col}
               className={`
-                min-w-[320px] max-w-[320px] flex flex-col gap-4 transition-all px-3
-                ${index < DISPLAY_COLUMNS.length - 1 ? 'border-r border-outline-variant/70' : ''}
+                relative flex flex-col gap-4 transition-all px-3
+                flex-1 min-w-0 min-h-full
+                max-lg:min-w-[280px] max-lg:max-w-[320px] max-lg:flex-none max-lg:min-h-0
                 ${isOver ? 'scale-[1.01]' : ''}
               `}
               onDragOver={e => { e.preventDefault(); setOverCol(col); }}
               onDragLeave={() => setOverCol(null)}
               onDrop={e => handleDrop(e, col)}
             >
+              {index < DISPLAY_COLUMNS.length - 1 && (
+                <span
+                  className="pointer-events-none absolute right-0 top-0 bottom-0 w-px bg-outline-variant/70"
+                  aria-hidden
+                />
+              )}
               <div className="flex items-center justify-between px-1">
                 <div className="flex items-center gap-2">
                   <span className={`w-2.5 h-2.5 rounded-full ${meta.dot}`} />
@@ -169,7 +176,7 @@ export const KanbanBoard: React.FC<Props> = ({ jobs: initialJobs, onJobClick, on
                 </div>
               </div>
 
-              <div className="flex flex-col gap-3">
+              <div className="flex flex-col gap-3 flex-1 min-h-0">
                 {colJobs.length === 0 && col === 'Offer' && (
                   <div className="flex flex-col items-center justify-center h-48 border-2 border-dashed border-outline-variant rounded-xl bg-surface-container-low">
                     <span className="material-symbols-outlined text-outline mb-2 text-[32px]">celebration</span>

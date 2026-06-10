@@ -65,9 +65,11 @@ public class BillingService {
     private final StripePlanMapper planMapper;
     private final BillingWebhookIdempotency webhookIdempotency;
     private final OrgUsageCounter orgUsageCounter;
+    private final BillingPeriodService billingPeriodService;
     private final SaasLifecycleTelemetry lifecycleTelemetry;
     private final SaasBillingProperties saasBillingProperties;
     private final OrganizationPlanSyncService organizationPlanSyncService;
+    private final UserQuotaGrantService quotaGrantService;
     private final String corsAllowedOrigins;
 
     public BillingService(
@@ -80,9 +82,11 @@ public class BillingService {
             StripePlanMapper planMapper,
             BillingWebhookIdempotency webhookIdempotency,
             OrgUsageCounter orgUsageCounter,
+            BillingPeriodService billingPeriodService,
             SaasLifecycleTelemetry lifecycleTelemetry,
             SaasBillingProperties saasBillingProperties,
             OrganizationPlanSyncService organizationPlanSyncService,
+            UserQuotaGrantService quotaGrantService,
             @Value("${cors.allowed.origins}") String corsAllowedOrigins) {
         this.subscriptionResolver = subscriptionResolver;
         this.subscriptionRepository = subscriptionRepository;
@@ -93,9 +97,11 @@ public class BillingService {
         this.planMapper = planMapper;
         this.webhookIdempotency = webhookIdempotency;
         this.orgUsageCounter = orgUsageCounter;
+        this.billingPeriodService = billingPeriodService;
         this.lifecycleTelemetry = lifecycleTelemetry;
         this.saasBillingProperties = saasBillingProperties;
         this.organizationPlanSyncService = organizationPlanSyncService;
+        this.quotaGrantService = quotaGrantService;
         this.corsAllowedOrigins = corsAllowedOrigins;
     }
 
@@ -107,6 +113,9 @@ public class BillingService {
 
         SubscriptionPlan effectivePlan = PlanEnforcementService.effectivePlan(ctx);
         PlanLimit limits = PlanLimit.forPlan(effectivePlan);
+        PlanLimitsResponse limitsResponse = quotaGrantService.unlimitedAccess(userId)
+                ? new PlanLimitsResponse(-1, -1, -1, -1)
+                : PlanLimitsResponse.from(limits);
 
         return new SubscriptionResponse(
                 ctx.orgId(),
@@ -115,13 +124,15 @@ public class BillingService {
                 ctx.status(),
                 subscription.getTrialEndsAt(),
                 subscription.getCurrentPeriodEnd(),
+                subscription.isCancelAtPeriodEnd(),
                 computeDaysRemaining(subscription),
                 hasBillingAccount(subscription),
                 canManageBilling(userId, ctx.orgId()),
                 new UsageThisMonth(
-                        orgUsageCounter.aiSkillRunsThisMonth(ctx.orgId()),
+                        orgUsageCounter.aiSkillRunsSince(
+                                ctx.orgId(), billingPeriodService.resolvePeriodStart(subscription)),
                         orgUsageCounter.jobApplicationsThisMonth(ctx.orgId())),
-                PlanLimitsResponse.from(limits),
+                limitsResponse,
                 orgUsageCounter.cvUploadsTotal(ctx.orgId()));
     }
 
@@ -140,15 +151,18 @@ public class BillingService {
 
     @Transactional(readOnly = true)
     public UsageMetricsResponse getUsageForUser(UUID userId) {
-        SubscriptionResponse subscription = getSubscriptionForUser(userId);
-        int aiLimit = subscription.limits().aiRunsPerMonth();
-        int appLimit = subscription.limits().applicationsPerMonth();
+        SubscriptionContext ctx = subscriptionResolver.resolveForUser(userId);
+        Subscription subscription = subscriptionRepository.findByOrganizationId(ctx.orgId())
+                .orElseThrow(() -> ApiException.notFound("Subscription not found for organization"));
+        SubscriptionResponse subscriptionResponse = getSubscriptionForUser(userId);
+        int aiLimit = subscriptionResponse.limits().aiRunsPerMonth();
+        int appLimit = subscriptionResponse.limits().applicationsPerMonth();
         return new UsageMetricsResponse(
-                subscription.usageThisMonth().aiRuns(),
+                subscriptionResponse.usageThisMonth().aiRuns(),
                 aiLimit,
-                subscription.usageThisMonth().applications(),
+                subscriptionResponse.usageThisMonth().applications(),
                 appLimit,
-                monthResetInstant());
+                billingPeriodService.nextResetInstant(subscription));
     }
 
     @Transactional
@@ -168,7 +182,7 @@ public class BillingService {
         return switch (plan) {
             case FREE -> List.of(
                     limits.aiSkillRunsPerMonth() + " AI runs per month",
-                    limits.jobApplicationsPerMonth() + " job applications",
+                    limits.jobApplicationsPerMonth() + " auto-apply runs per month",
                     limits.cvUploads() + " CV profile(s)");
             case PRO -> List.of(
                     "200 AI runs per month",
@@ -181,11 +195,6 @@ public class BillingService {
                     "Unlimited CV profiles",
                     "Priority support");
         };
-    }
-
-    private static Instant monthResetInstant() {
-        LocalDate firstOfNextMonth = LocalDate.now(ZoneOffset.UTC).plusMonths(1).withDayOfMonth(1);
-        return firstOfNextMonth.atStartOfDay(ZoneOffset.UTC).toInstant();
     }
 
     @Transactional(readOnly = true)
@@ -272,7 +281,9 @@ public class BillingService {
                 resolveCancelUrl(),
                 metadata);
 
-        if (result.sessionId() != null && result.sessionId().startsWith("cs_mock_")) {
+        if (result.sessionId() != null
+                && result.sessionId().startsWith("cs_mock_")
+                && stripeProperties.isMockCheckoutAutoActivate()) {
             String mockSubscriptionId = "sub_mock_" + UUID.randomUUID();
             activateSubscriptionFromCheckout(
                     subscription,
@@ -306,11 +317,14 @@ public class BillingService {
             if (subscription.getCurrentPeriodEnd() == null) {
                 subscription.setCurrentPeriodEnd(Instant.now().plus(30, ChronoUnit.DAYS));
             }
+            subscription.setCancelAtPeriodEnd(true);
             subscriptionRepository.save(subscription);
             return new CancelSubscriptionResponse(true, subscription.getCurrentPeriodEnd());
         }
 
         stripeGateway.cancelSubscriptionAtPeriodEnd(stripeSubscriptionId);
+        subscription.setCancelAtPeriodEnd(true);
+        subscriptionRepository.save(subscription);
         return new CancelSubscriptionResponse(true, subscription.getCurrentPeriodEnd());
     }
 
@@ -354,14 +368,35 @@ public class BillingService {
             throw new ApiException(HttpStatus.BAD_REQUEST, "Invalid Stripe signature");
         }
 
-        if (webhookIdempotency.isProcessed(event.getId())) {
+        if (!isSupportedWebhookEvent(event.getType())) {
+            log.info("Ignoring unsupported Stripe event type: {}", event.getType());
+            return WebhookDisposition.IGNORED_UNSUPPORTED;
+        }
+
+        if (!webhookIdempotency.tryAcquire(event.getId())) {
             log.debug("Stripe webhook event already processed: {}", event.getId());
             return WebhookDisposition.DUPLICATE;
         }
 
-        WebhookDisposition disposition = dispatchEvent(event);
-        webhookIdempotency.markProcessed(event.getId());
-        return disposition;
+        try {
+            WebhookDisposition disposition = dispatchEvent(event);
+            webhookIdempotency.markCompleted(event.getId());
+            return disposition;
+        } catch (RuntimeException ex) {
+            webhookIdempotency.release(event.getId());
+            throw ex;
+        }
+    }
+
+    private static boolean isSupportedWebhookEvent(String eventType) {
+        return switch (eventType) {
+            case "checkout.session.completed",
+                    "customer.subscription.updated",
+                    "customer.subscription.deleted",
+                    "invoice.payment_failed",
+                    "invoice.paid" -> true;
+            default -> false;
+        };
     }
 
     private WebhookDisposition dispatchEvent(Event event) {
@@ -464,24 +499,41 @@ public class BillingService {
         }
         if (subscriptionId != null && !subscriptionId.isBlank()) {
             subscription.setStripeSubscriptionId(subscriptionId);
-            Optional<Long> periodEnd = stripeGateway.retrieveSubscriptionCurrentPeriodEnd(subscriptionId);
-            if (periodEnd.isPresent()) {
-                subscription.setCurrentPeriodEnd(Instant.ofEpochSecond(periodEnd.get()));
-            } else if (isMockStripeId(subscriptionId)) {
-                subscription.setCurrentPeriodEnd(Instant.now().plus(30, ChronoUnit.DAYS));
-            } else {
-                log.warn("Stripe subscription {} has no current_period_end; leaving period end unset", subscriptionId);
-            }
+            applyStripePeriodBounds(subscription, subscriptionId);
         }
         subscription.setStatus(SubscriptionStatus.ACTIVE);
         subscription.setPlan(plan);
-        if (subscription.getCurrentPeriodEnd() == null && isMockStripeId(
-                subscription.getStripeSubscriptionId() != null ? subscription.getStripeSubscriptionId() : "")) {
-            subscription.setCurrentPeriodEnd(Instant.now().plus(30, ChronoUnit.DAYS));
+        subscription.setCancelAtPeriodEnd(false);
+        subscription.setTrialEndsAt(null);
+        if (isMockStripeId(subscription.getStripeSubscriptionId() != null ? subscription.getStripeSubscriptionId() : "")) {
+            if (subscription.getCurrentPeriodStart() == null) {
+                subscription.setCurrentPeriodStart(Instant.now());
+            }
+            if (subscription.getCurrentPeriodEnd() == null) {
+                subscription.setCurrentPeriodEnd(Instant.now().plus(30, ChronoUnit.DAYS));
+            }
         }
 
         subscriptionRepository.save(subscription);
         trackPlanChangeForOrg(subscription.getOrganizationId(), previousPlan, subscription.getPlan());
+    }
+
+    private void applyStripePeriodBounds(Subscription subscription, String subscriptionId) {
+        Optional<Long> periodStart = stripeGateway.retrieveSubscriptionCurrentPeriodStart(subscriptionId);
+        if (periodStart.isPresent()) {
+            subscription.setCurrentPeriodStart(Instant.ofEpochSecond(periodStart.get()));
+        } else if (isMockStripeId(subscriptionId)) {
+            subscription.setCurrentPeriodStart(Instant.now());
+        }
+
+        Optional<Long> periodEnd = stripeGateway.retrieveSubscriptionCurrentPeriodEnd(subscriptionId);
+        if (periodEnd.isPresent()) {
+            subscription.setCurrentPeriodEnd(Instant.ofEpochSecond(periodEnd.get()));
+        } else if (isMockStripeId(subscriptionId)) {
+            subscription.setCurrentPeriodEnd(Instant.now().plus(30, ChronoUnit.DAYS));
+        } else {
+            log.warn("Stripe subscription {} has no current_period_end; leaving period end unset", subscriptionId);
+        }
     }
 
     private void handleSubscriptionUpdated(Event event) {
@@ -512,16 +564,18 @@ public class BillingService {
             throw new WebhookProcessingException("customer.subscription.deleted missing subscription payload");
         }
 
-        subscriptionRepository.findByStripeSubscriptionId(stripeSubscription.getId())
-                .ifPresent(subscription -> {
-                    SubscriptionPlan previousPlan = subscription.getPlan();
-                    subscription.setStatus(SubscriptionStatus.CANCELLED);
-                    subscription.setPlan(SubscriptionPlan.FREE);
-                    subscription.setStripeSubscriptionId(null);
-                    subscription.setCurrentPeriodEnd(null);
-                    subscriptionRepository.save(subscription);
-                    trackPlanChangeForOrg(subscription.getOrganizationId(), previousPlan, subscription.getPlan());
-                });
+        Subscription subscription = subscriptionRepository.findByStripeSubscriptionId(stripeSubscription.getId())
+                .orElseThrow(() -> new WebhookProcessingException(
+                        "Unknown Stripe subscription " + stripeSubscription.getId() + " for deleted event"));
+
+        SubscriptionPlan previousPlan = subscription.getPlan();
+        subscription.setStatus(SubscriptionStatus.CANCELLED);
+        subscription.setPlan(SubscriptionPlan.FREE);
+        subscription.setStripeSubscriptionId(null);
+        subscription.setCurrentPeriodEnd(null);
+        subscription.setCancelAtPeriodEnd(false);
+        subscriptionRepository.save(subscription);
+        trackPlanChangeForOrg(subscription.getOrganizationId(), previousPlan, subscription.getPlan());
     }
 
     private void handleInvoicePaymentFailed(Event event) {
@@ -529,7 +583,11 @@ public class BillingService {
         if (invoice == null) {
             throw new WebhookProcessingException("invoice.payment_failed missing invoice payload");
         }
-        markPastDueFromCustomer(invoice.getCustomer());
+        String stripeSubscriptionId = invoice.getSubscription();
+        if (stripeSubscriptionId == null || stripeSubscriptionId.isBlank()) {
+            throw new WebhookProcessingException("invoice.payment_failed missing subscription id");
+        }
+        markPastDueFromSubscription(stripeSubscriptionId, invoice.getCustomer());
     }
 
     private void handleInvoicePaid(Event event) {
@@ -537,23 +595,52 @@ public class BillingService {
         if (invoice == null) {
             throw new WebhookProcessingException("invoice.paid missing invoice payload");
         }
-        subscriptionRepository.findByStripeCustomerId(invoice.getCustomer())
-                .filter(sub -> sub.getStatus() == SubscriptionStatus.PAST_DUE)
-                .ifPresent(sub -> {
-                    sub.setStatus(SubscriptionStatus.ACTIVE);
-                    subscriptionRepository.save(sub);
-                });
+        String stripeSubscriptionId = invoice.getSubscription();
+        if (stripeSubscriptionId == null || stripeSubscriptionId.isBlank()) {
+            throw new WebhookProcessingException("invoice.paid missing subscription id");
+        }
+        Subscription subscription = resolveInvoiceSubscription(
+                stripeSubscriptionId,
+                invoice.getCustomer(),
+                "invoice.paid");
+        if (subscription.getStatus() == SubscriptionStatus.PAST_DUE) {
+            subscription.setStatus(SubscriptionStatus.ACTIVE);
+            subscriptionRepository.save(subscription);
+        }
     }
 
-    private void markPastDueFromCustomer(String customerId) {
-        if (customerId == null || customerId.isBlank()) {
-            throw new WebhookProcessingException("invoice event missing customer id");
+    private void markPastDueFromSubscription(String stripeSubscriptionId, String customerId) {
+        Subscription subscription = resolveInvoiceSubscription(
+                stripeSubscriptionId,
+                customerId,
+                "invoice.payment_failed");
+        if (subscription.getStatus() != SubscriptionStatus.ACTIVE) {
+            log.info("Skipping PAST_DUE for subscription {} — status is {}",
+                    stripeSubscriptionId, subscription.getStatus());
+            return;
         }
-        subscriptionRepository.findByStripeCustomerId(customerId)
-                .ifPresent(sub -> {
-                    sub.setStatus(SubscriptionStatus.PAST_DUE);
-                    subscriptionRepository.save(sub);
-                });
+        subscription.setStatus(SubscriptionStatus.PAST_DUE);
+        subscriptionRepository.save(subscription);
+    }
+
+    private Subscription resolveInvoiceSubscription(
+            String stripeSubscriptionId,
+            String customerId,
+            String eventType) {
+        Subscription subscription = subscriptionRepository.findByStripeSubscriptionId(stripeSubscriptionId)
+                .orElseThrow(() -> new WebhookProcessingException(
+                        eventType + " has no local subscription for " + stripeSubscriptionId));
+        if (!belongsToCustomer(subscription, customerId)) {
+            throw new WebhookProcessingException(
+                    eventType + " customer does not match local subscription customer for " + stripeSubscriptionId);
+        }
+        return subscription;
+    }
+
+    private static boolean belongsToCustomer(Subscription subscription, String customerId) {
+        return customerId == null
+                || customerId.isBlank()
+                || customerId.equals(subscription.getStripeCustomerId());
     }
 
     private void trackPlanChangeForOrg(UUID orgId, SubscriptionPlan fromPlan, SubscriptionPlan toPlan) {
@@ -575,7 +662,11 @@ public class BillingService {
         subscription.setStripeSubscriptionId(stripeSubscription.getId());
         subscription.setStripeCustomerId(stripeSubscription.getCustomer());
         subscription.setStatus(planMapper.mapStripeStatus(stripeSubscription.getStatus()));
+        subscription.setCancelAtPeriodEnd(Boolean.TRUE.equals(stripeSubscription.getCancelAtPeriodEnd()));
 
+        if (stripeSubscription.getCurrentPeriodStart() != null) {
+            subscription.setCurrentPeriodStart(Instant.ofEpochSecond(stripeSubscription.getCurrentPeriodStart()));
+        }
         if (stripeSubscription.getCurrentPeriodEnd() != null) {
             subscription.setCurrentPeriodEnd(Instant.ofEpochSecond(stripeSubscription.getCurrentPeriodEnd()));
         }
@@ -585,16 +676,26 @@ public class BillingService {
                 && !stripeSubscription.getItems().getData().isEmpty()
                 && stripeSubscription.getItems().getData().getFirst().getPrice() != null) {
             String priceId = stripeSubscription.getItems().getData().getFirst().getPrice().getId();
-            planMapper.resolvePlanForPriceId(priceId).ifPresent(subscription::setPlan);
+            SubscriptionPlan plan = planMapper.resolvePlanForPriceId(priceId)
+                    .orElseThrow(() -> new WebhookProcessingException(
+                            "Unknown Stripe price " + priceId + " for subscription " + stripeSubscription.getId()));
+            subscription.setPlan(plan);
         }
     }
 
     private <T extends StripeObject> T deserialize(Event event, Class<T> type) {
-        return event.getDataObjectDeserializer()
+        Optional<StripeObject> object = event.getDataObjectDeserializer()
                 .getObject()
-                .filter(type::isInstance)
-                .map(type::cast)
-                .orElse(null);
+                .or(() -> {
+                    try {
+                        return Optional.ofNullable(event.getDataObjectDeserializer().deserializeUnsafe());
+                    } catch (Exception ex) {
+                        log.debug("Stripe webhook deserialize failed for event {} type {}: {}",
+                                event.getId(), event.getType(), ex.getMessage());
+                        return Optional.empty();
+                    }
+                });
+        return object.filter(type::isInstance).map(type::cast).orElse(null);
     }
 
     private void assertBillingAdmin(UUID userId, UUID orgId) {

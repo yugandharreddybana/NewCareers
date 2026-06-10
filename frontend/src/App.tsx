@@ -8,8 +8,7 @@
  *   #6.034          — RouteFallback is now context-aware (extracted to
  *                     ErrorBoundary.tsx).
  *   #6.036          — `withPreload(...)` helper exposes `.preload()` on each
- *                     lazy chunk so the AppShell sidebar can pre-warm chunks
- *                     on hover. Routes still lazy-load by default.
+ *                     lazy chunk for hover pre-warm. Routes still lazy-load by default.
  *   #6.038 / #6.044 — `/forgot-password` and `/reset-password` route to
  *                     dedicated pages.
  *   #6.043          — replaced the 25× ErrorBoundary+Suspense duplication with
@@ -76,6 +75,7 @@ const BillingCheckoutCancelPage = withPreload(() =>
     default: () => <m.default variant="cancel" />,
   })));
 const AccountTeamPage         = withPreload(() => import('./pages/account/AccountTeamPage'));
+const AccountDangerZonePage   = withPreload(() => import('./pages/account/AccountDangerZonePage'));
 const InterviewHistoryPage = withPreload(() => import('./pages/InterviewHistoryPage'));
 const InterviewPage        = withPreload(() => import('./pages/InterviewPage'));
 const NetworkingPage       = withPreload(() => import('./pages/NetworkingPage'));
@@ -178,6 +178,7 @@ export const App: React.FC = () => (
                     <Route path="notifications" element={<RouteWithBoundary label="Notification settings"><AccountNotificationsPage /></RouteWithBoundary>} />
                     <Route path="billing"       element={<RouteWithBoundary label="Billing settings"><AccountBillingPage /></RouteWithBoundary>} />
                     <Route path="team"          element={<RouteWithBoundary label="Team settings"><AccountTeamPage /></RouteWithBoundary>} />
+                    <Route path="danger-zone"   element={<RouteWithBoundary label="Danger zone"><AccountDangerZonePage /></RouteWithBoundary>} />
                   </Route>
                   <Route path="/interviews"       element={<RouteWithBoundary label="Interview history"><InterviewHistoryPage /></RouteWithBoundary>} />
                   <Route path="/interview"        element={<RouteWithBoundary label="Interview"><InterviewPage /></RouteWithBoundary>} />
@@ -204,7 +205,7 @@ export const App: React.FC = () => (
                   <Route path="/admin/experiments" element={<RouteWithBoundary label="Experiments"><ExperimentDashboard /></RouteWithBoundary>} />
                 </Route>
 
-                {/* ── Catch-all 404 (standalone — no AppShell / dashboard header) ─ */}
+                {/* ── Catch-all 404 (standalone — no dashboard header) ─ */}
                 <Route
                   path="*"
                   element={
@@ -229,7 +230,7 @@ export const lazyPages = {
   Home, Login, Signup, ForgotPasswordPage, ResetPasswordPage, Onboarding,
   Dashboard, WelcomeDashboard, PipelineDashboard, JobDetail, Profile,
   AccountSettingsLayout, AccountProfilePage, AccountSecurityPage, AccountNotificationsPage,
-  AccountBillingPage, AccountTeamPage,
+  AccountBillingPage, AccountTeamPage, AccountDangerZonePage,
   InterviewHistoryPage, InterviewPage, NetworkingPage, WorkspacePage,
   ProgressPage, ExperimentDashboard, SaasDashboard, Kanban, CvManager, Skills, Analytics,
   BillingPage, Refer, PlannerPage, WatchlistsPage, AutoApplyPage, OutreachPage,

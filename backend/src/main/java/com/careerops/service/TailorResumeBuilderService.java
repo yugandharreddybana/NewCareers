@@ -1,5 +1,6 @@
 package com.careerops.service;
 
+import com.careerops.debug.DebugSessionLog;
 import com.careerops.model.Job;
 import com.careerops.model.User;
 import com.careerops.model.UserProfile;
@@ -49,10 +50,41 @@ public class TailorResumeBuilderService {
 
         Optional<ObjectNode> ai = tailorResumeAi.tryBuild(userId, profile, job, baseline, parsed);
         if (ai.isPresent()) {
+            // #region agent log
+            DebugSessionLog.write(
+                "TailorResumeBuilderService.build",
+                "ai_path",
+                "H-AI",
+                Map.of("sourceTag", sourceTag, "parsedSectionCount", parsed.size()));
+            // #endregion
             return finalizeOutput(ai.get(), profile, job, userId, baseline, sourceTag + "_ai");
         }
 
-        return finalizeOutput(buildDeterministic(userId, profile, job, baseline, parsed), profile, job, userId, baseline, sourceTag);
+        List<CvMarkdownSections.Section> resolved = TailorResumeDeterministicSupport
+            .ensureTailorableSections(parsed, profile, baseline);
+        ObjectNode deterministic = buildDeterministic(userId, profile, job, baseline, resolved);
+        if (tailorResumeAi.isAvailable()) {
+            ArrayNode warnings = deterministic.has("warnings") && deterministic.get("warnings").isArray()
+                ? (ArrayNode) deterministic.get("warnings")
+                : mapper.createArrayNode();
+            warnings.add(
+                "AI tailoring did not pass quality checks — showing a keyword-assisted draft instead. "
+                    + "Try again; if this persists, check backend logs for quality_gate_rejected.");
+            deterministic.set("warnings", warnings);
+        }
+        // #region agent log
+        DebugSessionLog.write(
+            "TailorResumeBuilderService.build",
+            "deterministic_path",
+            "H-FALLBACK",
+            Map.of(
+                "sourceTag", sourceTag,
+                "parsedSectionCount", parsed.size(),
+                "resolvedSectionCount", resolved.size(),
+                "outputSectionCount", deterministic.path("sections").size(),
+                "aiAvailable", tailorResumeAi.isAvailable()));
+        // #endregion
+        return finalizeOutput(deterministic, profile, job, userId, baseline, sourceTag);
     }
 
     private ObjectNode buildDeterministic(
@@ -69,7 +101,7 @@ public class TailorResumeBuilderService {
         List<String> gaps = CvSkillCanonical.dedupeCanonical(
             skillExtraction.gapsInJob(skills, job.getDescription() != null ? job.getDescription() : jobHay));
 
-        String summary = buildThreeSentenceSummary(profile, job, matched);
+        String summary = TailorResumeDeterministicSupport.buildThreeSentenceSummary(profile, job, matched);
         ArrayNode sections = mapper.createArrayNode();
 
         for (CvMarkdownSections.Section sec : parsed) {
@@ -128,6 +160,7 @@ public class TailorResumeBuilderService {
             out.put("jobTitle", job.getTitle().trim());
         }
         out.put("baselineMarkdown", baseline);
+        repairThinOutputInPlace(out, profile, job, userId);
         repairExperienceSectionsInPlace(out, profile, job, userId);
         TailorResumeSectionSanitizer.sanitizeOutputInPlace(out);
         sectionsNode = out.path("sections");
@@ -140,6 +173,71 @@ public class TailorResumeBuilderService {
             user, profile, job, out.path("jobTitle").asText(""), summary, sectionsNode));
         out.put("resumeReady", true);
         return out;
+    }
+
+    /**
+     * Rebuilds summary + sections when output is legacy template or too thin to render a full CV.
+     *
+     * @return true when sections were rebuilt
+     */
+    public boolean repairThinOutputInPlace(
+            ObjectNode out,
+            UserProfile profile,
+            Job job,
+            UUID userId) {
+        if (out == null || !TailorResumeDeterministicSupport.needsSectionRepair(out)) {
+            return false;
+        }
+        String baseline = out.path("baselineMarkdown").asText("");
+        if (baseline.isBlank()) {
+            baseline = reconstructBaselineFromSections(out.path("sections"));
+        }
+        if (baseline.isBlank()) {
+            return false;
+        }
+        List<CvMarkdownSections.Section> resolved = TailorResumeDeterministicSupport
+            .ensureTailorableSections(CvMarkdownSections.parse(baseline), profile, baseline);
+        ObjectNode rebuilt = buildDeterministic(userId, profile, job, baseline, resolved);
+        out.put("summary", rebuilt.path("summary").asText(""));
+        out.set("sections", rebuilt.path("sections"));
+        if (out.path("keywordsAdded").isEmpty()) {
+            out.set("keywordsAdded", rebuilt.path("keywordsAdded"));
+        }
+        ArrayNode warnings = out.has("warnings") && out.get("warnings").isArray()
+            ? (ArrayNode) out.get("warnings")
+            : mapper.createArrayNode();
+        warnings.add("Rebuilt thin CV sections from your profile and baseline CV.");
+        out.set("warnings", warnings);
+        out.put("baselineMarkdown", baseline);
+        // #region agent log
+        DebugSessionLog.write(
+            "TailorResumeBuilderService.repairThinOutputInPlace",
+            "section_repair",
+            "H-REPAIR",
+            Map.of(
+                "resolvedSectionCount", resolved.size(),
+                "outputSectionCount", out.path("sections").size(),
+                "legacySummary", TailorResumeDeterministicSupport.isLegacyTemplateSummary(
+                    rebuilt.path("summary").asText(""))));
+        // #endregion
+        return true;
+    }
+
+    private static String reconstructBaselineFromSections(JsonNode sections) {
+        if (sections == null || !sections.isArray()) {
+            return "";
+        }
+        StringBuilder sb = new StringBuilder();
+        for (JsonNode row : sections) {
+            String original = row.path("original").asText("").trim();
+            if (!original.isBlank()) {
+                if (!sb.isEmpty()) {
+                    sb.append("\n\n");
+                }
+                sb.append(original);
+            }
+        }
+        return sb.toString().trim();
     }
 
     /**
@@ -232,6 +330,7 @@ public class TailorResumeBuilderService {
         ObjectNode copy = output.deepCopy();
         UUID userId = profile != null ? profile.getUserId() : (user != null ? user.getId() : null);
         User resolvedUser = user != null ? user : loadUser(userId);
+        repairThinOutputInPlace(copy, profile, job, userId);
         repairExperienceSectionsInPlace(copy, profile, job, userId);
         String baseline = copy.path("baselineMarkdown").asText("");
         JsonNode sections = TailorResumeSectionSanitizer.sanitize(copy.path("sections"), baseline);
@@ -409,20 +508,6 @@ public class TailorResumeBuilderService {
         return text + "\n\n(Role keywords to surface: " + String.join(", ", missing) + ")";
     }
 
-    private static String buildThreeSentenceSummary(UserProfile profile, Job job, List<String> matched) {
-        String role = job != null ? safe(job.getTitle()) : "this role";
-        String company = job != null ? safe(job.getCompany()) : "the employer";
-        String who = job != null && profile != null
-            ? ApplyAssistService.inferRoleLabel(job, profile)
-            : "Technology professional";
-        String skillsLine = matched.isEmpty()
-            ? "full-stack delivery and stakeholder collaboration"
-            : String.join(", ", matched.stream().limit(8).toList());
-        return who + " with hands-on experience across " + skillsLine + ". "
-            + "Targeting " + role + " at " + company + " where this stack is central to the posting. "
-            + "Ready to deliver measurable outcomes aligned to the team's priorities.";
-    }
-
     private static String rationaleFor(String sectionName, Job job, List<String> matched) {
         return "Tailored " + sectionName.toLowerCase(Locale.ROOT)
             + " for " + safe(job.getTitle()) + " at " + safe(job.getCompany())
@@ -448,4 +533,5 @@ public class TailorResumeBuilderService {
         if (s == null) return "";
         return s.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;");
     }
+
 }

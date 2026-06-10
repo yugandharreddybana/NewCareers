@@ -1,6 +1,5 @@
 package com.careerops.service;
 
-import com.careerops.config.SaasBillingProperties;
 import com.careerops.model.*;
 import com.careerops.repository.OrgMemberRepository;
 import com.careerops.repository.OrgRepository;
@@ -9,8 +8,6 @@ import com.careerops.repository.UserRepository;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
-import java.time.Instant;
-import java.time.temporal.ChronoUnit;
 import java.util.Comparator;
 import java.util.List;
 import java.util.UUID;
@@ -22,8 +19,7 @@ public class OrganizationSubscriptionResolver {
     private final OrgMemberRepository memberRepo;
     private final SubscriptionRepository subscriptionRepo;
     private final UserRepository userRepository;
-    private final TrialProvisioningService trialProvisioningService;
-    private final SaasBillingProperties saasBillingProperties;
+    private final OrgProvisioningService orgProvisioningService;
     private final OrganizationPlanSyncService organizationPlanSyncService;
 
     public OrganizationSubscriptionResolver(
@@ -31,15 +27,13 @@ public class OrganizationSubscriptionResolver {
             OrgMemberRepository memberRepo,
             SubscriptionRepository subscriptionRepo,
             UserRepository userRepository,
-            TrialProvisioningService trialProvisioningService,
-            SaasBillingProperties saasBillingProperties,
+            OrgProvisioningService orgProvisioningService,
             OrganizationPlanSyncService organizationPlanSyncService) {
         this.orgRepo = orgRepo;
         this.memberRepo = memberRepo;
         this.subscriptionRepo = subscriptionRepo;
         this.userRepository = userRepository;
-        this.trialProvisioningService = trialProvisioningService;
-        this.saasBillingProperties = saasBillingProperties;
+        this.orgProvisioningService = orgProvisioningService;
         this.organizationPlanSyncService = organizationPlanSyncService;
     }
 
@@ -51,23 +45,8 @@ public class OrganizationSubscriptionResolver {
         }
         final UUID orgId = resolvedOrgId;
         Subscription subscription = subscriptionRepo.findByOrganizationId(orgId)
-                .orElseGet(() -> trialProvisioningService.createTrialSubscription(orgId));
-        subscription = downgradeExpiredTrialIfNeeded(subscription);
+                .orElseGet(() -> orgProvisioningService.createFreeSubscription(orgId));
         return toContext(orgId, subscription);
-    }
-
-    private Subscription downgradeExpiredTrialIfNeeded(Subscription subscription) {
-        if (subscription.getStatus() == SubscriptionStatus.TRIALING
-                && subscription.getTrialEndsAt() != null
-                && subscription.getTrialEndsAt().isBefore(Instant.now())) {
-            subscription.setStatus(SubscriptionStatus.ACTIVE);
-            subscription.setPlan(SubscriptionPlan.FREE);
-            subscription.setTrialEndsAt(null);
-            Subscription saved = subscriptionRepo.save(subscription);
-            organizationPlanSyncService.syncFromSubscription(saved.getOrganizationId(), SubscriptionPlan.FREE);
-            return saved;
-        }
-        return subscription;
     }
 
     @Transactional
@@ -78,9 +57,11 @@ public class OrganizationSubscriptionResolver {
         Subscription subscription = new Subscription();
         subscription.setOrganizationId(orgId);
         subscription.setPlan(mapLegacyOrgPlan(legacyOrgPlan));
-        subscription.setStatus(SubscriptionStatus.TRIALING);
-        subscription.setTrialEndsAt(Instant.now().plus(saasBillingProperties.getTrialDays(), ChronoUnit.DAYS));
-        return subscriptionRepo.save(subscription);
+        subscription.setStatus(SubscriptionStatus.ACTIVE);
+        subscription.setTrialEndsAt(null);
+        Subscription saved = subscriptionRepo.save(subscription);
+        organizationPlanSyncService.syncFromSubscription(orgId, saved.getPlan());
+        return saved;
     }
 
     private UUID findPrimaryOrgId(UUID userId) {
@@ -111,7 +92,7 @@ public class OrganizationSubscriptionResolver {
     private UUID bootstrapPersonalOrg(UUID userId) {
         User user = userRepository.findById(userId)
                 .orElseThrow(() -> new IllegalStateException("User not found: " + userId));
-        return trialProvisioningService.provisionForNewUser(user).orgId();
+        return orgProvisioningService.provisionForNewUser(user).orgId();
     }
 
     static SubscriptionPlan mapLegacyOrgPlan(String legacyPlan) {

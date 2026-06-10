@@ -165,7 +165,7 @@ export default function Skills() {
                               <button
                                 onClick={() => handleRunSkill(job.userJobId, skill.id)}
                                 disabled={isRunning}
-                                className="flex-1 inline-flex items-center justify-center gap-1.5 px-3 py-2 text-xs font-bold uppercase tracking-wider text-white bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 transition rounded-xl"
+                                className="flex-1 inline-flex items-center justify-center gap-1.5 px-3 py-2 text-xs font-bold uppercase tracking-wider text-white bg-brand-500 hover:bg-brand-600 disabled:opacity-50 transition rounded-xl"
                               >
                                 {isRunning ? (
                                   <div className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin" />

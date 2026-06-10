@@ -11,6 +11,8 @@ import { authLimiter, loginLimiter, csrfGuard } from '../rateLimiter.js';
 import { authGuard } from '../authGuard.js';
 import { verifySessionToken } from '../jwtVerification.js';
 import { resolveClientIp } from '../trustedClientIp.js';
+import { buildRefreshForwardArgs, clientForwardHeaders } from './authProxyArgs.js';
+import { REMEMBER_FLAG_COOKIE, resolveRememberMe } from '../authRememberMe.js';
 
 const router = express.Router();
 
@@ -24,13 +26,9 @@ const cvUpload = multer({
   },
 });
 
-function clientForwardHeaders(req: express.Request): Record<string, string> {
-  const ua = req.headers['user-agent'];
-  return typeof ua === 'string' ? { 'user-agent': ua } : {};
-}
 const COOKIE = process.env.COOKIE_NAME || 'co_session';
 const REFRESH_COOKIE = 'co_refresh';
-const REMEMBER_FLAG = 'co_remember';
+const REMEMBER_FLAG = REMEMBER_FLAG_COOKIE;
 
 const ACCESS_COOKIE_MS = 15 * 60 * 1000;
 const REMEMBER_REFRESH_MS = 30 * 24 * 60 * 60 * 1000;
@@ -65,11 +63,6 @@ type LoginFlowPayload = AuthPayload & {
   challengeToken?: string;
 };
 
-function resolveRememberMe(req: express.Request, explicit?: boolean): boolean {
-  if (typeof explicit === 'boolean') return explicit;
-  return req.cookies?.[REMEMBER_FLAG] === '1';
-}
-
 function issueAuthCookies(
   res: express.Response,
   data: AuthPayload,
@@ -90,7 +83,18 @@ function issueAuthCookies(
   }
 }
 
+/** Login/signup responses — access token in HttpOnly cookie only (LSA-071). */
 function authJsonResponse(
+  res: express.Response,
+  data: AuthPayload,
+  rememberMe: boolean,
+) {
+  issueAuthCookies(res, data, rememberMe);
+  return res.json({ user: data.user });
+}
+
+/** Refresh — returns access token in JSON for in-memory Bearer use. */
+function refreshJsonResponse(
   res: express.Response,
   data: AuthPayload,
   rememberMe: boolean,
@@ -113,6 +117,11 @@ router.post('/signup-intent',
   body('email').isEmail().normalizeEmail(),
   body('password').isString().isLength({ min: 8, max: 128 }),
   body('consents').isObject(),
+  // validator.equals() only accepts strings; JSON booleans must use isBoolean + strict check
+  body('consents.termsAccepted').isBoolean().custom((v) => v === true),
+  body('consents.aiProcessingAccepted').isBoolean().custom((v) => v === true),
+  body('consents.marketingAccepted').optional().isBoolean(),
+  body('consents.analyticsAccepted').optional().isBoolean(),
   body('captchaToken').optional().isString(),
   body('name').optional().isString().isLength({ max: 100 }),
   checkValidation,
@@ -130,17 +139,25 @@ router.post('/signup-intent',
     } catch (e) { next(e); }
   });
 
-router.post('/signup',
+router.post(['/signup', '/register'],
   authLimiter, trimStrings,
   body('name').isString().isLength({ min: 1 }),
-  body('username').isString().isLength({ min: 3, max: 32 }),
+  body('username').isString().isLength({ min: 3, max: 30 }),
   body('email').isEmail().normalizeEmail(),
   body('password').optional().isString().isLength({ min: 8, max: 128 }),
+  body('consents').optional().isObject(),
+  body('consents.termsAccepted').optional().isBoolean(),
+  body('consents.aiProcessingAccepted').optional().isBoolean(),
+  body('consents.marketingAccepted').optional().isBoolean(),
+  body('consents.analyticsAccepted').optional().isBoolean(),
   body('signupIntentId').optional().isUUID(),
   body('emailVerificationId').optional().isUUID(),
+  body('captchaToken').optional().isString(),
+  body('rememberMe').optional().isBoolean(),
   checkValidation,
   async (req, res, next) => {
     try {
+      const rememberMe = Boolean(req.body.rememberMe);
       const r = await forward({
         method: 'POST',
         path: '/auth/register',
@@ -149,7 +166,7 @@ router.post('/signup',
         headers: clientForwardHeaders(req),
       });
       if (r.status >= 400) return res.status(r.status).json(r.data);
-      authJsonResponse(res, r.data as AuthPayload, false);
+      authJsonResponse(res, r.data as AuthPayload, rememberMe);
     } catch (e) { next(e); }
   });
 
@@ -221,7 +238,7 @@ router.get('/captcha/challenge',
 router.post('/login',
   loginLimiter, trimStrings,
   body('email').isEmail().normalizeEmail(),
-  body('password').isString().isLength({ min: 8 }),
+  body('password').isString().isLength({ min: 8, max: 128 }),
   body('captchaToken').optional().isString(),
   body('rememberMe').optional().isBoolean(),
   checkValidation,
@@ -238,6 +255,11 @@ router.post('/login',
       if (r.status >= 400) return res.status(r.status).json(r.data);
       const data = r.data as LoginFlowPayload;
       if (data.requiresTwoFactor) {
+        if (rememberMe) {
+          res.cookie(REMEMBER_FLAG, '1', rememberRefreshCookieOpts());
+        } else {
+          res.clearCookie(REMEMBER_FLAG, baseCookieOpts());
+        }
         return res.json({
           requiresTwoFactor: true,
           challengeToken: data.challengeToken,
@@ -251,10 +273,11 @@ router.post('/two-factor/verify',
   loginLimiter, trimStrings,
   body('challengeToken').isString().isLength({ min: 10 }),
   body('code').matches(/^\d{6}$/),
+  body('rememberMe').optional().isBoolean(),
   checkValidation,
   async (req, res, next) => {
     try {
-      const rememberMe = resolveRememberMe(req);
+      const rememberMe = resolveRememberMe(req.cookies, req.body.rememberMe);
       const r = await forward({
         method: 'POST',
         path: '/auth/two-factor/verify',
@@ -277,14 +300,10 @@ router.post('/refresh',
       if (!refreshToken || refreshToken.length < 10) {
         return res.status(401).json({ error: 'Refresh token required' });
       }
-      const rememberMe = resolveRememberMe(req);
-      const r = await forward({
-        method: 'POST',
-        path: '/auth/refresh',
-        data: { refreshToken },
-      });
+      const rememberMe = resolveRememberMe(req.cookies);
+      const r = await forward(buildRefreshForwardArgs(req, refreshToken));
       if (r.status >= 400) return res.status(r.status).json(r.data);
-      authJsonResponse(res, r.data as AuthPayload, rememberMe);
+      refreshJsonResponse(res, r.data as AuthPayload, rememberMe);
     } catch (e) { next(e); }
   });
 
@@ -438,21 +457,6 @@ router.post('/onboarding/verify-email',
     } catch (e) { next(e); }
   });
 
-router.get('/signup-intent/:id/exists',
-  authLimiter,
-  async (req, res, next) => {
-    try {
-      const r = await forward({
-        method: 'GET',
-        path: `/auth/signup-intent/${req.params.id}/exists`,
-        ip: resolveClientIp(req),
-        headers: clientForwardHeaders(req),
-      });
-      if (r.status >= 400) return res.status(r.status).json(r.data ?? {});
-      res.status(200).json(r.data ?? {});
-    } catch (e) { next(e); }
-  });
-
 router.post('/onboarding/parse-cv',
   authLimiter,
   cvUpload.single('file'),
@@ -476,10 +480,22 @@ router.post('/onboarding/parse-cv',
         data: fd,
         headers: fd.getHeaders(),
         ip: resolveClientIp(req),
+        timeoutMs: 180_000,
       });
-      if (r.status >= 400) return res.status(r.status).json(r.data ?? {});
+      if (r.status >= 400) {
+        const body = r.data as { error?: string; message?: string } | undefined;
+        return res.status(r.status).json({
+          error: body?.error ?? body?.message ?? 'Could not parse your CV. Please try again.',
+        });
+      }
       res.status(200).json(r.data ?? {});
-    } catch (e) { next(e); }
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : 'Could not parse your CV';
+      if (msg.includes('Only PDF or DOCX')) {
+        return res.status(400).json({ error: msg });
+      }
+      next(e);
+    }
   });
 
 router.post('/forgot-password',
@@ -506,7 +522,7 @@ router.post('/reset-password',
   authLimiter, trimStrings,
   body('email').isEmail().normalizeEmail(),
   body('otp').isString().matches(/^\d{8}$/),
-  body('newPassword').isString().isLength({ min: 8 }),
+  body('newPassword').isString().isLength({ min: 8, max: 128 }),
   checkValidation,
   async (req, res, next) => {
     try {

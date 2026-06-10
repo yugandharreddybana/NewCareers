@@ -62,6 +62,43 @@ class ProjectsSectionParserTest {
     }
 
     @Test
+    void parseEntries_pipeTitleWithGithubOnNextLine() {
+        var entries = ProjectsSectionParser.parseEntries("""
+            CareerOps Platform | Link
+            github.com/user/careerops
+            Built a job matching platform.
+            """);
+        assertThat(entries).hasSize(1);
+        assertThat(entries.get(0).title()).isEqualTo("CareerOps Platform");
+        assertThat(entries.get(0).url()).isEqualTo("https://github.com/user/careerops");
+        assertThat(entries.get(0).description()).containsIgnoringCase("job matching");
+        assertThat(entries.get(0).description()).doesNotContain("github.com");
+    }
+
+    @Test
+    void parseEntries_labeledGithubBullet() {
+        var entries = ProjectsSectionParser.parseEntries("""
+            AI Task Manager
+            GitHub: https://github.com/user/task-manager
+            Full-stack task management with AI.
+            """);
+        assertThat(entries).hasSize(1);
+        assertThat(entries.get(0).url()).isEqualTo("https://github.com/user/task-manager");
+        assertThat(entries.get(0).description()).doesNotContain("github.com");
+    }
+
+    @Test
+    void parseEntries_prefersRepoWhenMultipleLinks() {
+        var entries = ProjectsSectionParser.parseEntries("""
+            Portfolio Site
+            Live: https://portfolio.vercel.app
+            Repo: github.com/user/portfolio
+            """);
+        assertThat(entries).hasSize(1);
+        assertThat(entries.get(0).url()).isEqualTo("https://github.com/user/portfolio");
+    }
+
+    @Test
     void parseEntries_techLineThenPipeTitle() {
         var entries = ProjectsSectionParser.parseEntries("""
             React, Node.js, PostgreSQL

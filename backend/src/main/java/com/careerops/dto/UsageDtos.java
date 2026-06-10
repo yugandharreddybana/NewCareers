@@ -18,6 +18,17 @@ public final class UsageDtos {
             String resetDescription
     ) {}
 
+    public record PeriodQuota(
+            String key,
+            String label,
+            long used,
+            long limit,
+            long remaining,
+            String periodStart,
+            String resetsAt,
+            String resetDescription
+    ) {}
+
     public record RateLimitHint(
             String label,
             int requestsPerMinute,
@@ -27,8 +38,10 @@ public final class UsageDtos {
     public record UsageLimitsResponse(
             DailyQuota jobDelivery,
             DailyQuota aiTokens,
+            PeriodQuota skillRuns,
             RateLimitHint skillApi,
             RateLimitHint generalApi,
-            String timezoneId
+            String timezoneId,
+            String planName
     ) {}
 }

@@ -25,6 +25,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -52,7 +53,7 @@ class SignupIntentServiceTest {
         when(users.existsByEmail("signup@example.com")).thenReturn(false);
         when(encoder.encode("Secure1Pass")).thenReturn("bcrypt-hash");
         UUID id = UUID.randomUUID();
-        when(intents.save(any(SignupIntent.class))).thenAnswer(inv -> {
+        when(intents.saveAndFlush(any(SignupIntent.class))).thenAnswer(inv -> {
             SignupIntent intent = inv.getArgument(0);
             intent.setId(id);
             intent.setExpiresAt(Instant.now().plusSeconds(1800));
@@ -64,21 +65,21 @@ class SignupIntentServiceTest {
 
         assertThat(response.signupIntentId()).isEqualTo(id);
         ArgumentCaptor<SignupIntent> cap = ArgumentCaptor.forClass(SignupIntent.class);
-        verify(intents).save(cap.capture());
+        verify(intents).saveAndFlush(cap.capture());
         assertThat(cap.getValue().getPasswordHash()).isEqualTo("bcrypt-hash");
         assertThat(cap.getValue().getEmail()).isEqualTo("signup@example.com");
     }
 
     @Test
-    @DisplayName("exists returns opaque response for any id")
-    void existsOpaqueResponse() {
-        UUID id = UUID.randomUUID();
-        when(intents.findById(id)).thenReturn(Optional.empty());
+    @DisplayName("create returns decoy intent when email already registered")
+    void createDecoyForExistingEmail() {
+        when(users.existsByEmail("existing@example.com")).thenReturn(true);
 
-        var response = service.exists(id);
+        SignupIntentResponse response = service.create(new SignupIntentRequest(
+                "existing@example.com", "Secure1Pass", consents, "Ada", null));
 
-        assertThat(response.exists()).isTrue();
-        assertThat(response.active()).isTrue();
+        assertThat(response.signupIntentId()).isNotNull();
+        verify(intents, never()).saveAndFlush(any());
     }
 
     @Test
@@ -93,20 +94,10 @@ class SignupIntentServiceTest {
     }
 
     @Test
-    @DisplayName("consume rejects expired intent")
+    @DisplayName("consume rejects expired or already-used intent atomically")
     void consumeExpired() {
         UUID id = UUID.randomUUID();
-        SignupIntent intent = SignupIntent.builder()
-                .id(id)
-                .email("signup@example.com")
-                .passwordHash("hash")
-                .termsAccepted(true)
-                .aiProcessingAccepted(true)
-                .marketingAccepted(false)
-                .analyticsAccepted(false)
-                .expiresAt(Instant.now().minusSeconds(60))
-                .build();
-        when(intents.findByIdAndEmail(id, "signup@example.com")).thenReturn(Optional.of(intent));
+        when(intents.consumeIfActive(eq(id), eq("signup@example.com"), any(), any())).thenReturn(0);
 
         assertThatThrownBy(() -> service.consume(id, "signup@example.com"))
                 .isInstanceOf(ApiException.class)
@@ -114,7 +105,7 @@ class SignupIntentServiceTest {
     }
 
     @Test
-    @DisplayName("consume returns hash and marks intent used")
+    @DisplayName("consume returns hash after atomic consume")
     void consumeSuccess() {
         UUID id = UUID.randomUUID();
         SignupIntent intent = SignupIntent.builder()
@@ -126,13 +117,14 @@ class SignupIntentServiceTest {
                 .marketingAccepted(false)
                 .analyticsAccepted(false)
                 .expiresAt(Instant.now().plusSeconds(600))
+                .consumedAt(Instant.now())
                 .build();
+        when(intents.consumeIfActive(eq(id), eq("signup@example.com"), any(), any())).thenReturn(1);
         when(intents.findByIdAndEmail(id, "signup@example.com")).thenReturn(Optional.of(intent));
 
         SignupIntentService.ConsumedSignupIntent consumed = service.consume(id, "signup@example.com");
 
         assertThat(consumed.passwordHash()).isEqualTo("stored-hash");
-        verify(intents).save(intent);
-        assertThat(intent.getConsumedAt()).isNotNull();
+        verify(intents, never()).save(any());
     }
 }

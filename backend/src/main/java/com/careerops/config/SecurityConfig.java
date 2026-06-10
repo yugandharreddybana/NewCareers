@@ -60,6 +60,7 @@ public class SecurityConfig {
             .sessionManagement(s -> s.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
             .headers(h -> {
                 h.httpStrictTransportSecurity(s -> s
+                        .requestMatcher(org.springframework.security.web.util.matcher.AnyRequestMatcher.INSTANCE)
                         .maxAgeInSeconds(31536000)
                         .includeSubDomains(true));
                 h.contentTypeOptions(c -> {});

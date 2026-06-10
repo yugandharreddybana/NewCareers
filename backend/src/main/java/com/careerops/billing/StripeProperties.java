@@ -11,6 +11,8 @@ public class StripeProperties {
     private CheckoutUrls checkout = new CheckoutUrls();
     private String portalReturnUrl = "";
     private String frontendBaseUrl = "";
+    /** When true, mock checkout sessions auto-activate paid plans (local dev only). */
+    private boolean mockCheckoutAutoActivate = false;
 
     public String getSecretKey() {
         return secretKey;
@@ -58,6 +60,14 @@ public class StripeProperties {
 
     public void setFrontendBaseUrl(String frontendBaseUrl) {
         this.frontendBaseUrl = frontendBaseUrl;
+    }
+
+    public boolean isMockCheckoutAutoActivate() {
+        return mockCheckoutAutoActivate;
+    }
+
+    public void setMockCheckoutAutoActivate(boolean mockCheckoutAutoActivate) {
+        this.mockCheckoutAutoActivate = mockCheckoutAutoActivate;
     }
 
     public static class PriceIds {

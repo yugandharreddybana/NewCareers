@@ -41,7 +41,7 @@ public class UserPlanTierService {
     }
 
     /**
-     * Effective tier for quota enforcement — uses subscription resolver (incl. active trial → PRO).
+     * Effective tier for quota enforcement — uses subscription resolver effective plan.
      * Updates profile when it diverges from canonical subscription tier.
      */
     @Transactional

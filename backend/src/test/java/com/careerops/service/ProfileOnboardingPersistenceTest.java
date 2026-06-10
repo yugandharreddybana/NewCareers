@@ -9,6 +9,7 @@ import com.careerops.repository.UserCvRepository;
 import com.careerops.repository.UserJobRepository;
 import com.careerops.repository.UserProfileRepository;
 import com.careerops.repository.UserRepository;
+import com.careerops.security.AesFieldEncryptor;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -21,6 +22,7 @@ import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -34,6 +36,7 @@ class ProfileOnboardingPersistenceTest {
     @Mock AuditLogService audit;
     @Mock CvService cvService;
     @Mock CvSkillExtractionService skillExtraction;
+    @Mock AesFieldEncryptor fieldEncryptor;
 
     ProfileService profileService;
 
@@ -43,7 +46,9 @@ class ProfileOnboardingPersistenceTest {
 
     @BeforeEach
     void setUp() {
-        profileService = new ProfileService(profiles, cvs, userJobs, users, audit, cvService, skillExtraction);
+        profileService = new ProfileService(
+                profiles, cvs, userJobs, users, audit, cvService, skillExtraction, fieldEncryptor);
+        lenient().when(fieldEncryptor.decrypt(any(), any())).thenAnswer(inv -> inv.getArgument(0));
         when(skillExtraction.extractForUser(any(), any(), any())).thenReturn(List.of());
         profile = UserProfile.builder()
             .userId(userId)
@@ -51,10 +56,10 @@ class ProfileOnboardingPersistenceTest {
             .build();
         user = User.builder().id(userId).name("Old Name").email("a@b.com").username("ab").passwordHash("x").build();
         when(profiles.findByUserId(userId)).thenReturn(Optional.of(profile));
-        when(users.findById(userId)).thenReturn(Optional.of(user));
+        lenient().when(users.findById(userId)).thenReturn(Optional.of(user));
         when(cvs.findFirstByUserIdAndIsActiveTrueOrderByUploadedAtDesc(userId)).thenReturn(Optional.empty());
         when(profiles.save(any())).thenAnswer(inv -> inv.getArgument(0));
-        when(users.save(any())).thenAnswer(inv -> inv.getArgument(0));
+        lenient().when(users.save(any())).thenAnswer(inv -> inv.getArgument(0));
     }
 
     @Test
@@ -82,6 +87,7 @@ class ProfileOnboardingPersistenceTest {
             120_000,
             "EUR",
             new String[] { "Full-time" },
+            null,
             null,
             null,
             true,
@@ -126,5 +132,179 @@ class ProfileOnboardingPersistenceTest {
         assertThat(response.githubUrl()).isEqualTo("https://github.com/jane");
         assertThat(response.websiteUrl()).isEqualTo("https://jane.dev");
         verify(audit).log(userId, "ONBOARDING_COMPLETE", java.util.Map.of("targetRole", "Full Stack Developer"));
+    }
+
+    @Test
+    void upsert_persistsWorkTypesFromOnboardingPayload() {
+        var req = new ProfileRequest(
+            null,
+            new String[] { "Engineer" },
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            new String[] { "Full-time", "Contract" },
+            null,
+            null,
+            null,
+            true,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null
+        );
+
+        profileService.upsert(userId, req, null);
+
+        assertThat(profile.getWorkTypes()).containsExactly("Full-time", "Contract");
+        assertThat(profile.getSectors()).containsExactly("Full-time", "Contract");
+    }
+
+    @Test
+    void upsert_mirrorsSectorsToWorkTypes() {
+        var req = new ProfileRequest(
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            new String[] { "Part-time", "Contract" },
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null
+        );
+
+        profileService.upsert(userId, req, null);
+
+        assertThat(profile.getSectors()).containsExactly("Part-time", "Contract");
+        assertThat(profile.getWorkTypes()).containsExactly("Part-time", "Contract");
+    }
+
+    @Test
+    void upsert_withNameChange_persistsAfterGetStyleLoad() {
+        profile.setVersion(2L);
+        profile.setOnboarded(true);
+        profile.setLocation("Dublin");
+
+        when(profiles.findByUserId(userId)).thenReturn(Optional.of(profile));
+
+        var req = new ProfileRequest(
+            "Updated Name",
+            new String[] { "Engineer" },
+            null,
+            "Dublin, Ireland",
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null
+        );
+
+        profileService.get(userId);
+        var response = profileService.upsert(userId, req, 2L);
+
+        assertThat(user.getName()).isEqualTo("Updated Name");
+        assertThat(profile.getLocation()).isEqualTo("Dublin, Ireland");
+        assertThat(response.targetRoles()).containsExactly("Engineer");
+        verify(users).save(user);
+        verify(profiles).save(profile);
+    }
+
+    @Test
+    void upsert_withNullVersion_reloadsWritableProfileBeforeSave() {
+        UserProfile stale = UserProfile.builder()
+            .userId(userId)
+            .onboarded(true)
+            .location("Dublin")
+            .build();
+        UserProfile fresh = UserProfile.builder()
+            .userId(userId)
+            .onboarded(true)
+            .location("Dublin")
+            .version(1L)
+            .build();
+
+        when(profiles.findByUserId(userId))
+            .thenReturn(Optional.of(stale))
+            .thenReturn(Optional.of(fresh));
+
+        var req = new ProfileRequest(
+            null,
+            new String[] { "Engineer" },
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null
+        );
+
+        profileService.upsert(userId, req, null);
+
+        assertThat(fresh.getTargetRoles()).containsExactly("Engineer");
+        verify(profiles).save(fresh);
     }
 }

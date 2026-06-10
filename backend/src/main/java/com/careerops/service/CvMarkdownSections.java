@@ -28,7 +28,7 @@ public final class CvMarkdownSections {
         Map.entry("profile", "Professional summary"),
         Map.entry("experience", "Professional experience"),
         Map.entry("professional experience", "Professional experience"),
-        // Map.entry("work experience", "Professional experience"),
+        Map.entry("work experience", "Professional experience"),
         Map.entry("employment", "Professional experience"),
         Map.entry("education", "Education"),
         Map.entry("qualifications", "Education"),
@@ -77,17 +77,21 @@ public final class CvMarkdownSections {
     }
 
     private static List<int[]> collectHeadingSpans(String text) {
+        List<int[]> knownSpans = new ArrayList<>();
+        Matcher known = KNOWN_SECTION_HEADING.matcher(text);
+        while (known.find()) {
+            knownSpans.add(new int[] { known.start(), known.end() });
+        }
+        // Prefer ALL-CAPS CV section titles — generic "Key Achievements:" lines must not
+        // shadow PROFESSIONAL EXPERIENCE / EDUCATION / PROJECTS detection.
+        if (!knownSpans.isEmpty()) {
+            return knownSpans;
+        }
+
         List<int[]> spans = new ArrayList<>();
         Matcher m = HEADING.matcher(text);
         while (m.find()) {
             spans.add(new int[] { m.start(), m.end() });
-        }
-        if (!spans.isEmpty()) {
-            return spans;
-        }
-        Matcher known = KNOWN_SECTION_HEADING.matcher(text);
-        while (known.find()) {
-            spans.add(new int[] { known.start(), known.end() });
         }
         return spans;
     }
@@ -114,5 +118,14 @@ public final class CvMarkdownSections {
         String t = raw.replaceAll("^#+\\s*", "").replace(":", "").trim();
         String key = t.toLowerCase(Locale.ROOT);
         return NORMALIZE.getOrDefault(key, t);
+    }
+
+    /** Stable key for matching AI section names to parsed CV sections (e.g. "Experience" → "professional experience"). */
+    public static String sectionMatchKey(String rawName) {
+        if (rawName == null || rawName.isBlank()) {
+            return "";
+        }
+        String display = normalizeTitle(rawName.trim());
+        return display.toLowerCase(Locale.ROOT);
     }
 }

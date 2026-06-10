@@ -15,7 +15,7 @@ class StripeMockGatewayTest {
 
     @BeforeEach
     void setUp() {
-        gateway = new StripeMockGateway();
+        gateway = new StripeMockGateway(new StripeProperties());
     }
 
     @Test

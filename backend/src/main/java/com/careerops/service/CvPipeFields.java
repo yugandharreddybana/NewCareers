@@ -12,7 +12,8 @@ final class CvPipeFields {
     private static final Pattern PIPE_SPLIT = Pattern.compile("\\s*\\|\\s*");
 
     private static final Pattern URL_PATTERN = Pattern.compile(
-        "(?i)(https?://\\S+|(?:www\\.)?github\\.com/\\S+)"
+        "(?i)(https?://[^\\s<>\"']+|(?:www\\.)?github\\.com/[\\w.\\-/%]+|"
+            + "(?:www\\.)?gitlab\\.com/[\\w.\\-/%]+|(?:www\\.)?bitbucket\\.org/[\\w.\\-/%]+)"
     );
 
     private static final Pattern DEGREE_HINT = Pattern.compile(
@@ -82,7 +83,7 @@ final class CvPipeFields {
         if (URL_PATTERN.matcher(right).find()) {
             Matcher urlMatcher = URL_PATTERN.matcher(right);
             urlMatcher.find();
-            return new ProjectPipeParts(left, normalizeUrl(urlMatcher.group(1)), "");
+            return new ProjectPipeParts(left, ProjectLinkExtractor.normalizeUrl(urlMatcher.group(1)), "");
         }
         if (isLinkPlaceholder(right)) {
             return new ProjectPipeParts(left, "", "");
@@ -158,17 +159,4 @@ final class CvPipeFields {
         return lower.equals("link") || lower.equals("demo") || lower.equals("url") || lower.equals("live");
     }
 
-    private static String normalizeUrl(String raw) {
-        if (raw == null || raw.isBlank()) {
-            return "";
-        }
-        String t = raw.strip();
-        if (t.startsWith("http://") || t.startsWith("https://")) {
-            return t;
-        }
-        if (t.startsWith("www.")) {
-            return "https://" + t;
-        }
-        return "https://" + t;
-    }
 }

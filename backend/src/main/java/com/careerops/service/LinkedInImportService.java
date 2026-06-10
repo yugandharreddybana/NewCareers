@@ -49,7 +49,7 @@ public class LinkedInImportService {
     // ── Public API ───────────────────────────────────────────────────────
 
     @Transactional(timeout = 10)
-    @CacheEvict(value = "user-profile", key = "#userId")
+    @CacheEvict(value = "user-profile", key = "#userId", beforeInvocation = true)
     public ImportSummary importZip(UUID userId, MultipartFile file) throws IOException {
         if (file == null || file.isEmpty())
             throw new ApiException(HttpStatus.BAD_REQUEST, "ZIP file is empty");

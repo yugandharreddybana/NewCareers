@@ -12,6 +12,18 @@ import {
 
 const GUEST_AUTH_PATHS = ['/login', '/signup', '/register', '/forgot-password'] as const;
 
+test.describe('Route guards — public landing', () => {
+  test.beforeEach(async ({ page }) => {
+    await clearAuthState(page);
+  });
+
+  test('unauthenticated user can access / without session_expired redirect', async ({ page }) => {
+    await page.goto('/');
+    await expect(page).toHaveURL(/\/$/);
+    await expect(page).not.toHaveURL(/session_expired/);
+  });
+});
+
 test.describe('Route guards — guest', () => {
   test.beforeEach(async ({ page }) => {
     await clearAuthState(page);
@@ -39,24 +51,28 @@ test.describe('Route guards — protected routes', () => {
     await clearAuthState(page);
   });
 
-  test('unauthenticated /dashboard redirects to /login', async ({ page }) => {
+  test('unauthenticated /dashboard redirects to plain /login', async ({ page }) => {
     await page.goto('/dashboard');
-    await expect(page).toHaveURL(/\/login/, { timeout: 10_000 });
+    await expect(page).toHaveURL(/\/login$/, { timeout: 10_000 });
+    await expect(page.getByText(/your session expired/i)).toHaveCount(0);
   });
 
-  test('unauthenticated /kanban redirects to /login', async ({ page }) => {
+  test('unauthenticated /kanban redirects to plain /login', async ({ page }) => {
     await page.goto('/kanban');
-    await expect(page).toHaveURL(/\/login/, { timeout: 10_000 });
+    await expect(page).toHaveURL(/\/login$/, { timeout: 10_000 });
+    await expect(page.getByText(/your session expired/i)).toHaveCount(0);
   });
 
-  test('unauthenticated /account redirects to /login', async ({ page }) => {
+  test('unauthenticated /account redirects to plain /login', async ({ page }) => {
     await page.goto('/account');
-    await expect(page).toHaveURL(/\/login/, { timeout: 10_000 });
+    await expect(page).toHaveURL(/\/login$/, { timeout: 10_000 });
+    await expect(page.getByText(/your session expired/i)).toHaveCount(0);
   });
 
-  test('unauthenticated /account/profile redirects to /login', async ({ page }) => {
+  test('unauthenticated /account/profile redirects to plain /login', async ({ page }) => {
     await page.goto('/account/profile');
-    await expect(page).toHaveURL(/\/login/, { timeout: 10_000 });
+    await expect(page).toHaveURL(/\/login$/, { timeout: 10_000 });
+    await expect(page.getByText(/your session expired/i)).toHaveCount(0);
   });
 });
 

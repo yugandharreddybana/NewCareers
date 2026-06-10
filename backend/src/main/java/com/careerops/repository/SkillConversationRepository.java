@@ -7,8 +7,6 @@ import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 import org.springframework.stereotype.Repository;
 import org.springframework.transaction.annotation.Transactional;
-import org.springframework.data.jpa.repository.Lock;
-import jakarta.persistence.LockModeType;
 
 import java.time.Instant;
 import java.util.List;
@@ -26,8 +24,11 @@ public interface SkillConversationRepository extends JpaRepository<SkillConversa
     /**
      * Pessimistic lock for race condition protection (3.059).
      */
-    @Lock(LockModeType.PESSIMISTIC_WRITE)
-    @Query("SELECT sc FROM SkillConversation sc WHERE sc.id = :id AND sc.userId = :userId")
+    @Query(value = """
+            SELECT * FROM careerops.skill_conversations
+            WHERE id = :id AND user_id = :userId
+            FOR UPDATE
+            """, nativeQuery = true)
     Optional<SkillConversation> findByIdAndUserIdForUpdate(@Param("id") UUID id, @Param("userId") UUID userId);
 
     /**

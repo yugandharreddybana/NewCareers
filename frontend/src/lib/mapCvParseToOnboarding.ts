@@ -1,5 +1,6 @@
 import type { OnboardingCvParseResponse } from '@/services/api';
 import { parseDegree, stripFieldFromDegreeTitle, type DegreeLevel } from '@/lib/degreeNormalization';
+import { normalizeProjectUrl, promoteProjectLink } from '@/lib/extractProjectLink';
 
 export type MappedWorkEntry = {
   jobTitle: string;
@@ -16,6 +17,8 @@ export type MappedEducationEntry = {
   degreeLevel: DegreeLevel | '';
   degreeTitle: string;
   fieldOfStudy: string;
+  startYear: string;
+  endYear: string;
   graduationYear: string;
   location: string;
 };
@@ -46,6 +49,8 @@ function emptyEducation(): MappedEducationEntry {
     degreeLevel: '',
     degreeTitle: '',
     fieldOfStudy: '',
+    startYear: '',
+    endYear: '',
     graduationYear: '',
     location: '',
   };
@@ -71,6 +76,8 @@ function hasEducationContent(e: MappedEducationEntry): boolean {
     || e.degreeTitle.trim()
     || e.degreeLevel
     || e.fieldOfStudy.trim()
+    || e.startYear.trim()
+    || e.endYear.trim()
     || e.graduationYear.trim()
     || e.location.trim(),
   );
@@ -146,7 +153,17 @@ function salvageProjectFields(
     }
   }
 
-  return { projectName, projectLink, projectDetails };
+  const promoted = promoteProjectLink({
+    projectName,
+    projectLink,
+    projectDetails,
+  });
+
+  return {
+    projectName,
+    projectLink: promoted.projectLink,
+    projectDetails: promoted.projectDetails,
+  };
 }
 
 /**
@@ -184,12 +201,15 @@ export function mapCvParseToOnboarding(response: OnboardingCvParseResponse): {
       const degreeTitle = field
         ? stripFieldFromDegreeTitle(parsed.title, field)
         : parsed.title;
+      const endYear = (e.endYear?.trim() || e.graduationYear?.trim()) ?? '';
       return {
         schoolName: e.schoolName?.trim() ?? '',
         degreeLevel: parsed.level,
         degreeTitle,
         fieldOfStudy: field,
-        graduationYear: e.graduationYear?.trim() ?? '',
+        startYear: e.startYear?.trim() ?? '',
+        endYear,
+        graduationYear: endYear,
         location: e.location?.trim() ?? '',
       };
     })
@@ -199,7 +219,7 @@ export function mapCvParseToOnboarding(response: OnboardingCvParseResponse): {
     .map(p => {
       const salvaged = salvageProjectFields(
         p.title?.trim() ?? '',
-        p.url?.trim() ?? '',
+        normalizeProjectUrl(p.url?.trim() ?? ''),
         p.description?.trim() ?? '',
       );
       return {

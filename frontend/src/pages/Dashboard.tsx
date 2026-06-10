@@ -1,13 +1,11 @@
 import { useMemo } from 'react';
 import { useSearchParams } from 'react-router-dom';
-import { useQuery } from '@tanstack/react-query';
 import {
   CareersHomeDashboard,
   readWelcomePendingFlag,
 } from '@/components/dashboard/CareersHomeDashboard';
 import { DomainPermitWidget } from '@/components/analytics/DomainPermitWidget';
-import { profileApi } from '@/services/api';
-import { queryKeys } from '@/lib/queryKeys';
+import { useProfileQuery } from '@/hooks/queries';
 import { resolveProfileDomainKey } from '@/utils/domainResolver';
 
 /**
@@ -22,10 +20,7 @@ export default function Dashboard() {
     return readWelcomePendingFlag();
   }, [searchParams]);
 
-  const { data: profile } = useQuery({
-    queryKey: queryKeys.profile.current(),
-    queryFn: () => profileApi.get(),
-  });
+  const { data: profile } = useProfileQuery();
 
   const domainKey = resolveProfileDomainKey(profile);
 
@@ -41,5 +36,11 @@ export default function Dashboard() {
     </section>
   );
 
-  return <CareersHomeDashboard celebrate={celebrate} beforeFastTrack={permitSection} />;
+  return (
+    <CareersHomeDashboard
+      celebrate={celebrate}
+      beforeFastTrack={permitSection}
+      profile={profile ?? null}
+    />
+  );
 }

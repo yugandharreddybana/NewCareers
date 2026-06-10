@@ -35,13 +35,15 @@ const toAppNotification = (notification: NotificationDto): AppNotification => ({
 });
 
 export const notificationsApi = {
+  getUnreadCount: async (): Promise<number> => {
+    const res = await api.get<{ unread: number }>('/notifications/unread-count');
+    return res.data.unread;
+  },
+
   getNotifications: async (page = 0, size = 20): Promise<NotificationsResponse> => {
-    const [pageResponse, unreadResponse] = await Promise.all([
-      api.get<NotificationPageDto>('/notifications', {
-        params: { page, size },
-      }),
-      api.get<{ unread: number }>('/notifications/unread-count'),
-    ]);
+    const pageResponse = await api.get<NotificationPageDto>('/notifications', {
+      params: { page, size },
+    });
 
     return {
       items: pageResponse.data.content.map(toAppNotification),
@@ -49,7 +51,7 @@ export const notificationsApi = {
       page: pageResponse.data.number,
       size: pageResponse.data.size,
       totalPages: pageResponse.data.totalPages,
-      unreadCount: unreadResponse.data.unread,
+      unreadCount: pageResponse.data.content.filter(n => !n.read).length,
     };
   },
 

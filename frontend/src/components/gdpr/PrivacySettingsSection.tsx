@@ -7,7 +7,7 @@ import { legalPaths } from '@/lib/brand';
 import { writeAnalyticsConsent } from '@/lib/cookieConsent';
 import { GoogleSignInButton } from '@/components/auth/GoogleSignInButton';
 import { GOOGLE_AUTH_ENABLED } from '@/lib/env';
-import { useAuth } from '@/context/AuthContext';
+import { useAuth } from '@/context/authCtx';
 
 export function PrivacySettingsSection() {
   const { user, signOut } = useAuth();

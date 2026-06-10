@@ -44,6 +44,7 @@ public class UserAnonymizationService {
     private final OrgMemberRepository orgMembers;
     private final SubscriptionRepository subscriptions;
     private final BillingStripeSyncService billingStripeSync;
+    private final OrganizationPlanSyncService organizationPlanSyncService;
 
     public UserAnonymizationService(
             UserRepository users,
@@ -59,7 +60,8 @@ public class UserAnonymizationService {
             SkillConversationRepository skillConversations,
             OrgMemberRepository orgMembers,
             SubscriptionRepository subscriptions,
-            BillingStripeSyncService billingStripeSync) {
+            BillingStripeSyncService billingStripeSync,
+            OrganizationPlanSyncService organizationPlanSyncService) {
         this.users = users;
         this.profiles = profiles;
         this.authService = authService;
@@ -74,6 +76,7 @@ public class UserAnonymizationService {
         this.orgMembers = orgMembers;
         this.subscriptions = subscriptions;
         this.billingStripeSync = billingStripeSync;
+        this.organizationPlanSyncService = organizationPlanSyncService;
     }
 
     @Transactional(timeout = 30)
@@ -139,7 +142,9 @@ public class UserAnonymizationService {
         subscription.setStatus(SubscriptionStatus.CANCELLED);
         subscription.setCurrentPeriodEnd(null);
         subscription.setTrialEndsAt(null);
+        subscription.setCancelAtPeriodEnd(false);
         subscriptions.save(subscription);
+        organizationPlanSyncService.syncFromSubscription(subscription.getOrganizationId(), SubscriptionPlan.FREE);
     }
 
     private void scrubProfile(UUID userId) {

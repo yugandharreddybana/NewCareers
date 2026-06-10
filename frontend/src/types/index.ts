@@ -109,6 +109,8 @@ export interface Profile {
     degreeLevel?: string;
     degreeTitle?: string;
     fieldOfStudy?: string;
+    startYear?: string;
+    endYear?: string;
     graduationYear?: string;
     location?: string;
   }>;
@@ -197,6 +199,17 @@ export interface DailyQuota {
   resetDescription: string;
 }
 
+export interface PeriodQuota {
+  key: string;
+  label: string;
+  used: number;
+  limit: number;
+  remaining: number;
+  periodStart: string;
+  resetsAt: string;
+  resetDescription: string;
+}
+
 export interface RateLimitHint {
   label: string;
   requestsPerMinute: number;
@@ -206,9 +219,11 @@ export interface RateLimitHint {
 export interface UsageLimits {
   jobDelivery: DailyQuota;
   aiTokens: DailyQuota;
+  skillRuns: PeriodQuota;
   skillApi: RateLimitHint;
   generalApi: RateLimitHint;
   timezoneId: string;
+  planName: string;
 }
 
 export interface Stats {

@@ -3,7 +3,6 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import toast from 'react-hot-toast';
 import {
   Activity,
-  BarChart3,
   Building2,
   DollarSign,
   Flag,
@@ -13,7 +12,7 @@ import {
 } from 'lucide-react';
 import { PageMeta } from '@/components/PageMeta';
 import { PageLoader } from '@/components/LoadingSpinner';
-import { useAuth } from '@/context/AuthContext';
+import { useAuth } from '@/context/authCtx';
 import {
   saasAdminApi,
   type FeatureFlagRow,
@@ -24,7 +23,7 @@ import {
 const STALE_MS = 30_000;
 
 const PLAN_OPTIONS: SubscriptionPlanCode[] = ['FREE', 'PRO', 'ENTERPRISE'];
-const STATUS_OPTIONS: SubscriptionStatusCode[] = ['ACTIVE', 'TRIALING', 'PAST_DUE', 'CANCELLED'];
+const STATUS_OPTIONS: SubscriptionStatusCode[] = ['ACTIVE', 'PAST_DUE', 'CANCELLED'];
 
 function MetricCard({
   label,
@@ -190,18 +189,13 @@ export default function SaasDashboard() {
             label="Active Subscriptions"
             value={metrics ? metrics.activeSubscriptions.toLocaleString() : '—'}
             icon={<Building2 size={18} />}
-            sub="ACTIVE + TRIALING"
+            sub="ACTIVE subscriptions"
           />
           <MetricCard
             label="Churn"
             value={metrics ? `${metrics.churnRatePercent.toFixed(1)}%` : '—'}
             icon={<TrendingDown size={18} />}
             sub="30-day window"
-          />
-          <MetricCard
-            label="Trial Conversions"
-            value={metrics ? `${metrics.trialConversionRatePercent.toFixed(1)}%` : '—'}
-            icon={<BarChart3 size={18} />}
           />
         </section>
 
@@ -258,7 +252,6 @@ export default function SaasDashboard() {
                   <th className="px-5 py-3">Organization</th>
                   <th className="px-5 py-3">Plan</th>
                   <th className="px-5 py-3">Status</th>
-                  <th className="px-5 py-3">Trial ends</th>
                   <th className="px-5 py-3">Actions</th>
                 </tr>
               </thead>
@@ -271,9 +264,6 @@ export default function SaasDashboard() {
                       <span className="px-2 py-0.5 rounded-full text-xs bg-gray-100 text-gray-700">
                         {row.status}
                       </span>
-                    </td>
-                    <td className="px-5 py-3 text-gray-500">
-                      {row.trialEndsAt ? new Date(row.trialEndsAt).toLocaleDateString() : '—'}
                     </td>
                     <td className="px-5 py-3">
                       <button
@@ -434,7 +424,7 @@ export default function SaasDashboard() {
               <button
                 type="button"
                 disabled={overrideMutation.isPending}
-                className="px-4 py-2 text-sm bg-indigo-600 text-white rounded-lg disabled:opacity-50"
+                className="px-4 py-2 text-sm bg-brand-500 text-white rounded-lg disabled:opacity-50"
                 onClick={() => overrideMutation.mutate({ orgId: overrideOrgId, plan: overridePlan })}
               >
                 {overrideMutation.isPending ? 'Saving…' : 'Save'}

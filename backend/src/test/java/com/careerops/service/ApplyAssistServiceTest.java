@@ -22,6 +22,18 @@ class ApplyAssistServiceTest {
     }
 
     @Test
+    void inferRoleLabel_prefersFullStackWhenTitleIncludesReactAndFullStack() {
+        Job job = Job.builder()
+            .title("Full Stack Developer (Python / React)")
+            .company("RECRUITERS")
+            .description("Python, React, PostgreSQL")
+            .build();
+        UserProfile profile = new UserProfile();
+
+        assertThat(ApplyAssistService.inferRoleLabel(job, profile)).isEqualTo("Full-stack engineer");
+    }
+
+    @Test
     void inferRoleLabel_usesTargetRoleWhenAligned() {
         Job job = Job.builder()
             .title("Senior React Developer")

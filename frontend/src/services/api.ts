@@ -25,7 +25,8 @@
  */
 import axios, { AxiosError, AxiosRequestConfig, InternalAxiosRequestConfig } from 'axios';
 import toast from 'react-hot-toast';
-import { redirectOnSessionExpired } from '@/lib/onboardingSession';
+import { redirectOnSessionExpired, markSessionExpired } from '@/lib/onboardingSession';
+import { isPublicFrontendPath } from '@/lib/publicRoutes';
 import { tokenStore } from '@/lib/tokenStore';
 import { reportError } from '@/lib/telemetry';
 import { API_V1_URL, DEV_BYPASS } from '@/lib/env';
@@ -96,6 +97,8 @@ export interface OnboardingCvParseResponse {
     schoolName: string;
     degree: string;
     fieldOfStudy: string;
+    startYear?: string;
+    endYear?: string;
     graduationYear: string;
     location?: string;
   }>;
@@ -112,6 +115,10 @@ export interface OnboardingCvParseResponse {
   linkedInUrl?: string | null;
   githubUrl?: string | null;
   websiteUrl?: string | null;
+  extractedTechStack?: string[];
+  extractedTargetRoles?: string[];
+  parseSource?: 'ai' | 'regex';
+  parseWarnings?: string[];
 }
 export interface WordCaptchaChallenge {
   challengeId: string;
@@ -227,27 +234,15 @@ let refreshPromise: Promise<string> | null = null;
 // Pass 6 #6.025 — replace the `_retry` flag-on-config with a WeakSet so each
 // request is only ever retried once even when React Query retries it.
 const retriedConfigs = new WeakSet<AxiosRequestConfig>();
+const retried429Configs = new WeakSet<AxiosRequestConfig>();
+
+const sleep = (ms: number) => new Promise<void>(resolve => { setTimeout(resolve, ms); });
 
 function emit(eventName: string, detail?: unknown): void {
   if (typeof window === 'undefined') return;
   try { window.dispatchEvent(new CustomEvent(eventName, { detail })); }
   catch { /* CustomEvent unavailable in some test envs */ }
 }
-
-const PUBLIC_PATHS_FRONTEND = new Set([
-  '/',
-  '/login',
-  '/signup',
-  '/register',
-  '/forgot-password',
-  '/reset-password',
-  '/get-started',
-  '/onboarding',
-  '/privacy',
-  '/terms',
-  '/help',
-  '/accessibility',
-]);
 
 /** Pre-auth API routes — must not attach Bearer tokens or trigger silent refresh on 401. */
 export const PUBLIC_AUTH_API_PATHS = new Set([
@@ -256,6 +251,8 @@ export const PUBLIC_AUTH_API_PATHS = new Set([
   '/auth/signup-intent',
   '/auth/login',
   '/auth/google',
+  '/auth/two-factor/verify',
+  '/auth/google/link/confirm',
   '/auth/refresh',
   '/auth/logout',
   '/auth/captcha/challenge',
@@ -284,9 +281,6 @@ export function isPublicAuthApiPath(url: string | undefined): boolean {
     : url.startsWith('/api/')
       ? url.replace(/^\/api\//, '/')
       : url;
-  if (normalized.startsWith('/auth/signup-intent/') && normalized.endsWith('/exists')) {
-    return true;
-  }
   return PUBLIC_AUTH_API_PATHS.has(normalized);
 }
 
@@ -299,7 +293,13 @@ export function shouldSkipInitialSessionProbe(): boolean {
   if (hasValidAccess) return false;
 
   const path = window.location.pathname;
+
   if (PRE_AUTH_PAGES.has(path)) {
+    return !tokenStore.hasRefreshOrCookie();
+  }
+
+  // Public landing/marketing/legal pages: skip probe only when there is no session hint.
+  if (isPublicFrontendPath(path)) {
     return !tokenStore.hasRefreshOrCookie();
   }
 
@@ -313,7 +313,7 @@ export function shouldSkipInitialSessionProbe(): boolean {
 /** Pure helper for redirect gating (deferred signup on /onboarding has no session). */
 export function shouldRedirectOnAuthFailure(pathname: string, hasSession: boolean): boolean {
   if (pathname === '/onboarding' && !hasSession) return false;
-  if (PUBLIC_PATHS_FRONTEND.has(pathname)) return false;
+  if (isPublicFrontendPath(pathname)) return false;
   return true;
 }
 
@@ -354,6 +354,19 @@ function applyAuthResponse(data: AuthResponse): void {
   }
 }
 
+/** After cookie-only auth responses, bootstrap in-memory access via /auth/refresh. */
+async function completeAuthResponse(data: AuthResponse): Promise<AuthResponse> {
+  if (data.token) {
+    applyAuthResponse(data);
+    return data;
+  }
+  tokenStore.setRefreshViaCookie(true);
+  const refreshed = await postAuthRefresh({});
+  applyAuthResponse(refreshed);
+  if (refreshed.token) emit(AUTH_REFRESHED_EVENT);
+  return { ...data, token: refreshed.token };
+}
+
 async function postAuthRefresh(body: Record<string, unknown>): Promise<AuthResponse> {
   const csrf = getCsrfToken();
   const resp = await axios.post(`${API_V1_URL}/auth/refresh`, body, {
@@ -388,6 +401,7 @@ function getRefreshedAccessToken(): Promise<string> {
     refreshPromise = refreshAccessToken()
       .catch(err => {
         tokenStore.clear();
+        markSessionExpired();
         emit(AUTH_LOGGED_OUT_EVENT);
         redirectOnAuthFailure();
         throw err;
@@ -438,17 +452,32 @@ api.interceptors.response.use(
       originalRequest.url !== '/auth/login' &&
       !isPublicAuthApiPath(originalRequest.url);
 
-    // 429 → user-facing toast
-    if (err.response?.status === 429) {
+    // 429 → one automatic retry for idempotent GETs, then toast
+    if (err.response?.status === 429 && originalRequest) {
+      const retryHeader = err.response?.headers?.['retry-after'];
+      const retryAfterSeconds = typeof retryHeader === 'string'
+        ? Number.parseInt(retryHeader, 10)
+        : 1;
+      const isIdempotentGet =
+        (originalRequest.method ?? 'get').toLowerCase() === 'get'
+        && !retried429Configs.has(originalRequest);
+
+      if (isIdempotentGet) {
+        retried429Configs.add(originalRequest);
+        endApiLoading(originalRequest);
+        const waitMs = Math.min(
+          Math.max((Number.isFinite(retryAfterSeconds) ? retryAfterSeconds : 1), 1) * 1000,
+          5_000,
+        );
+        await sleep(waitMs);
+        return api(originalRequest);
+      }
+
       endApiLoading(originalRequest);
       const msg =
         err.response?.data?.error ||
         err.response?.data?.message ||
         'Too many requests — please slow down.';
-      const retryHeader = err.response?.headers?.['retry-after'];
-      const retryAfterSeconds = typeof retryHeader === 'string'
-        ? Number.parseInt(retryHeader, 10)
-        : undefined;
       const enriched429 = err as AxiosError & {
         normalizedMessage: string;
         status?: number;
@@ -459,7 +488,7 @@ api.interceptors.response.use(
       if (retryAfterSeconds !== undefined && Number.isFinite(retryAfterSeconds) && retryAfterSeconds > 0) {
         enriched429.retryAfterSeconds = retryAfterSeconds;
       }
-      if (!originalRequest?.skipGlobalLoader) {
+      if (!originalRequest.skipGlobalLoader) {
         toast.error(msg, { id: 'rate-limit', duration: 4000 });
       }
       return Promise.reject(enriched429);
@@ -483,6 +512,17 @@ api.interceptors.response.use(
     }
 
   if (isRefreshableRequest) {
+      const errMsg =
+        err.response?.data?.error ||
+        err.response?.data?.message ||
+        '';
+      const isHmacSignatureFailure = /invalid or expired signature/i.test(errMsg);
+      if (isHmacSignatureFailure) {
+        endApiLoading(originalRequest);
+        const enriched = err as AxiosError & { normalizedMessage: string };
+        enriched.normalizedMessage = errMsg || 'Request unauthorized';
+        return Promise.reject(enriched);
+      }
       retriedConfigs.add(originalRequest);
       // Release the original request's loader before retry — otherwise the retry
       // opens a second track and the first id never clears (infinite overlay).
@@ -499,6 +539,25 @@ api.interceptors.response.use(
         return api(originalRequest);
       } catch (refreshError) {
         return Promise.reject(refreshError);
+      }
+    }
+
+    // 401 after refresh retry (or non-refreshable auth failure) — force re-login
+    if (
+      err.response?.status === 401
+      && originalRequest
+      && !isPublicAuthApiPath(originalRequest.url)
+    ) {
+      const errMsg =
+        err.response?.data?.error ||
+        err.response?.data?.message ||
+        '';
+      const isHmacSignatureFailure = /invalid or expired signature/i.test(errMsg);
+      if (!isHmacSignatureFailure && retriedConfigs.has(originalRequest)) {
+        tokenStore.clear();
+        markSessionExpired();
+        emit(AUTH_LOGGED_OUT_EVENT);
+        redirectOnAuthFailure();
       }
     }
 
@@ -539,8 +598,7 @@ export const authApi = {
 
   signup: async (b: SignupBody): Promise<AuthResponse> => {
     const r = await api.post<AuthResponse>('/auth/register', b);
-    applyAuthResponse(r.data);
-    return r.data;
+    return completeAuthResponse(r.data);
   },
 
   getWordCaptchaChallenge: (): Promise<WordCaptchaChallenge> =>
@@ -553,18 +611,20 @@ export const authApi = {
     if (r.data.requiresTwoFactor) {
       return r.data;
     }
-    applyAuthResponse(r.data);
-    return r.data;
+    return completeAuthResponse(r.data);
   },
 
-  verifyTwoFactor: async (challengeToken: string, code: string): Promise<AuthResponse> => {
+  verifyTwoFactor: async (
+    challengeToken: string,
+    code: string,
+    rememberMe?: boolean,
+  ): Promise<AuthResponse> => {
     const r = await api.post<AuthResponse>(
       '/auth/two-factor/verify',
-      { challengeToken, code },
+      { challengeToken, code, ...(rememberMe ? { rememberMe: true } : {}) },
       { skipGlobalLoader: true },
     );
-    applyAuthResponse(r.data);
-    return r.data;
+    return completeAuthResponse(r.data);
   },
 
   google: async (
@@ -583,8 +643,7 @@ export const authApi = {
       },
       { skipGlobalLoader: true },
     );
-    applyAuthResponse(r.data);
-    return r.data;
+    return completeAuthResponse(r.data);
   },
 
   confirmGoogleLink: async (
@@ -603,8 +662,7 @@ export const authApi = {
       },
       { skipGlobalLoader: true },
     );
-    applyAuthResponse(r.data);
-    return r.data;
+    return completeAuthResponse(r.data);
   },
 
   logout: async (): Promise<{ success: boolean }> => {
@@ -685,15 +743,33 @@ export const authApi = {
     if (email) fd.append('email', email);
     if (captchaToken) fd.append('captchaToken', captchaToken);
     return api
-      .post<OnboardingCvParseResponse>('/auth/onboarding/parse-cv', fd, { skipGlobalLoader: true })
-      .then(r => r.data);
+      .post<OnboardingCvParseResponse>('/auth/onboarding/parse-cv', fd, {
+        loaderMessage: 'Reading your CV…',
+        timeout: 180_000,
+        validateStatus: status => status < 500,
+      })
+      .then(r => {
+        if (r.status >= 400) {
+          const msg =
+            (r.data as { error?: string; message?: string } | undefined)?.error
+            ?? (r.data as { message?: string } | undefined)?.message
+            ?? 'Could not parse your CV. Please try again.';
+          return Promise.reject(Object.assign(new Error(msg), { response: r }));
+        }
+        return r.data;
+      });
   },
 };
 
 // ── Profile API ───────────────────────────────────────────────────────────
 export const profileApi = {
   get: (): Promise<Profile> => api.get<Profile>('/profile').then(r => r.data),
-  update: (b: object) => api.put<Profile>('/profile', b).then(r => r.data),
+  update: (b: object, ifMatch?: number) =>
+    api
+      .put<Profile>('/profile', b, {
+        ...(ifMatch != null ? { headers: { 'If-Match': String(ifMatch) } } : {}),
+      })
+      .then(r => r.data),
   uploadCv: (file: File) => {
     const fd = new FormData();
     fd.append('file', file);
@@ -702,6 +778,22 @@ export const profileApi = {
       .then(r => r.data);
   },
   cvDownload: () => api.get<{ url: string }>('/profile/cv/download').then(r => r.data),
+  /** Fetches CV bytes for in-app preview (signed URL or authenticated blob). */
+  fetchCvBlob: async (fileName?: string | null): Promise<{ blob: Blob; objectUrl: string }> => {
+    const { url } = await profileApi.cvDownload();
+    if (url.startsWith('http://') || url.startsWith('https://')) {
+      const res = await fetch(url);
+      if (!res.ok) throw new Error('CV download failed');
+      const blob = await res.blob();
+      return { blob, objectUrl: URL.createObjectURL(blob) };
+    }
+    const path = url.startsWith('/api/v1') ? url.slice('/api/v1'.length) : url;
+    const res = await api.get(path, { responseType: 'blob' });
+    const blob = res.data as Blob;
+    const objectUrl = URL.createObjectURL(blob);
+    void fileName;
+    return { blob, objectUrl };
+  },
   /** Opens signed Supabase URL or fetches local-dev CV bytes with auth. */
   openCvDownload: async (url: string, fileName?: string | null): Promise<void> => {
     if (url.startsWith('http://') || url.startsWith('https://')) {

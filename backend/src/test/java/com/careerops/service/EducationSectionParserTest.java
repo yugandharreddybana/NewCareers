@@ -52,6 +52,8 @@ class EducationSectionParserTest {
         assertThat(entries).hasSize(2);
         assertThat(entries.get(0).schoolName()).containsIgnoringCase("Dublin");
         assertThat(entries.get(0).graduationYear()).isEqualTo("2020");
+        assertThat(entries.get(0).startYear()).isEqualTo("2016");
+        assertThat(entries.get(0).endYear()).isEqualTo("2020");
         assertThat(entries.get(1).degree()).containsIgnoringCase("MSc");
     }
 
@@ -102,6 +104,8 @@ class EducationSectionParserTest {
         assertThat(entries.get(0).degree()).containsIgnoringCase("Master");
         assertThat(entries.get(0).schoolName()).containsIgnoringCase("Atlantic Technological University");
         assertThat(entries.get(0).graduationYear()).isEqualTo("2022");
+        assertThat(entries.get(0).startYear()).isEqualTo("2020");
+        assertThat(entries.get(0).endYear()).isEqualTo("2022");
     }
 
     @Test

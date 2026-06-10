@@ -1,0 +1,25 @@
+sequenceDiagram
+    participant User
+    participant GuestRoute
+    participant AuthContext
+    participant Signup as Signup.tsx
+
+    User->>GuestRoute: GET /signup
+    GuestRoute->>AuthContext: loading while refresh()
+    AuthContext->>AuthContext: shouldSkipInitialSessionProbe()
+    alt guest page and no tokens
+        AuthContext-->>GuestRoute: user=null, skip /auth/me
+        GuestRoute-->>User: render Signup.tsx
+    else has co_refresh cookie
+        AuthContext->>AuthContext: ensureFreshSession
+        alt user authenticated
+            GuestRoute->>GuestRoute: loginRedirectTarget
+            alt user.onboarded
+                GuestRoute-->>User: redirect /dashboard
+            else not onboarded
+                GuestRoute-->>User: redirect /onboarding
+            end
+        else no session
+            GuestRoute-->>User: render Signup.tsx
+        end
+    end

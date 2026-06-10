@@ -1,0 +1,25 @@
+sequenceDiagram
+    participant User
+    participant Login as Login.tsx
+    participant AuthContext
+    participant Axios
+    participant Middleware
+    participant Auth as AuthService
+    participant TwoFA as TwoFactorService
+
+    User->>Login: Enter 6-digit TOTP + Verify
+    Login->>AuthContext: completeTwoFactor(challengeToken, code, rememberMe)
+    AuthContext->>Axios: POST /auth/two-factor/verify
+    Axios->>Middleware: POST /api/v1/auth/two-factor/verify
+    Middleware->>Middleware: resolveRememberMe(cookies + body)
+    Middleware->>Auth: verifyTwoFactorLogin
+    Auth->>TwoFA: verifyLoginCode(challengeToken, code)
+    alt invalid/expired code
+        TwoFA-->>Login: 401
+    else valid
+        Auth->>Auth: createAuthResponse(user, rememberMe)
+        Middleware->>Middleware: issueAuthCookies
+        Middleware-->>AuthContext: user
+        AuthContext->>AuthContext: setUser
+        GuestRoute-->>User: redirect into app
+    end

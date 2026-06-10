@@ -1,31 +1,9 @@
-# Local development — offline-friendly H2 by default; mock Stripe; plan limits bypassed.
+# Local development on Postgres (port 8080) — datasource comes from application.properties + repo .env.
+# For offline H2 file DB, use the `test` profile (application-test.properties, port 8100).
+# cache profile is activated via spring.profiles.include in application.properties (not here).
 spring:
-  profiles:
-    include: cache
   autoconfigure:
     exclude: org.springframework.boot.autoconfigure.data.redis.RedisAutoConfiguration
-  datasource:
-    url: ${DATABASE_URL:jdbc:h2:file:./data/careerops-dev;DB_CLOSE_DELAY=-1;MODE=PostgreSQL;NON_KEYWORDS=KEY;INIT=RUNSCRIPT FROM 'classpath:h2-init.sql'}
-    driver-class-name: ${DATABASE_DRIVER:org.h2.Driver}
-    username: ${DATABASE_USERNAME:sa}
-    password: ${DATABASE_PASSWORD:}
-    hikari:
-      schema: PUBLIC
-  jpa:
-    database-platform: org.hibernate.dialect.H2Dialect
-    hibernate:
-      ddl-auto: update
-    defer-datasource-initialization: true
-    properties:
-      hibernate:
-        dialect: org.hibernate.dialect.H2Dialect
-        default_schema: careerops
-  sql:
-    init:
-      data-locations: classpath:h2-dev-seed.sql
-      mode: always
-  flyway:
-    enabled: ${FLYWAY_ENABLED:false}
 
 auth:
   login:
@@ -34,6 +12,14 @@ auth:
 
 resend:
   dev-mode: true
+
+# Skip reCAPTCHA server verification locally (widget may still show when VITE_RECAPTCHA_SITE_KEY is set).
+# Staging/prod always enforce when captcha.secret is configured.
+captcha:
+  dev-mode: true
+
+stripe:
+  mock-checkout-auto-activate: true
 
 ratelimit:
   require-shared-store: false
@@ -46,6 +32,8 @@ scraper:
   auto-start: ${SCRAPER_AUTO_START:true}
 
 jobs:
+  nightly:
+    catchup-on-startup: true
   live:
     simulation:
       enabled: true

@@ -11,7 +11,12 @@ const MARKDOWN_H3 = /^###\s+(.+)$/;
 const MARKDOWN_H1 = /^#\s+(.+)$/;
 const BULLET = /^(\d+[.)])\s+(.+)$/;
 const DASH_BULLET = /^[-*•]\s+(.+)$/;
-const SECTION_HEADING = /^([A-Za-z][A-Za-z0-9\s/&-]{2,48}):\s*$/;
+const SECTION_HEADING = /^([A-Za-z][A-Za-z0-9\s/&'-]{2,48}):\s*$/;
+const INLINE_SECTION_LABEL =
+  /^((?:Salary|Compensation|Pay|Hybrid|Remote|On-site|On site|Location|About(?: the)?(?: role| us| company)?|Responsibilities|Requirements|Must have|Nice to have|Tech(?:nology)? stack|Benefits|What you(?:'|')?ll do|What we offer|Key skills|Qualifications|The role|Your role|Job description|Overview))\s*:\s*(.+)$/i;
+const INLINE_SECTION_BREAK = /\s+(?=(?:Salary|Compensation|Pay|Hybrid|Remote|On-site|On site|Location|About(?: the)?(?: role| us| company)?|Responsibilities|Requirements|Must have|Nice to have|Tech(?:nology)? stack|Benefits|What you(?:'|')?ll do|What we offer|Key skills|Qualifications|The role|Your role|Job description|Overview)\s*:)/gi;
+const INLINE_BULLET = /\s+([•\-*])\s+/g;
+const INLINE_NUMBERED = /\s+(\d+[.)])\s+/g;
 const ALL_CAPS_HEADING = /^[A-Z][A-Z0-9\s/&,'()-]{3,58}$/;
 
 /** Strip UI chrome and normalize whitespace (safe in browser and tests). */
@@ -35,8 +40,54 @@ export function cleanJobDescriptionText(raw: string): string {
   return text.replace(/\n{3,}/g, '\n\n').trim();
 }
 
+/** Split an overlong paragraph into readable chunks (sentence groups). */
+export function splitLongParagraphText(text: string, sentencesPerChunk = 2): string[] {
+  const trimmed = text.trim();
+  if (!trimmed) return [];
+  if (trimmed.length < 320) return [trimmed];
+
+  const sentences = trimmed.split(/(?<=[.!?])\s+(?=[A-Z"'(])/);
+  if (sentences.length <= sentencesPerChunk) return [trimmed];
+
+  const chunks: string[] = [];
+  let current = '';
+  let count = 0;
+  for (const sentence of sentences) {
+    const part = sentence.trim();
+    if (!part) continue;
+    current = current ? `${current} ${part}` : part;
+    count += 1;
+    if (count >= sentencesPerChunk) {
+      chunks.push(current);
+      current = '';
+      count = 0;
+    }
+  }
+  if (current) chunks.push(current);
+  return chunks.length > 0 ? chunks : [trimmed];
+}
+
+/** Break single-line scraped postings into multi-line sections for parsing. */
+export function preprocessJobDescription(plain: string): string {
+  let text = cleanJobDescriptionText(plain);
+  if (!text) return text;
+  if (!text.includes('\n') && text.length > 200) {
+    text = text.replace(INLINE_SECTION_BREAK, '\n\n');
+    text = text.replace(INLINE_BULLET, '\n$1 ');
+    text = text.replace(INLINE_NUMBERED, '\n$1 ');
+  }
+
+  const lines = text.split('\n').flatMap(line => {
+    const trimmed = line.trim();
+    if (!trimmed) return [''];
+    if (trimmed.length < 320 || trimmed.includes('\n\n')) return [trimmed];
+    return splitLongParagraphText(trimmed);
+  });
+  return lines.join('\n').replace(/\n{3,}/g, '\n\n').trim();
+}
+
 export function parseJobDescriptionBlocks(plain: string): JobDescBlock[] {
-  const text = cleanJobDescriptionText(plain);
+  const text = preprocessJobDescription(plain);
   if (!text) return [];
 
   const lines = text.split('\n');
@@ -73,6 +124,20 @@ export function parseJobDescriptionBlocks(plain: string): JobDescBlock[] {
     if (h3) {
       flushList();
       blocks.push({ type: 'heading', level: 3, text: h3[1]!.trim() });
+      continue;
+    }
+
+    const inlineSection = INLINE_SECTION_LABEL.exec(trimmed);
+    if (inlineSection) {
+      flushList();
+      const label = inlineSection[1]!.trim();
+      const body = inlineSection[2]!.trim();
+      blocks.push({
+        type: 'heading',
+        level: 3,
+        text: label.charAt(0).toUpperCase() + label.slice(1),
+      });
+      blocks.push({ type: 'paragraph', text: body });
       continue;
     }
 

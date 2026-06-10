@@ -54,6 +54,22 @@ public class InternalHmacSigner {
         return MessageDigest.isEqual(expectedBytes, actualBytes);
     }
 
+    /** Pre-fix UTF-8 body decoding — debug only to detect stale verification behavior. */
+    boolean verifyLegacyUtf8Body(long timestampMs, String method, String path, byte[] body, String signatureHex) {
+        if (signatureHex == null || signatureHex.isBlank()) {
+            return false;
+        }
+        String normalizedMethod = method == null ? "" : method.toUpperCase();
+        String normalizedPath = path == null ? "" : path;
+        String bodyText = body == null || body.length == 0
+                ? ""
+                : new String(body, StandardCharsets.UTF_8);
+        String payload = timestampMs + normalizedMethod + normalizedPath + bodyText;
+        return MessageDigest.isEqual(
+                hmacHex(payload).getBytes(StandardCharsets.UTF_8),
+                signatureHex.trim().toLowerCase().getBytes(StandardCharsets.UTF_8));
+    }
+
     public boolean isTimestampFresh(long timestampMs) {
         return isTimestampFresh(timestampMs, DEFAULT_MAX_SKEW_MS);
     }
@@ -63,12 +79,16 @@ public class InternalHmacSigner {
         return Math.abs(now - timestampMs) <= maxSkewMs;
     }
 
+    /**
+     * Body bytes are decoded as ISO-8859-1 to match middleware {@code bytesForSigning}
+     * (Node {@code buffer.toString('latin1')}) for multipart/binary forwards.
+     */
     static String buildPayload(long timestampMs, String method, String path, byte[] body) {
         String normalizedMethod = method == null ? "" : method.toUpperCase();
         String normalizedPath = path == null ? "" : path;
         String bodyText = body == null || body.length == 0
                 ? ""
-                : new String(body, StandardCharsets.UTF_8);
+                : new String(body, StandardCharsets.ISO_8859_1);
         return timestampMs + normalizedMethod + normalizedPath + bodyText;
     }
 

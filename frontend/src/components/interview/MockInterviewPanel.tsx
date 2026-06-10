@@ -87,7 +87,7 @@ export default function MockInterviewPanel({
           <div key={idx} className="space-y-2">
             {/* Question */}
             <div className="flex gap-3">
-              <span className="shrink-0 w-7 h-7 rounded-full bg-indigo-600 text-white text-xs flex items-center justify-center font-bold">
+              <span className="shrink-0 w-7 h-7 rounded-full bg-brand-500 text-white text-xs flex items-center justify-center font-bold">
                 AI
               </span>
               <div className="bg-indigo-50 rounded-xl rounded-tl-none px-4 py-3 text-sm text-gray-800 max-w-prose">
@@ -145,7 +145,7 @@ export default function MockInterviewPanel({
             <button
               onClick={handleSubmit}
               disabled={!currentAnswer.trim() || replyMutation.isPending}
-              className="self-end px-4 py-2 bg-indigo-600 text-white text-sm rounded-lg hover:bg-indigo-700 disabled:opacity-50"
+              className="self-end px-4 py-2 bg-brand-500 text-white text-sm rounded-lg hover:bg-brand-600 disabled:opacity-50"
             >
               {replyMutation.isPending ? '…' : 'Send'}
             </button>

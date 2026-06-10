@@ -2,9 +2,14 @@
  * AuthContext.tsx — single source of truth for authentication state.
  */
 import {
-  createContext, useContext, useState, useEffect,
+  useState, useEffect,
   useCallback, useRef, type ReactNode,
 } from 'react';
+import {
+  AuthCtx,
+  type SignUpInput,
+  type UpdateProfilePayload,
+} from '@/context/authCtx';
 import type { User } from '@/types';
 import {
   authApi,
@@ -13,108 +18,30 @@ import {
   AUTH_REFRESHED_EVENT,
   AUTH_LOGGED_OUT_EVENT,
   shouldSkipInitialSessionProbe,
+  shouldRedirectOnAuthFailure,
 } from '@/services/api';
+import { redirectOnSessionExpired, markSessionExpired } from '@/lib/onboardingSession';
 import { tokenStore } from '@/lib/tokenStore';
 import { clearOnboardingVerification } from '@/lib/onboardingVerification';
 import { clearPendingSignup, type SignupConsents } from '@/lib/pendingSignup';
 import {
   clearPendingGoogleConsents,
-  readPendingGoogleConsents,
+  resolveGoogleSignInConsents,
 } from '@/lib/pendingGoogleConsents';
+import { clearPendingGoogleLink } from '@/lib/pendingGoogleLink';
 import { syncLocalAnalyticsConsentToBackend } from '@/lib/cookieConsent';
 import { queryClient } from '@/lib/queryClient';
 import { queryKeys } from '@/lib/queryKeys';
+import { SUBSCRIPTION_QUERY_KEY } from '@/lib/subscriptionUtils';
 import { payloadAffectsPipelineMatch } from '@/lib/profileMerge';
 import { invalidatePipelineAfterProfileChange, resetPipelineSkillsSync } from '@/hooks/queries/useJobs';
 import type { Profile } from '@/types';
-export interface OnboardingWorkEntry {
-  jobTitle: string;
-  companyName: string;
-  startDate: string;
-  endDate: string;
-  current: boolean;
-  description: string;
-  location?: string;
-}
 
-export interface OnboardingEducationEntry {
-  schoolName: string;
-  degree: string;
-  degreeLevel?: string;
-  degreeTitle?: string;
-  fieldOfStudy: string;
-  graduationYear: string;
-  location?: string;
-}
-
-export interface UpdateProfilePayload {
-  name?: string;
-  goalTitle?: string;
-  targetRoles?: string[];
-  techStack?: string[];
-  sectors?: string[];
-  location?: string;
-  salaryMin?: number;
-  salaryMax?: number;
-  salaryCurrency?: string;
-  availability?: string;
-  experienceLevel?: string;
-  sponsorshipRequired?: boolean;
-  openToRemote?: boolean;
-  remotePolicy?: string;
-  hybridOnsiteDays?: string;
-  workExperience?: OnboardingWorkEntry[];
-  education?: OnboardingEducationEntry[];
-  onboarded?: boolean;
-  workTypes?: string[];
-  goalLocation?: string;
-  minMatchPercent?: number;
-  freshnessHours?: number;
-  jobDomain?: string;
-  linkedInUrl?: string;
-  githubUrl?: string;
-  websiteUrl?: string;
-}
-
-interface SignUpInput {
-  name: string;
-  email: string;
-  signupIntentId: string;
-  consents: {
-    termsAccepted: boolean;
-    aiProcessingAccepted: boolean;
-    marketingAccepted: boolean;
-    analyticsAccepted: boolean;
-  };
-  emailVerificationId?: string;
-}
-
-interface AuthCtxValue {
-  user: User | null;
-  isAdmin: boolean;
-  loading: boolean;
-  actionLoading: boolean;
-  setUser: (u: User | null) => void;
-  refresh: () => Promise<User | null>;
-  signOut: () => Promise<void>;
-  signIn: (
-    email: string,
-    password: string,
-    options?: { rememberMe?: boolean; captchaToken?: string },
-  ) => Promise<User>;
-  signInWithGoogle: (
-    idToken: string,
-    rememberMe?: boolean,
-    consents?: SignupConsents,
-    captchaToken?: string,
-  ) => Promise<User>;
-  signUp: (input: SignUpInput) => Promise<User>;
-  updateProfile: (data: UpdateProfilePayload) => Promise<Profile>;
-  forgotPassword: (email: string) => Promise<void>;
-  resetPassword: (email: string, otp: string, newPassword: string) => Promise<void>;
-}
-
-const AuthCtx = createContext<AuthCtxValue | null>(null);
+export type {
+  OnboardingWorkEntry,
+  OnboardingEducationEntry,
+  UpdateProfilePayload,
+} from '@/context/authCtx';
 
 const usernameFromEmail = (email: string): string => {
   const local = email.split('@')[0] ?? '';
@@ -143,11 +70,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const inFlightMe = useRef<Promise<User | null> | null>(null);
-  const userRef = useRef<User | null>(null);
-
-  useEffect(() => {
-    userRef.current = user;
-  }, [user]);
 
   const refresh = useCallback(async (): Promise<User | null> => {
     if (inFlightMe.current) return inFlightMe.current;
@@ -161,10 +83,18 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       try {
         await ensureFreshSession();
       } catch {
-        if (!tokenStore.hasAccess() && !tokenStore.hasRefreshOrCookie()) {
-          setUser(null);
-          return null;
+        const hadSession = tokenStore.hasRefreshOrCookie() || tokenStore.hasAccess();
+        tokenStore.clear();
+        setUser(null);
+        queryClient.removeQueries({ queryKey: SUBSCRIPTION_QUERY_KEY });
+        if (hadSession && typeof window !== 'undefined') {
+          const path = window.location.pathname;
+          if (shouldRedirectOnAuthFailure(path, false)) {
+            markSessionExpired();
+            redirectOnSessionExpired(path);
+          }
         }
+        return null;
       }
 
       if (!tokenStore.hasAccess() && !tokenStore.hasRefreshOrCookie()) {
@@ -180,6 +110,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       } catch {
         tokenStore.clear();
         setUser(null);
+        queryClient.removeQueries({ queryKey: SUBSCRIPTION_QUERY_KEY });
+        if (typeof window !== 'undefined') {
+          const path = window.location.pathname;
+          if (shouldRedirectOnAuthFailure(path, false)) {
+            markSessionExpired();
+            redirectOnSessionExpired(path);
+          }
+        }
         return null;
       }
     })().finally(() => { inFlightMe.current = null; });
@@ -195,8 +133,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     if (typeof window === 'undefined') return;
 
-    const onRefreshed = () => { void refresh(); };
-    const onLoggedOut = () => { setUser(null); };
+    const onRefreshed = () => {
+      if (inFlightMe.current) return;
+      void refresh();
+    };
+    const onLoggedOut = () => {
+      setUser(null);
+      queryClient.removeQueries({ queryKey: SUBSCRIPTION_QUERY_KEY });
+    };
 
     window.addEventListener(AUTH_REFRESHED_EVENT, onRefreshed);
     window.addEventListener(AUTH_LOGGED_OUT_EVENT, onLoggedOut);
@@ -278,6 +222,24 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   }, [setUser]);
 
+  const completeTwoFactor = useCallback(async (
+    challengeToken: string,
+    code: string,
+    rememberMe?: boolean,
+  ): Promise<User> => {
+    setActionLoading(true);
+    try {
+      const data = await authApi.verifyTwoFactor(challengeToken, code, rememberMe);
+      clearPendingSignup();
+      clearOnboardingVerification();
+      setUser(data.user);
+      void syncLocalAnalyticsConsentToBackend();
+      return data.user;
+    } finally {
+      setActionLoading(false);
+    }
+  }, [setUser]);
+
   const signInWithGoogle = useCallback(async (
     idToken: string,
     rememberMe?: boolean,
@@ -286,7 +248,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   ): Promise<User> => {
     setActionLoading(true);
     try {
-      const resolvedConsents = consents ?? readPendingGoogleConsents() ?? undefined;
+      const resolvedConsents = resolveGoogleSignInConsents(consents);
       const data = await authApi.google(idToken, rememberMe, resolvedConsents, captchaToken);
       clearPendingGoogleConsents();
       clearPendingSignup();
@@ -305,6 +267,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     finally {
       setUser(null);
       clearPendingSignup();
+      clearPendingGoogleConsents();
+      clearPendingGoogleLink();
       clearOnboardingVerification();
       try {
         queryClient.clear();
@@ -317,7 +281,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, [setUser]);
 
   const updateProfile = useCallback(async (data: UpdateProfilePayload): Promise<Profile> => {
-    const serverProfile = await profileApi.update(data);
+    const cached = queryClient.getQueryData<Profile>(queryKeys.profile.current());
+    const serverProfile = await profileApi.update(data, cached?.version);
     queryClient.setQueryData(queryKeys.profile.current(), serverProfile);
     if (payloadAffectsPipelineMatch(data)) {
       invalidatePipelineAfterProfileChange();
@@ -360,16 +325,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       actionLoading,
       setUser,
       refresh,
-      signOut, signIn, signInWithGoogle, signUp, updateProfile,
+      signOut, signIn, completeTwoFactor, signInWithGoogle, signUp, updateProfile,
       forgotPassword, resetPassword,
     }}>
       {children}
     </AuthCtx.Provider>
   );
-}
-
-export function useAuth(): AuthCtxValue {
-  const v = useContext(AuthCtx);
-  if (!v) throw new Error('useAuth must be inside <AuthProvider>');
-  return v;
 }

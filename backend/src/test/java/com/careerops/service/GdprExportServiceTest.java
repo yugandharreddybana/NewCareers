@@ -11,7 +11,9 @@ import com.careerops.model.UserJob;
 import com.careerops.model.UserProfile;
 import com.careerops.repository.AiTokenUsageRepository;
 import com.careerops.repository.AuditLogRepository;
+import com.careerops.repository.OrgMemberRepository;
 import com.careerops.repository.SkillRunRepository;
+import com.careerops.repository.SubscriptionRepository;
 import com.careerops.repository.UserConsentRepository;
 import com.careerops.repository.UserCvRepository;
 import com.careerops.repository.UserJobRepository;
@@ -50,6 +52,8 @@ class GdprExportServiceTest {
     @Mock AuditLogRepository auditLogs;
     @Mock SkillRunRepository skillRuns;
     @Mock AiTokenUsageRepository tokenUsage;
+    @Mock OrgMemberRepository orgMembers;
+    @Mock SubscriptionRepository subscriptions;
     @Mock AuditLogService audit;
     @Mock HttpServletRequest request;
     @Spy ObjectMapper objectMapper = new ObjectMapper().findAndRegisterModules();
@@ -125,6 +129,7 @@ class GdprExportServiceTest {
         when(consents.findAllByUserIdOrderByAcceptedAtDesc(userId)).thenReturn(List.of(consent));
         when(skillRuns.findAllByUserIdOrderByCreatedAtDesc(userId)).thenReturn(List.of(skillRun));
         when(tokenUsage.findByUserIdOrderByCreatedAtDesc(userId)).thenReturn(List.of(tokenRow));
+        when(orgMembers.findByUserId(userId)).thenReturn(List.of());
 
         byte[] json = service.exportUserDataJson(userId, request);
         JsonNode root = objectMapper.readTree(json);

@@ -1,7 +1,8 @@
-import React, { useEffect, useState } from 'react';
+import React, { useState } from 'react';
 import { PageMeta } from '@/components/PageMeta';
 import { PageLoader } from '@/components/LoadingSpinner';
 import { api } from '@/services/api';
+import { usePlannerDeadlinesQuery, usePlannerTasksQuery, useInvalidatePlanner } from '@/hooks/queries';
 import toast from 'react-hot-toast';
 import {
   Calendar, CheckCircle, Circle, Plus, Trash2,
@@ -48,39 +49,34 @@ function fmtDate(iso: string) {
 }
 
 const PlannerPage: React.FC = () => {
-  const [tasks, setTasks]         = useState<Task[]>([]);
-  const [deadlines, setDeadlines] = useState<Deadline[]>([]);
-  const [loading, setLoading]     = useState(true);
+  const invalidatePlanner = useInvalidatePlanner();
+  const { data: tasksData, isLoading: tasksLoading } = usePlannerTasksQuery();
+  const { data: deadlinesData, isLoading: deadlinesLoading } = usePlannerDeadlinesQuery();
+  const tasks = (tasksData as Task[] | undefined) ?? [];
+  const deadlines = (deadlinesData as Deadline[] | undefined) ?? [];
+  const loading = tasksLoading || deadlinesLoading;
   const [newTitle, setNewTitle]   = useState('');
   const [newPriority, setNewPriority] = useState<Task['priority']>('medium');
   const [newDue, setNewDue]       = useState('');
   const [adding, setAdding]       = useState(false);
   const [showForm, setShowForm]   = useState(false);
 
-  useEffect(() => {
-    const load = async () => {
-      try {
-        const [t, d] = await Promise.all([
-          api.get('/planner/tasks').then(r => r.data),
-          api.get('/planner/deadlines').then(r => r.data),
-        ]);
-        setTasks(t as Task[]);
-        setDeadlines(d as Deadline[]);
-      } finally { setLoading(false); }
-    };
-    load();
-  }, []);
-
   const handleToggle = async (id: string) => {
-    setTasks(prev => prev.map(t => t.id === id ? { ...t, completed: !t.completed } : t));
-    try { await api.patch(`/planner/tasks/${id}/toggle`); }
-    catch { toast.error('Failed to update task.'); }
+    try {
+      await api.patch(`/planner/tasks/${id}/toggle`);
+      invalidatePlanner();
+    } catch {
+      toast.error('Failed to update task.');
+    }
   };
 
   const handleDelete = async (id: string) => {
-    setTasks(prev => prev.filter(t => t.id !== id));
-    try { await api.delete(`/planner/tasks/${id}`); }
-    catch { toast.error('Failed to delete task.'); }
+    try {
+      await api.delete(`/planner/tasks/${id}`);
+      invalidatePlanner();
+    } catch {
+      toast.error('Failed to delete task.');
+    }
   };
 
   const handleAdd = async () => {
@@ -88,8 +84,8 @@ const PlannerPage: React.FC = () => {
     setAdding(true);
     try {
       const body = { title: newTitle, priority: newPriority, dueDate: newDue || null };
-      const task: Task = await api.post('/planner/tasks', body).then(r => r.data);
-      setTasks(prev => [task, ...prev]);
+      await api.post('/planner/tasks', body);
+      invalidatePlanner();
       setNewTitle(''); setNewDue(''); setNewPriority('medium'); setShowForm(false);
       toast.success('Task added!');
     } catch { toast.error('Failed to add task.'); }
@@ -113,7 +109,7 @@ const PlannerPage: React.FC = () => {
             <p className="text-sm text-gray-500 mt-1 flex items-center gap-1.5"><Calendar size={13} />{today}</p>
           </div>
           <button onClick={() => setShowForm(v => !v)}
-            className="flex items-center gap-2 px-4 py-2.5 bg-indigo-500 hover:bg-indigo-600 text-white text-sm font-semibold rounded-lg transition-colors">
+            className="flex items-center gap-2 px-4 py-2.5 bg-brand-500 hover:bg-brand-600 text-white text-sm font-semibold rounded-lg transition-colors">
             <Plus size={15} /> Add Task
           </button>
         </div>
@@ -136,7 +132,7 @@ const PlannerPage: React.FC = () => {
             </div>
             <div className="flex gap-2">
               <button onClick={() => setShowForm(false)} className="flex-1 py-2 border border-gray-300 rounded-lg text-sm text-gray-600 hover:bg-gray-50">Cancel</button>
-              <button onClick={handleAdd} disabled={adding} className="flex-1 py-2 bg-indigo-500 hover:bg-indigo-600 disabled:opacity-60 text-white text-sm font-semibold rounded-lg transition-colors">
+              <button onClick={handleAdd} disabled={adding} className="flex-1 py-2 bg-brand-500 hover:bg-brand-600 disabled:opacity-60 text-white text-sm font-semibold rounded-lg transition-colors">
                 {adding ? 'Adding…' : 'Add Task'}
               </button>
             </div>

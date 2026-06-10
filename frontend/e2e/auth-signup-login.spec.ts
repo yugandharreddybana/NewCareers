@@ -16,7 +16,7 @@ import {
   fillLoginForm,
   submitAuthForm,
   acceptSignupTerms,
-  expectSignupDuplicateEmailAlert,
+  acceptSignupAiProcessing,
   togglePasswordVisibility,
   expectLoginBrandVisible,
 } from './helpers/auth';
@@ -202,29 +202,33 @@ test.describe('C — Signup live API', () => {
     expect(session?.value?.length ?? 0).toBeLessThan(11);
   });
 
-  test('SU-21: duplicate email blocked on signup', async ({ page, request }) => {
+  test('SU-21: duplicate email gets same signup-intent success (anti-enumeration)', async ({ page, request }) => {
     await ensureTestUser(request);
     await page.goto('/signup');
     await fillSignupForm(page, TEST_USER);
     await submitAuthForm(page);
-    await expect(page).toHaveURL(/\/signup/, { timeout: 20_000 });
-    await expectSignupDuplicateEmailAlert(page);
+    await expect(page).toHaveURL(/\/onboarding/, { timeout: 20_000 });
   });
 
-  test('SU-24: duplicate alert clears when email is edited', async ({ page, request }) => {
-    await ensureTestUser(request);
+  test('SU-24: signup error clears when email is edited', async ({ page }) => {
     await page.goto('/signup');
-    await fillSignupForm(page, TEST_USER);
+    await page.locator('#email').fill('not-an-email');
+    await page.locator('#password').fill(TEST_USER.password);
+    await acceptSignupTerms(page);
+    await acceptSignupAiProcessing(page);
     await submitAuthForm(page);
-    await expectSignupDuplicateEmailAlert(page);
-    await page.locator('#email').fill('test@newcareer.co');
-    await expect(page.getByText(/account may already exist/i)).toHaveCount(0);
+    await expect(page.getByRole('alert')).toBeVisible();
+    await page.locator('#email').fill('valid@careerops.test');
+    await expect(page.getByRole('alert')).toHaveCount(0);
   });
 
-  test('SU-25: signup-intent API returns conflict for registered email', async ({ request }) => {
+  test('SU-25: signup-intent API returns decoy success for registered email', async ({ request }) => {
     await ensureTestUser(request);
     const dupResult = await createSignupIntentViaApi(request, TEST_USER);
-    expect(dupResult.status).toBe(409);
+    expect(dupResult.status).toBe(200);
+    const body = dupResult.body as { signupIntentId?: string; expiresAt?: string };
+    expect(body.signupIntentId).toBeTruthy();
+    expect(body.expiresAt).toBeTruthy();
   });
 
   test('M-12: bad OTP verify message matches for registered and new emails after send', async ({ request }) => {
@@ -399,12 +403,12 @@ test.describe('F — Cross-flow signup to login', () => {
     await clearAuthState(page);
   });
 
-  test('XF-01: duplicate signup then login manually', async ({ page, request }) => {
+  test('XF-01: duplicate signup intent then login manually', async ({ page, request }) => {
     await ensureTestUser(request);
     await page.goto('/signup');
     await fillSignupForm(page, TEST_USER);
     await submitAuthForm(page);
-    await expectSignupDuplicateEmailAlert(page);
+    await expect(page).toHaveURL(/\/onboarding/, { timeout: 20_000 });
     await page.goto('/login');
     await fillLoginForm(page, TEST_USER);
     await submitAuthForm(page);

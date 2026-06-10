@@ -1,0 +1,17 @@
+sequenceDiagram
+    participant User
+    participant Login as Login.tsx
+    participant WordCaptcha as WordCaptchaField
+    participant Axios
+    participant Middleware
+    participant Java as WordCaptchaService
+
+    User->>Login: open /login
+    Login->>WordCaptcha: mount (if LOGIN_WORD_CAPTCHA_REQUIRED)
+    WordCaptcha->>Axios: GET /auth/captcha/challenge
+    Axios->>Middleware: GET /api/v1/auth/captcha/challenge
+    Middleware->>Java: GET /auth/captcha/challenge
+    Java->>Java: createChallenge() — 5 chars, SVG, 10min TTL
+    Java-->>WordCaptcha: challengeId + svg
+    User->>WordCaptcha: type 5 characters (case-insensitive)
+    WordCaptcha->>Login: captchaToken challengeId plus answer

@@ -18,6 +18,8 @@ import { writeAnalyticsConsent } from '@/lib/cookieConsent';
 import { evaluatePasswordStrength, passwordComplexityHint } from '@/lib/passwordRules';
 import { mapSignupIntentError } from '@/lib/authErrors';
 
+const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
 export default function Signup() {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
@@ -79,6 +81,11 @@ export default function Signup() {
       setError('Please enter your full name.');
       return;
     }
+    const trimmedEmail = email.trim();
+    if (!EMAIL_PATTERN.test(trimmedEmail)) {
+      setError('Please enter a valid email address.');
+      return;
+    }
     if (!strength.acceptable) {
       setError(
         password.length === 0
@@ -97,9 +104,13 @@ export default function Signup() {
       return;
     }
 
+    const refreshCaptcha = () => {
+      captchaRef.current?.reset();
+      setCaptchaToken(null);
+    };
+
     setSubmitting(true);
     try {
-      const trimmedEmail = email.trim();
       const consents = buildConsents();
       const intent = await authApi.createSignupIntent({
         email: trimmedEmail,
@@ -113,11 +124,13 @@ export default function Signup() {
       writePendingSignup({
         signupIntentId: intent.signupIntentId,
         email: trimmedEmail,
+        expiresAt: intent.expiresAt,
         ...(name.trim() ? { name: name.trim() } : {}),
         consents,
       });
       navigate('/onboarding', { replace: true });
     } catch (err: unknown) {
+      refreshCaptcha();
       setError(mapSignupIntentError(err));
     } finally {
       setSubmitting(false);

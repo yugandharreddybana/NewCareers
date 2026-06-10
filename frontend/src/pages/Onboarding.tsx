@@ -1,9 +1,9 @@
-﻿import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 
 import { useNavigate } from 'react-router-dom';
 
-import { useAuth } from '@/context/AuthContext';
+import { useAuth } from '@/context/authCtx';
 import {
   readOnboardingVerification,
   writeOnboardingVerification,
@@ -13,7 +13,7 @@ import {
   readPendingSignup,
 } from '@/lib/pendingSignup';
 import { OnboardingEmailVerificationModal } from '@/components/onboarding/OnboardingEmailVerificationModal';
-import { TrialStartedConfirmation } from '@/components/onboarding/TrialStartedConfirmation';
+import { readableDisplayName } from '@/lib/readableDisplayName';
 import {
   completeOnboardingFinish,
   messageForDeliveryStage,
@@ -31,6 +31,7 @@ import {
   type OnboardingDeliveryStatus,
 } from '@/services/api';
 import {
+  getSessionExpiredRedirectTarget,
   isAuthFailureError,
   isOnboardingPath,
   redirectOnSessionExpired,
@@ -59,6 +60,7 @@ import {
   writeOnboardingCvDraft,
   clearOnboardingCvDraft,
 } from '@/lib/onboardingCvDraft';
+import { mergeUniqueChipValues } from '@/lib/mergeUniqueChipValues';
 import { OnboardingPageShell } from '@/components/onboarding/OnboardingPageShell';
 import { OnboardingStepper } from '@/components/onboarding/OnboardingStepper';
 import { BasicInfoStep } from '@/components/onboarding/BasicInfoStep';
@@ -156,9 +158,14 @@ export default function Onboarding() {
 
   const handleSessionExpiredOnOnboarding = useCallback(() => {
     if (!isOnboardingPath()) return;
+    const target = getSessionExpiredRedirectTarget('/onboarding', { user });
+    if (!target) {
+      toast.error('Your session expired. Sign in again to continue setup.');
+      return;
+    }
     toast.error('Your sign-up session expired. Please start again from the sign-up page.');
-    redirectOnSessionExpired('/onboarding');
-  }, []);
+    redirectOnSessionExpired('/onboarding', { user });
+  }, [user]);
 
   useEffect(() => {
     const onLoggedOut = () => {
@@ -195,12 +202,19 @@ export default function Onboarding() {
   const [deliveryFailed, setDeliveryFailed] = useState<string | null>(null);
   const [verificationModalOpen, setVerificationModalOpen] = useState(false);
   const [verificationResendsRemaining] = useState(3);
-  const [trialConfirmationOpen, setTrialConfirmationOpen] = useState(false);
-  const [trialConfirmContinuing, setTrialConfirmContinuing] = useState(false);
+  const [fullName, setFullName] = useState(() => {
+    const pendingName = readPendingSignup()?.name?.trim();
+    if (pendingName) return pendingName;
+    return readableDisplayName(user?.name);
+  });
 
-  const [fullName, setFullName] = useState(
-    () => user?.name || readPendingSignup()?.name || '',
-  );
+  useEffect(() => {
+    const pendingName = readPendingSignup()?.name?.trim();
+    if (pendingName) return;
+    const readable = readableDisplayName(user?.name);
+    if (!readable) return;
+    setFullName(prev => (readableDisplayName(prev) ? prev : readable));
+  }, [user?.name]);
 
   const [headline, setHeadline] = useState('');
 
@@ -220,7 +234,36 @@ export default function Onboarding() {
 
 
 
-  const [preferences, setPreferences] = useState<PreferencesStepValues>(defaultPreferences);
+  const [preferences, setPreferences] = useState<PreferencesStepValues>(() => {
+    const draft = readOnboardingCvDraft();
+    const base = defaultPreferences();
+    if (!draft) return base;
+    let next = base;
+    if (draft.extractedTechStack?.length) {
+      next = {
+        ...next,
+        selectedTech: mergeUniqueChipValues(next.selectedTech, draft.extractedTechStack),
+      };
+    }
+    if (draft.extractedTargetRoles?.length) {
+      next = {
+        ...next,
+        selectedRoles: mergeUniqueChipValues(next.selectedRoles, draft.extractedTargetRoles),
+      };
+    }
+    return next;
+  });
+  const [parseSource, setParseSource] = useState<'ai' | 'regex' | null>(
+    () => readOnboardingCvDraft()?.parseSource ?? null,
+  );
+  const [techAutoFilled, setTechAutoFilled] = useState(
+    () => Boolean(readOnboardingCvDraft()?.extractedTechStack?.length),
+  );
+  const [rolesAutoFilled, setRolesAutoFilled] = useState(
+    () => Boolean(readOnboardingCvDraft()?.extractedTargetRoles?.length),
+  );
+  const techPrefilledRef = useRef(techAutoFilled);
+  const rolesPrefilledRef = useRef(rolesAutoFilled);
 
   const patchPreferences = useCallback((patch: Partial<PreferencesStepValues>) => {
     setPreferences(prev => {
@@ -259,13 +302,13 @@ export default function Onboarding() {
         throw new Error(
           status.error ??
             status.message ??
-            'Matching could not complete. Your profile is saved — try again or open the dashboard to use any roles already found.',
+            'Matching could not complete. Your profile is saved ? try again or open the dashboard to use any roles already found.',
         );
       }
       await sleep(DELIVERY_POLL_MS);
     }
     throw new Error(
-      'Matching is taking longer than expected. You can open the dashboard — more roles will load in the background.',
+      'Matching is taking longer than expected. You can open the dashboard ? more roles will load in the background.',
     );
   }
 
@@ -294,7 +337,7 @@ export default function Onboarding() {
     setSaving(true);
     setMatchingOverlay(true);
     setDeliveryFailed(null);
-    setDeliveryStatus(overlayStatusForPhase('Preparing…'));
+    setDeliveryStatus(overlayStatusForPhase('Preparing?'));
     let keepDeliveryOverlay = false;
 
     try {
@@ -353,8 +396,22 @@ export default function Onboarding() {
           toast.error(finishResult.message ?? GENERIC_ONBOARDING_SIGNUP_ERROR);
           return;
         }
+        if (finishResult.reason === 'plan_limit') {
+          toast.error(finishResult.message ?? GENERIC_ONBOARDING_PROFILE_ERROR);
+          setMatchingOverlay(false);
+          navigate('/account/billing');
+          return;
+        }
+        if (
+          finishResult.reason === 'profile_failed' ||
+          finishResult.reason === 'cv_failed' ||
+          finishResult.reason === 'delivery_failed'
+        ) {
+          toast.error(finishResult.message ?? GENERIC_ONBOARDING_PROFILE_ERROR);
+          return;
+        }
         if (finishResult.reason === 'missing_user_id') {
-          handleSessionExpiredOnOnboarding();
+          toast.error(finishResult.message ?? GENERIC_ONBOARDING_PROFILE_ERROR);
           return;
         }
         if (finishResult.reason === 'missing_cv') {
@@ -372,7 +429,13 @@ export default function Onboarding() {
         await pollDeliveryUntilReady();
       } catch (pollErr: unknown) {
         if (isAuthFailureError(pollErr)) {
-          handleSessionExpiredOnOnboarding();
+          const target = getSessionExpiredRedirectTarget('/onboarding', { user });
+          if (target) {
+            handleSessionExpiredOnOnboarding();
+          } else {
+            setDeliveryFailed('Your session expired. Sign in again to continue setup.');
+            keepDeliveryOverlay = true;
+          }
           return;
         }
         const pollMsg = pollErr instanceof Error ? pollErr.message : undefined;
@@ -440,17 +503,7 @@ export default function Onboarding() {
       writeOnboardingVerification(verificationId, pending.email, pending.signupIntentId);
     }
     setVerificationModalOpen(false);
-    setTrialConfirmationOpen(true);
-  }
-
-  async function handleTrialConfirmationContinue() {
-    setTrialConfirmContinuing(true);
-    try {
-      await proceedFinish();
-    } finally {
-      setTrialConfirmContinuing(false);
-      setTrialConfirmationOpen(false);
-    }
+    void proceedFinish();
   }
 
 
@@ -458,6 +511,14 @@ export default function Onboarding() {
   async function handleBasicInfoSubmit() {
     if (!fullName.trim()) {
       toast.error('Please enter your full name.');
+      return;
+    }
+    if (!headline.trim()) {
+      toast.error('Please enter your professional headline.');
+      return;
+    }
+    if (!experienceYears) {
+      toast.error('Please select your years of experience.');
       return;
     }
     if (!preferences.cvFile) {
@@ -498,11 +559,36 @@ export default function Onboarding() {
         setGithubUrl(parsed.githubUrl.trim());
       }
 
+      const extractedTech = parsed.extractedTechStack ?? [];
+      if (!techPrefilledRef.current && extractedTech.length > 0) {
+        setPreferences(p => ({
+          ...p,
+          selectedTech: mergeUniqueChipValues(p.selectedTech, extractedTech),
+        }));
+        setTechAutoFilled(true);
+        techPrefilledRef.current = true;
+      }
+
+      const extractedRoles = parsed.extractedTargetRoles ?? [];
+      if (!rolesPrefilledRef.current && extractedRoles.length > 0) {
+        setPreferences(p => ({
+          ...p,
+          selectedRoles: mergeUniqueChipValues(p.selectedRoles, extractedRoles),
+        }));
+        setRolesAutoFilled(true);
+        rolesPrefilledRef.current = true;
+      }
+
+      setParseSource(parsed.parseSource ?? 'regex');
+
       writeOnboardingCvDraft({
         cvMarkdown: parsed.cvMarkdown,
         rolesFound: parsed.rolesFound,
         educationFound: parsed.educationFound,
         projectsFound: parsed.projectsFound ?? 0,
+        extractedTechStack: extractedTech.length > 0 ? extractedTech : undefined,
+        extractedTargetRoles: extractedRoles.length > 0 ? extractedRoles : undefined,
+        parseSource: parsed.parseSource,
       });
 
       setCvParseSummary({
@@ -510,6 +596,12 @@ export default function Onboarding() {
         educationFound: parsed.educationFound,
         projectsFound: parsed.projectsFound ?? 0,
       });
+
+      if (parsed.parseSource === 'ai' && (parsed.rolesFound > 0 || parsed.educationFound > 0)) {
+        toast.success('Imported details from your CV — review the next steps.');
+      } else if (parsed.parseWarnings?.length) {
+        toast(parsed.parseWarnings[0], { icon: '??' });
+      }
 
       if (parsed.rolesFound === 0) {
         toast.error('We could not detect work experience in your CV. Please add it manually.');
@@ -525,7 +617,11 @@ export default function Onboarding() {
         handleSessionExpiredOnOnboarding();
         return;
       }
-      toast.error(GENERIC_CV_PARSE_ERROR);
+      const message =
+        err instanceof Error && err.message.trim()
+          ? err.message
+          : GENERIC_CV_PARSE_ERROR;
+      toast.error(message);
     } finally {
       setParsingCv(false);
     }
@@ -602,13 +698,7 @@ export default function Onboarding() {
         step0Submitted={step0Submitted}
       >
         <div className="onboarding-shell__scroll" ref={scrollRef}>
-          {trialConfirmationOpen ? (
-            <TrialStartedConfirmation
-              onContinue={() => void handleTrialConfirmationContinue()}
-              continuing={trialConfirmContinuing}
-            />
-          ) : (
-            <>
+          <>
           <OnboardingStepper activeStep={step} basicIdentityComplete={basicIdentityComplete} />
 
           {step === 0 && (
@@ -639,6 +729,7 @@ export default function Onboarding() {
               educationEntries={educationEntries}
               projectEntries={projectEntries}
               cvParseSummary={cvParseSummary}
+              parseSource={parseSource}
               onWorkChange={updateWork}
               onEducationChange={updateEducation}
               onProjectChange={updateProject}
@@ -655,7 +746,7 @@ export default function Onboarding() {
               <div className="onboarding-card__title onboarding-card__title--preferences">
                 <h1>Job preferences</h1>
                 <p>
-                  Choose roles, skills, and filters so we only surface jobs that fit your profile — not
+                  Choose roles, skills, and filters so we only surface jobs that fit your profile ? not
                   random listings.
                 </p>
               </div>
@@ -663,6 +754,8 @@ export default function Onboarding() {
                 <PreferencesStep
                   values={preferences}
                   saving={saving}
+                  techAutoFilled={techAutoFilled}
+                  rolesAutoFilled={rolesAutoFilled}
                   onChange={patchPreferences}
                   onBack={() => setStep(1)}
                   onComplete={handleFinish}
@@ -671,7 +764,6 @@ export default function Onboarding() {
             </>
           )}
             </>
-          )}
         </div>
       </OnboardingPageShell>
     </div>

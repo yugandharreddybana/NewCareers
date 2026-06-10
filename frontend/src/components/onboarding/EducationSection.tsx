@@ -58,16 +58,34 @@ function EducationPanel({
           />
         </div>
         <div className="onboarding-field onboarding-field--muted">
-          <label htmlFor={id('graduationYear')}>Graduation Year</label>
+          <label htmlFor={id('startYear')}>Start year</label>
           <input
             className="onboarding-input-sm"
-            id={id('graduationYear')}
+            id={id('startYear')}
+            type="number"
+            min={1950}
+            max={2100}
+            placeholder="e.g. 2016"
+            value={entry.startYear}
+            onChange={e => onChange(index, { startYear: e.target.value })}
+          />
+        </div>
+        <div className="onboarding-field onboarding-field--muted">
+          <label htmlFor={id('endYear')}>End year</label>
+          <input
+            className="onboarding-input-sm"
+            id={id('endYear')}
             type="number"
             min={1950}
             max={2100}
             placeholder="e.g. 2020"
-            value={entry.graduationYear}
-            onChange={e => onChange(index, { graduationYear: e.target.value })}
+            value={entry.endYear}
+            onChange={e =>
+              onChange(index, {
+                endYear: e.target.value,
+                graduationYear: e.target.value,
+              })
+            }
           />
         </div>
       </div>

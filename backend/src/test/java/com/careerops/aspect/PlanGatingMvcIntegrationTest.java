@@ -23,6 +23,7 @@ import org.springframework.test.context.junit.jupiter.SpringExtension;
 import org.springframework.test.context.junit.jupiter.web.SpringJUnitWebConfig;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
+import org.springframework.http.converter.json.MappingJackson2HttpMessageConverter;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.context.WebApplicationContext;
@@ -67,6 +68,11 @@ class PlanGatingMvcIntegrationTest {
         GlobalExceptionHandler globalExceptionHandler() {
             return new GlobalExceptionHandler();
         }
+
+        @Bean
+        MappingJackson2HttpMessageConverter mappingJackson2HttpMessageConverter() {
+            return new MappingJackson2HttpMessageConverter();
+        }
     }
 
     @RestController
@@ -87,7 +93,11 @@ class PlanGatingMvcIntegrationTest {
 
     @BeforeEach
     void setUp() {
-        mockMvc = MockMvcBuilders.webAppContextSetup(context).build();
+        mockMvc = MockMvcBuilders
+                .standaloneSetup(context.getBean(GatedTestController.class))
+                .setControllerAdvice(new GlobalExceptionHandler())
+                .setMessageConverters(new MappingJackson2HttpMessageConverter())
+                .build();
         SecurityContextHolder.getContext().setAuthentication(
                 new UsernamePasswordAuthenticationToken(userId.toString(), null));
         Mockito.reset(Config.ENFORCEMENT);
@@ -105,7 +115,9 @@ class PlanGatingMvcIntegrationTest {
                 .when(Config.ENFORCEMENT)
                 .checkCvUploadAllowed(userId);
 
-        mockMvc.perform(post("/test/cv-upload").contentType(MediaType.APPLICATION_JSON))
+        mockMvc.perform(post("/test/cv-upload")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .accept(MediaType.APPLICATION_JSON))
                 .andExpect(status().isPaymentRequired())
                 .andExpect(jsonPath("$.error").value("PLAN_LIMIT_EXCEEDED"))
                 .andExpect(jsonPath("$.feature").value("cv_upload"))

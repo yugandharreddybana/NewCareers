@@ -3,7 +3,7 @@
  */
 import express from 'express';
 import { authGuard } from '../authGuard.js';
-import { createJavaRouteProxy, forwardRawBillingWebhook } from '../services/backendProxy.js';
+import { createJavaRouteProxy } from '../services/backendProxy.js';
 
 const router = express.Router();
 const proxy = createJavaRouteProxy('/billing');
@@ -14,14 +14,14 @@ router.post('/customer-portal', authGuard, proxy);
 router.post('/portal', authGuard, proxy);
 router.get('/subscription', authGuard, proxy);
 router.get('/', authGuard, proxy);
-router.get('/plans', authGuard, proxy);
+router.get('/plans', proxy);
 router.get('/invoices', authGuard, proxy);
 router.get('/usage', authGuard, proxy);
 router.post('/cancel', authGuard, proxy);
 router.post('/reactivate', authGuard, proxy);
 router.put('/organization', authGuard, proxy);
 
-router.post('/webhook', forwardRawBillingWebhook);
+// Webhook is registered in server.ts with per-IP rate limiting (LSA-074).
 
 router.use((req, res) => {
   res.status(404).json({

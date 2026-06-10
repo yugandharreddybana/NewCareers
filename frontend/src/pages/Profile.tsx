@@ -1,8 +1,11 @@
 import React, { useEffect, useRef, useState } from 'react';
+import { useQueryClient } from '@tanstack/react-query';
 import { PageMeta } from '@/components/PageMeta';
 import { PageLoader } from '@/components/LoadingSpinner';
-import { useAuth } from '@/context/AuthContext';
+import { useAuth } from '@/context/authCtx';
 import { profileApi } from '@/services/api';
+import { useProfileQuery } from '@/hooks/queries';
+import { queryKeys } from '@/lib/queryKeys';
 import type { Profile as ProfileType, PortfolioItem } from '@/types';
 import toast from 'react-hot-toast';
 import { User, Upload, Briefcase, MapPin, DollarSign, Tag, Plus, Trash2, ExternalLink, CheckCircle } from 'lucide-react';
@@ -52,7 +55,7 @@ const TagInput: React.FC<{
           placeholder={placeholder ?? 'Type and press Enter'}
           className="flex-1 px-3 py-2 border border-gray-300 rounded-lg text-xs focus:outline-none focus:ring-2 focus:ring-indigo-400"
         />
-        <button aria-label="Add tag" onClick={add} className="px-3 py-2 bg-indigo-500 hover:bg-indigo-600 text-white text-xs rounded-lg transition-colors">
+        <button aria-label="Add tag" onClick={add} className="px-3 py-2 bg-brand-500 hover:bg-brand-600 text-white text-xs rounded-lg transition-colors">
           <Plus size={13} />
         </button>
       </div>
@@ -63,9 +66,10 @@ const TagInput: React.FC<{
 // ─── Main component ───────────────────────────────────────────────────────────
 const ProfilePage: React.FC = () => {
   const { user, updateProfile } = useAuth();
+  const queryClient = useQueryClient();
+  const { data: profileFromServer, isLoading: loading } = useProfileQuery();
 
   const [profile, setProfile] = useState<ProfileType | null>(null);
-  const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [cvUploading, setCvUploading] = useState(false);
   const [saved, setSaved] = useState(false);
@@ -77,13 +81,16 @@ const ProfilePage: React.FC = () => {
   const cvInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
-    profileApi.get()
-      .then(u => {
-        setProfile(u);
-      })
-      .catch(() => toast.error('Failed to load profile.'))
-      .finally(() => setLoading(false));
-  }, []);
+    if (profileFromServer) {
+      setProfile(profileFromServer);
+    }
+  }, [profileFromServer]);
+
+  useEffect(() => {
+    if (!loading && !profileFromServer) {
+      toast.error('Failed to load profile.');
+    }
+  }, [loading, profileFromServer]);
 
   const handleSave = async () => {
     if (!profile) return;
@@ -105,8 +112,7 @@ const ProfilePage: React.FC = () => {
     setCvUploading(true);
     try {
       await profileApi.uploadCv(file);
-      const refreshed = await profileApi.get();
-      setProfile(refreshed);
+      await queryClient.invalidateQueries({ queryKey: queryKeys.profile.current() });
       toast.success('CV uploaded!');
     } catch {
       toast.error('CV upload failed.');
@@ -118,9 +124,9 @@ const ProfilePage: React.FC = () => {
   const addPortfolioItem = async () => {
     if (!newItem.title.trim()) return;
     try {
-      await profileApi.addPortfolioItem(newItem);
-      const updated = await profileApi.get();
+      const updated = await profileApi.addPortfolioItem(newItem);
       setProfile(updated);
+      queryClient.setQueryData(queryKeys.profile.current(), updated);
       setNewItem({ title: '', url: '', description: '', location: '' });
       setAddingPortfolio(false);
       toast.success('Portfolio item added!');
@@ -159,7 +165,7 @@ const ProfilePage: React.FC = () => {
           <button
             onClick={handleSave}
             disabled={saving}
-            className="flex items-center gap-2 px-4 py-2.5 bg-indigo-500 hover:bg-indigo-600 disabled:opacity-60 text-white text-sm font-semibold rounded-lg transition-colors"
+            className="flex items-center gap-2 px-4 py-2.5 bg-brand-500 hover:bg-brand-600 disabled:opacity-60 text-white text-sm font-semibold rounded-lg transition-colors"
           >
             {saved ? <CheckCircle size={15} /> : null}
             {saving ? 'Saving…' : saved ? 'Saved!' : 'Save Changes'}
@@ -392,7 +398,7 @@ const ProfilePage: React.FC = () => {
                     className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400 resize-none"
                   />
                   <div className="flex gap-2">
-                    <button onClick={addPortfolioItem} className="flex-1 py-2 bg-indigo-500 hover:bg-indigo-600 text-white text-sm font-semibold rounded-lg transition-colors">
+                    <button onClick={addPortfolioItem} className="flex-1 py-2 bg-brand-500 hover:bg-brand-600 text-white text-sm font-semibold rounded-lg transition-colors">
                       Add Item
                     </button>
                     <button onClick={() => setAddingPortfolio(false)} className="flex-1 py-2 border border-gray-300 text-gray-600 text-sm font-semibold rounded-lg hover:bg-gray-50 transition-colors">
@@ -418,7 +424,7 @@ const ProfilePage: React.FC = () => {
           <button
             onClick={handleSave}
             disabled={saving}
-            className="px-6 py-2.5 bg-indigo-500 hover:bg-indigo-600 disabled:opacity-60 text-white text-sm font-semibold rounded-lg transition-colors"
+            className="px-6 py-2.5 bg-brand-500 hover:bg-brand-600 disabled:opacity-60 text-white text-sm font-semibold rounded-lg transition-colors"
           >
             {saving ? 'Saving…' : 'Save Changes'}
           </button>

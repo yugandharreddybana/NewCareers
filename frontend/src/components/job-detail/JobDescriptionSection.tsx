@@ -3,6 +3,7 @@ import { useQueryClient } from '@tanstack/react-query';
 import toast from 'react-hot-toast';
 import { JobDescriptionView } from '@/components/job-detail/JobDescriptionView';
 import { sourceLabel } from '@/lib/jobSource';
+import { extractJobPostingMeta, formatSalaryDisplay } from '@/lib/jobPostingMeta';
 import { hasUsableJobDescription, plainJobDescription } from '@/lib/plainJobDescription';
 import { queryKeys } from '@/lib/queryKeys';
 import { jobsApi } from '@/services/api';
@@ -20,6 +21,13 @@ export function JobDescriptionSection({ job, profile, onDescriptionLoaded }: Pro
   const description = plainJobDescription(job.description);
   const hasDescription = hasUsableJobDescription(job.description);
   const looksTruncated = hasDescription && description.length < 500;
+  const postingMeta = extractJobPostingMeta(job);
+  const salaryLabel =
+    job.salaryMin != null || job.salaryMax != null
+      ? formatSalaryDisplay(job, postingMeta)
+      : (postingMeta.salaryLabel ?? '');
+  const locationLabel = postingMeta.locationDetail || job.location || '';
+  const workModelLabel = postingMeta.workArrangement ?? '';
 
   const loadDescription = useCallback(
     async () => {
@@ -58,6 +66,9 @@ export function JobDescriptionSection({ job, profile, onDescriptionLoaded }: Pro
             description={description}
             title={job.title}
             profile={profile ?? null}
+            {...(salaryLabel ? { salary: salaryLabel } : {})}
+            {...(locationLabel ? { location: locationLabel } : {})}
+            {...(workModelLabel ? { workModel: workModelLabel } : {})}
             {...(job.matchedSkills ? { matchedSkills: job.matchedSkills } : {})}
             {...(job.unmatchedSkills ? { unmatchedSkills: job.unmatchedSkills } : {})}
           />

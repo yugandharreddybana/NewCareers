@@ -5,7 +5,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { OtpInput } from '@/components/auth/OtpInput';
 import { Link, useLocation } from 'react-router-dom';
 import { Loader2 } from 'lucide-react';
-import { useAuth } from '@/context/AuthContext';
+import { useAuth } from '@/context/authCtx';
 import { PageMeta } from '@/components/PageMeta';
 import { AuthPageShell } from '@/components/auth/AuthPageShell';
 import { legalPaths } from '@/lib/brand';

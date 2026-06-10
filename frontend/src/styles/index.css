@@ -8,10 +8,10 @@
 
 /* ── CSS Custom Properties ────────────────────────────────────────────── */
 :root {
-  --brand:          #6366f1;
-  --brand-deep:     #4f46e5;
-  --brand-light:    #818cf8;
-  --brand-pale:     #eef2ff;
+  --brand:          #00685f;
+  --brand-deep:     #005049;
+  --brand-light:    #2ca487;
+  --brand-pale:     #e6f4f2;
   --bg-app:         #f8f9fc;
   --bg-surface:     #ffffff;
   --bg-raised:      #f8f9fc;
@@ -20,8 +20,8 @@
   --text-primary:   #0f172a;
   --text-secondary: #475569;
   --text-tertiary:  #94a3b8;
-  --sidebar-width:  240px;
   --topbar-height:  60px;
+  --status-banner-height: 0px;
   --radius:         0.75rem;
 }
 
@@ -123,20 +123,9 @@ body {
   }
 
   /* ── Page layout helpers ── */
-  .page-container { @apply max-w-6xl mx-auto px-6 py-8; }
+  .app-shell { @apply w-full px-margin-mobile md:px-margin-desktop; }
+  .page-container { @apply w-full px-margin-mobile md:px-margin-desktop py-8; }
   .section-label  { @apply text-2xs font-bold uppercase tracking-widest text-text-tertiary; }
-  .app-shell-content-offset {
-    margin-left: var(--sidebar-width, 240px);
-    width: calc(100% - var(--sidebar-width, 240px));
-    transition: margin-left 0.22s cubic-bezier(0.4, 0, 0.2, 1), width 0.22s cubic-bezier(0.4, 0, 0.2, 1);
-  }
-  .topbar-shell-offset {
-    left: var(--sidebar-width, 240px);
-    width: calc(100% - var(--sidebar-width, 240px));
-    transition: left 0.22s cubic-bezier(0.4, 0, 0.2, 1), width 0.22s cubic-bezier(0.4, 0, 0.2, 1);
-  }
-  .bottom-nav-safe { padding-bottom: env(safe-area-inset-bottom); }
-  .sidebar-scrollbarless::-webkit-scrollbar { display: none; }
   .thread-skeleton-line--wide { width: 80%; }
   .thread-skeleton-line--narrow { width: 60%; }
 
@@ -173,7 +162,7 @@ body {
 }
 
 /* ── Progress Page ─────────────────────────────────────────── */
-.progress-page { padding: var(--space-6) var(--space-4); max-width: var(--content-wide); margin-inline: auto; }
+.progress-page { padding: var(--space-6) var(--space-4); width: 100%; margin-inline: auto; }
 .page-header { display: flex; align-items: flex-start; justify-content: space-between; gap: var(--space-4); margin-bottom: var(--space-6); flex-wrap: wrap; }
 .page-title { font-size: var(--text-xl); font-weight: 700; color: var(--color-text); line-height: 1.2; }
 .page-subtitle { font-size: var(--text-sm); color: var(--color-text-muted); margin-top: var(--space-1); }
@@ -301,7 +290,7 @@ body {
 .variant-count { background: var(--color-primary); color: #fff; border-radius: var(--radius-full); padding: 0 5px; font-size: 10px; font-weight: 700; min-width: 16px; text-align: center; }
 
 /* ── Workspace Page ─────────────────────────────────────────── */
-.page-container { padding: var(--space-6) var(--space-4); max-width: var(--content-wide); margin-inline: auto; }
+.page-container { padding: var(--space-6) var(--space-4); width: 100%; margin-inline: auto; }
 
 /* ── Section 3.2 Application Planner — component styles ──────── */
 .planner-card { display: flex; flex-direction: column; gap: var(--space-3); background: var(--color-surface); border: 1px solid var(--color-border); border-radius: var(--radius-xl); padding: var(--space-5); }

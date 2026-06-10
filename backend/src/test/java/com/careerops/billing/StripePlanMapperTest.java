@@ -47,7 +47,7 @@ class StripePlanMapperTest {
     @DisplayName("mapStripeStatus covers active, trialing, past_due variants, and cancelled")
     void mapStripeStatus() {
         assertThat(mapper.mapStripeStatus("active")).isEqualTo(SubscriptionStatus.ACTIVE);
-        assertThat(mapper.mapStripeStatus("trialing")).isEqualTo(SubscriptionStatus.TRIALING);
+        assertThat(mapper.mapStripeStatus("trialing")).isEqualTo(SubscriptionStatus.ACTIVE);
         assertThat(mapper.mapStripeStatus("past_due")).isEqualTo(SubscriptionStatus.PAST_DUE);
         assertThat(mapper.mapStripeStatus("incomplete")).isEqualTo(SubscriptionStatus.PAST_DUE);
         assertThat(mapper.mapStripeStatus("paused")).isEqualTo(SubscriptionStatus.PAST_DUE);

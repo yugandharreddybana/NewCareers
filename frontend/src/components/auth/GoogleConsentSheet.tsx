@@ -34,6 +34,10 @@ export function GoogleConsentSheet({ open, busy, onCancel, onSubmit }: GoogleCon
       setError('You must accept the Terms of Service and Privacy Policy to continue.');
       return;
     }
+    if (!aiProcessingAccepted) {
+      setError('AI processing consent is required to create an account.');
+      return;
+    }
     if (CAPTCHA_ENABLED && !captchaToken) {
       setError('Complete the security check below.');
       return;
@@ -99,7 +103,7 @@ export function GoogleConsentSheet({ open, busy, onCancel, onSubmit }: GoogleCon
               disabled={busy}
             />
             <span className="text-sm text-gray-600">
-              I consent to AI processing of my CV and profile (optional).
+              I consent to AI processing of my CV and profile.
             </span>
           </label>
 

@@ -14,17 +14,17 @@
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { useQueryClient } from '@tanstack/react-query';
 import toast from 'react-hot-toast';
 import { getUserFacingErrorMessage } from '@/lib/userFacingError';
 import { PageMeta } from '@/components/PageMeta';
 import { discoveryApi, SearchParams, SearchResult } from '@/services/discoveryApi';
-import { profileApi } from '@/services/api';
 import { queryKeys } from '@/lib/queryKeys';
 import {
   useFetchLiveJobMutation,
   useAnalyticsSummary,
   useInfiniteJobsFeed,
+  useProfileQuery,
 } from '@/hooks/queries';
 import { fetchJobsOrchestrated } from '@/lib/pipelineJobSearch';
 import { skillsApi } from '@/services/skillsApi';
@@ -91,10 +91,7 @@ export default function PipelineDashboard() {
   const [fetchInFlight, setFetchInFlight] = useState(false);
   const [fetchProgress, setFetchProgress] = useState<string | null>(null);
   const { data: analyticsStats, isLoading: statsLoading } = useAnalyticsSummary();
-  const { data: profile } = useQuery({
-    queryKey: queryKeys.profile.current(),
-    queryFn: () => profileApi.get(),
-  });
+  const { data: profile } = useProfileQuery();
   const minMatch = profile?.minMatchPercent ?? 0;
 
   const [search, setSearch] = useState('');
@@ -317,7 +314,7 @@ export default function PipelineDashboard() {
             state={allJobs.length === 0 ? 'locked' : triageSkill.state} onClick={triageSkill.run}
             className="!rounded-xl !h-9 !text-xs" />
           <button onClick={handleFetchLiveJobs} disabled={fetchLive.isPending || fetchInFlight}
-            className="flex items-center gap-2 h-9 px-4 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl font-semibold text-sm transition-all disabled:opacity-50 shadow-sm">
+            className="flex items-center gap-2 h-9 px-4 bg-brand-500 hover:bg-brand-600 text-white rounded-xl font-semibold text-sm transition-all disabled:opacity-50 shadow-sm">
             <Sparkles size={14} className={fetchLive.isPending ? 'animate-spin' : ''} />
             {fetchLive.isPending ? 'Fetching…' : 'Fetch Live Jobs'}
           </button>

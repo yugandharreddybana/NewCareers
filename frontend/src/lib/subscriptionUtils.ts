@@ -1,10 +1,5 @@
-/** Days remaining until trial end (0 if missing or expired). */
-export function computeTrialDaysRemaining(trialEndsAt: string | null | undefined): number {
-  if (!trialEndsAt) return 0;
-  const end = new Date(trialEndsAt).getTime();
-  if (Number.isNaN(end)) return 0;
-  return Math.max(0, Math.ceil((end - Date.now()) / 86_400_000));
-}
+/** Shared React Query key for subscription data (BILL-048). */
+export const SUBSCRIPTION_QUERY_KEY = ['subscription'] as const;
 
 /** Human-readable feature label from backend snake_case keys. */
 export function formatPlanLimitFeature(feature: string): string {

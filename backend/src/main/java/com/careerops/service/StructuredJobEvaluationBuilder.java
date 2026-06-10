@@ -38,6 +38,7 @@ public class StructuredJobEvaluationBuilder {
     private final UserJobSkillMatchService skillMatchService;
     private final JobMatchingService jobMatcher;
     private final EvaluationReportValidator evaluationValidator;
+    private final ProfileReadableFields profileFields;
     private final ObjectMapper mapper;
 
     public StructuredJobEvaluationBuilder(
@@ -45,11 +46,13 @@ public class StructuredJobEvaluationBuilder {
             UserJobSkillMatchService skillMatchService,
             JobMatchingService jobMatcher,
             EvaluationReportValidator evaluationValidator,
+            ProfileReadableFields profileFields,
             ObjectMapper mapper) {
         this.skillExtraction = skillExtraction;
         this.skillMatchService = skillMatchService;
         this.jobMatcher = jobMatcher;
         this.evaluationValidator = evaluationValidator;
+        this.profileFields = profileFields;
         this.mapper = mapper;
     }
 
@@ -90,7 +93,7 @@ public class StructuredJobEvaluationBuilder {
         raw.put("overallScore", match);
         raw.put("verdict", verdictFor(match));
         raw.put("evaluationStatus", evaluationStatus);
-        raw.put("humanSummary", humanSummary(job, profile, match, matched, unmatched));
+        raw.put("humanSummary", humanSummary(job, match, matched, unmatched));
 
         ArrayNode matchedArr = raw.putArray("matchedSkills");
         matched.forEach(matchedArr::add);
@@ -189,36 +192,34 @@ public class StructuredJobEvaluationBuilder {
         return "Low match — deprioritise unless strategic";
     }
 
-    private static String humanSummary(Job job, UserProfile profile, int match,
+    private static String humanSummary(Job job, int match,
             List<String> matched, List<String> unmatched) {
         String title = safe(job.getTitle());
         String company = safe(job.getCompany());
-        String headline = profile.getGoalTitle() != null && !profile.getGoalTitle().isBlank()
-                ? profile.getGoalTitle().trim() : null;
         if (matched.isEmpty()) {
-            String base = "Limited overlap between your CV/profile and "
+            return "Limited overlap between your CV/profile and "
                 + title + " at " + company + " (" + match + "%). Review gaps before investing application time.";
-            return headline != null ? "Headline: " + headline + ". " + base : base;
         }
-        String base = "Your background aligns with " + matched.size() + " core signals for "
+        return "Your background aligns with " + matched.size() + " core signals for "
             + title + " at " + company + " (" + match + "%). "
             + (unmatched.isEmpty()
                 ? "No major stack gaps detected in the posting text."
                 : unmatched.size() + " profile skills need stronger evidence in your CV.");
-        return headline != null ? "Headline: " + headline + ". " + base : base;
     }
 
-    private static String executiveSummary(Job job, UserProfile profile, int match,
+    private String executiveSummary(Job job, UserProfile profile, int match,
             List<String> matched, List<String> unmatched,
             @Nullable JobMatchingService.ScoredJob scored) {
         StringBuilder sb = new StringBuilder();
-        if (profile.getGoalTitle() != null && !profile.getGoalTitle().isBlank()) {
-            sb.append("Headline: ").append(profile.getGoalTitle().trim()).append(". ");
+        String headline = profileFields.goalTitle(profile);
+        if (headline != null) {
+            sb.append("Headline: ").append(headline).append(". ");
         }
         sb.append(safe(job.getTitle())).append(" at ").append(safe(job.getCompany()));
         sb.append(" scores ").append(match).append("% against your profile");
-        if (profile.getLocation() != null && !profile.getLocation().isBlank()) {
-            sb.append(" (target location: ").append(profile.getLocation()).append(")");
+        String location = profileFields.location(profile);
+        if (location != null) {
+            sb.append(" (target location: ").append(location).append(")");
         }
         sb.append(". ");
         if (scored != null && !scored.reasons().isEmpty()) {

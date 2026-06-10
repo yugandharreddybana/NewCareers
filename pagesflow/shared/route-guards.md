@@ -33,7 +33,7 @@ flowchart TD
     onbRoute -->|no| admin{Admin route?}
     admin -->|yes| adminRole{role ADMIN?}
     adminRole -->|no| dash3[/dashboard/]
-    adminRole -->|yes| allowAdmin[Render admin in AppShell]
+    adminRole -->|yes| allowAdmin[Render admin in DashboardLayout]
 
     admin -->|no| protected{Protected route?}
     protected -->|yes| hasUser2{User?}
@@ -43,18 +43,16 @@ flowchart TD
     onbGate -->|yes| allowApp[Render page]
 ```
 
-## Full-width layout (no AppShell sidebar)
+## App layout (`DashboardLayout`)
 
-`ProtectedRoute` skips `AppShell` for these paths:
+Authenticated routes render inside `DashboardLayout` (`DashboardTopNav` + page content via `<Outlet />`).
+
+**Layout-less paths** (no top nav):
 
 - `/onboarding`
-- `/welcome`
-- `/dashboard`
-- `/account`
-- `/jobs`, `/kanban` (redirects to `/jobs`)
-- `/jobs/:id`
+- `/welcome` (redirects to `/dashboard?welcome=1`)
 
-All other protected routes render inside `AppShell` (sidebar + top bar + notification bell).
+All other protected routes — including `/dashboard`, `/jobs`, `/account`, `/skills`, admin — use `DashboardLayout`.
 
 ## Legacy route aliases
 
@@ -84,7 +82,8 @@ All guards show `PageLoader` while `AuthContext.loading` is true.
 
 | Action | Who can do it | API signal |
 |--------|---------------|------------|
-| View subscription, usage, invoices | Any **active** org member | `GET /billing/subscription` always allowed when authenticated |
+| View subscription and usage | Any **active** org member | `GET /billing/subscription` always allowed when authenticated |
+| View invoices | Org **owner** or **admin** with a Stripe customer | UI enables invoice fetch only when `canManageBilling` and `hasBillingAccount` are true |
 | Checkout, portal, cancel | Org **owner** or **admin** only | `canManageBilling: true` in subscription response; mutations return 403 otherwise |
 | Stripe portal / payment method | Owner/admin **and** `hasBillingAccount: true` (Stripe customer exists) | UI gates portal buttons on both flags |
 
@@ -100,7 +99,7 @@ Frontend route guards (`ProtectedRoute`, etc.) do **not** block navigation when 
 | `PlanEnforcementService` | Compares org usage vs `PlanLimit.forPlan(effectivePlan)` |
 | Over limit | HTTP **402 Payment Required** with `PlanLimitErrorResponse` (`error: PLAN_LIMIT_EXCEEDED`, `feature`, `currentPlan`, `upgradeUrl`) |
 | Frontend UX | `api.ts` intercepts 402 → `emitPlanLimitExceeded` → `PlanLimitBanner` in `App.tsx` |
-| Dev/test bypass | `dev`/`test` Spring profiles skip enforcement unless `SAAS_BILLING_ENFORCEMENT_ENABLED=true` |
+| Enforcement switch | `SAAS_BILLING_ENFORCEMENT_ENABLED=false` disables limits; `true` enables them in every profile, including dev/test |
 
 Gated features include `ai_skill_run`, `cv_upload`, `job_application`, and team invites (`team_member` via `OrgService`).
 

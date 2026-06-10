@@ -146,7 +146,10 @@ public class OnboardingDeliveryService {
             saveProgress(userId, progress(Stage.normalizing_cv, "Preparing your profile for AI matching…", 0, 0));
             cvNormalization.normalizeAndStore(userId);
 
-            saveProgress(userId, progress(Stage.fetching_jobs, "Searching job boards in your area…", 0, 0));
+            String fetchMsg = jobDelivery.willUseCachedPoolForOnboarding(userId)
+                ? "Matching roles from today's job pool…"
+                : "Searching job boards in your area…";
+            saveProgress(userId, progress(Stage.fetching_jobs, fetchMsg, 0, 0));
             jobDelivery.deliverForOnboarding(
                 userId,
                 OnboardingDeliveryDtos.DEFAULT_TARGET_COUNT,

@@ -9,13 +9,8 @@ import {
   type SubscriptionResponse,
 } from '@/services/billingApi';
 import { getUserFacingErrorMessage } from '@/lib/userFacingError';
+import { assignStripeHostedUrl } from '@/lib/stripeRedirect';
 import { AccountSettingsPageHeader } from './AccountSettingsPageHeader';
-
-const PLAN_PRICES: Record<SubscriptionPlanCode, number> = {
-  FREE: 0,
-  PRO: 29,
-  ENTERPRISE: 99,
-};
 
 function formatDate(iso: string | null | undefined): string {
   if (!iso) return '—';
@@ -28,7 +23,7 @@ function formatDate(iso: string | null | undefined): string {
   }).format(d);
 }
 
-function formatCurrency(amount: number, currency = 'USD'): string {
+function formatCurrency(amount: number, currency = 'EUR'): string {
   return new Intl.NumberFormat(undefined, { style: 'currency', currency }).format(amount);
 }
 
@@ -43,6 +38,28 @@ function isUnlimitedLimit(limit: number): boolean {
 function usagePercent(used: number, limit: number): number {
   if (isUnlimitedLimit(limit) || limit <= 0) return Math.min((used / 100) * 15, 100);
   return Math.min((used / limit) * 100, 100);
+}
+
+function planDisplayName(plan: SubscriptionPlanCode): string {
+  switch (plan) {
+    case 'PRO':
+      return 'Pro';
+    case 'ENTERPRISE':
+      return 'Elite';
+    default:
+      return 'Free';
+  }
+}
+
+function cancelFeatureLoss(plan: SubscriptionPlanCode): string[] {
+  switch (plan) {
+    case 'ENTERPRISE':
+      return ['Unlimited AI Skill Runs', 'Unlimited CV profiles', 'Priority support'];
+    case 'PRO':
+      return ['200 AI Skill Runs per month', '10 CV profiles', 'Interview Prep Suite'];
+    default:
+      return ['Premium features'];
+  }
 }
 
 function UsageBar({
@@ -88,11 +105,19 @@ export default function AccountBillingPage() {
     refetch: refetchSubscription,
   } = useSubscription();
 
+  const plansQuery = useQuery({
+    queryKey: ['billing', 'plans'],
+    queryFn: () => billingApi.getPlans(),
+    staleTime: 300_000,
+    retry: false,
+  });
+
   const invoicesQuery = useQuery({
     queryKey: ['billing', 'invoices'],
     queryFn: () => billingApi.getInvoices(),
     staleTime: 60_000,
     retry: false,
+    enabled: Boolean(subscription?.canManageBilling && subscription?.hasBillingAccount),
   });
 
   const invoices: BillingInvoice[] = invoicesQuery.isError ? [] : (invoicesQuery.data ?? []);
@@ -101,7 +126,7 @@ export default function AccountBillingPage() {
     setPortalLoading(true);
     try {
       const { url } = await billingApi.openPortal();
-      window.location.assign(url);
+      assignStripeHostedUrl(url);
     } catch (err) {
       toast.error(getUserFacingErrorMessage(err, 'Could not open billing portal.'));
       setPortalLoading(false);
@@ -112,7 +137,7 @@ export default function AccountBillingPage() {
     setCheckoutLoading(true);
     try {
       const { url } = await billingApi.createCheckoutSession(plan);
-      window.location.assign(url);
+      assignStripeHostedUrl(url);
     } catch (err) {
       toast.error(getUserFacingErrorMessage(err, 'Could not start checkout.'));
       setCheckoutLoading(false);
@@ -136,12 +161,9 @@ export default function AccountBillingPage() {
   const storedPlan = subscription?.plan ?? 'FREE';
   const displayPlan = subscription?.effectivePlan ?? storedPlan;
   const status = subscription?.status ?? 'ACTIVE';
-  const isTrialing = status === 'TRIALING';
-  const planPrice = PLAN_PRICES[displayPlan] ?? 0;
-  const chargeDate = subscription?.trialEndsAt ?? subscription?.currentPeriodEnd;
   const canManageBilling = Boolean(subscription?.canManageBilling);
   const hasBillingAccount = Boolean(subscription?.hasBillingAccount);
-
+  const cancelAtPeriodEnd = Boolean(subscription?.cancelAtPeriodEnd);
   const aiUsed = subscription?.usageThisMonth.aiRuns ?? 0;
   const aiLimit = subscription?.limits.aiRunsPerMonth ?? 5;
   const appsUsed = subscription?.usageThisMonth.applications ?? 0;
@@ -149,19 +171,48 @@ export default function AccountBillingPage() {
   const cvUsed = subscription?.cvUploadsTotal ?? 0;
   const cvLimit = subscription?.limits.cvUploads ?? 1;
 
-  const trialDaysLabel =
-    subscription?.daysRemaining && subscription.daysRemaining > 0
-      ? `${subscription.daysRemaining}-day`
-      : 'trial';
-
-  const showTrialBanner = isTrialing && subscription?.trialEndsAt;
-
   return (
     <main className="flex-1 flex flex-col gap-stack-lg min-w-0">
       <AccountSettingsPageHeader
         title="Subscription & Billing"
         subtitle="Manage your plan, billing cycle, and payment methods."
       />
+
+      {status === 'PAST_DUE' && !subscriptionError && (
+        <div className="bg-amber-50 border border-amber-200 rounded p-stack-md flex flex-col sm:flex-row sm:items-center gap-stack-md">
+          <p className="font-body-md text-body-md text-amber-950 flex-1">
+            Your last payment failed. Update your payment method in the customer portal to keep your{' '}
+            {planDisplayName(displayPlan)} plan active.
+          </p>
+          {canManageBilling && hasBillingAccount && (
+            <button
+              type="button"
+              disabled={portalLoading}
+              onClick={() => void openPortal()}
+              className="font-label-md text-label-md bg-amber-900 text-white px-4 py-2 rounded shrink-0 disabled:opacity-50"
+            >
+              {portalLoading ? 'Opening…' : 'Update payment method'}
+            </button>
+          )}
+        </div>
+      )}
+
+      {cancelAtPeriodEnd && canManageBilling && hasBillingAccount && !subscriptionError && (
+        <div className="bg-surface-container border border-outline-variant rounded p-stack-md flex flex-col sm:flex-row sm:items-center gap-stack-md">
+          <p className="font-body-md text-body-md text-on-surface-variant flex-1">
+            Your subscription is set to cancel on {formatDate(subscription?.currentPeriodEnd)}. You can
+            resume billing in the Stripe customer portal before that date.
+          </p>
+          <button
+            type="button"
+            disabled={portalLoading}
+            onClick={() => void openPortal()}
+            className="font-label-md text-label-md border border-outline hover:bg-surface-container-high text-on-surface px-4 py-2 rounded shrink-0 disabled:opacity-50"
+          >
+            {portalLoading ? 'Opening…' : 'Manage in portal'}
+          </button>
+        </div>
+      )}
 
       {subscriptionError && (
         <div className="bg-error-container border border-error/30 rounded p-stack-md flex flex-col sm:flex-row sm:items-center gap-stack-md">
@@ -174,31 +225,6 @@ export default function AccountBillingPage() {
             onClick={() => void refetchSubscription()}
           >
             Retry
-          </button>
-        </div>
-      )}
-
-      {showTrialBanner && !subscriptionError && (
-        <div className="bg-secondary-container border border-secondary-container rounded p-stack-md flex items-start sm:items-center gap-stack-md">
-          <span
-            className="material-symbols-outlined text-on-secondary-container"
-            style={{ fontVariationSettings: "'FILL' 1" }}
-            aria-hidden="true"
-          >
-            info
-          </span>
-          <div className="flex-1">
-            <p className="font-label-md text-label-md text-on-secondary-container">
-              Your {trialDaysLabel} Pro trial ends on {formatDate(subscription.trialEndsAt)}
-            </p>
-          </div>
-          <button
-            type="button"
-            disabled={checkoutLoading}
-            onClick={() => void startCheckout('PRO')}
-            className="font-label-sm text-label-sm bg-primary text-on-primary px-3 py-1.5 rounded font-semibold hover:bg-primary/90 transition-colors shrink-0 disabled:opacity-50"
-          >
-            Upgrade Now
           </button>
         </div>
       )}
@@ -217,7 +243,7 @@ export default function AccountBillingPage() {
             </div>
             <div className="flex items-baseline gap-stack-sm mb-stack-md">
               <span className="font-display text-display text-on-surface">
-                {isTrialing ? `${displayPlan} Trial` : displayPlan}
+                {displayPlan}
               </span>
               <span className="font-body-md text-body-md text-on-surface-variant">/ month</span>
             </div>
@@ -225,8 +251,8 @@ export default function AccountBillingPage() {
               <p className="font-body-md text-body-md text-on-surface-variant">Loading plan details…</p>
             ) : (
               <p className="font-body-md text-body-md text-on-surface-variant mb-stack-lg">
-                {isTrialing
-                  ? `You will be charged ${formatCurrency(planPrice)} on ${formatDate(chargeDate)}.`
+                {cancelAtPeriodEnd
+                    ? `Your plan stays active until ${formatDate(subscription?.currentPeriodEnd)}, then moves to Free.`
                   : displayPlan === 'FREE'
                     ? 'You are on the free plan. Upgrade to unlock Pro features.'
                     : `Your plan renews on ${formatDate(subscription?.currentPeriodEnd)}.`}
@@ -234,6 +260,25 @@ export default function AccountBillingPage() {
             )}
           </div>
           <div className="flex flex-wrap gap-stack-md">
+            {displayPlan === 'FREE' && canManageBilling && !subscriptionLoading && (
+              <>
+                {(plansQuery.data ?? [])
+                  .filter(plan => plan.name === 'PRO' || plan.name === 'ENTERPRISE')
+                  .map(plan => (
+                    <button
+                      key={plan.id}
+                      type="button"
+                      disabled={checkoutLoading}
+                      onClick={() => void startCheckout(plan.name as SubscriptionPlanCode)}
+                      className="font-label-md text-label-md bg-primary text-on-primary px-5 py-2.5 rounded transition-all duration-200 hover:bg-primary/90 disabled:opacity-50"
+                    >
+                      {checkoutLoading
+                        ? 'Redirecting…'
+                        : `Upgrade to ${planDisplayName(plan.name as SubscriptionPlanCode)}`}
+                    </button>
+                  ))}
+              </>
+            )}
             {canManageBilling && hasBillingAccount && (
               <button
                 type="button"
@@ -265,10 +310,10 @@ export default function AccountBillingPage() {
           ) : (
             <>
               <p className="font-label-sm text-label-sm text-on-surface-variant -mt-1 mb-1">
-                Monthly plan usage (resets each calendar month)
+                AI skill runs reset each billing period (30 days from checkout). Auto-apply runs reset each calendar month.
               </p>
               <UsageBar label="AI Skill Runs" used={aiUsed} limit={aiLimit} />
-              <UsageBar label="Applications" used={appsUsed} limit={appsLimit} />
+              <UsageBar label="Auto-Apply Runs" used={appsUsed} limit={appsLimit} />
               <UsageBar label="CV Versions" used={cvUsed} limit={cvLimit} />
             </>
           )}
@@ -303,7 +348,11 @@ export default function AccountBillingPage() {
 
         <section className="glass-panel rounded p-gutter lg:col-span-2 overflow-x-auto">
           <h3 className="account-settings-card-label mb-stack-md">Billing History</h3>
-          {invoicesQuery.isLoading ? (
+          {!canManageBilling ? (
+            <p className="font-body-md text-on-surface-variant">
+              Billing history is available to organization owners and admins.
+            </p>
+          ) : invoicesQuery.isLoading ? (
             <p className="font-body-sm text-on-surface-variant">Loading invoices…</p>
           ) : invoicesQuery.isError ? (
             <p className="font-body-md text-on-surface-variant">
@@ -362,7 +411,7 @@ export default function AccountBillingPage() {
         </section>
       </div>
 
-      {displayPlan !== 'FREE' && canManageBilling && hasBillingAccount && !subscriptionError && (
+      {displayPlan !== 'FREE' && canManageBilling && hasBillingAccount && !cancelAtPeriodEnd && !subscriptionError && (
         <section className="border border-error/30 bg-error-container rounded p-gutter flex flex-col sm:flex-row items-start sm:items-center justify-between gap-stack-md">
           <div>
             <h3 className="font-headline-md text-headline-md text-on-error-container mb-1">
@@ -396,21 +445,15 @@ export default function AccountBillingPage() {
             </div>
             <h2 className="font-headline-md text-headline-md text-on-surface mb-stack-sm">Are you sure?</h2>
             <p className="font-body-md text-body-md text-on-surface-variant mb-stack-md">
-              If you cancel your Pro plan, you will lose access to:
+              If you cancel your {displayPlan} plan, you will lose access to:
             </p>
             <ul className="flex flex-col gap-2 mb-stack-lg font-body-md text-body-md text-on-surface-variant">
-              <li className="flex items-center gap-2">
-                <span className="material-symbols-outlined text-sm text-error">close</span>
-                Unlimited AI Skill Runs
-              </li>
-              <li className="flex items-center gap-2">
-                <span className="material-symbols-outlined text-sm text-error">close</span>
-                Advanced Resume Parsing
-              </li>
-              <li className="flex items-center gap-2">
-                <span className="material-symbols-outlined text-sm text-error">close</span>
-                Priority Support
-              </li>
+              {cancelFeatureLoss(displayPlan as SubscriptionPlanCode).map(feature => (
+                <li key={feature} className="flex items-center gap-2">
+                  <span className="material-symbols-outlined text-sm text-error">close</span>
+                  {feature}
+                </li>
+              ))}
             </ul>
             <div className="flex justify-end gap-stack-md">
               <button
@@ -418,7 +461,7 @@ export default function AccountBillingPage() {
                 className="font-label-md text-label-md border border-outline hover:bg-surface-container text-on-surface px-4 py-2 rounded transition-all"
                 onClick={() => setCancelModalOpen(false)}
               >
-                Keep Pro Plan
+                Keep {displayPlan} Plan
               </button>
               <button
                 type="button"

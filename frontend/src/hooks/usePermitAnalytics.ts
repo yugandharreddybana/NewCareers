@@ -9,7 +9,7 @@ import {
   useQueryClient,
   keepPreviousData,
 } from '@tanstack/react-query';
-import { useAuth } from '@/context/AuthContext';
+import { useAuth } from '@/context/authCtx';
 import { queryKeys } from '@/lib/queryKeys';
 import {
   permitAnalyticsService,

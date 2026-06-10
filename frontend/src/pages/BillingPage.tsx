@@ -1,12 +1,14 @@
 import { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
+import { useQuery } from '@tanstack/react-query';
 import toast from 'react-hot-toast';
 import { PageMeta } from '@/components/PageMeta';
 import { MarketingNav } from '@/components/marketing/MarketingNav';
-import { useAuth } from '@/context/AuthContext';
+import { useAuth } from '@/context/authCtx';
 import { useSubscription } from '@/hooks/useSubscription';
 import { BRAND_NAME, SALES_EMAIL } from '@/lib/brand';
 import { subscriptionPlanToCardId } from '@/lib/subscriptionUtils';
+import { assignStripeHostedUrl } from '@/lib/stripeRedirect';
 import { billingApi, type SubscriptionPlanCode } from '@/services/billingApi';
 
 interface PlanFeature {
@@ -36,7 +38,7 @@ const PLANS: PricingPlan[] = [
     description: 'Start your solo job search with the essentials.',
     features: [
       { text: '5 AI runs per month' },
-      { text: '10 active job applications' },
+      { text: '10 auto-apply runs per month' },
       { text: '1 CV profile' },
     ],
     cta: 'Get Started Free',
@@ -46,7 +48,7 @@ const PLANS: PricingPlan[] = [
     id: 'pro',
     name: 'Pro',
     checkoutPlan: 'PRO',
-    monthlyPrice: 49,
+    monthlyPrice: 19,
     description: 'Full toolkit for one person running a serious job search.',
     features: [
       { text: '200 AI runs per month', textVariant: 'default' },
@@ -65,7 +67,7 @@ const PLANS: PricingPlan[] = [
     id: 'elite',
     name: 'Elite',
     checkoutPlan: 'ENTERPRISE',
-    monthlyPrice: 79,
+    monthlyPrice: 299,
     description: 'Unlimited power for one individual at peak search intensity.',
     features: [
       { text: 'Unlimited AI runs', iconColor: 'tertiary' },
@@ -99,15 +101,19 @@ export default function BillingPage() {
   const { user } = useAuth();
   const {
     subscription,
-    isTrialing,
-    daysRemaining,
     isLoading: subscriptionLoading,
     error: subscriptionError,
     refetch: refetchSubscription,
   } = useSubscription();
   const navigate = useNavigate();
+  const plansQuery = useQuery({
+    queryKey: ['billing', 'plans'],
+    queryFn: () => billingApi.getPlans(),
+    staleTime: 300_000,
+    retry: false,
+  });
 
-  const currentPlanId = subscription ? subscriptionPlanToCardId(subscription.plan) : null;
+  const currentPlanId = subscription ? subscriptionPlanToCardId(subscription.effectivePlan) : null;
 
   const handlePaidUpgrade = async (plan: PricingPlan) => {
     if (!plan.checkoutPlan) return;
@@ -118,7 +124,7 @@ export default function BillingPage() {
     setCheckoutLoading(plan.id);
     try {
       const { url } = await billingApi.createCheckoutSession(plan.checkoutPlan);
-      window.location.href = url;
+      assignStripeHostedUrl(url);
     } catch {
       toast.error('Checkout unavailable right now. Try again later or contact support.');
     } finally {
@@ -149,7 +155,7 @@ export default function BillingPage() {
       <div className="font-sans antialiased min-h-screen flex flex-col text-on-surface bg-surface">
         <MarketingNav activeLink="pricing" />
 
-        <main className="flex-grow pt-32 pb-stack-xl px-margin-mobile md:px-margin-desktop max-w-container-max mx-auto w-full flex flex-col items-center">
+        <main className="flex-grow pt-[calc(8rem+var(--status-banner-height,0px))] pb-stack-xl app-shell w-full flex flex-col items-center">
           <div className="text-center mb-stack-xl max-w-2xl">
             <h1 className="font-display text-display text-on-surface mb-stack-md">
               Invest in your career operating system.
@@ -172,14 +178,6 @@ export default function BillingPage() {
               >
                 Retry
               </button>
-            </div>
-          )}
-
-          {user && isTrialing && !subscriptionError && (
-            <div className="w-full mb-stack-lg rounded-lg border border-primary/20 bg-primary/5 px-6 py-4 text-center">
-              <p className="font-label-md text-label-md text-primary">
-                {daysRemaining} {daysRemaining === 1 ? 'day' : 'days'} left in your trial
-              </p>
             </div>
           )}
 
@@ -207,7 +205,14 @@ export default function BillingPage() {
 
           <div className="grid grid-cols-1 md:grid-cols-3 gap-gutter w-full mb-stack-xl">
             {PLANS.map((plan) => {
-              const price = displayPrice(plan.monthlyPrice);
+              const catalogPlan = plansQuery.data?.find(item =>
+                item.name === plan.checkoutPlan || item.name === plan.name.toUpperCase(),
+              );
+              const price = displayPrice(Number(catalogPlan?.price ?? plan.monthlyPrice));
+              const featureRows =
+                catalogPlan?.features?.length
+                  ? catalogPlan.features.map(text => ({ text }))
+                  : plan.features;
               const featureTextClass =
                 plan.highlighted ? 'text-on-surface' : 'text-on-surface-variant';
               const isCurrentPlan =
@@ -249,7 +254,7 @@ export default function BillingPage() {
                     </p>
                   </div>
                   <ul className="flex flex-col gap-stack-sm mb-stack-lg flex-grow">
-                    {plan.features.map((feature) => (
+                    {featureRows.map((feature) => (
                       <li
                         key={feature.text}
                         className={`flex items-center gap-2 font-body-md text-body-md ${
@@ -288,7 +293,7 @@ export default function BillingPage() {
           </div>
         </main>
 
-        <footer className="w-full py-stack-xl px-margin-mobile md:px-margin-desktop grid grid-cols-2 md:grid-cols-4 gap-gutter max-w-container-max mx-auto bg-background border-t border-outline-variant/30">
+        <footer className="w-full py-stack-xl app-shell grid grid-cols-2 md:grid-cols-4 gap-gutter bg-background border-t border-outline-variant/30">
           <div className="col-span-2 md:col-span-1 flex flex-col gap-stack-sm">
             <div className="font-headline-md text-headline-md font-bold text-on-surface">{BRAND_NAME}</div>
             <p className="font-body-md text-body-md text-on-surface-variant text-sm mt-2">

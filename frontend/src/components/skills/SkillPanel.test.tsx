@@ -58,7 +58,7 @@ describe('SkillPanel', () => {
     fireEvent.click(screen.getByRole('button', { name: /pdf/i }));
 
     await waitFor(() => {
-      expect(skillsApi.downloadSkillPdf).toHaveBeenCalledWith('job-abc', 'evaluate');
+      expect(skillsApi.downloadSkillPdf).toHaveBeenCalledWith('job-abc', 'evaluate', undefined);
     });
     expect(toastPromise).toHaveBeenCalledTimes(1);
   });

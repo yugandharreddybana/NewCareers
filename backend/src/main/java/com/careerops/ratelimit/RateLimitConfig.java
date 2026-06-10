@@ -11,8 +11,8 @@ import java.time.Duration;
  *
  * Policy:
  *   - 60 tokens per 1-minute window (greedy refill — one token every second)
- *   - Initial burst of 10 extra tokens to absorb short legitimate spikes
- *     (e.g. page load firing several parallel API calls)
+ *   - Initial burst of 120 tokens to absorb SPA page loads and post-refresh
+ *     request replays without false 429s on bootstrap reads
  *
  * Why greedy over classic?
  *   Greedy refill distributes tokens evenly across the window so a client
@@ -25,9 +25,9 @@ public class RateLimitConfig {
     @Bean
     public Bandwidth apiBandwidth() {
         return Bandwidth.builder()
-            .capacity(70)
+            .capacity(120)
             .refillGreedy(60, Duration.ofMinutes(1))
-            .initialTokens(70)
+            .initialTokens(120)
             .build();
     }
 }

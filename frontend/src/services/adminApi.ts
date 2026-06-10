@@ -1,13 +1,8 @@
 /**
- * Task 139 — Admin API client.
- * All requests include X-Internal-Secret header.
- * Only accessible from the Admin page (role-gated).
+ * Admin API client.
+ * Browser requests rely on normal user auth; internal trust secrets must stay server-side.
  */
 import { api } from '@/services/api';
-
-const secret = () => ({
-  headers: { 'X-Internal-Secret': import.meta.env.VITE_INTERNAL_SECRET || '' },
-});
 
 export type AdminStats = {
   totalUsers: number;
@@ -34,27 +29,21 @@ export type AdminUser = {
 };
 
 export const adminApi = {
-  /** Platform-wide stats for the admin dashboard */
   getStats: (): Promise<AdminStats> =>
-    api.get('/admin/stats', secret()).then(r => r.data),
+    api.get('/admin/stats').then(r => r.data),
 
-  /** List all feature flags */
   getFlags: (): Promise<FeatureFlag[]> =>
-    api.get('/admin/flags', secret()).then(r => r.data),
+    api.get('/admin/flags').then(r => r.data),
 
-  /** Toggle a feature flag on or off */
   toggleFlag: (key: string, enabled: boolean): Promise<FeatureFlag> =>
-    api.post('/admin/flags/toggle', { key, enabled }, secret()).then(r => r.data),
+    api.post('/admin/flags/toggle', { key, enabled }).then(r => r.data),
 
-  /** List all users */
   listUsers: (page = 1, limit = 20): Promise<{ users: AdminUser[]; total: number }> =>
-    api.get('/admin/users', { ...secret(), params: { page, limit } }).then(r => r.data),
+    api.get('/admin/users', { params: { page, limit } }).then(r => r.data),
 
-  /** Hard-delete a user account */
   deleteUser: (userId: string): Promise<{ success: boolean }> =>
-    api.delete(`/admin/users/${userId}`, secret()).then(r => r.data),
+    api.delete(`/admin/users/${userId}`).then(r => r.data),
 
-  /** Impersonate a user (returns a short-lived token) */
   impersonate: (userId: string): Promise<{ token: string }> =>
-    api.post(`/admin/users/${userId}/impersonate`, {}, secret()).then(r => r.data),
+    api.post(`/admin/users/${userId}/impersonate`, {}).then(r => r.data),
 };

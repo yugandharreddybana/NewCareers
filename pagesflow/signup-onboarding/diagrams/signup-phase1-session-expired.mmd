@@ -1,0 +1,14 @@
+sequenceDiagram
+    participant User
+    participant Signup as Signup.tsx
+    participant TokenStore
+    participant Storage as sessionStorage
+    participant Axios
+
+    User->>Signup: GET /signup?reason=session_expired
+    Signup->>TokenStore: clear()
+    Signup->>Storage: clearPendingSignup co_pending_signup_v2
+    Signup->>Storage: clearOnboardingVerification
+    Signup->>Axios: authApi.logout best-effort
+  Note over Signup: Clears HttpOnly cookies
+    Signup-->>User: Banner sign-up session expired

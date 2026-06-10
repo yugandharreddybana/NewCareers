@@ -40,7 +40,7 @@ export default defineConfig({
         short_name: 'CareerOps',
         description: 'AI-powered career intelligence platform',
         display: 'standalone',
-        start_url: '/dashboard',
+        start_url: '/',
         scope: '/',
         theme_color: '#6366F1',
         background_color: '#F8F9FC',

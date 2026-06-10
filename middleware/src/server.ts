@@ -1,17 +1,24 @@
 import './loadEnv.js';
+import { validateStartupSecrets } from './startupValidation.js';
 import express from 'express';
 import cors from 'cors';
 import helmet from 'helmet';
 import morgan from 'morgan';
 import cookieParser from 'cookie-parser';
 import crypto from 'crypto';
-import { rateLimit, ipKeyGenerator } from 'express-rate-limit';
+import { rateLimit } from 'express-rate-limit';
 import compression from 'compression';
 import { stripXss } from './sanitize';
 import axios from 'axios';
 import hpp from 'hpp';
 import { logger } from './logger.js';
-import { verifySessionToken } from './jwtVerification.js';
+import {
+  CSRF_COOKIE,
+  createBillingWebhookRateLimit,
+  createCsrfProtection,
+  createGlobalApiRateLimit,
+} from './apiProtection.js';
+import { forwardRawBillingWebhook } from './services/backendProxy.js';
 
 // ── C2 fix: startup env validation ────────────────────────────────────────────────
 // Fail fast at startup if critical env vars are missing instead of crashing
@@ -25,6 +32,8 @@ if (missingEnv.length) {
   console.error(`[startup] FATAL: missing required env vars: ${missingEnv.join(', ')}`);
   process.exit(1);
 }
+
+validateStartupSecrets();
 
 const javaBackendUrl = process.env.JAVA_BACKEND_URL || '';
 if (javaBackendUrl.includes(':8100')) {
@@ -173,12 +182,9 @@ app.use((req, res, next) => {
 });
 
 // ── CSRF protection — double-submit cookie (cookie + X-CSRF-Token header) ───────
-const CSRF_COOKIE = 'co_csrf';
-const CSRF_EXEMPT_ROUTES = new Set([
-  '/billing/webhook',
-  '/api/billing/webhook',
-  '/api/v1/billing/webhook',
-]);
+const csrfProtection = createCsrfProtection();
+const globalApiRateLimit = createGlobalApiRateLimit();
+const billingWebhookRateLimit = createBillingWebhookRateLimit();
 
 declare global {
   namespace Express {
@@ -216,63 +222,13 @@ app.get('/api/v1/csrf', (req, res) => {
   return res.json({ token });
 });
 
-app.use('/api/v1', (req, res, next) => {
-  const safeMethods = ['GET', 'HEAD', 'OPTIONS'];
-  if (safeMethods.includes(req.method)) return next();
+// CSRF + global rate limit on v1 and legacy /api/billing (LSA-070).
+app.use('/api/v1', csrfProtection, globalApiRateLimit);
+app.use('/api/billing', csrfProtection, globalApiRateLimit);
 
-  const isExempt = CSRF_EXEMPT_ROUTES.has(req.path)
-    || [...CSRF_EXEMPT_ROUTES].some(route => req.path.startsWith(route));
-  if (isExempt) return next();
-
-  const cookieToken = (req.cookies[CSRF_COOKIE] as string | undefined) || req.issuedCsrfToken;
-  if (!cookieToken) {
-    return res.status(403).json({ error: 'CSRF validation failed: Token missing' });
-  }
-
-  if (IS_PROD) {
-    const headerToken = req.headers['x-csrf-token'];
-    if (!headerToken || String(headerToken) !== cookieToken) {
-      return res.status(403).json({ error: 'CSRF validation failed: Token mismatch' });
-    }
-    return next();
-  }
-
-  const xrw = req.headers['x-requested-with'];
-  if (String(xrw ?? '').toLowerCase() === 'xmlhttprequest') {
-    return next();
-  }
-
-  const headerToken = req.headers['x-csrf-token'];
-  if (headerToken && String(headerToken) !== cookieToken) {
-    return res.status(403).json({ error: 'CSRF validation failed: Token mismatch' });
-  }
-
-  next();
-});
-
-// ── C3 fix: global rate limiter keyed per user (not per IP) ────────────────────
-// The old flat IP-based limiter meant one user on a shared NAT (office, uni)
-// could exhaust the limit for everyone on the same IP.
-// Now: authenticated requests are keyed by JWT userId extracted from the
-// Authorization header; unauthenticated requests fall back to IP.
-app.use('/api/v1', rateLimit({
-  windowMs: 60_000,
-  max: 200,
-  standardHeaders: true,
-  legacyHeaders: false,
-  keyGenerator: (req) => {
-    // 9.011 Fix: Verify JWT signature to prevent malicious forgery and quota exhaust attacks
-    try {
-      const auth = req.headers.authorization;
-      if (auth?.startsWith('Bearer ')) {
-        const token = auth.substring(7);
-        const payload = verifySessionToken(token);
-        if (payload?.sub) return `user:${payload.sub}`;
-      }
-    } catch { /* fall through to IP */ }
-    return ipKeyGenerator(req.ip ?? 'unknown');
-  },
-}));
+// Stripe webhook — CSRF-exempt but per-IP rate limited (LSA-074).
+app.post('/api/v1/billing/webhook', billingWebhookRateLimit, forwardRawBillingWebhook);
+app.post('/api/billing/webhook', billingWebhookRateLimit, forwardRawBillingWebhook);
 
 let cachedHealth: { ok: boolean; backendOk: boolean; ts: number } | null = null;
 
@@ -347,6 +303,7 @@ app.use('/api/v1/agent-memory', agentMemory);
 app.use('/api/v1/resume-versions', resumeVersions);
 app.use('/api/v1/cv', cv);
 app.use('/api/v1/billing', billing);
+// Legacy mount — same CSRF/rate-limit stack as v1; webhook handled above.
 app.use('/api/billing', billing);
 app.use('/api/v1/admin/saas', adminSaas);
 app.use('/api/v1/usage', usage);

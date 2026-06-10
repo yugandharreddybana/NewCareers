@@ -1,7 +1,8 @@
-import React, { useEffect, useState } from 'react';
+import React, { useState } from 'react';
 import { PageMeta } from '@/components/PageMeta';
 import { PageLoader } from '@/components/LoadingSpinner';
 import { api } from '@/services/api';
+import { useInvalidateNetworking, useNetworkingContactsQuery } from '@/hooks/queries';
 import toast from 'react-hot-toast';
 import { Users, Plus, Search, Mail, ExternalLink, Trash2, X } from 'lucide-react';
 
@@ -32,7 +33,7 @@ const STAGE_STYLES: Record<Contact['pipelineStage'], string> = {
   closed:     'bg-purple-100 text-purple-700',
 };
 
-const AddContactModal: React.FC<{ onClose: () => void; onAdd: (c: Contact) => void }> = ({ onClose, onAdd }) => {
+const AddContactModal: React.FC<{ onClose: () => void; onAdd: () => void }> = ({ onClose, onAdd }) => {
   const [form, setForm] = useState({ name: '', company: '', roleTitle: '', email: '', linkedinUrl: '', contactType: 'recruiter' as Contact['contactType'], relationshipTemperature: 'cold' as Contact['relationshipTemperature'], pipelineStage: 'identified' as Contact['pipelineStage'], notes: '' });
   const [saving, setSaving] = useState(false);
   const textFields = [
@@ -55,8 +56,8 @@ const AddContactModal: React.FC<{ onClose: () => void; onAdd: (c: Contact) => vo
     setSaving(true);
     try {
       const body = { ...form, company: form.company || null, roleTitle: form.roleTitle || null, email: form.email || null, linkedinUrl: form.linkedinUrl || null, notes: form.notes || null };
-      const c: Contact = await api.post('/networking/contacts', body).then(r => r.data);
-      onAdd(c); toast.success('Contact added!'); onClose();
+      await api.post('/networking/contacts', body);
+      onAdd(); toast.success('Contact added!'); onClose();
     } catch { toast.error('Failed to add contact.'); }
     finally { setSaving(false); }
   };
@@ -84,7 +85,7 @@ const AddContactModal: React.FC<{ onClose: () => void; onAdd: (c: Contact) => vo
         <div><label className="block text-xs font-medium text-gray-600 mb-1">Notes</label><textarea value={form.notes} onChange={e => set('notes', e.target.value)} rows={2} className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400 resize-none" /></div>
         <div className="flex gap-3 pt-2">
           <button onClick={onClose} className="flex-1 py-2.5 border border-gray-300 rounded-lg text-sm text-gray-600 hover:bg-gray-50">Cancel</button>
-          <button onClick={handleSubmit} disabled={saving} className="flex-1 py-2.5 bg-indigo-500 hover:bg-indigo-600 disabled:opacity-60 text-white text-sm font-semibold rounded-lg">{saving ? 'Saving…' : 'Add Contact'}</button>
+          <button onClick={handleSubmit} disabled={saving} className="flex-1 py-2.5 bg-brand-500 hover:bg-brand-600 disabled:opacity-60 text-white text-sm font-semibold rounded-lg">{saving ? 'Saving…' : 'Add Contact'}</button>
         </div>
       </div>
     </div>
@@ -92,28 +93,19 @@ const AddContactModal: React.FC<{ onClose: () => void; onAdd: (c: Contact) => vo
 };
 
 const NetworkingPage: React.FC = () => {
-  const [contacts, setContacts] = useState<Contact[]>([]);
-  const [loading, setLoading]   = useState(true);
+  const invalidateNetworking = useInvalidateNetworking();
+  const { data: contactsData, isLoading: loading } = useNetworkingContactsQuery();
+  const contacts = (contactsData as Contact[] | undefined) ?? [];
   const [search, setSearch]     = useState('');
   const [showModal, setShowModal] = useState(false);
   const [deleting, setDeleting]   = useState<string | null>(null);
-
-  useEffect(() => {
-    const load = async () => {
-      try {
-        const data = await api.get('/networking/contacts').then(r => r.data);
-        setContacts(data as Contact[]);
-      } finally { setLoading(false); }
-    };
-    load();
-  }, []);
 
   const handleDelete = async (id: string) => {
     if (!window.confirm('Remove this contact?')) return;
     setDeleting(id);
     try {
       await api.delete(`/networking/contacts/${id}`);
-      setContacts(prev => prev.filter(c => c.id !== id));
+      invalidateNetworking();
       toast.success('Contact removed.');
     } catch { toast.error('Failed to remove contact.'); }
     finally { setDeleting(null); }
@@ -128,12 +120,17 @@ const NetworkingPage: React.FC = () => {
   return (
     <>
       <PageMeta title="Networking — NewCareers" />
-      {showModal && <AddContactModal onClose={() => setShowModal(false)} onAdd={c => setContacts(prev => [c, ...prev])} />}
+      {showModal && (
+        <AddContactModal
+          onClose={() => setShowModal(false)}
+          onAdd={() => invalidateNetworking()}
+        />
+      )}
       <div className="max-w-3xl mx-auto px-4 sm:px-6 py-8 space-y-6">
 
         <div className="flex items-center justify-between">
           <div><h1 className="text-2xl font-semibold text-gray-900">Networking</h1><p className="text-sm text-gray-500 mt-1">Track your recruiter and hiring manager relationships.</p></div>
-          <button onClick={() => setShowModal(true)} className="flex items-center gap-2 px-4 py-2.5 bg-indigo-500 hover:bg-indigo-600 text-white text-sm font-semibold rounded-lg transition-colors"><Plus size={15} /> Add Contact</button>
+          <button onClick={() => setShowModal(true)} className="flex items-center gap-2 px-4 py-2.5 bg-brand-500 hover:bg-brand-600 text-white text-sm font-semibold rounded-lg transition-colors"><Plus size={15} /> Add Contact</button>
         </div>
 
         {/* Search */}

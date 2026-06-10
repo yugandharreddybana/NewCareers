@@ -45,6 +45,8 @@ public interface SkillRunRepository extends JpaRepository<SkillRun, UUID> {
     Optional<SkillRun> findFirstByUserIdAndUserJobIdAndSkillOrderByCreatedAtDesc(
             UUID userId, UUID userJobId, String skill);
 
+    Optional<SkillRun> findByIdAndUserId(UUID id, UUID userId);
+
     List<SkillRun> findByUserIdAndUserJobIdAndSkillOrderByCreatedAtDesc(
             UUID userId, UUID userJobId, String skill, Pageable pageable);
 
@@ -90,6 +92,8 @@ public interface SkillRunRepository extends JpaRepository<SkillRun, UUID> {
     int deleteAllByUserId(@Param("userId") UUID userId);
 
     long countByUserIdAndCreatedAtAfter(UUID userId, Instant since);
+
+    long countByUserIdAndUserJobId(UUID userId, UUID userJobId);
 
     @Query("""
         SELECT COUNT(sr) FROM SkillRun sr

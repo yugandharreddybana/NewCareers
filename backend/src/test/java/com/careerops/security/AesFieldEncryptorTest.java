@@ -11,6 +11,7 @@ import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.when;
 
 @ExtendWith(MockitoExtension.class)
@@ -28,7 +29,7 @@ class AesFieldEncryptorTest {
     void setUp() {
         USER_DEK[0] = 7;
         encryptor = AesFieldEncryptor.forTest(userKeyService, LEGACY_KEY);
-        when(userKeyService.getUserDek(USER_ID)).thenReturn(USER_DEK);
+        lenient().when(userKeyService.getUserDek(USER_ID)).thenReturn(USER_DEK);
     }
 
     @Test

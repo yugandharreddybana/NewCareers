@@ -27,7 +27,7 @@ Field order on the form: **Email → Password → Security check → Remember me
 | Field | Required | Validation | When shown |
 |-------|----------|------------|------------|
 | Email | Yes | HTML5 `type="email"`, trimmed on submit | Always |
-| Password | Yes | HTML5 `type="password"`, min length enforced server-side (8) | Always |
+| Password | Yes | Client min length 8 + server enforcement | Always |
 | Security check | Yes (prod) | User types jumbled characters left-to-right; case-insensitive | Production only (`LOGIN_WORD_CAPTCHA_REQUIRED`); hidden in local dev |
 | Remember me | No | Checkbox; passed to `signIn` as `rememberMe: true` | Always |
 
@@ -53,12 +53,12 @@ Google sign-in does not use the word CAPTCHA.
 
 ## Auth and session
 
-On successful login, middleware issues HttpOnly cookies and the frontend stores tokens:
+On successful login, middleware issues HttpOnly cookies; the frontend never stores the refresh token in `sessionStorage`:
 
 | Remember me | Refresh token | Cookie behavior |
 |-------------|---------------|-----------------|
-| Unchecked | Returned in JSON body → `sessionStorage` via `tokenStore.set` | `co_refresh` session cookie (no max-age) |
-| Checked | Not in JSON; HttpOnly `co_refresh` only | `co_refresh` + `co_remember` cookies, 30-day max-age |
+| Unchecked | HttpOnly cookie only | `co_refresh` session cookie (no max-age) |
+| Checked | HttpOnly cookie only | `co_refresh` + `co_remember` cookies, 30-day max-age |
 
 Access token (`co_session`) is always a 15-minute HttpOnly cookie.
 
@@ -138,7 +138,9 @@ sequenceDiagram
 
 ## Edge cases
 
-- **Session expired redirect**: Axios interceptor sends users to `/login?reason=session_expired`.
+- **Session expired redirect**: Axios interceptor / silent refresh failure sends users to `/login?reason=session_expired`. First-time guest visits to protected routes go to plain `/login` (no banner).
+- **2FA remember me**: Checkbox value is passed in `POST /auth/two-factor/verify` body (`rememberMe: true`) in addition to the `co_remember` cookie set at login.
+- **Google link refresh**: Link step-up token is in-memory only; refreshing the page requires signing in with Google again (UI warns user).
 - **Email prefill**: `?email=` pre-populates the field; the query param is removed from the address bar immediately after read.
 - **One-time challenge**: Each `challengeId` is consumed on verify; refresh or retry fetches a new one.
 - **Challenge TTL**: 10 minutes server-side; expired challenges return invalid captcha.
@@ -148,6 +150,7 @@ sequenceDiagram
 
 ## Related docs
 
+- [login-pipeline.docx](./login-pipeline.docx) — full pipeline reference with embedded sequence diagrams (DOCX)
 - [shared/auth-infrastructure.md](../shared/auth-infrastructure.md)
 - [shared/route-guards.md](../shared/route-guards.md)
 - [mandatory-fields.md](../mandatory-fields.md) — onboarding may still use Google reCAPTCHA

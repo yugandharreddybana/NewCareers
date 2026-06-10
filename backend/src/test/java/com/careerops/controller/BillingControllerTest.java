@@ -73,6 +73,7 @@ class BillingControllerTest {
                         SubscriptionStatus.TRIALING,
                         null,
                         null,
+                        false,
                         7,
                         false,
                         true,
@@ -83,7 +84,8 @@ class BillingControllerTest {
         mockMvc().perform(get("/billing/subscription"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.plan").value("FREE"))
-                .andExpect(jsonPath("$.status").value("TRIALING"));
+                .andExpect(jsonPath("$.status").value("TRIALING"))
+                .andExpect(jsonPath("$.cancelAtPeriodEnd").value(false));
 
         verify(billingService).getSubscriptionForUser(userId);
     }

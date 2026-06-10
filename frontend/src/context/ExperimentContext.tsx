@@ -11,7 +11,7 @@
  * instance used everywhere else, with the full interceptor chain.
  */
 import React, { createContext, useContext, useEffect, useState } from 'react';
-import { useAuth } from '@/context/AuthContext';
+import { useAuth } from '@/context/authCtx';
 import { experimentsApi } from '@/services/experimentsApi';
 
 type VariantMap = Record<string, string>;

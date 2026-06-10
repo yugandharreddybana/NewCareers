@@ -34,12 +34,14 @@ describe('pendingSignup', () => {
       consents,
     });
     expect(hasPendingSignup()).toBe(true);
-    expect(readPendingSignup()).toEqual({
+    const pending = readPendingSignup();
+    expect(pending).toMatchObject({
       signupIntentId: INTENT_ID,
       email: 'a@b.test',
       name: 'Jane',
       consents,
     });
+    expect(new Date(pending!.expiresAt).getTime()).toBeGreaterThan(Date.now());
     clearPendingSignup();
     expect(hasPendingSignup()).toBe(false);
   });
@@ -50,5 +52,45 @@ describe('pendingSignup', () => {
       JSON.stringify({ signupIntentId: 'bad', email: 'a@b.test', consents }),
     );
     expect(readPendingSignup()).toBeNull();
+  });
+
+  it('rejects pending signup without AI processing consent', () => {
+    sessionStorage.setItem(
+      'co_pending_signup_v2',
+      JSON.stringify({
+        signupIntentId: INTENT_ID,
+        email: 'a@b.test',
+        consents: { ...consents, aiProcessingAccepted: false },
+        expiresAt: new Date(Date.now() + 60_000).toISOString(),
+      }),
+    );
+    expect(readPendingSignup()).toBeNull();
+  });
+
+  it('honors server expiresAt from signup intent', () => {
+    const serverExpiry = new Date(Date.now() + 120_000).toISOString();
+    writePendingSignup({
+      signupIntentId: INTENT_ID,
+      email: 'a@b.test',
+      consents,
+      expiresAt: serverExpiry,
+    });
+    const pending = readPendingSignup();
+    expect(pending?.expiresAt).toBe(serverExpiry);
+  });
+
+  it('expires stale pending signup sessions and clears storage', () => {
+    sessionStorage.setItem(
+      'co_pending_signup_v2',
+      JSON.stringify({
+        signupIntentId: INTENT_ID,
+        email: 'a@b.test',
+        consents,
+        expiresAt: new Date(Date.now() - 1_000).toISOString(),
+      }),
+    );
+
+    expect(readPendingSignup()).toBeNull();
+    expect(sessionStorage.getItem('co_pending_signup_v2')).toBeNull();
   });
 });

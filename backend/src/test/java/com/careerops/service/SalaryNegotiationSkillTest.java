@@ -1,5 +1,7 @@
 package com.careerops.service;
 
+import com.careerops.service.SkillMdExecutorService.SkillMdExecuteResult;
+import com.careerops.service.skills.SkillHandlerResult;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.DisplayName;
@@ -31,11 +33,12 @@ class SalaryNegotiationSkillTest {
         UUID userJobId = UUID.randomUUID();
 
         JsonNode response = mapper.readTree("{\"salaryBand\": {\"min\": 60000}}");
-        when(executor.execute(eq("salary-negotiation"), eq(userId), eq(userJobId), isNull()))
-            .thenReturn(response);
+        when(executor.executeWithUsage(eq("salary-negotiation"), eq(userId), eq(userJobId), isNull()))
+            .thenReturn(new SkillMdExecuteResult(response, 42));
 
-        JsonNode result = skill.execute(userId, userJobId);
+        SkillHandlerResult result = skill.execute(userId, userJobId);
 
-        assertThat(result.path("salaryBand").path("min").asInt()).isEqualTo(60000);
+        assertThat(result.output().path("salaryBand").path("min").asInt()).isEqualTo(60000);
+        assertThat(result.totalTokens()).isEqualTo(42);
     }
 }

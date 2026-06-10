@@ -9,6 +9,8 @@ import com.careerops.repository.JobWatchlistRepository;
 import com.careerops.repository.SkillRunRepository;
 import com.careerops.repository.UserJobRepository;
 import com.careerops.repository.UserProfileRepository;
+import com.careerops.repository.UserRepository;
+import com.careerops.model.User;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -26,12 +28,14 @@ import static org.mockito.Mockito.when;
 class SkillExecutionContextBuilderTest {
 
     @Mock UserProfileRepository profiles;
+    @Mock UserRepository users;
     @Mock UserJobRepository userJobs;
     @Mock JobRepository jobs;
     @Mock CvService cvService;
     @Mock SkillRunRepository skillRuns;
     @Mock JobWatchlistRepository watchlist;
     @Mock CompanyWebResearchService companyWebResearch;
+    @Mock ProfileReadableFields profileFields;
 
     SkillExecutionContextBuilder builder;
     UUID userId = UUID.randomUUID();
@@ -41,7 +45,8 @@ class SkillExecutionContextBuilderTest {
     @BeforeEach
     void setUp() {
         builder = new SkillExecutionContextBuilder(
-                profiles, userJobs, jobs, cvService, skillRuns, watchlist, companyWebResearch, new ObjectMapper());
+                profiles, users, userJobs, jobs, cvService, skillRuns, watchlist,
+                companyWebResearch, profileFields, new ObjectMapper());
     }
 
     @Test

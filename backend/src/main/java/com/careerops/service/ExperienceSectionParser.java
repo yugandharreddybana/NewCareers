@@ -36,6 +36,12 @@ final class ExperienceSectionParser {
         if (body == null || body.isBlank()) {
             return List.of();
         }
+
+        List<String> byDateLines = splitByCompanyDateLines(body);
+        if (!byDateLines.isEmpty()) {
+            return byDateLines;
+        }
+
         String[] lines = body.split("\\r?\\n");
         List<String> blocks = new ArrayList<>();
         List<String> current = new ArrayList<>();
@@ -68,6 +74,72 @@ final class ExperienceSectionParser {
             }
         }
         return paragraphBlocks.size() > 1 ? paragraphBlocks : blocks;
+    }
+
+    /**
+     * PDF résumés often use a two-line role header: job title (+ location), then company + dates.
+     */
+    private static List<String> splitByCompanyDateLines(String body) {
+        String[] lines = body.split("\\r?\\n");
+        List<Integer> dateLineIndexes = new ArrayList<>();
+        for (int i = 0; i < lines.length; i++) {
+            String t = lines[i].strip();
+            if (!t.isBlank() && isRoleHeaderLine(t)) {
+                dateLineIndexes.add(i);
+            }
+        }
+        if (dateLineIndexes.isEmpty()) {
+            return List.of();
+        }
+
+        List<String> blocks = new ArrayList<>();
+        for (int i = 0; i < dateLineIndexes.size(); i++) {
+            int dateIdx = dateLineIndexes.get(i);
+            int start = dateIdx;
+            if (dateIdx > 0) {
+                String previous = lines[dateIdx - 1].strip();
+                if (isLikelyTitleOnlyLine(previous)) {
+                    start = dateIdx - 1;
+                }
+            }
+
+            int endExclusive = lines.length;
+            if (i + 1 < dateLineIndexes.size()) {
+                int nextDateIdx = dateLineIndexes.get(i + 1);
+                endExclusive = nextDateIdx;
+                if (nextDateIdx > 0 && isLikelyTitleOnlyLine(lines[nextDateIdx - 1].strip())) {
+                    endExclusive = nextDateIdx - 1;
+                }
+            }
+
+            StringBuilder block = new StringBuilder();
+            for (int lineIdx = start; lineIdx < endExclusive; lineIdx++) {
+                String t = lines[lineIdx].strip();
+                if (t.isBlank()) {
+                    continue;
+                }
+                if (block.length() > 0) {
+                    block.append('\n');
+                }
+                block.append(t);
+            }
+            String trimmed = block.toString().trim();
+            if (!trimmed.isBlank()) {
+                blocks.add(trimmed);
+            }
+        }
+        return blocks;
+    }
+
+    private static boolean isLikelyTitleOnlyLine(String line) {
+        if (line == null || line.isBlank() || isBulletLine(line) || isRoleHeaderLine(line)) {
+            return false;
+        }
+        String lower = line.toLowerCase(Locale.ROOT);
+        return !lower.startsWith("key achievements")
+            && !lower.startsWith("challenge")
+            && !lower.startsWith("action")
+            && !lower.startsWith("result");
     }
 
     static boolean isRoleHeaderLine(String line) {
@@ -147,34 +219,59 @@ final class ExperienceSectionParser {
         String dates = "";
         String company = "";
         String location = "";
+        int bulletStart = 1;
 
-        Matcher monthDates = TRAILING_MONTH_RANGE.matcher(titleLine);
-        if (monthDates.find()) {
-            dates = monthDates.group(1).trim();
-            title = titleLine.substring(0, monthDates.start()).trim();
+        if (lines.length > 1 && isRoleHeaderLine(lines[1].strip())) {
+            title = collapseSpaces(titleLine);
+            location = extractTrailingLocation(title);
+            if (!location.isBlank()) {
+                title = title.substring(0, title.length() - location.length()).strip();
+            }
+
+            String companyLine = collapseSpaces(lines[1].strip());
+            Matcher monthDates = TRAILING_MONTH_RANGE.matcher(companyLine);
+            if (monthDates.find()) {
+                dates = monthDates.group(1).trim();
+                company = companyLine.substring(0, monthDates.start()).trim();
+            } else {
+                Matcher yearDates = TRAILING_YEAR_RANGE.matcher(companyLine);
+                if (yearDates.find()) {
+                    dates = yearDates.group(1).trim();
+                    company = companyLine.substring(0, yearDates.start()).trim();
+                } else {
+                    company = companyLine;
+                }
+            }
+            bulletStart = 2;
         } else {
-            Matcher yearDates = TRAILING_YEAR_RANGE.matcher(titleLine);
-            if (yearDates.find()) {
-                dates = yearDates.group(1).trim();
-                title = titleLine.substring(0, yearDates.start()).trim();
+            Matcher monthDates = TRAILING_MONTH_RANGE.matcher(titleLine);
+            if (monthDates.find()) {
+                dates = monthDates.group(1).trim();
+                title = titleLine.substring(0, monthDates.start()).trim();
+            } else {
+                Matcher yearDates = TRAILING_YEAR_RANGE.matcher(titleLine);
+                if (yearDates.find()) {
+                    dates = yearDates.group(1).trim();
+                    title = titleLine.substring(0, yearDates.start()).trim();
+                }
             }
-        }
 
-        if (title.contains(" — ")) {
-            String[] parts = title.split(" — ", 2);
-            title = parts[0].trim();
-            if (company.isBlank() && parts.length > 1) {
-                company = parts[1].trim();
+            if (title.contains(" — ")) {
+                String[] parts = title.split(" — ", 2);
+                title = parts[0].trim();
+                if (company.isBlank() && parts.length > 1) {
+                    company = parts[1].trim();
+                }
             }
-        }
 
-        location = extractLocation(company);
-        if (!location.isBlank()) {
-            company = stripLocationSuffix(company);
+            location = extractLocation(company);
+            if (!location.isBlank()) {
+                company = stripLocationSuffix(company);
+            }
         }
 
         List<String> bullets = new ArrayList<>();
-        for (int i = 1; i < lines.length; i++) {
+        for (int i = bulletStart; i < lines.length; i++) {
             String line = lines[i].strip();
             if (line.isBlank()) {
                 continue;
@@ -267,5 +364,25 @@ final class ExperienceSectionParser {
 
     private static String normalizeBullet(String line) {
         return line.replaceFirst("^[\\s•\\-*▪►#]+\\s*", "").trim();
+    }
+
+    private static String collapseSpaces(String value) {
+        return value == null ? "" : value.strip().replaceAll("\\s{2,}", " ").trim();
+    }
+
+    private static String extractTrailingLocation(String titleLine) {
+        if (titleLine == null || titleLine.isBlank()) {
+            return "";
+        }
+        Matcher m = Pattern.compile(
+            "\\s+([A-Z][A-Za-z]+(?:\\s+[A-Z][A-Za-z]+)*(?:,\\s*[A-Z][A-Za-z]+(?:\\s+[A-Z][A-Za-z]+)*)?)\\s*$"
+        ).matcher(titleLine.strip());
+        if (m.find()) {
+            String candidate = m.group(1).trim();
+            if (looksLikeLocation(candidate)) {
+                return candidate;
+            }
+        }
+        return "";
     }
 }

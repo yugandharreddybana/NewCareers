@@ -11,6 +11,7 @@ import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMock
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.context.SpringBootTest.WebEnvironment;
 import org.springframework.http.MediaType;
+import org.springframework.mock.web.MockMultipartFile;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
@@ -60,6 +61,19 @@ class AuthControllerIntegrationTest {
         )
         .andExpect(status().isOk())
         .andExpect(jsonPath("$.available").value(true));
+    }
+
+    @Test @Order(0)
+    @DisplayName("0c — parse-cv accepts multipart upload without authentication")
+    void parseOnboardingCvMultipartWithoutAuth() throws Exception {
+        byte[] pdfMagic = new byte[] { 0x25, 0x50, 0x44, 0x46, 0x2D, 0x31, 0x2E, 0x34, 0x0A };
+        MockMultipartFile file = new MockMultipartFile(
+            "file", "cv.pdf", "application/pdf", pdfMagic
+        );
+
+        mockMvc.perform(multipart("/auth/onboarding/parse-cv").file(file))
+            .andExpect(status().isUnprocessableEntity())
+            .andExpect(jsonPath("$.error").exists());
     }
 
     @Test @Order(0)
@@ -161,11 +175,11 @@ class AuthControllerIntegrationTest {
         Map<?, ?> captchaBody = objectMapper.readValue(
                 captchaResult.getResponse().getContentAsString(), Map.class);
         String challengeId = (String) captchaBody.get("challengeId");
-        @SuppressWarnings("unchecked")
-        java.util.List<Map<String, Object>> letters =
-                (java.util.List<Map<String, Object>>) captchaBody.get("letters");
-        String answer = letters.stream()
-                .map(l -> (String) l.get("character"))
+        String imageSvg = (String) captchaBody.get("imageSvg");
+        String answer = java.util.regex.Pattern.compile("<text[^>]*>([^<])</text>")
+                .matcher(imageSvg)
+                .results()
+                .map(match -> match.group(1))
                 .reduce("", String::concat);
         String captchaToken = challengeId + ":" + answer;
 

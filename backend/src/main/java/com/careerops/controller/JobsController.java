@@ -2,13 +2,16 @@ package com.careerops.controller;
 
 import com.careerops.dto.JobDtos.*;
 import com.careerops.exception.ApiException;
+import com.careerops.ratelimit.RateLimited;
 import com.careerops.model.Job;
 import com.careerops.model.UserJob;
 import com.careerops.model.UserProfile;
 import com.careerops.repository.JobRepository;
 import com.careerops.repository.UserJobRepository;
 import com.careerops.repository.UserProfileRepository;
+import com.careerops.service.AiEvalCacheService;
 import com.careerops.service.CvService;
+import com.careerops.service.HumanSummarySanitizer;
 import com.careerops.service.DailyLimitService;
 import com.careerops.service.EvaluationReportEnrichmentService;
 import com.careerops.service.JobDeliveryFilters;
@@ -20,6 +23,7 @@ import com.careerops.service.JobRecommendationService;
 import com.careerops.service.KanbanService;
 import com.careerops.service.OnboardingDeliveryService;
 import com.careerops.service.ParallelJobEvaluationService;
+import com.careerops.service.UserJobDuplicateCleanupService;
 import com.careerops.service.UserJobSkillMatchService;
 import com.careerops.util.AuthUtil;
 import com.fasterxml.jackson.databind.JsonNode;
@@ -70,6 +74,8 @@ public class JobsController {
     private final CvService                          cvService;
     private final ParallelJobEvaluationService       parallelEval;  // B1-G2
     private final OnboardingDeliveryService          onboardingDelivery;
+    private final AiEvalCacheService                 evalCache;
+    private final UserJobDuplicateCleanupService     duplicateCleanup;
 
     public JobsController(UserJobRepository u, JobRepository j, JobDeliveryService d,
                           DailyLimitService l, JobRecommendationService r, KanbanService k,
@@ -79,7 +85,9 @@ public class JobsController {
                           UserProfileRepository profiles,
                           CvService cvService,
                           ParallelJobEvaluationService parallelEval,
-                          OnboardingDeliveryService onboardingDelivery) {
+                          OnboardingDeliveryService onboardingDelivery,
+                          AiEvalCacheService evalCache,
+                          UserJobDuplicateCleanupService duplicateCleanup) {
         this.userJobs              = u;
         this.jobs                  = j;
         this.delivery              = d;
@@ -93,16 +101,20 @@ public class JobsController {
         this.cvService             = cvService;
         this.parallelEval          = parallelEval;
         this.onboardingDelivery    = onboardingDelivery;
+        this.evalCache             = evalCache;
+        this.duplicateCleanup      = duplicateCleanup;
     }
 
     @GetMapping
     @Transactional
+    @RateLimited(capacity = 300, requestsPerMinute = 300)
     public JobListResponse list(
             @RequestParam(defaultValue = "0") int page,
             @RequestParam(defaultValue = "20") int size) {
         UUID uid = AuthUtil.currentUserId();
         UserProfile profile = profiles.findByUserId(uid)
                 .orElseThrow(() -> new ApiException(HttpStatus.BAD_REQUEST, "Complete your profile first"));
+        duplicateCleanup.pruneSemanticDuplicates(uid);
         int minMatch = JobProfileMatchPolicy.minMatchFloor(profile);
         int safeSize = Math.max(1, Math.min(size, 500));
         Pageable pageable = PageRequest.of(page, safeSize);
@@ -163,6 +175,10 @@ public class JobsController {
         UserProfile profile = profiles.findByUserId(uid)
                 .orElseThrow(() -> new ApiException(HttpStatus.BAD_REQUEST, "Complete your profile first"));
 
+        if (HumanSummarySanitizer.containsEncryptedHeadline(uj.getHumanSummary())) {
+            evalCache.invalidate(uid, j.getId());
+        }
+
         // B1-G2: route through evaluateDeep() for cache-aware full evaluation
         JobMatchingService.ScoredJob rankedJob =
                 new JobMatchingService.ScoredJob(
@@ -181,7 +197,8 @@ public class JobsController {
         uj.setAiScore(report.path("overallScore").asInt(
             uj.getAiScore() != null ? uj.getAiScore() : 0));
         if (report.hasNonNull("humanSummary")) {
-            uj.setHumanSummary(report.path("humanSummary").asText(uj.getHumanSummary()));
+            uj.setHumanSummary(HumanSummarySanitizer.sanitize(
+                    report.path("humanSummary").asText(uj.getHumanSummary())));
         }
         if (report.hasNonNull("verdict")) {
             uj.setVerdict(report.path("verdict").asText(uj.getVerdict()));
@@ -235,6 +252,7 @@ public class JobsController {
 
     @PostMapping("/refresh-skills")
     @Transactional
+    @RateLimited(capacity = 60, requestsPerMinute = 60)
     public JobListResponse refreshAllSkills(
             @RequestParam(defaultValue = "0") int page,
             @RequestParam(defaultValue = "500") int size) {
@@ -324,6 +342,7 @@ public class JobsController {
 
     @GetMapping("/limits")
     @Transactional(readOnly = true)
+    @RateLimited(capacity = 300, requestsPerMinute = 300)
     public FetchSummary limits() {
         UUID uid = AuthUtil.currentUserId();
         return new FetchSummary(0, limits.getCount(uid), limits.maxForUser(uid), limits.remaining(uid));

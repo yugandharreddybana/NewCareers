@@ -64,6 +64,15 @@ class IpRateLimitFilterTest {
     }
 
     @Test
+    @DisplayName("2FA and Google link confirmation callbacks use auth per-IP limits")
+    void stepUpCallbackRateLimits() throws Exception {
+        assertAuthPathLimited("/auth/two-factor/verify", "192.0.2.20");
+        assertAuthPathLimited("/auth/google/link/confirm", "192.0.2.21");
+        assertAuthPathLimited("/v1/auth/two-factor/verify", "192.0.2.22");
+        assertAuthPathLimited("/v1/auth/google/link/confirm", "192.0.2.23");
+    }
+
+    @Test
     @DisplayName("X-Forwarded-For is honored only when TRUSTED_PROXY is set")
     void forwardedForRequiresTrustedProxy() throws Exception {
         String previous = System.getenv("TRUSTED_PROXY");
@@ -126,13 +135,13 @@ class IpRateLimitFilterTest {
         request.setServletPath("/health");
         request.setRemoteAddr("192.0.2.3");
         MockHttpServletResponse response = new MockHttpServletResponse();
-        MockFilterChain chain = new MockFilterChain();
 
         for (int i = 0; i < 25; i++) {
+            MockFilterChain chain = new MockFilterChain();
             filter.doFilter(request, response, chain);
+            assertThat(chain.getRequest()).isNotNull();
         }
 
-        assertThat(chain.getRequest()).isNotNull();
         assertThat(response.getStatus()).isEqualTo(200);
     }
 
@@ -185,6 +194,31 @@ class IpRateLimitFilterTest {
     private static MockHttpServletRequest registerRequest(String remoteAddr) {
         MockHttpServletRequest request = new MockHttpServletRequest("POST", "/auth/register");
         request.setServletPath("/auth/register");
+        request.setRemoteAddr(remoteAddr);
+        return request;
+    }
+
+    private void assertAuthPathLimited(String path, String remoteAddr) throws Exception {
+        for (int i = 0; i < 20; i++) {
+            MockHttpServletRequest request = authPathRequest(path, remoteAddr);
+            MockHttpServletResponse response = new MockHttpServletResponse();
+            MockFilterChain chain = new MockFilterChain();
+            filter.doFilter(request, response, chain);
+            assertThat(chain.getRequest()).isNotNull();
+        }
+
+        MockHttpServletRequest blocked = authPathRequest(path, remoteAddr);
+        MockHttpServletResponse blockedResponse = new MockHttpServletResponse();
+        MockFilterChain blockedChain = new MockFilterChain();
+        filter.doFilter(blocked, blockedResponse, blockedChain);
+
+        assertThat(blockedChain.getRequest()).isNull();
+        assertThat(blockedResponse.getStatus()).isEqualTo(429);
+    }
+
+    private static MockHttpServletRequest authPathRequest(String path, String remoteAddr) {
+        MockHttpServletRequest request = new MockHttpServletRequest("POST", path);
+        request.setServletPath(path);
         request.setRemoteAddr(remoteAddr);
         return request;
     }

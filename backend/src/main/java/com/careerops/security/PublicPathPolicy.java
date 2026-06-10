@@ -24,11 +24,12 @@ public final class PublicPathPolicy {
         "/auth/register",
         "/auth/login",
         "/auth/signup-intent",
-        "/auth/signup-intent/*/exists",
         "/auth/forgot-password",
         "/auth/reset-password",
         "/auth/refresh",
         "/auth/google",
+        "/auth/two-factor/verify",
+        "/auth/google/link/confirm",
         "/auth/onboarding/check-email",
         "/auth/onboarding/check-password",
         "/auth/onboarding/send-verification-otp",
@@ -39,6 +40,7 @@ public final class PublicPathPolicy {
         "/health",
         "/public/stats",
         "/.well-known/jwks.json",
+        "/billing/plans",
         "/billing/webhook"
     );
 
@@ -57,11 +59,12 @@ public final class PublicPathPolicy {
         "/auth/register",
         "/auth/login",
         "/auth/signup-intent",
-        "/auth/signup-intent/*/exists",
         "/auth/forgot-password",
         "/auth/reset-password",
         "/auth/refresh",
         "/auth/google",
+        "/auth/two-factor/verify",
+        "/auth/google/link/confirm",
         "/auth/onboarding/check-email",
         "/auth/onboarding/check-password",
         "/auth/onboarding/send-verification-otp",
@@ -72,6 +75,7 @@ public final class PublicPathPolicy {
         "/health",
         "/public/stats",
         "/.well-known/jwks.json",
+        "/billing/plans",
         "/billing/webhook",
         "/referrals/validate/**"
     };
@@ -88,9 +92,6 @@ public final class PublicPathPolicy {
 
     public boolean isPublic(String rawPath) {
         final String path = normalize(rawPath);
-        if (path.startsWith("/auth/signup-intent/") && path.endsWith("/exists")) {
-            return true;
-        }
         if (BASE_EXACT_PATHS.contains(path)) {
             return true;
         }

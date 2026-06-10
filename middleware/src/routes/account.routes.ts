@@ -121,11 +121,19 @@ router.post('/sessions/revoke-others', async (req, res, next) => {
 
 router.get('/security/activity', async (req, res, next) => {
   try {
-    const qs = new URLSearchParams();
-    if (req.query.page != null) qs.set('page', String(req.query.page));
-    if (req.query.size != null) qs.set('size', String(req.query.size));
-    const suffix = qs.toString() ? `?${qs.toString()}` : '';
-    const r = await forwardAccount(req, 'GET', `/account/security/activity${suffix}`);
+    // Query string must be forwarded via `params`, not embedded in `path`.
+    // HMAC is computed on the path only; Java verifies servlet path without query.
+    const params: Record<string, string> = {};
+    if (req.query.page != null) params.page = String(req.query.page);
+    if (req.query.size != null) params.size = String(req.query.size);
+    const r = await forward({
+      method: 'GET',
+      path: '/account/security/activity',
+      userId: req.userId,
+      params,
+      ip: resolveClientIp(req),
+      headers: clientForwardHeaders(req),
+    });
     bubble(r, res);
   } catch (e) {
     next(e);

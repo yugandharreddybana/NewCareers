@@ -1,0 +1,7 @@
+flowchart LR
+    A[Login success setUser] --> B{GuestRoute}
+    B --> C{safeRedirectPath state.from?}
+    C -->|yes| D[Protected destination]
+    C -->|no| E{user.onboarded?}
+    E -->|yes| F[dashboard]
+    E -->|no| G[onboarding]

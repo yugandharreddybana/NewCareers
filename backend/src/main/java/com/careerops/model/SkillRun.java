@@ -88,6 +88,10 @@ public class SkillRun {
     @Column(name = "resume_filename")
     private String resumeFilename;
 
+    /** Total LLM tokens consumed for this run (input + output). Null for legacy rows. */
+    @Column(name = "total_tokens")
+    private Integer totalTokens;
+
     @CreationTimestamp
     @Column(name = "created_at", nullable = false, updatable = false)
     private Instant createdAt;

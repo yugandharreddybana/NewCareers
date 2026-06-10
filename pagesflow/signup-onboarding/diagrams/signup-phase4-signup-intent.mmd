@@ -1,0 +1,33 @@
+sequenceDiagram
+    participant Signup as Signup.tsx
+    participant Axios
+    participant Middleware
+    participant Java as SignupIntentService
+    participant HIBP as HIBP check
+
+    Signup->>Axios: POST /auth/signup-intent
+    Axios->>Middleware: authLimiter + csrfGuard + validation
+    alt middleware validation fail
+        Middleware-->>Signup: 400 Invalid input
+    else rate limit exceeded
+        Middleware-->>Signup: 429 Too many auth attempts
+    else forward to Java
+        Middleware->>Java: POST /auth/signup-intent HMAC
+        Java->>Java: requireRecaptchaWhenConfigured
+        alt terms or AI consent missing
+            Java-->>Signup: 400 consent error
+        else email already registered
+            Java->>Java: SIGNUP_INTENT_DECOY random UUID
+            Java-->>Signup: 200 decoy signupIntentId not stored
+        else new email
+            Java->>HIBP: validateOnboardingPassword
+            alt pwned password
+                HIBP-->>Signup: 400 password not secure
+            else HIBP unavailable prod
+                HIBP-->>Signup: 503 temporarily unavailable
+            else password OK
+                Java->>Java: save intent passwordHash 30min TTL
+                Java-->>Signup: 200 signupIntentId expiresAt
+            end
+        end
+    end

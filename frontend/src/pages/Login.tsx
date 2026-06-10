@@ -4,7 +4,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { ArrowRight, Eye, EyeOff, Loader2 } from 'lucide-react';
-import { useAuth } from '@/context/AuthContext';
+import { useAuth } from '@/context/authCtx';
 import { PageMeta } from '@/components/PageMeta';
 import { LoginPageShell } from '@/components/auth/LoginPageShell';
 import { LoginGoogleButton } from '@/components/auth/LoginGoogleButton';
@@ -34,12 +34,14 @@ import {
 import { CAPTCHA_ENABLED, RecaptchaBlock } from '@/components/auth/RecaptchaBlock';
 import ReCAPTCHA from 'react-google-recaptcha';
 import { authApi } from '@/services/api';
+import {
+  clearPendingGoogleConsents,
+  readPendingGoogleConsents,
+  resolveGoogleLoginConsent,
+  writePendingGoogleConsents,
+} from '@/lib/pendingGoogleConsents';
 import { OtpInput } from '@/components/auth/OtpInput';
-import { clearOnboardingVerification } from '@/lib/onboardingVerification';
-import { clearPendingSignup } from '@/lib/pendingSignup';
-import { syncLocalAnalyticsConsentToBackend } from '@/lib/cookieConsent';
 import { isApiError } from '@/types';
-import { readPendingGoogleConsents, writePendingGoogleConsents } from '@/lib/pendingGoogleConsents';
 import {
   clearPendingGoogleLink,
   readPendingGoogleLink,
@@ -59,7 +61,7 @@ function safeEmailFromParam(raw: string | null): string {
 }
 
 export default function Login() {
-  const { signIn, signInWithGoogle, setUser } = useAuth();
+  const { signIn, signInWithGoogle, completeTwoFactor, setUser, actionLoading } = useAuth();
   const [searchParams] = useSearchParams();
   const sessionExpired = searchParams.get('reason') === 'session_expired';
   const prefillEmail = safeEmailFromParam(searchParams.get('email'));
@@ -84,8 +86,6 @@ export default function Login() {
   const [pendingGoogleToken, setPendingGoogleToken] = useState<string | null>(null);
   const [twoFactorChallenge, setTwoFactorChallenge] = useState<string | null>(null);
   const [twoFactorCode, setTwoFactorCode] = useState('');
-  const [twoFactorSubmitting, setTwoFactorSubmitting] = useState(false);
-
   const errorRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -105,7 +105,23 @@ export default function Login() {
     setGoogleConsentOpen(true);
   }, [searchParams]);
 
-  const busy = emailSubmitting || googleSubmitting || twoFactorSubmitting;
+  useEffect(() => {
+    if (!IS_DEV || searchParams.get('e2e') !== 'google-stale-consent') return;
+    writePendingGoogleConsents({
+      termsAccepted: true,
+      aiProcessingAccepted: false,
+      marketingAccepted: false,
+      analyticsAccepted: false,
+    });
+    const decision = resolveGoogleLoginConsent(readPendingGoogleConsents());
+    if (decision.kind === 'show_sheet') {
+      if (decision.clearStale) clearPendingGoogleConsents();
+      setPendingGoogleToken('e2e-stub-google-token');
+      setGoogleConsentOpen(true);
+    }
+  }, [searchParams]);
+
+  const busy = emailSubmitting || googleSubmitting || actionLoading;
   const showTwoFactorStep = Boolean(twoFactorChallenge);
   const showCaptcha = captchaRequired || LOGIN_WORD_CAPTCHA_REQUIRED;
 
@@ -125,6 +141,18 @@ export default function Login() {
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError('');
+
+    if (!EMAIL_PARAM_PATTERN.test(form.email.trim())) {
+      setError(GENERIC_LOGIN_ERROR);
+      focusError();
+      return;
+    }
+
+    if (!form.password || form.password.length < 8) {
+      setError(GENERIC_LOGIN_ERROR);
+      focusError();
+      return;
+    }
 
     if (showCaptcha && !captchaToken) {
       setError('Please enter the security check characters.');
@@ -170,21 +198,15 @@ export default function Login() {
     e.preventDefault();
     if (!twoFactorChallenge || twoFactorCode.length !== 6) return;
     setError('');
-    setTwoFactorSubmitting(true);
     try {
-      const data = await authApi.verifyTwoFactor(twoFactorChallenge, twoFactorCode);
-      clearPendingSignup();
-      clearOnboardingVerification();
-      setUser(data.user);
-      void syncLocalAnalyticsConsentToBackend();
+      await completeTwoFactor(twoFactorChallenge, twoFactorCode, rememberMe);
       setTwoFactorChallenge(null);
       setTwoFactorCode('');
     } catch {
-      setError('Invalid verification code. Try again.');
+      setError(GENERIC_LOGIN_ERROR);
       setTwoFactorCode('');
+      if (showCaptcha) refreshCaptcha();
       focusError();
-    } finally {
-      setTwoFactorSubmitting(false);
     }
   };
 
@@ -239,13 +261,14 @@ export default function Login() {
   };
 
   const handleGoogle = async (idToken: string) => {
-    const pending = readPendingGoogleConsents();
-    if (!pending?.termsAccepted) {
+    const decision = resolveGoogleLoginConsent(readPendingGoogleConsents());
+    if (decision.kind === 'show_sheet') {
+      if (decision.clearStale) clearPendingGoogleConsents();
       setPendingGoogleToken(idToken);
       setGoogleConsentOpen(true);
       return;
     }
-    await completeGoogleSignIn(idToken, pending);
+    await completeGoogleSignIn(idToken, decision.consents);
   };
 
   const handleGoogleConsentSubmit = async (consents: SignupConsents, captchaToken: string | null) => {
@@ -353,6 +376,9 @@ export default function Login() {
               <p className="text-sm text-gray-700">
                 This email already has a password. Confirm it to link Google sign-in.
               </p>
+              <p className="text-xs text-gray-500">
+                If you refresh this page, sign in with Google again to continue linking.
+              </p>
               <input
                 className={inputClass}
                 type="password"
@@ -419,7 +445,7 @@ export default function Login() {
               disabled={busy || twoFactorCode.length !== 6}
               className="w-full bg-[#022c22] hover:bg-[#011b16] text-white py-3.5 px-4 rounded-xl font-medium text-sm transition-colors duration-200 flex items-center justify-center gap-2 shadow-md disabled:opacity-60"
             >
-              {twoFactorSubmitting ? (
+              {actionLoading ? (
                 <Loader2 size={17} className="animate-spin" />
               ) : (
                 <>

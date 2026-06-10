@@ -1,0 +1,22 @@
+sequenceDiagram
+    participant User
+    participant Signup as Signup.tsx
+    participant Recaptcha as RecaptchaBlock
+    participant Axios
+    participant Java as CaptchaService
+
+    alt VITE_RECAPTCHA_SITE_KEY not set
+        Signup->>Signup: CAPTCHA_ENABLED=false, skip widget
+    else CAPTCHA enabled
+        Signup->>Recaptcha: render react-google-recaptcha
+        User->>Recaptcha: complete challenge
+        Recaptcha->>Signup: captchaToken
+    end
+    Signup->>Axios: POST /auth/signup-intent with captchaToken
+    Axios->>Java: requireRecaptchaWhenConfigured
+    alt captcha missing or invalid
+        Java-->>Signup: 400 Security verification failed
+        Signup->>Recaptcha: reset captcha
+    else captcha OK or disabled
+        Java-->>Signup: continue signup-intent flow
+    end

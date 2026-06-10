@@ -14,13 +14,41 @@ import type { Socket } from 'net';
 
 const stripTrailingSlash = (url: string): string => url.replace(/\/+$/, '');
 
-function javaBackendBase(): string {
-  return stripTrailingSlash(
+/** Host root only — context-path `/api` is appended once in getApiClient(). */
+export function resolveJavaBackendRoot(): string {
+  const raw = stripTrailingSlash(
     process.env.JAVA_BACKEND_URL || process.env.BACKEND_URL || 'http://localhost:8080',
   );
+  // Misconfigured deploys sometimes set JAVA_BACKEND_URL=http://host:8080/api — avoid /api/api/... hops
+  return raw.replace(/\/api$/i, '');
 }
 
 const TRUST_HEADER = process.env.INTERNAL_TRUST_HEADER || 'X-Internal-User-Id';
+
+const STRIP_PROXY_HEADERS = new Set([
+  'cookie',
+  'authorization',
+  'host',
+  'connection',
+  'content-length',
+  'x-signature',
+  'x-timestamp',
+  TRUST_HEADER.toLowerCase(),
+]);
+
+/** Strip client-controlled trust/auth headers before forwarding to Java. */
+export function sanitizeProxyHeaders(
+  headers: Record<string, unknown>,
+): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const [key, value] of Object.entries(headers)) {
+    if (value === undefined || value === null) continue;
+    const lower = key.toLowerCase();
+    if (STRIP_PROXY_HEADERS.has(lower)) continue;
+    out[key] = Array.isArray(value) ? String(value[0]) : String(value);
+  }
+  return out;
+}
 
 /**
  * Default client timeout. Set high enough to accommodate long-running AI
@@ -38,9 +66,11 @@ function getApiClient(): AxiosInstance {
     apiClient = axios.create({
       // Java uses server.servlet.context-path=/api; controllers map /jobs, /auth, etc.
       // Middleware exposes /api/v1/* to the browser but must not add /v1 on the Java hop.
-      baseURL: `${javaBackendBase()}/api`,
+      baseURL: `${resolveJavaBackendRoot()}/api`,
       timeout: DEFAULT_TIMEOUT_MS,
       validateStatus: () => true,
+      maxBodyLength: Infinity,
+      maxContentLength: Infinity,
     });
   }
   return apiClient;
@@ -116,6 +146,14 @@ export async function prepareForwardBody(data: unknown): Promise<{
   return { requestBody: json, bodyText: json, formHeaders: {} };
 }
 
+/** Java HMAC verification uses servlet path only — never include `?query` in the signed path. */
+export function hmacSigningPath(path: string): string {
+  const q = path.indexOf('?');
+  const base = q === -1 ? path : path.slice(0, q);
+  const hash = base.indexOf('#');
+  return hash === -1 ? base : base.slice(0, hash);
+}
+
 export async function forward({
   method = 'GET',
   path,
@@ -142,7 +180,7 @@ export async function forward({
   const finalHeaders = buildHeaders(userId, { ...headers, ...formHeaders });
   if (ip) finalHeaders['X-Forwarded-For'] = ip;
 
-  const signed = signInternalRequest(method, path, bodyText);
+  const signed = signInternalRequest(method, hmacSigningPath(path), bodyText);
   if (signed) {
     finalHeaders[TIMESTAMP_HEADER] = signed.timestamp;
     finalHeaders[SIGNATURE_HEADER] = signed.signature;
@@ -156,6 +194,10 @@ export async function forward({
     if (!hasContentType && typeof data !== 'string' && !Buffer.isBuffer(data)) {
       finalHeaders['Content-Type'] = 'application/json';
     }
+  }
+
+  if (Buffer.isBuffer(requestBody)) {
+    finalHeaders['Content-Length'] = String(requestBody.length);
   }
 
   return getApiClient().request({
@@ -248,7 +290,7 @@ export function createJavaRouteProxy(
         userId: req.userId,
         data: req.body,
         params: req.query,
-        headers: req.headers as Record<string, unknown>,
+        headers: sanitizeProxyHeaders(req.headers as Record<string, unknown>),
         ip: clientIp,
         timeoutMs,
       });

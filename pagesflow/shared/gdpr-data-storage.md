@@ -58,7 +58,7 @@ flowchart TB
 |-------|---------------|------------|
 | **PostgreSQL `careerops`** | Users, profiles, jobs pipeline, consents, audit trail, AI run history, networking, etc. | Primary system of record. EU-hosted Postgres recommended for production (see privacy policy processors). |
 | **Supabase Storage** | CV files, application assets, resume versions (when configured) | Purged on account deletion via `SupabaseStorageService.purgeUserFiles`. Metadata also in `user_cvs.storage_path`. |
-| **Browser** | Access token (memory), refresh token (sessionStorage or HttpOnly cookie), pending signup, analytics cookie consent flag | Not server DB; cleared on sign-out. See [auth-infrastructure.md](./auth-infrastructure.md). |
+| **Browser** | Access-token metadata in memory, HttpOnly auth cookies, pending signup handoff, analytics cookie consent flag | Not server DB; cleared on sign-out or expiry. Refresh tokens are HttpOnly cookies only. See [auth-infrastructure.md](./auth-infrastructure.md). |
 
 ### Browser sessionStorage — UX handoff only (M-26 / M-33)
 

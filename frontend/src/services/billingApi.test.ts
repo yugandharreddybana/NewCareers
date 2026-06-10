@@ -62,11 +62,4 @@ describe('billingApi', () => {
     expect(result.cancelAtPeriodEnd).toBe(true);
   });
 
-  it('setBillingOrganization puts organization id', async () => {
-    mockPut.mockResolvedValueOnce({ data: null });
-
-    await billingApi.setBillingOrganization('org-uuid');
-
-    expect(mockPut).toHaveBeenCalledWith('/billing/organization', { organizationId: 'org-uuid' });
-  });
 });

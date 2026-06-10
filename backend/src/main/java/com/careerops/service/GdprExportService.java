@@ -20,6 +20,7 @@ import com.careerops.repository.SubscriptionRepository;
 import com.careerops.repository.UserRepository;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.SerializationFeature;
 import jakarta.servlet.http.HttpServletRequest;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -70,7 +71,8 @@ public class GdprExportService {
         this.skillRuns = skillRuns;
         this.tokenUsage = tokenUsage;
         this.audit = audit;
-        this.objectMapper = objectMapper;
+        this.objectMapper = objectMapper.copy()
+                .disable(SerializationFeature.WRITE_DATES_AS_TIMESTAMPS);
         this.orgMembers = orgMembers;
         this.subscriptions = subscriptions;
     }

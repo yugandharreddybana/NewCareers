@@ -8,6 +8,8 @@ import com.careerops.repository.EmailVerificationRepository;
 import com.careerops.repository.UserRepository;
 import com.careerops.security.OtpHashService;
 import org.jspecify.annotations.Nullable;
+import org.springframework.core.env.Environment;
+import org.springframework.core.env.Profiles;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
@@ -44,6 +46,7 @@ public class OnboardingEmailVerificationService {
     private final OtpHashService otpHashService;
     private final boolean resendDevMode;
     private final String e2eTestEmail;
+    private final Environment environment;
 
     public OnboardingEmailVerificationService(
             EmailVerificationRepository verifications,
@@ -52,7 +55,8 @@ public class OnboardingEmailVerificationService {
             CaptchaService captcha,
             OtpHashService otpHashService,
             @Value("${resend.dev-mode:false}") boolean resendDevMode,
-            @Value("${e2e.test.email:test@newcareer.com}") String e2eTestEmail) {
+            @Value("${e2e.test.email:test@newcareer.com}") String e2eTestEmail,
+            Environment environment) {
         this.verifications = verifications;
         this.users = users;
         this.email = email;
@@ -60,6 +64,7 @@ public class OnboardingEmailVerificationService {
         this.otpHashService = otpHashService;
         this.resendDevMode = resendDevMode;
         this.e2eTestEmail = e2eTestEmail == null ? "" : e2eTestEmail.trim().toLowerCase(Locale.ROOT);
+        this.environment = environment;
     }
 
     @Transactional(readOnly = true, timeout = 10)
@@ -72,11 +77,11 @@ public class OnboardingEmailVerificationService {
         requireRecaptchaWhenConfigured(captchaToken);
         String lookupEmail = AuthService.normalizeEmail(rawEmail);
         boolean registered = users.findByEmail(lookupEmail).isPresent();
+        Instant now = Instant.now();
 
-        verifications.invalidateAllActiveForEmail(lookupEmail);
+        verifications.invalidateAllActiveForEmail(lookupEmail, now);
 
         String otp = registered ? generateRandomOtp() : generateOtpForEmail(lookupEmail);
-        Instant now = Instant.now();
         EmailVerification row = EmailVerification.builder()
                 .email(lookupEmail)
                 .otpHash(otpHashService.hash(otp))
@@ -175,29 +180,20 @@ public class OnboardingEmailVerificationService {
     @Transactional(timeout = 10)
     public void consumeForSignup(UUID verificationId, String rawEmail) {
         String lookupEmail = AuthService.normalizeEmail(rawEmail);
-        EmailVerification row = verifications.findByIdAndEmail(verificationId, lookupEmail)
-                .orElseThrow(() -> new ApiException(HttpStatus.BAD_REQUEST, "Email verification required."));
-
-        if (row.getConsumedAt() != null) {
-            throw new ApiException(HttpStatus.BAD_REQUEST, "This verification has already been used.");
-        }
-
-        if (row.getCaptchaVerifiedAt() == null) {
+        Instant now = Instant.now();
+        int updated = verifications.consumeForSignupIfEligible(
+                verificationId,
+                lookupEmail,
+                now,
+                now.minus(CAPTCHA_VALID_MINUTES, ChronoUnit.MINUTES),
+                now.minus(SESSION_TTL_MINUTES, ChronoUnit.MINUTES));
+        if (updated == 0) {
             throw new ApiException(HttpStatus.BAD_REQUEST, "Email verification required.");
         }
-
-        if (row.getCaptchaVerifiedAt().isBefore(Instant.now().minus(CAPTCHA_VALID_MINUTES, ChronoUnit.MINUTES))) {
-            throw new ApiException(HttpStatus.BAD_REQUEST,
-                    "Verification expired. Please verify your email again.");
-        }
-
-        assertSessionActive(row);
-        row.setConsumedAt(Instant.now());
-        verifications.save(row);
     }
 
     private void requireRecaptchaWhenConfigured(String captchaToken) {
-        if (!captcha.isConfigured()) {
+        if (!captcha.isEnforcementActive()) {
             return;
         }
         if (captchaToken == null || captchaToken.isBlank() || !captcha.verify(captchaToken)) {
@@ -212,9 +208,10 @@ public class OnboardingEmailVerificationService {
     }
 
     private boolean isDevE2eBypassEmail(String lookupEmail) {
-        return resendDevMode
-                && (lookupEmail.endsWith("@careerops.test")
-                || (!e2eTestEmail.isEmpty() && lookupEmail.equalsIgnoreCase(e2eTestEmail)));
+        boolean nonProdE2eDomain = environment.acceptsProfiles(Profiles.of("dev", "test"))
+                && lookupEmail.endsWith("@careerops.test");
+        return nonProdE2eDomain || (resendDevMode
+                && (!e2eTestEmail.isEmpty() && lookupEmail.equalsIgnoreCase(e2eTestEmail)));
     }
 
     private String generateOtpForEmail(String lookupEmail) {

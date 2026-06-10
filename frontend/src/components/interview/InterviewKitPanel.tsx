@@ -76,7 +76,7 @@ export default function InterviewKitPanel({
           <button
             onClick={() => generateMutation.mutate()}
             disabled={generateMutation.isPending}
-            className="px-3 py-1.5 text-sm bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 disabled:opacity-50"
+            className="px-3 py-1.5 text-sm bg-brand-500 text-white rounded-lg hover:bg-brand-600 disabled:opacity-50"
           >
             {generateMutation.isPending ? 'Generating…' : questions.length > 0 ? '↻ Regenerate' : '✦ Generate Kit'}
           </button>
@@ -99,7 +99,7 @@ export default function InterviewKitPanel({
               onClick={() => setActiveFilter(area)}
               className={`px-2.5 py-1 rounded-full text-xs font-medium transition-colors ${
                 activeFilter === area
-                  ? 'bg-indigo-600 text-white'
+                  ? 'bg-brand-500 text-white'
                   : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
               }`}
             >

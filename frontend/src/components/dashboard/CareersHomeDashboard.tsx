@@ -1,16 +1,15 @@
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import toast from 'react-hot-toast';
-import { useAuth } from '@/context/AuthContext';
+import { useAuth } from '@/context/authCtx';
 import { PageMeta } from '@/components/PageMeta';
-import { DashboardTopNav } from '@/components/dashboard/DashboardTopNav';
 import { TopMatchCard } from '@/components/dashboard/TopMatchCard';
 import { SKILL_COUNT } from '@/lib/skillCatalog';
-import { useFetchLiveJobMutation, useJobsList } from '@/hooks/queries';
-import { onboardingApi, profileApi, type OnboardingDeliveryStatus } from '@/services/api';
+import { useFetchLiveJobMutation, useJobsList, useProfileQuery } from '@/hooks/queries';
+import { onboardingApi, type OnboardingDeliveryStatus } from '@/services/api';
 import { queryKeys } from '@/lib/queryKeys';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import type { JobCard } from '@/types';
+import type { JobCard, Profile } from '@/types';
 import { isApiError } from '@/types';
 import { getUserFacingErrorMessage } from '@/lib/userFacingError';
 import { normalizeJobCard } from '@/lib/normalizeJobCard';
@@ -127,9 +126,11 @@ type Props = {
   celebrate?: boolean;
   /** Rendered after top matches, before user analytics (e.g. permit intelligence). */
   beforeFastTrack?: ReactNode;
+  /** When provided, skips an internal GET /profile (parent owns the query). */
+  profile?: Profile | null;
 };
 
-export function CareersHomeDashboard({ celebrate = false, beforeFastTrack }: Props) {
+export function CareersHomeDashboard({ celebrate = false, beforeFastTrack, profile: profileProp }: Props) {
   const { user } = useAuth();
   const navigate = useNavigate();
   const matchesRef = useRef<HTMLDivElement>(null);
@@ -145,11 +146,10 @@ export function CareersHomeDashboard({ celebrate = false, beforeFastTrack }: Pro
     }
   }, [celebrate, queryClient]);
 
-  const { data: profile } = useQuery({
-    queryKey: queryKeys.profile.current(),
-    queryFn: () => profileApi.get(),
-    enabled: Boolean(user),
+  const { data: profileFromQuery } = useProfileQuery({
+    enabled: Boolean(user) && profileProp === undefined,
   });
+  const profile = profileProp !== undefined ? profileProp : profileFromQuery;
   const { data: jobsList, isLoading: matchesLoading, isError: matchesQueryError, refetch: refetchJobs } =
     useJobsList({ enabled: Boolean(user) });
   const fetchLive = useFetchLiveJobMutation();
@@ -296,7 +296,6 @@ export function CareersHomeDashboard({ celebrate = false, beforeFastTrack }: Pro
   return (
     <div className="bg-background font-body-md text-on-background min-h-screen flex flex-col overflow-x-hidden">
       <PageMeta title={celebrate ? "You're all set | NewCareers" : 'Dashboard | NewCareers'} />
-      <DashboardTopNav />
 
       <main className="flex-grow">
         <section className="welcome-bg-radial-premium py-16 md:py-24 text-white relative overflow-hidden">
@@ -328,7 +327,7 @@ export function CareersHomeDashboard({ celebrate = false, beforeFastTrack }: Pro
           </div>
         </section>
 
-        <div className="max-w-container-max mx-auto px-margin-mobile md:px-margin-desktop -mt-10 mb-20">
+        <div className="app-shell -mt-10 mb-20 w-full">
           <div ref={matchesRef} id="top-matches" className="mb-12 scroll-mt-24">
             <div className="flex items-center justify-between mb-6">
               <h2 className="font-headline-md text-headline-md text-on-surface">Your Top Matches</h2>
@@ -487,7 +486,7 @@ export function CareersHomeDashboard({ celebrate = false, beforeFastTrack }: Pro
       </main>
 
       <footer className="w-full py-8 mt-auto bg-surface-container-lowest border-t border-outline-variant">
-        <div className="flex flex-col md:flex-row justify-between items-center px-margin-mobile md:px-margin-desktop max-w-container-max mx-auto gap-base">
+        <div className="flex flex-col md:flex-row justify-between items-center app-shell gap-base w-full">
           <div className="font-headline-sm text-headline-sm font-black text-on-surface">NewCareers</div>
           <div className="flex flex-wrap justify-center gap-6">
             <a href="#" className="font-label-sm text-label-sm text-on-secondary-container hover:text-primary underline opacity-80 hover:opacity-100 transition-opacity">

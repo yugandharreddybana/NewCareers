@@ -7,7 +7,11 @@ import {
 } from './completeOnboardingFinish';
 import { writeOnboardingVerification } from './onboardingVerification';
 import type { User } from '@/types';
-import { GENERIC_ONBOARDING_SIGNUP_ERROR } from '@/lib/authErrors';
+import {
+  GENERIC_ONBOARDING_MATCH_ERROR,
+  GENERIC_ONBOARDING_PROFILE_ERROR,
+  GENERIC_ONBOARDING_SIGNUP_ERROR,
+} from '@/lib/authErrors';
 
 const baseUser: User = {
   id: 'existing-user-id',
@@ -22,6 +26,7 @@ const pending = {
   signupIntentId: '33333333-3333-4333-8333-333333333333',
   email: 'new@test.ie',
   name: 'New User',
+  expiresAt: '2099-01-01T00:00:00.000Z',
   consents: {
     termsAccepted: true,
     aiProcessingAccepted: true,
@@ -197,11 +202,38 @@ describe('completeOnboardingFinish', () => {
 
     expect(result).toEqual({
       ok: false,
-      reason: 'signup_failed',
-      message: GENERIC_ONBOARDING_SIGNUP_ERROR,
+      reason: 'cv_failed',
+      message: GENERIC_ONBOARDING_PROFILE_ERROR,
     });
     expect(updateProfile).toHaveBeenCalledOnce();
     expect(startDelivery).not.toHaveBeenCalled();
+    expect(clearPendingSignup).not.toHaveBeenCalled();
+  });
+
+  it('returns plan_limit when startDelivery responds with 402', async () => {
+    startDelivery.mockRejectedValue({
+      normalizedMessage: 'Upgrade to run more AI skills.',
+      status: 402,
+      response: { data: { feature: 'ai_skill_run', limit: 0, used: 0 } },
+    });
+
+    const result = await completeOnboardingFinish(
+      {
+        existingUser: baseUser,
+        pending: null,
+        registerName: 'Existing',
+        profilePayload: { onboarded: true },
+        cvFile,
+      },
+      deps(),
+    );
+
+    expect(result).toEqual({
+      ok: false,
+      reason: 'plan_limit',
+      message: 'Upgrade to run more AI skills.',
+    });
+    expect(clearPendingSignup).not.toHaveBeenCalled();
   });
 
   it('returns structured failure when startDelivery throws', async () => {
@@ -220,10 +252,34 @@ describe('completeOnboardingFinish', () => {
 
     expect(result).toEqual({
       ok: false,
-      reason: 'signup_failed',
-      message: GENERIC_ONBOARDING_SIGNUP_ERROR,
+      reason: 'delivery_failed',
+      message: GENERIC_ONBOARDING_MATCH_ERROR,
     });
     expect(uploadCv).toHaveBeenCalledOnce();
+    expect(clearPendingSignup).not.toHaveBeenCalled();
+  });
+
+  it('defers clearPendingSignup until full pipeline succeeds', async () => {
+    updateProfile.mockRejectedValueOnce(new Error('profile save failed'));
+
+    const result = await completeOnboardingFinish(
+      {
+        existingUser: null,
+        pending,
+        registerName: 'New User',
+        profilePayload: { onboarded: true, name: 'New User' },
+        cvFile,
+      },
+      deps(),
+    );
+
+    expect(result).toEqual({
+      ok: false,
+      reason: 'profile_failed',
+      message: GENERIC_ONBOARDING_PROFILE_ERROR,
+    });
+    expect(signUp).toHaveBeenCalledOnce();
+    expect(clearPendingSignup).not.toHaveBeenCalled();
   });
 
   it('returns session_expired when no user and no pending signup', async () => {

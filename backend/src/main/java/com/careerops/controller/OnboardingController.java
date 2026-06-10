@@ -1,5 +1,7 @@
 package com.careerops.controller;
 
+import com.careerops.annotation.PlanGated;
+import com.careerops.ratelimit.RateLimited;
 import com.careerops.dto.OnboardingDeliveryDtos.DeliveryStatusResponse;
 import com.careerops.dto.OnboardingDeliveryDtos.StartDeliveryResponse;
 import com.careerops.service.OnboardingAnalyticsService;
@@ -50,6 +52,7 @@ public class OnboardingController {
 
     /** Track A — start first-run job delivery (CV normalize → scrape → evaluate). */
     @PostMapping("/delivery/start")
+    @PlanGated("ai_skill_run")
     public StartDeliveryResponse startDelivery(
             @RequestParam(defaultValue = "false") boolean restart) {
         return deliveryService.start(AuthUtil.currentUserId(), restart);
@@ -57,6 +60,7 @@ public class OnboardingController {
 
     /** Track A — poll delivery progress for the onboarding loader. */
     @GetMapping("/delivery/status")
+    @RateLimited(capacity = 300, requestsPerMinute = 300)
     public DeliveryStatusResponse deliveryStatus() {
         return deliveryService.status(AuthUtil.currentUserId());
     }

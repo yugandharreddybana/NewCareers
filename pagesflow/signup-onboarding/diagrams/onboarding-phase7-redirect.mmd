@@ -1,0 +1,20 @@
+sequenceDiagram
+    participant Onb as Onboarding.tsx
+    participant SSE as useJobEvaluationProgress
+    participant Storage as sessionStorage
+    participant Router
+
+    Onb->>SSE: connect evaluation-progress userId
+    loop SSE events
+        SSE-->>Onb: SOURCE_FOUND JOB_EVALUATED
+        SSE-->>Onb: COMPLETE
+    end
+    alt poll returns ready or readyPartial
+        Onb->>Onb: finishToDashboard
+    else SSE COMPLETE
+        Onb->>Onb: wait 1.5s then finishToDashboard
+    end
+    Onb->>Storage: clearOnboardingCvDraft
+    Onb->>Storage: setWelcomePendingFlag nc_welcome_pending
+    Onb->>Router: navigate /dashboard?welcome=1
+    Note over Router: CareersHomeDashboard shows welcome celebration

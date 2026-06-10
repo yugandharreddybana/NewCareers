@@ -1,6 +1,7 @@
 package com.careerops.ratelimit;
 
 import com.careerops.exception.ErrorResponse;
+import com.careerops.security.ServletPathNormalizer;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import io.github.bucket4j.Bandwidth;
 import io.github.bucket4j.Bucket;
@@ -108,11 +109,8 @@ public class RateLimitFilter extends OncePerRequestFilter {
                                     FilterChain chain)
             throws ServletException, IOException {
 
-        // 3.002 — Use servletPath to ignore context-path (e.g. /api/v1) for matching
-        String path = req.getServletPath();
-        if (path == null || path.isEmpty()) {
-            path = req.getRequestURI().substring(req.getContextPath().length());
-        }
+        // Align /v1/* servlet paths with policy entries (/auth, /jobs, …).
+        String path = ServletPathNormalizer.normalize(req);
 
         // Exempt public endpoints
         if (publicPathPolicy.isPublic(path)) {
@@ -132,7 +130,7 @@ public class RateLimitFilter extends OncePerRequestFilter {
         // 2.080 — Check for @RateLimited override
         Bandwidth limitToUse = this.bandwidth;
         String bucketKey = userId;
-        int redisMax = 60;
+        int redisMax = capacityTokens(limitToUse);
 
         if (handlerMapping != null) {
             try {
@@ -150,7 +148,7 @@ public class RateLimitFilter extends OncePerRequestFilter {
                                 .build();
                         // Use a specialized key for this limit group to avoid colliding with global budget
                         bucketKey = userId + ":" + hm.getMethod().getName() + ":" + ann.requestsPerMinute();
-                        redisMax = ann.requestsPerMinute();
+                        redisMax = ann.capacity();
                     }
                 }
             } catch (Exception e) {
@@ -250,6 +248,14 @@ public class RateLimitFilter extends OncePerRequestFilter {
         } catch (Exception e) {
             log.warn("failed to write 503 body for path={}", path, e);
         }
+    }
+
+    private static int capacityTokens(Bandwidth bandwidth) {
+        long capacity = bandwidth.getCapacity();
+        if (capacity <= 0) {
+            return 60;
+        }
+        return (int) Math.min(capacity, Integer.MAX_VALUE);
     }
 
     private String resolveUserId(HttpServletRequest req) {

@@ -89,7 +89,7 @@ const Home: React.FC = () => {
         <MarketingNav />
 
         {/* Hero Section */}
-        <header className="relative min-h-screen flex flex-col md:flex-row pt-20 overflow-hidden bg-surface">
+        <header className="relative min-h-screen flex flex-col md:flex-row pt-[calc(5rem+var(--status-banner-height,0px))] overflow-hidden bg-surface">
           {/* Left Side (Light) */}
           <div className="w-full md:w-1/2 flex items-center justify-center p-8 lg:p-16 xl:p-24 relative z-10">
             <div className="absolute top-0 left-0 w-full h-full bg-gradient-to-br from-[#0d9488]/5 to-transparent pointer-events-none" />
@@ -97,7 +97,7 @@ const Home: React.FC = () => {
               <div className="hardware-sticker rounded-full px-4 py-1.5 inline-flex items-center gap-2 animate-slide-up-fade">
                 <span className="material-symbols-outlined text-[16px] text-teal-700">bolt</span>
                 <span className="font-label-sm text-label-sm text-teal-800 tracking-wide uppercase">
-                  Now with NVIDIA Llama 3.3 AI
+                  Now with NVIDIA Nemotron AI
                 </span>
               </div>
               <h1 className="font-headline-xl text-[48px] leading-[1.1] text-on-surface mt-stack-sm tracking-tight animate-slide-up-fade delay-100">

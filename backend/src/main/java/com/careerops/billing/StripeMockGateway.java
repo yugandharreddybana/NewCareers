@@ -99,6 +99,14 @@ public class StripeMockGateway implements StripeGateway {
     }
 
     @Override
+    public Optional<Long> retrieveSubscriptionCurrentPeriodStart(String stripeSubscriptionId) {
+        if (stripeSubscriptionId == null || stripeSubscriptionId.isBlank()) {
+            return Optional.empty();
+        }
+        return Optional.of(Instant.now().getEpochSecond());
+    }
+
+    @Override
     public Optional<SubscriptionPlanResolution> resolveSubscriptionPlan(String stripeSubscriptionId) {
         if (stripeSubscriptionId == null || stripeSubscriptionId.isBlank()) {
             return Optional.empty();

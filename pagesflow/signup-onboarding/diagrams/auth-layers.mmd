@@ -1,0 +1,37 @@
+flowchart TB
+    subgraph Frontend
+        SignupUI[Signup.tsx + SignupPageShell]
+        OnbUI[Onboarding.tsx + step components]
+        PendingStore[pendingSignup.ts + onboardingVerification.ts]
+        Axios[api.ts Axios + CSRF]
+    end
+    subgraph Middleware
+        AuthRoutes[auth.routes.ts]
+        OnbRoutes[onboarding.routes.ts]
+        Cookies[HttpOnly cookies at finish]
+    end
+    subgraph Backend
+        AuthCtrl[AuthController]
+        OnbCtrl[OnboardingController]
+        SignupIntent[SignupIntentService]
+        EmailVerify[OnboardingEmailVerificationService]
+        CvParse[OnboardingCvParseService]
+        Delivery[OnboardingDeliveryService]
+        Captcha[CaptchaService]
+        AuthSvc[AuthService.register]
+    end
+    SignupUI --> PendingStore
+    OnbUI --> PendingStore
+    SignupUI --> Axios
+    OnbUI --> Axios
+    Axios --> AuthRoutes
+    Axios --> OnbRoutes
+    AuthRoutes --> AuthCtrl
+    OnbRoutes --> OnbCtrl
+    AuthCtrl --> SignupIntent
+    AuthCtrl --> EmailVerify
+    AuthCtrl --> CvParse
+    AuthCtrl --> AuthSvc
+    OnbCtrl --> Delivery
+    SignupIntent --> Captcha
+    AuthSvc --> Cookies

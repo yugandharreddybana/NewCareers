@@ -19,7 +19,7 @@ const COPY_VARIANTS: Record<string, { headline: string; subtext: string; cta: st
   value_focus: {
     headline: 'Land interviews faster',
     subtext: 'Premium members get 3× more interview callbacks. Unlock mock interviews, workspace sharing, and unlimited skill runs.',
-    cta: 'Start my free trial',
+    cta: 'Upgrade to Pro',
   },
   urgency: {
     headline: 'Limited free usage remaining',

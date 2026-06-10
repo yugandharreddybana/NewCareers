@@ -1,15 +1,23 @@
 const STORAGE_KEY = 'careerops_onboarding_cv_draft';
+const MAX_MARKDOWN_CHARS = 32_768;
 
 export type OnboardingCvDraft = {
   cvMarkdown: string;
   rolesFound: number;
   educationFound: number;
   projectsFound: number;
+  extractedTechStack?: string[];
+  extractedTargetRoles?: string[];
+  parseSource?: 'ai' | 'regex';
 };
 
 export function writeOnboardingCvDraft(draft: OnboardingCvDraft): void {
   try {
-    sessionStorage.setItem(STORAGE_KEY, JSON.stringify(draft));
+    let cvMarkdown = draft.cvMarkdown;
+    if (cvMarkdown.length > MAX_MARKDOWN_CHARS) {
+      cvMarkdown = cvMarkdown.slice(0, MAX_MARKDOWN_CHARS);
+    }
+    sessionStorage.setItem(STORAGE_KEY, JSON.stringify({ ...draft, cvMarkdown }));
   } catch {
     /* ignore quota errors */
   }

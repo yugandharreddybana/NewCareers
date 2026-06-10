@@ -1,6 +1,7 @@
 package com.careerops.service;
 
 import com.careerops.model.UserProfile;
+import com.careerops.security.AesGcmCodec;
 
 import java.util.ArrayList;
 import java.util.LinkedHashSet;
@@ -13,6 +14,8 @@ import java.util.Set;
  * Uses target roles and professional headline ({@link UserProfile#getGoalTitle()}) only.
  */
 public final class JobProfileSearchTerms {
+
+    private static final String FALLBACK_KEYWORD = "software engineer";
 
     private JobProfileSearchTerms() {}
 
@@ -32,9 +35,7 @@ public final class JobProfileSearchTerms {
             addKeyword(out, seen, profile.getGoalTitle());
         }
 
-        if (out.isEmpty()) {
-            throw new IllegalStateException("No target roles or goal title defined for user profile");
-        }
+        if (out.isEmpty()) out.add(FALLBACK_KEYWORD);
         return out;
     }
 
@@ -47,6 +48,7 @@ public final class JobProfileSearchTerms {
     private static void addKeyword(List<String> out, Set<String> seen, String raw) {
         if (raw == null || raw.isBlank()) return;
         String trimmed = raw.trim();
+        if (AesGcmCodec.looksEncrypted(trimmed)) return;
         String key = trimmed.toLowerCase(Locale.ROOT);
         if (seen.add(key)) {
             out.add(trimmed);

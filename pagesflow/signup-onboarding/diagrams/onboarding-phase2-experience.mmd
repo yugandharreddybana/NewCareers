@@ -1,0 +1,18 @@
+sequenceDiagram
+    participant User
+    participant Onb as Onboarding.tsx
+    participant Exp as ExperienceStep
+
+    User->>Onb: Step1 Experience
+    Onb->>Exp: work education projects sections
+    alt parseSource ai and rows present
+        Exp-->>User: review banner verify dates titles
+    end
+    User->>Exp: edit add remove entries
+    User->>Exp: Continue
+    alt invalid project URL
+        Exp-->>User: toast invalid URL warning
+        Note over Exp: Continue still allowed soft validation
+    end
+    Exp->>Onb: onContinue
+    Onb->>Onb: setStep 2

@@ -10,7 +10,13 @@ import type { OnboardingDeliveryStatus } from '@/services/api';
 import { filterProjectEntries } from '@/lib/buildOnboardingProfilePayload';
 import type { MappedProjectEntry } from '@/lib/mapCvParseToOnboarding';
 import { normalizeUrl } from '@/lib/normalizeUrl';
-import { GENERIC_ONBOARDING_SIGNUP_ERROR } from '@/lib/authErrors';
+import {
+  GENERIC_ONBOARDING_MATCH_ERROR,
+  GENERIC_ONBOARDING_PROFILE_ERROR,
+  GENERIC_ONBOARDING_SIGNUP_ERROR,
+} from '@/lib/authErrors';
+import { emitPlanLimitExceeded, parsePlanLimitResponse } from '@/lib/planLimitEvents';
+import { isApiError } from '@/types';
 
 export const ONBOARDING_OVERLAY_CREATING_ACCOUNT =
   'Creating your account…' as const;
@@ -95,7 +101,31 @@ export type CompleteOnboardingFinishDeps = {
 
 export type CompleteOnboardingFinishResult =
   | { ok: true; evaluationUserId: string }
-  | { ok: false; reason: 'session_expired' | 'signup_failed' | 'missing_user_id' | 'missing_cv'; message?: string };
+  | {
+      ok: false;
+      reason:
+        | 'session_expired'
+        | 'signup_failed'
+        | 'profile_failed'
+        | 'cv_failed'
+        | 'delivery_failed'
+        | 'plan_limit'
+        | 'missing_user_id'
+        | 'missing_cv';
+      message?: string;
+    };
+
+function planLimitFailure(err: unknown): CompleteOnboardingFinishResult | null {
+  if (!isApiError(err) || err.status !== 402) return null;
+  const body = err.response?.data as Record<string, unknown> | undefined;
+  const planLimit = parsePlanLimitResponse(body ?? {});
+  if (planLimit) emitPlanLimitExceeded(planLimit);
+  return {
+    ok: false,
+    reason: 'plan_limit',
+    message: err.normalizedMessage ?? GENERIC_ONBOARDING_MATCH_ERROR,
+  };
+}
 
 /**
  * Runs register → profile → CV → startDelivery in strict order.
@@ -132,8 +162,6 @@ export async function completeOnboardingFinish(
         emailVerificationId: verification.verificationId,
       });
       evaluationUserId = created.id;
-      deps.clearPendingSignup();
-      clearOnboardingVerification();
     } catch {
       return { ok: false, reason: 'signup_failed', message: GENERIC_ONBOARDING_SIGNUP_ERROR };
     }
@@ -142,7 +170,7 @@ export async function completeOnboardingFinish(
   }
 
   if (!evaluationUserId?.trim()) {
-    return { ok: false, reason: 'missing_user_id' };
+    return { ok: false, reason: 'missing_user_id', message: GENERIC_ONBOARDING_PROFILE_ERROR };
   }
 
   if (!cvFile) {
@@ -152,6 +180,15 @@ export async function completeOnboardingFinish(
   deps.onPhase(overlayStatusForPhase(ONBOARDING_OVERLAY_SAVING_PROFILE));
   try {
     await deps.updateProfile(profilePayload);
+  } catch {
+    return {
+      ok: false,
+      reason: 'profile_failed',
+      message: GENERIC_ONBOARDING_PROFILE_ERROR,
+    };
+  }
+
+  try {
     await deps.uploadCv(cvFile);
     for (const project of filterProjectEntries(projectEntries ?? [])) {
       const title = project.projectName.trim();
@@ -174,8 +211,8 @@ export async function completeOnboardingFinish(
   } catch {
     return {
       ok: false,
-      reason: 'signup_failed',
-      message: GENERIC_ONBOARDING_SIGNUP_ERROR,
+      reason: 'cv_failed',
+      message: GENERIC_ONBOARDING_PROFILE_ERROR,
     };
   }
 
@@ -184,12 +221,19 @@ export async function completeOnboardingFinish(
   );
   try {
     await deps.startDelivery();
-  } catch {
+  } catch (err) {
+    const planLimit = planLimitFailure(err);
+    if (planLimit) return planLimit;
     return {
       ok: false,
-      reason: 'signup_failed',
-      message: GENERIC_ONBOARDING_SIGNUP_ERROR,
+      reason: 'delivery_failed',
+      message: GENERIC_ONBOARDING_MATCH_ERROR,
     };
+  }
+
+  if (pending) {
+    deps.clearPendingSignup();
+    clearOnboardingVerification();
   }
 
   return { ok: true, evaluationUserId };

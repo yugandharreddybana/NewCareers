@@ -21,7 +21,8 @@ public class AuthDtos {
         @Size(min = 8, max = 128) @Pattern(regexp = "^(?=.*[a-z])(?=.*[A-Z])(?=.*\\d).{8,128}$") String password,
         @Valid @NotNull SignupConsentsRequest consents,
         @NotNull java.util.UUID emailVerificationId,
-        java.util.UUID signupIntentId
+        java.util.UUID signupIntentId,
+        String captchaToken
     ) {}
 
     public record SignupIntentRequest(
@@ -180,6 +181,8 @@ public class AuthDtos {
         String schoolName,
         String degree,
         String fieldOfStudy,
+        String startYear,
+        String endYear,
         String graduationYear,
         String location
     ) {}
@@ -207,6 +210,29 @@ public class AuthDtos {
         int projectsFound,
         String linkedInUrl,
         String githubUrl,
-        String websiteUrl
-    ) {}
+        String websiteUrl,
+        java.util.List<String> extractedTechStack,
+        java.util.List<String> extractedTargetRoles,
+        String parseSource,
+        java.util.List<String> parseWarnings
+    ) {
+        public OnboardingCvParseResponse(
+            String cvMarkdown,
+            String headline,
+            java.util.List<OnboardingCvParseWorkEntry> workExperience,
+            java.util.List<OnboardingCvParseEducationEntry> education,
+            java.util.List<OnboardingCvParseProjectEntry> projects,
+            int rolesFound,
+            int educationFound,
+            int projectsFound,
+            String linkedInUrl,
+            String githubUrl,
+            String websiteUrl
+        ) {
+            this(cvMarkdown, headline, workExperience, education, projects,
+                rolesFound, educationFound, projectsFound,
+                linkedInUrl, githubUrl, websiteUrl,
+                java.util.List.of(), java.util.List.of(), "regex", java.util.List.of());
+        }
+    }
 }

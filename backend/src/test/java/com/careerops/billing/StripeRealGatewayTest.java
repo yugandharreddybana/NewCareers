@@ -2,10 +2,14 @@ package com.careerops.billing;
 
 import com.stripe.exception.SignatureVerificationException;
 import com.stripe.model.Event;
-import com.stripe.net.Webhook;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+
+import javax.crypto.Mac;
+import javax.crypto.spec.SecretKeySpec;
+import java.nio.charset.StandardCharsets;
+import java.util.HexFormat;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -35,7 +39,7 @@ class StripeRealGatewayTest {
         String payload = """
                 {"id":"evt_unit_test","object":"event","type":"ping"}
                 """;
-        String signature = Webhook.generateTestHeaderString(payload, WEBHOOK_SECRET);
+        String signature = stripeSignature(payload, WEBHOOK_SECRET);
 
         Event event = gateway.constructWebhookEvent(payload, signature);
 
@@ -49,5 +53,14 @@ class StripeRealGatewayTest {
 
         assertThatThrownBy(() -> gateway.constructWebhookEvent(payload, "t=0,v1=invalid"))
                 .isInstanceOf(SignatureVerificationException.class);
+    }
+
+    private static String stripeSignature(String payload, String secret) throws Exception {
+        long timestamp = System.currentTimeMillis() / 1000L;
+        String signedPayload = timestamp + "." + payload;
+        Mac mac = Mac.getInstance("HmacSHA256");
+        mac.init(new SecretKeySpec(secret.getBytes(StandardCharsets.UTF_8), "HmacSHA256"));
+        String digest = HexFormat.of().formatHex(mac.doFinal(signedPayload.getBytes(StandardCharsets.UTF_8)));
+        return "t=" + timestamp + ",v1=" + digest;
     }
 }

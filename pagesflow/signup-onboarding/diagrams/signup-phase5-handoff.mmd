@@ -1,0 +1,13 @@
+sequenceDiagram
+    participant Signup as Signup.tsx
+    participant Storage as sessionStorage
+    participant Router
+
+    Note over Signup: signup-intent returned 200
+    Signup->>Storage: writePendingGoogleConsents
+    Signup->>Storage: writeAnalyticsConsent
+    Signup->>Storage: writePendingSignup co_pending_signup_v2
+    Note over Storage: intentId email consents name expiresAt 30min
+    Signup->>Router: navigate /onboarding replace true
+    Note over Signup: No JWT co_session not set yet
+    Router-->>Signup: OnboardingRoute checks hasPendingSignup

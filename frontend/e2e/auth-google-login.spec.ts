@@ -34,6 +34,13 @@ test.describe('H-14 — Google consent sheet (UI)', () => {
     await expect(dialog.getByRole('alert')).toContainText(/terms of service/i);
   });
 
+  test('stale partial consents require consent sheet (LSA-001)', async ({ page }) => {
+    await page.goto('/login?e2e=google-stale-consent');
+    const dialog = page.getByRole('dialog', { name: /finish setting up your account/i });
+    await expect(dialog).toBeVisible();
+    await expect(dialog.getByRole('checkbox', { name: /ai processing/i })).not.toBeChecked();
+  });
+
   test('accepting terms enables submit path (mocked API)', async ({ page }) => {
     let capturedBody: Record<string, unknown> | null = null;
 

@@ -479,6 +479,20 @@ export function hasRichEvaluationReport(evaluation?: JobEvaluationView | null): 
   return false;
 }
 
+const ENCRYPTED_HEADLINE = /^Headline:\s*([A-Za-z0-9+/=]{20,})\./i;
+const HEADLINE_PREFIX = /^Headline:\s*[^.]+\.\s*/i;
+
+/** Strip legacy encrypted profile headline prefixes from stored AI summaries. */
+export function sanitizeHumanSummary(summary?: string | null): string | undefined {
+  if (!summary?.trim()) return undefined;
+  const trimmed = summary.trim();
+  if (ENCRYPTED_HEADLINE.test(trimmed) || HEADLINE_PREFIX.test(trimmed)) {
+    const stripped = trimmed.replace(HEADLINE_PREFIX, '').trim();
+    return stripped.length > 0 ? stripped : undefined;
+  }
+  return trimmed;
+}
+
 export function isHeuristicPlaceholderEvaluation(job: JobDetail): boolean {
   const breakdown = job.scoreBreakdown as Record<string, unknown> | undefined;
   if (breakdown?.evaluationStatus === 'complete_local' || breakdown?.evaluationStatus === 'complete') {

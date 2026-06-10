@@ -2,15 +2,15 @@
 
 ## Overview
 
-Global notification UI embedded in `TopBar` (AppShell layout). Not a standalone route. `NotificationBell` shows an unread badge (polls every 60s) and opens `NotificationDrawer`, a right-side slide-over listing up to 50 notifications with type-specific icons, relative timestamps, mark-read, mark-all-read, and clear-all actions.
+Global notification UI embedded in `DashboardTopNav`. Not a standalone route. `NotificationBell` shows an unread badge (polls every 60s) and opens `NotificationDrawer`, a right-side slide-over listing up to 50 notifications with type-specific icons, relative timestamps, mark-read, mark-all-read, and clear-all actions.
 
 ## Route
 
 | Property | Value |
 |----------|-------|
 | URL | *(none — component only)* |
-| Mount point | `frontend/src/components/layout/TopBar.tsx` (AppShell pages) |
-| Guard | Inherited from parent route (`ProtectedRoute` + AppShell) |
+| Mount point | `frontend/src/components/dashboard/DashboardTopNav.tsx` |
+| Guard | Inherited from parent route (`ProtectedRoute` + `DashboardLayout`) |
 | Layout | Fixed header control; drawer overlays current page |
 | Redirects | N/A |
 

@@ -68,7 +68,53 @@ class PublicPathPolicyTest {
 
     void signupIntentIsPublic() {
 
-        assertThat(devPolicy().isPublic("/auth/signup-intent")).isTrue();
+        PublicPathPolicy policy = devPolicy();
+
+        assertThat(policy.isPublic("/auth/signup-intent")).isTrue();
+
+        assertThat(policy.isPublic("/v1/auth/signup-intent")).isTrue();
+
+        assertThat(policy.isPublic("/auth/signup-intent/00000000-0000-0000-0000-000000000001/exists")).isFalse();
+
+    }
+
+
+
+    @Test
+
+    void authStepUpCallbacksArePublic() {
+
+        PublicPathPolicy policy = devPolicy();
+
+        assertThat(policy.isPublic("/auth/two-factor/verify")).isTrue();
+
+        assertThat(policy.isPublic("/auth/google/link/confirm")).isTrue();
+
+        assertThat(policy.isPublic("/v1/auth/two-factor/verify")).isTrue();
+
+        assertThat(policy.isPublic("/v1/auth/google/link/confirm")).isTrue();
+
+        assertThat(policy.securityPatterns()).contains(
+
+                "/auth/two-factor/verify",
+
+                "/auth/google/link/confirm");
+
+    }
+
+
+
+    @Test
+
+    void billingPlansArePublic() {
+
+        PublicPathPolicy policy = devPolicy();
+
+        assertThat(policy.isPublic("/billing/plans")).isTrue();
+
+        assertThat(policy.isPublic("/v1/billing/plans")).isTrue();
+
+        assertThat(policy.securityPatterns()).contains("/billing/plans");
 
     }
 

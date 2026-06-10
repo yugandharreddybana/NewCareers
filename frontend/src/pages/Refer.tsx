@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { PageMeta } from '@/components/PageMeta';
 import { PageLoader } from '@/components/LoadingSpinner';
-import { useAuth } from '@/context/AuthContext';
+import { useAuth } from '@/context/authCtx';
 import { referralsApi, type ReferralDto, type ReferralStats } from '@/services/referralsApi';
 import toast from 'react-hot-toast';
 import { Gift, Copy, Check, Mail, Users, Award, CheckCircle, Clock } from 'lucide-react';
@@ -99,7 +99,7 @@ const ReferPage: React.FC = () => {
               {referralLink || 'Sign in to generate your referral link.'}
             </div>
             <button onClick={handleCopy} disabled={!referralCode}
-              className={`flex items-center gap-1.5 px-4 py-2.5 rounded-lg text-sm font-semibold transition-colors disabled:opacity-50 ${ copied ? 'bg-emerald-500 text-white' : 'bg-indigo-500 hover:bg-indigo-600 text-white'}`}>
+              className={`flex items-center gap-1.5 px-4 py-2.5 rounded-lg text-sm font-semibold transition-colors disabled:opacity-50 ${ copied ? 'bg-emerald-500 text-white' : 'bg-brand-500 hover:bg-brand-600 text-white'}`}>
               {copied ? <><Check size={14} /> Copied!</> : <><Copy size={14} /> Copy</>}
             </button>
           </div>
@@ -120,7 +120,7 @@ const ReferPage: React.FC = () => {
               placeholder="friend@example.com" onKeyDown={e => e.key === 'Enter' && void handleInvite()}
               className="flex-1 px-3 py-2.5 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400" />
             <button onClick={() => void handleInvite()} disabled={sending}
-              className="px-4 py-2.5 bg-indigo-500 hover:bg-indigo-600 disabled:opacity-60 text-white text-sm font-semibold rounded-lg transition-colors">
+              className="px-4 py-2.5 bg-brand-500 hover:bg-brand-600 disabled:opacity-60 text-white text-sm font-semibold rounded-lg transition-colors">
               {sending ? 'Sending…' : 'Send Invite'}
             </button>
           </div>

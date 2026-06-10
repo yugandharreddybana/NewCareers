@@ -6,8 +6,8 @@ import com.careerops.repository.UserCvRepository;
 import com.careerops.repository.UserProfileRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.util.UUID;
@@ -31,12 +31,27 @@ public class CvNormalizationService {
     private final UserCvRepository cvRepo;
     private final UserProfileRepository profiles;
     private final UserJobSkillMatchService skillMatchService;
+    private final ProfileReadableFields profileFields;
 
-    @Value("${nvidia.api.key:}")
-    private String nvidiaApiKey;
+    /** Settings / profile CV upload: update active CV markdown only (no job match refresh). */
+    @Transactional(propagation = Propagation.REQUIRES_NEW)
+    public String normalizeMarkdownOnly(UUID userId) {
+        return storeNormalizedMarkdown(userId);
+    }
 
+    /** Onboarding and explicit refresh paths: markdown + pipeline skill-match refresh. */
     @Transactional
     public String normalizeAndStore(UUID userId) {
+        String markdown = storeNormalizedMarkdown(userId);
+        try {
+            skillMatchService.refreshAllForUser(userId);
+        } catch (Exception e) {
+            log.warn("Could not refresh pipeline skill matches after CV normalize userId={}: {}", userId, e.getMessage());
+        }
+        return markdown;
+    }
+
+    private String storeNormalizedMarkdown(UUID userId) {
         UserCv cv = cvRepo.findFirstByUserIdAndIsActiveTrueOrderByUploadedAtDesc(userId)
             .orElseThrow(() -> com.careerops.exception.ApiException.badRequest("Upload your CV before continuing"));
         UserProfile profile = profiles.findByUserId(userId).orElse(null);
@@ -47,30 +62,25 @@ public class CvNormalizationService {
         }
 
         String markdown;
-        if (nvidiaApiKey != null && !nvidiaApiKey.isBlank()) {
+        if (nvidia.isConfigured()) {
             try {
                 String userPrompt = buildUserPrompt(parsed, profile);
                 markdown = nvidia.generatePlainText(SYSTEM_PROMPT, userPrompt, userId, "cv-normalize");
             } catch (Exception e) {
                 log.warn("AI CV normalization failed for userId={}, using deterministic fallback: {}", userId, e.getMessage());
-                markdown = buildDeterministicMarkdown(parsed, profile);
+                markdown = buildDeterministicMarkdown(parsed, profile, profileFields);
             }
         } else {
-            markdown = buildDeterministicMarkdown(parsed, profile);
+            markdown = buildDeterministicMarkdown(parsed, profile, profileFields);
         }
 
         markdown = markdown.trim();
         if (markdown.isBlank()) {
-            markdown = buildDeterministicMarkdown(parsed, profile);
+            markdown = buildDeterministicMarkdown(parsed, profile, profileFields);
         }
 
         cv.setCvMarkdown(markdown);
         cvRepo.save(cv);
-        try {
-            skillMatchService.refreshAllForUser(userId);
-        } catch (Exception e) {
-            log.warn("Could not refresh pipeline skill matches after CV normalize userId={}: {}", userId, e.getMessage());
-        }
         log.info("Stored cv_markdown for userId={} ({} chars)", userId, markdown.length());
         return markdown;
     }
@@ -79,17 +89,20 @@ public class CvNormalizationService {
         StringBuilder sb = new StringBuilder();
         sb.append("RAW CV TEXT:\n").append(truncate(parsed, 12_000)).append("\n\n");
         if (profile != null) {
-            appendProfileContext(sb, profile);
+            appendProfileContext(sb, profile, profileFields);
         }
         return sb.toString();
     }
 
-    private static void appendProfileContext(StringBuilder sb, UserProfile profile) {
-        if (profile.getGoalTitle() != null && !profile.getGoalTitle().isBlank()) {
-            sb.append("HEADLINE: ").append(profile.getGoalTitle()).append("\n");
+    private static void appendProfileContext(
+            StringBuilder sb, UserProfile profile, ProfileReadableFields fields) {
+        String headline = fields.goalTitle(profile);
+        if (headline != null) {
+            sb.append("HEADLINE: ").append(headline).append("\n");
         }
-        if (profile.getLocation() != null) {
-            sb.append("LOCATION: ").append(profile.getLocation()).append("\n");
+        String location = fields.location(profile);
+        if (location != null) {
+            sb.append("LOCATION: ").append(location).append("\n");
         }
         if (profile.getTargetRoles() != null && profile.getTargetRoles().length > 0) {
             sb.append("TARGET ROLES: ").append(String.join(", ", profile.getTargetRoles())).append("\n");
@@ -123,10 +136,18 @@ public class CvNormalizationService {
     }
 
     static String buildDeterministicMarkdown(String parsed, UserProfile profile) {
+        return buildDeterministicMarkdown(parsed, profile, null);
+    }
+
+    static String buildDeterministicMarkdown(
+            String parsed, UserProfile profile, ProfileReadableFields fields) {
         StringBuilder md = new StringBuilder();
         md.append("# CV\n\n");
-        if (profile != null && profile.getGoalTitle() != null && !profile.getGoalTitle().isBlank()) {
-            md.append("## Summary\n\n").append(profile.getGoalTitle().trim()).append("\n\n");
+        String headline = profile != null && fields != null
+                ? fields.goalTitle(profile)
+                : plainGoalTitle(profile);
+        if (headline != null) {
+            md.append("## Summary\n\n").append(headline).append("\n\n");
         } else {
             md.append("## Summary\n\n").append(firstParagraph(parsed)).append("\n\n");
         }
@@ -165,6 +186,14 @@ public class CvNormalizationService {
         int idx = t.indexOf("\n\n");
         String chunk = idx > 0 ? t.substring(0, idx) : t;
         return truncate(chunk, 600);
+    }
+
+    private static String plainGoalTitle(UserProfile profile) {
+        if (profile == null) return null;
+        String g = profile.getGoalTitle();
+        if (g == null || g.isBlank()) return null;
+        if (com.careerops.security.AesGcmCodec.looksEncrypted(g.trim())) return null;
+        return g.trim();
     }
 
     private static String nullSafe(String s) {

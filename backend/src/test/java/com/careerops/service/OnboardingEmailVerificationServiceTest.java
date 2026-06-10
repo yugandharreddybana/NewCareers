@@ -11,9 +11,9 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
-import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.core.env.Environment;
 
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
@@ -28,6 +28,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -39,8 +40,9 @@ class OnboardingEmailVerificationServiceTest {
     @Mock ResendEmailService email;
     @Mock CaptchaService captcha;
     @Mock com.careerops.security.OtpHashService otpHashService;
+    @Mock Environment environment;
 
-    @InjectMocks OnboardingEmailVerificationService service;
+    OnboardingEmailVerificationService service;
 
     private static final String EMAIL = "new.user@example.com";
     private static final String REGISTERED_EMAIL = "existing.user@example.com";
@@ -49,8 +51,17 @@ class OnboardingEmailVerificationServiceTest {
     @BeforeEach
     void setUp() {
         verificationId = UUID.randomUUID();
-        when(otpHashService.hash(any())).thenAnswer(inv -> sha256(inv.getArgument(0)));
-        when(otpHashService.matches(any(), any())).thenAnswer(inv -> {
+        service = new OnboardingEmailVerificationService(
+                verifications,
+                users,
+                email,
+                captcha,
+                otpHashService,
+                false,
+                "test@newcareer.com",
+                environment);
+        lenient().when(otpHashService.hash(any())).thenAnswer(inv -> sha256(inv.getArgument(0)));
+        lenient().when(otpHashService.matches(any(), any())).thenAnswer(inv -> {
             String otp = inv.getArgument(0);
             String hash = inv.getArgument(1);
             return sha256(otp).equals(hash);
@@ -60,8 +71,6 @@ class OnboardingEmailVerificationServiceTest {
     @Test
     @DisplayName("checkEmailAvailable returns silently when email already registered")
     void checkEmailAvailableIgnoresExistingUser() {
-        when(users.findByEmail(EMAIL)).thenReturn(Optional.of(User.builder().email(EMAIL).build()));
-
         service.checkEmailAvailable(EMAIL);
 
         verify(verifications, never()).save(any());
@@ -70,8 +79,6 @@ class OnboardingEmailVerificationServiceTest {
     @Test
     @DisplayName("checkEmailAvailable succeeds when email is new")
     void checkEmailAvailableSuccess() {
-        when(users.findByEmail(EMAIL)).thenReturn(Optional.empty());
-
         service.checkEmailAvailable(EMAIL);
 
         verify(verifications, never()).save(any());
@@ -88,7 +95,7 @@ class OnboardingEmailVerificationServiceTest {
         OnboardingOtpSentResponse resp = service.sendOtp(REGISTERED_EMAIL, "New", null);
 
         assertThat(resp.resendsRemaining()).isEqualTo(3);
-        verify(verifications).invalidateAllActiveForEmail(REGISTERED_EMAIL);
+        verify(verifications).invalidateAllActiveForEmail(eq(REGISTERED_EMAIL), any(Instant.class));
         verify(verifications).save(any(EmailVerification.class));
         verify(email, never()).sendOnboardingVerificationOtp(any(), any(), any());
     }
@@ -106,7 +113,7 @@ class OnboardingEmailVerificationServiceTest {
         OnboardingOtpSentResponse resp = service.sendOtp(EMAIL, "New User", null);
 
         assertThat(resp.resendsRemaining()).isEqualTo(3);
-        verify(verifications).invalidateAllActiveForEmail(EMAIL);
+        verify(verifications).invalidateAllActiveForEmail(eq(EMAIL), any(Instant.class));
         verify(email).sendOnboardingVerificationOtp(eq(EMAIL), any(String.class), eq("New"));
     }
 
@@ -238,17 +245,29 @@ class OnboardingEmailVerificationServiceTest {
     }
 
     @Test
-    @DisplayName("consumeForSignup marks verification consumed")
+    @DisplayName("consumeForSignup atomically marks verification consumed")
     void consumeForSignup() {
-        EmailVerification row = activeRow("12345678", 0);
-        row.setOtpVerifiedAt(Instant.now());
-        row.setCaptchaVerifiedAt(Instant.now());
-        when(verifications.findByIdAndEmail(verificationId, EMAIL)).thenReturn(Optional.of(row));
-        when(verifications.save(row)).thenReturn(row);
+        when(verifications.consumeForSignupIfEligible(
+                eq(verificationId), eq(EMAIL), any(Instant.class), any(Instant.class), any(Instant.class)))
+                .thenReturn(1);
 
         service.consumeForSignup(verificationId, EMAIL);
 
-        assertThat(row.getConsumedAt()).isNotNull();
+        verify(verifications).consumeForSignupIfEligible(
+                eq(verificationId), eq(EMAIL), any(Instant.class), any(Instant.class), any(Instant.class));
+        verify(verifications, never()).save(any());
+    }
+
+    @Test
+    @DisplayName("consumeForSignup rejects when atomic consume updates zero rows")
+    void consumeForSignupRejectsIneligible() {
+        when(verifications.consumeForSignupIfEligible(
+                eq(verificationId), eq(EMAIL), any(Instant.class), any(Instant.class), any(Instant.class)))
+                .thenReturn(0);
+
+        assertThatThrownBy(() -> service.consumeForSignup(verificationId, EMAIL))
+                .isInstanceOf(ApiException.class)
+                .hasMessageContaining("Email verification required");
     }
 
     private EmailVerification activeRow(String otp, int resendCount) {

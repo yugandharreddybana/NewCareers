@@ -1,0 +1,32 @@
+sequenceDiagram
+    participant User
+    participant Onb as Onboarding.tsx
+    participant Modal as EmailVerificationModal
+    participant Axios
+    participant Java as OnboardingEmailVerificationService
+
+    Onb->>Onb: handleFinish
+    alt pendingSignup and no verification session
+        Onb->>Modal: open awaitingInitialSend
+        User->>Modal: captcha then Send code
+        Modal->>Axios: POST /auth/onboarding/send-verification-otp
+        Axios->>Java: send OTP 8 digits
+        alt registered email decoy
+            Java-->>Modal: 202 accepted no email sent
+        else new email
+            Java-->>Modal: 202 OTP emailed
+        end
+        User->>Modal: enter 8-digit OTP + captcha
+        Modal->>Axios: POST /auth/onboarding/verify-email
+        alt invalid OTP or expired
+            Java-->>Modal: 400 Invalid code
+        else resend cooldown
+            Java-->>Modal: 429 retryAfterSeconds
+        else verified
+            Java-->>Modal: verificationId
+            Modal->>Onb: writeOnboardingVerification 15min TTL
+            Onb->>Onb: proceedFinish
+        end
+    else Google user or already verified
+        Onb->>Onb: proceedFinish skip OTP
+    end

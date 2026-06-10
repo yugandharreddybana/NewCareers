@@ -74,8 +74,7 @@ public class AdminSaasService {
         Instant thirtyDaysAgo = now.minusSeconds(30L * 86_400L);
 
         long totalUsers = userRepository.countByDeletedAtIsNull();
-        long activeSubscriptions = subscriptionRepository.countByStatusIn(
-                EnumSet.of(SubscriptionStatus.ACTIVE, SubscriptionStatus.TRIALING));
+        long activeSubscriptions = subscriptionRepository.countByStatus(SubscriptionStatus.ACTIVE);
 
         BigDecimal mrr = BigDecimal.ZERO;
         for (Object[] row : subscriptionRepository.countActiveGroupByPlan()) {
@@ -89,17 +88,12 @@ public class AdminSaasService {
         double churnRate = (cancelledLast30d * 100.0)
                 / Math.max(1, activeNow + cancelledLast30d);
 
-        long trialingNow = subscriptionRepository.countByStatus(SubscriptionStatus.TRIALING);
-        long activeWithPastTrial = subscriptionRepository.countActiveWithPastTrial(now);
-        double trialConversion = (activeWithPastTrial * 100.0)
-                / Math.max(1, trialingNow + activeWithPastTrial);
-
         return new SaasMetricsResponse(
                 totalUsers,
                 activeSubscriptions,
                 mrr.setScale(2, RoundingMode.HALF_UP),
                 roundPercent(churnRate),
-                roundPercent(trialConversion),
+                0.0,
                 now);
     }
 

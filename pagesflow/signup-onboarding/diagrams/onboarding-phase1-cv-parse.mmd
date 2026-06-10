@@ -1,0 +1,35 @@
+sequenceDiagram
+    participant User
+    participant Onb as Onboarding.tsx
+    participant Axios
+    participant Java as OnboardingCvParseService
+
+    User->>Onb: Step0 Continue with CV file
+    Onb->>Onb: validate fullName headline experienceYears cvFile
+    alt validation fail
+        Onb-->>User: toast error
+    else CAPTCHA required missing
+        Onb-->>User: Complete security check
+    else submit parse
+        Onb->>Axios: POST /auth/onboarding/parse-cv multipart
+        Axios->>Java: parse with signupIntentId email
+        alt intent expired or missing prod
+            Java-->>Onb: 400 Sign-up session expired
+        else AI consent missing
+            Java-->>Onb: 400 AI consent required
+        else file invalid type or size
+            Java-->>Onb: 413 415 or 422
+        else parse success
+            alt AI path enabled
+                Java->>Java: OnboardingCvAiParseService
+                alt AI fails
+                    Java->>Java: regex fallback parseWarnings
+                end
+            else regex only
+                Java->>Java: regex parsers
+            end
+            Java-->>Onb: work education projects tech roles
+            Onb->>Onb: writeOnboardingCvDraft mapCvParseToOnboarding
+            Onb->>Onb: setStep 1
+        end
+    end

@@ -21,6 +21,10 @@ public interface UserRepository extends JpaRepository<User, UUID> {
 
     @Query("SELECT u FROM User u WHERE lower(u.email) = lower(:email)")
     Optional<User> findByEmail(@org.springframework.data.repository.query.Param("email") String email);
+
+    @Query(value = "SELECT * FROM careerops.users WHERE id = :id AND deleted_at IS NULL FOR UPDATE", nativeQuery = true)
+    Optional<User> findByIdForUpdate(@org.springframework.data.repository.query.Param("id") UUID id);
+
     Optional<User> findByGoogleSub(String googleSub);
     boolean existsByGoogleSub(String googleSub);
 

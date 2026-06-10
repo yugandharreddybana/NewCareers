@@ -131,7 +131,7 @@ export function SkillQuestionModal({
             onClick={handleSubmit}
             disabled={isLoading || answer.trim().length === 0}
             aria-label="Submit answer"
-            className="px-5 py-2 text-sm font-semibold text-white bg-indigo-600 hover:bg-indigo-700 rounded-lg disabled:opacity-50 transition-colors flex items-center gap-2"
+            className="px-5 py-2 text-sm font-semibold text-white bg-brand-500 hover:bg-brand-600 rounded-lg disabled:opacity-50 transition-colors flex items-center gap-2"
           >
             {isLoading ? (
               <>

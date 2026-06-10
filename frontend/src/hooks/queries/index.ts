@@ -24,7 +24,20 @@ export {
 
 export { useWeeklyProgress, useProgressStreaks } from './useProgress';
 
-export { useUsageLimits } from './useUsageLimits';
-
 // Batch 5 — filter optimistic save
 export { useFiltersMutation } from './useFiltersMutation';
+
+export { useProfileQuery, useInvalidateProfile } from './useProfile';
+
+export {
+  usePlannerTasksQuery,
+  usePlannerDeadlinesQuery,
+  useInvalidatePlanner,
+  plannerQueryKeys,
+} from './usePlanner';
+
+export {
+  useNetworkingContactsQuery,
+  useInvalidateNetworking,
+  networkingQueryKeys,
+} from './useNetworking';

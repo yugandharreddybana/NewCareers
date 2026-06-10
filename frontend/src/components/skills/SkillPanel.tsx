@@ -216,6 +216,8 @@ export function SkillPanel({
     );
   }
 
+  const selectedRunId = runHistory[historyIndex]?.id;
+
   const handleDownload = async () => {
     if (!userJobId || !skillName) {
       toast.error('PDF download is unavailable right now.');
@@ -227,7 +229,7 @@ export function SkillPanel({
       const download =
         skillName === 'tailor-resume'
           ? () => skillsApi.downloadResumePdf(userJobId)
-          : () => skillsApi.downloadSkillPdf(userJobId, skillName);
+          : () => skillsApi.downloadSkillPdf(userJobId, skillName, selectedRunId);
       await toast.promise(download(), {
           loading: 'Generating PDF...',
           success: 'Your PDF download has started.',
@@ -247,7 +249,7 @@ export function SkillPanel({
       <div className="flex items-center justify-between">
         <h3 className="text-sm font-semibold text-gray-900 dark:text-white">{label}</h3>
         <div className="flex items-center gap-2">
-          {state === 'done' && data && (
+          {state === 'done' && data && skillName !== 'cover-letter' && (
             <button
               onClick={handleDownload}
               disabled={downloading}
@@ -262,7 +264,7 @@ export function SkillPanel({
             onClick={onRun}
             disabled={showLoading || state === 'waiting_answer'}
             type="button"
-            className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-white bg-indigo-600 hover:bg-indigo-700 rounded-lg disabled:opacity-50 transition-colors"
+            className="btn btn-primary !px-3 !py-1.5 text-xs"
           >
             {showLoading ? (
               <>
@@ -304,16 +306,18 @@ export function SkillPanel({
           runs={runHistory}
           selectedIndex={historyIndex}
           onSelect={onHistoryIndexChange}
+          skillName={skillName}
         />
       )}
 
       {state === 'done' && data && (
         <SkillOutput
           data={
-            historyIndex > 0 && runHistory[historyIndex]?.output
+            runHistory[historyIndex]?.output
               ? (runHistory[historyIndex].output as Record<string, unknown>)
               : data
           }
+          tokensUsed={resolveHistoryTokens(runHistory, historyIndex, data)}
           {...(skillName === 'tailor-resume' && historyIndex > 0 && runHistory[0]?.output
             ? { compareFrom: runHistory[0].output }
             : {})}
@@ -321,6 +325,9 @@ export function SkillPanel({
           userJobId={userJobId}
           {...(skillName === 'tailor-resume'
             ? { onDownloadTailorPdf: () => { void handleDownload(); } }
+            : {})}
+          {...(skillName === 'cover-letter'
+            ? { onDownloadCoverPdf: () => { void handleDownload(); } }
             : {})}
         />
       )}
@@ -341,18 +348,42 @@ function isTailorCvOutput(data: unknown): data is React.ComponentProps<typeof Ta
         )));
 }
 
+function resolveHistoryTokens(
+  runHistory: SkillRunHistoryEntry[],
+  historyIndex: number,
+  data: SkillData,
+): number | undefined {
+  const fromHistory = runHistory[historyIndex]?.totalTokens;
+  if (typeof fromHistory === 'number' && fromHistory > 0) {
+    return fromHistory;
+  }
+  const fromOutput = runHistory[historyIndex]?.output?.tokensUsed;
+  if (typeof fromOutput === 'number' && fromOutput > 0) {
+    return fromOutput;
+  }
+  const fromData = data.tokensUsed;
+  if (typeof fromData === 'number' && fromData > 0) {
+    return fromData;
+  }
+  return undefined;
+}
+
 function SkillOutput({
   data,
   compareFrom,
   skillName,
   userJobId,
+  tokensUsed,
   onDownloadTailorPdf,
+  onDownloadCoverPdf,
 }: {
   data: SkillData;
   compareFrom?: Record<string, unknown>;
   skillName: string;
   userJobId?: string;
+  tokensUsed?: number;
   onDownloadTailorPdf?: () => void;
+  onDownloadCoverPdf?: () => void;
 }) {
   // Phase 2 rich panels
   switch (skillName) {
@@ -376,7 +407,13 @@ function SkillOutput({
       return <StructuredSkillOutput data={data} warning="Tailor results could not be rendered — showing raw output." />;
     case 'cover-letter':
       if (isCoverLetterOutput(data)) {
-        return <CoverLetterPanel data={data} />;
+        return (
+          <CoverLetterPanel
+            data={data}
+            {...(tokensUsed != null ? { tokensUsed } : {})}
+            {...(onDownloadCoverPdf ? { onDownloadPdf: onDownloadCoverPdf } : {})}
+          />
+        );
       }
       return <StructuredSkillOutput data={data} warning={`We couldn't render the enhanced ${humanizeSkillName(skillName)} view, so the structured result is shown instead.`} />;
     case 'salary-negotiation':

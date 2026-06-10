@@ -1,7 +1,8 @@
 package com.careerops.service;
 
+import com.careerops.debug.DebugSessionLog;
 import com.careerops.model.Job;
-import com.careerops.model.PlanTierLimits;
+import com.careerops.model.PlanTier;
 import com.careerops.model.UserProfile;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -35,6 +36,7 @@ public class TailorResumeAiService {
     private final ObjectMapper mapper;
     private final TokenUsageService tokenUsage;
     private final UserPlanTierService planTierService;
+    private final UserQuotaGrantService quotaGrantService;
 
     public TailorResumeAiService(
             NvidiaService nvidia,
@@ -42,13 +44,15 @@ public class TailorResumeAiService {
             SkillPromptLibrary skillPrompts,
             ObjectMapper mapper,
             TokenUsageService tokenUsage,
-            UserPlanTierService planTierService) {
+            UserPlanTierService planTierService,
+            UserQuotaGrantService quotaGrantService) {
         this.nvidia = nvidia;
         this.skillExtraction = skillExtraction;
         this.skillPrompts = skillPrompts;
         this.mapper = mapper;
         this.tokenUsage = tokenUsage;
         this.planTierService = planTierService;
+        this.quotaGrantService = quotaGrantService;
     }
 
     public boolean isAvailable() {
@@ -65,7 +69,8 @@ public class TailorResumeAiService {
             String cvText,
             List<CvMarkdownSections.Section> parsedSections) {
         try {
-            long tierBudget = PlanTierLimits.tokenBudget(planTierService.resolveForUser(userId));
+            PlanTier tier = planTierService.resolveForUser(userId);
+            long tierBudget = quotaGrantService.tokenBudget(userId, tier);
             if (tokenUsage.hasExceededBudget(userId, tierBudget)) {
                 log.info("Skipping AI tailor — daily token budget exhausted for userId={}", userId);
                 return Optional.empty();
@@ -86,8 +91,27 @@ public class TailorResumeAiService {
 
             ObjectNode tailored = generateTailoredCv(
                 userId, profile, job, cv, jd, matched, gaps, parsedSections);
-            if (!TailorResumeQuality.isSubstantiallyTailored(tailored)) {
-                log.warn("AI tailor output too similar to baseline for userId={} job={}", userId, job.getTitle());
+            TailorResumeQuality.Diagnosis diag = TailorResumeQuality.diagnose(tailored);
+            if (!diag.summaryChanged() || !diag.experienceChanged()) {
+                log.warn(
+                    "AI tailor output too similar to baseline for userId={} job={} "
+                        + "(summaryChanged={}, experienceChanged={}, sectionsChanged={}, backfilled={})",
+                    userId, job.getTitle(),
+                    diag.summaryChanged(), diag.experienceChanged(),
+                    diag.changedSectionCount(), diag.backfilledSectionCount());
+                // #region agent log
+                DebugSessionLog.write(
+                    "TailorResumeAiService.tryBuild",
+                    "quality_gate_rejected",
+                    "H-QUALITY",
+                    java.util.Map.of(
+                        "summaryChanged", diag.summaryChanged(),
+                        "experienceChanged", diag.experienceChanged(),
+                        "sectionsChanged", diag.changedSectionCount(),
+                        "backfilledSections", diag.backfilledSectionCount(),
+                        "parsedSectionCount", parsedSections.size(),
+                        "jobTitle", job.getTitle() != null ? job.getTitle() : ""));
+                // #endregion
                 return Optional.empty();
             }
             tailored.put("mode", "ai_skill_md");
@@ -177,16 +201,16 @@ public class TailorResumeAiService {
         java.util.Map<String, JsonNode> aiByName = new java.util.LinkedHashMap<>();
         if (out.has("sections") && out.get("sections").isArray()) {
             for (JsonNode row : out.get("sections")) {
-                String key = row.path("name").asText("").trim().toLowerCase(Locale.ROOT);
+                String key = CvMarkdownSections.sectionMatchKey(row.path("name").asText(""));
                 if (!key.isBlank()) {
-                    aiByName.put(key, row);
+                    aiByName.putIfAbsent(key, row);
                 }
             }
         }
 
         LinkedHashSet<String> seen = new LinkedHashSet<>();
         for (CvMarkdownSections.Section sec : parsedSections) {
-            String key = sec.name().trim().toLowerCase(Locale.ROOT);
+            String key = CvMarkdownSections.sectionMatchKey(sec.name());
             seen.add(key);
             JsonNode aiRow = aiByName.get(key);
             ObjectNode row = mapper.createObjectNode();
@@ -203,12 +227,33 @@ public class TailorResumeAiService {
         }
 
         for (JsonNode aiRow : aiByName.values()) {
-            String key = aiRow.path("name").asText("").trim().toLowerCase(Locale.ROOT);
+            String key = CvMarkdownSections.sectionMatchKey(aiRow.path("name").asText(""));
             if (key.isBlank() || seen.contains(key)) continue;
             merged.add(aiRow.deepCopy());
         }
 
         out.set("sections", merged);
+        // #region agent log
+        int mergedFromAi = 0;
+        int preservedOriginal = 0;
+        for (JsonNode row : merged) {
+            if (row.path("rationale").asText("").contains("AI did not return this section")) {
+                preservedOriginal++;
+            } else if (!row.path("original").asText("").trim()
+                    .equals(row.path("rewritten").asText("").trim())) {
+                mergedFromAi++;
+            }
+        }
+        DebugSessionLog.write(
+            "TailorResumeAiService.mergeParsedSections",
+            "merge_complete",
+            "H-MERGE",
+            java.util.Map.of(
+                "aiSectionKeys", aiByName.size(),
+                "parsedSectionCount", parsedSections.size(),
+                "mergedFromAi", mergedFromAi,
+                "preservedOriginal", preservedOriginal));
+        // #endregion
 
         if (!out.has("summary") || out.path("summary").asText("").isBlank()) {
             for (JsonNode row : merged) {

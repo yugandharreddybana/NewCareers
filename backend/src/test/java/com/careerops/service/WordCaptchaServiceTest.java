@@ -1,6 +1,7 @@
 package com.careerops.service;
 
 import com.careerops.dto.AuthDtos.WordCaptchaChallengeResponse;
+import com.careerops.service.captcha.InMemoryWordCaptchaStore;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -48,17 +49,11 @@ class WordCaptchaServiceTest {
 
     private static String extractAnswerFromSvg(String svg) {
         StringBuilder answer = new StringBuilder();
-        int idx = 0;
-        while (true) {
-            int start = svg.indexOf('>', idx);
-            if (start < 0) break;
-            int end = svg.indexOf("</text>", start);
-            if (end < 0) break;
-            String inner = svg.substring(start + 1, end).trim();
-            if (inner.length() == 1) {
-                answer.append(inner);
-            }
-            idx = end + 7;
+        java.util.regex.Matcher matcher = java.util.regex.Pattern
+                .compile("<text\\b[^>]*>([^<])</text>")
+                .matcher(svg);
+        while (matcher.find()) {
+            answer.append(matcher.group(1));
         }
         return answer.toString();
     }

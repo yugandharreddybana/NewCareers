@@ -11,7 +11,7 @@ Application pipeline tracker at `/jobs` (alias `/kanban` → redirect). Board an
 | URL | `/jobs` |
 | Legacy alias | `/kanban` → `/jobs` (replace) |
 | Guard | `ProtectedRoute` |
-| Layout | Full-width standalone (`DashboardTopNav`); not AppShell |
+| Layout | `DashboardLayout` (`DashboardTopNav` + page content) |
 | Redirects | Job card click → `/jobs/:userJobId` |
 
 ## Fields and inputs

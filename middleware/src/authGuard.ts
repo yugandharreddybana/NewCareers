@@ -27,7 +27,7 @@ function devAutoAuthEnabled(): boolean {
 function applyDevUser(req: Request): void {
   req.userId = DEV_USER_ID;
   req.email = 'dev@careerops.ie';
-  req.role = 'ADMIN';
+  req.role = process.env.DEV_AUTO_AUTH_ROLE || 'USER';
 
   const trustHeader = process.env.INTERNAL_TRUST_HEADER || 'X-Internal-User-Id';
   req.headers[trustHeader] = req.userId;

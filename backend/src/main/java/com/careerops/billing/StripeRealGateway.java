@@ -177,6 +177,19 @@ public class StripeRealGateway implements StripeGateway {
     }
 
     @Override
+    public Optional<Long> retrieveSubscriptionCurrentPeriodStart(String stripeSubscriptionId) {
+        try {
+            com.stripe.model.Subscription subscription =
+                    com.stripe.model.Subscription.retrieve(stripeSubscriptionId);
+            Long start = subscription.getCurrentPeriodStart();
+            return start != null ? Optional.of(start) : Optional.empty();
+        } catch (Exception e) {
+            log.error("Stripe retrieveSubscriptionCurrentPeriodStart failed subId={}", stripeSubscriptionId, e);
+            return Optional.empty();
+        }
+    }
+
+    @Override
     public Optional<SubscriptionPlanResolution> resolveSubscriptionPlan(String stripeSubscriptionId) {
         try {
             com.stripe.model.Subscription subscription =

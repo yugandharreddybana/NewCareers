@@ -1,0 +1,28 @@
+sequenceDiagram
+    participant Onb as Onboarding.tsx
+    participant Axios
+    participant Java as OnboardingDeliveryService
+    participant Loader as JobSearchRadarLoader
+
+    Onb->>Axios: POST /onboarding/delivery/start
+    alt plan limit 402
+        Java-->>Onb: PLAN_LIMIT_EXCEEDED
+        Onb-->>User: toast upgrade billing
+    else AI consent missing
+        Java-->>Onb: 403 consent required
+    else profile not onboarded or no CV
+        Java-->>Onb: 400 prerequisite error
+    else started
+        Java->>Java: async pipeline virtual thread
+        Note over Java: reading_cv normalizing_cv fetching_jobs evaluating_jobs
+        loop poll every 1.5s max 5 min
+            Onb->>Axios: GET /onboarding/delivery/status
+            Java-->>Onb: stage progress ready readyPartial failed
+        end
+        Onb->>Loader: show overlay messages per stage
+        alt timeout 5 min
+            Onb-->>User: toast continue to dashboard
+        else stage failed
+            Loader-->>User: retry or continue buttons
+        end
+    end

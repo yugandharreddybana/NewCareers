@@ -11,10 +11,15 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionTemplate;
 import org.springframework.web.multipart.MultipartFile;
 
 import java.io.IOException;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.StandardOpenOption;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
@@ -22,16 +27,15 @@ import java.util.UUID;
 /**
  * CV Service
  *
- * upload()  : upload + parse + store in Supabase bucket
+ * upload()  : replace user's CV — deletes any prior CV rows/storage, then stores the new file
  * history() : list all CVs for a user, newest first
  * delete()  : remove from DB + Supabase bucket; auto-promote next
  * activate(): switch active CV — evicts AI eval cache so stale scores are purged
  * downloadUrl() : 10-min signed URL from Supabase
  * activeCvText() : parsed text of the active CV (used by AI skills)
  *
- * B1-G1 FIX: AiEvalCacheService injected; evictAllForUser() is called
- * in upload(), activate(), and delete() so AI scores are never served
- * stale after a CV change.
+ * Settings/profile upload updates the active CV file, parsed text, and cv_markdown only.
+ * AiEvalCacheService evictAllForUser() runs on activate() and delete(), not on upload().
  */
 @Service
 @Slf4j
@@ -44,6 +48,7 @@ public class CvService {
     private final com.careerops.util.FileUtil fileUtil;
     private final CvNormalizationService  cvNormalization;
     private final AiEvalCacheService      aiEvalCache;   // B1-G1
+    private final TransactionTemplate     writeTx;
     private final String                  bucket;
 
     private static final long   MAX              = 5L * 1024 * 1024;
@@ -56,6 +61,7 @@ public class CvService {
                      com.careerops.util.FileUtil fileUtil,
                      CvNormalizationService cvNormalization,
                      AiEvalCacheService aiEvalCache,
+                     PlatformTransactionManager transactionManager,
                      @Value("${supabase.bucket.cv}") String bucket) {
         this.repo            = repo;
         this.storage         = storage;
@@ -64,16 +70,40 @@ public class CvService {
         this.fileUtil        = fileUtil;
         this.cvNormalization = cvNormalization;
         this.aiEvalCache     = aiEvalCache;
+        this.writeTx = new TransactionTemplate(transactionManager);
+        this.writeTx.setTimeout(30);
         this.bucket          = bucket;
     }
 
-    @Transactional(timeout = 10)
     public UserCv upload(UUID userId, MultipartFile file) throws IOException {
         if (file == null || file.isEmpty())
             throw new ApiException(HttpStatus.BAD_REQUEST, "Empty file");
         if (file.getSize() > MAX)
             throw new ApiException(HttpStatus.PAYLOAD_TOO_LARGE, "Max 5 MB");
 
+        UserCv saved = writeTx.execute(status -> {
+            try {
+                return persistUploadedCv(userId, file);
+            } catch (IOException e) {
+                throw new ApiException(HttpStatus.BAD_REQUEST, "Could not read uploaded file: " + e.getMessage());
+            }
+        });
+        if (saved == null) {
+            throw new ApiException(HttpStatus.INTERNAL_SERVER_ERROR, "CV upload failed");
+        }
+
+        try {
+            cvNormalization.normalizeMarkdownOnly(userId);
+            log.info("CV markdown normalized for userId={} after upload", userId);
+        } catch (Exception e) {
+            log.warn("CV markdown normalization failed for userId={} (parsed text still available): {}",
+                userId, e.getMessage());
+        }
+
+        return saved;
+    }
+
+    private UserCv persistUploadedCv(UUID userId, MultipartFile file) throws IOException {
         String name = fileUtil.sanitizeFilename(file.getOriginalFilename());
         String lc   = name.toLowerCase();
         if (!(lc.endsWith(".pdf") || lc.endsWith(".docx")))
@@ -84,10 +114,18 @@ public class CvService {
         byte[] fileBytes = file.getBytes();
         virusScanner.scan(fileBytes, name);
 
-        repo.findFirstByUserIdAndIsActiveTrueOrderByUploadedAtDesc(userId).ifPresent(c -> {
-            c.setIsActive(false);
-            repo.save(c);
-        });
+        // #region agent log
+        long existingBefore = repo.findByUserIdOrderByUploadedAtDesc(userId).size();
+        debugLog("CvService.persistUploadedCv:pre-replace", "before replace purge", "replace",
+                java.util.Map.of("userId", userId.toString(), "existingCvCount", existingBefore));
+        // #endregion
+
+        int removed = purgeExistingCvsForReplace(userId);
+        // #region agent log
+        debugLog("CvService.persistUploadedCv:post-replace-purge", "after purge, before insert", "replace",
+                java.util.Map.of("userId", userId.toString(), "removedCvCount", removed,
+                        "remainingCvCount", repo.findByUserIdOrderByUploadedAtDesc(userId).size()));
+        // #endregion
 
         String path   = userId + "/" + System.currentTimeMillis() + "-" + name;
         String parsed = parser.extract(new java.io.ByteArrayInputStream(fileBytes), file.getContentType(), name);
@@ -109,23 +147,67 @@ public class CvService {
                 .isActive(true)
                 .fileData(storage.isConfigured() ? null : fileBytes)
                 .build();
-        UserCv saved = repo.save(cv);
-
         try {
-            cvNormalization.normalizeAndStore(userId);
-            log.info("CV markdown normalized for userId={} after upload", userId);
-        } catch (Exception e) {
-            log.warn("CV markdown normalization failed for userId={} (parsed text still available): {}",
-                userId, e.getMessage());
+            UserCv saved = repo.save(cv);
+            // #region agent log
+            debugLog("CvService.persistUploadedCv:insert-success", "new active cv saved", "A",
+                    java.util.Map.of("userId", userId.toString(), "newCvId", saved.getId().toString(),
+                            "activeCountDb", repo.countActiveByUserId(userId)));
+            // #endregion
+            return saved;
+        } catch (org.springframework.dao.DataIntegrityViolationException ex) {
+            // #region agent log
+            debugLog("CvService.persistUploadedCv:insert-failed", "unique constraint on insert", "A,B,C",
+                    java.util.Map.of("userId", userId.toString(),
+                            "activeCountDb", repo.countActiveByUserId(userId),
+                            "cause", ex.getMostSpecificCause().getMessage()));
+            // #endregion
+            throw ex;
         }
-
-        // B1-G1: Evict ALL cached AI scores so the next evaluation
-        // uses the new CV content rather than returning stale cached results.
-        aiEvalCache.evictAllForUser(userId);
-        log.info("AI eval cache evicted for userId={} after CV upload", userId);
-
-        return saved;
     }
+
+    /** Removes all CV rows (and schedules storage cleanup) so upload truly replaces the prior file. */
+    private int purgeExistingCvsForReplace(UUID userId) {
+        List<UserCv> existing = new ArrayList<>(repo.findByUserIdOrderByUploadedAtDesc(userId));
+        if (existing.isEmpty()) {
+            return 0;
+        }
+        List<String> storagePaths = existing.stream()
+                .map(UserCv::getStoragePath)
+                .filter(path -> path != null && !path.isBlank() && !isLocalDevPath(path))
+                .toList();
+        repo.deleteByUserId(userId);
+        repo.flush();
+        aiEvalCache.evictAllForUser(userId);
+        if (storage.isConfigured()) {
+            for (String path : storagePaths) {
+                scheduleStorageDeleteAfterCommit(path, userId);
+            }
+        }
+        log.info("Replaced CV: removed {} prior record(s) for userId={}", existing.size(), userId);
+        return existing.size();
+    }
+
+    // #region agent log
+    private static void debugLog(String location, String message, String hypothesisId, java.util.Map<String, Object> data) {
+        try {
+            String line = new com.fasterxml.jackson.databind.ObjectMapper().writeValueAsString(java.util.Map.of(
+                    "sessionId", "45a8b2",
+                    "timestamp", System.currentTimeMillis(),
+                    "location", location,
+                    "message", message,
+                    "hypothesisId", hypothesisId,
+                    "data", data));
+            Path logPath = Path.of(System.getProperty("user.dir", ".")).toAbsolutePath().normalize();
+            if ("backend".equalsIgnoreCase(String.valueOf(logPath.getFileName()))) {
+                logPath = logPath.getParent();
+            }
+            Files.writeString(logPath.resolve("debug-45a8b2.log"), line + System.lineSeparator(),
+                    StandardOpenOption.CREATE, StandardOpenOption.APPEND);
+        } catch (Exception ignored) {
+        }
+    }
+    // #endregion
 
     public String activeCvMarkdown(UUID userId) {
         return repo.findFirstByUserIdAndIsActiveTrueOrderByUploadedAtDesc(userId)

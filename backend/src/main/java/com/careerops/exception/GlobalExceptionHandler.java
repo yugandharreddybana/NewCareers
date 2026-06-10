@@ -16,9 +16,13 @@ import org.springframework.web.HttpMediaTypeNotSupportedException;
 import org.springframework.web.HttpRequestMethodNotSupportedException;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.dao.DataIntegrityViolationException;
+import org.springframework.orm.ObjectOptimisticLockingFailureException;
+import org.springframework.web.bind.MissingRequestHeaderException;
+import org.springframework.web.bind.ServletRequestBindingException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 import org.springframework.web.context.request.WebRequest;
+import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
 
 import java.util.Map;
 import java.util.NoSuchElementException;
@@ -189,6 +193,28 @@ public class GlobalExceptionHandler {
 
     // ─── Standard Java / Spring exceptions ─────────────────────────────
 
+    @ExceptionHandler(MissingRequestHeaderException.class)
+    public ResponseEntity<ErrorResponse> handleMissingRequestHeader(MissingRequestHeaderException ex, WebRequest req) {
+        log.warn("Missing request header [{}]: {}", path(req), ex.getHeaderName());
+        return ResponseEntity.badRequest()
+                .body(error(HttpStatus.BAD_REQUEST, "Missing required header: " + ex.getHeaderName(),
+                        "MISSING_REQUEST_HEADER", req));
+    }
+
+    @ExceptionHandler(ServletRequestBindingException.class)
+    public ResponseEntity<ErrorResponse> handleServletBinding(ServletRequestBindingException ex, WebRequest req) {
+        log.warn("Request binding failed [{}]: {}", path(req), ex.getMessage());
+        return ResponseEntity.badRequest()
+                .body(error(HttpStatus.BAD_REQUEST, "Invalid request: " + ex.getMessage(), "BAD_REQUEST", req));
+    }
+
+    @ExceptionHandler(MethodArgumentTypeMismatchException.class)
+    public ResponseEntity<ErrorResponse> handleTypeMismatch(MethodArgumentTypeMismatchException ex, WebRequest req) {
+        log.warn("Type mismatch [{}]: {}={}", path(req), ex.getName(), ex.getValue());
+        return ResponseEntity.badRequest()
+                .body(error(HttpStatus.BAD_REQUEST, "Invalid request parameter: " + ex.getName(), "BAD_REQUEST", req));
+    }
+
     @ExceptionHandler(IllegalArgumentException.class)
     public ResponseEntity<ErrorResponse> handleBadRequest(IllegalArgumentException ex, WebRequest req) {
         log.warn("Bad request [{}]: {}", path(req), ex.getMessage());
@@ -223,6 +249,16 @@ public class GlobalExceptionHandler {
                 .body(error(HttpStatus.CONFLICT,
                         "That record already exists. Refresh and try again.",
                         "CONFLICT",
+                        req));
+    }
+
+    @ExceptionHandler(ObjectOptimisticLockingFailureException.class)
+    public ResponseEntity<ErrorResponse> handleOptimisticLock(ObjectOptimisticLockingFailureException ex, WebRequest req) {
+        log.warn("Optimistic lock conflict [{}]: {}", path(req), ex.getMessage());
+        return ResponseEntity.status(HttpStatus.CONFLICT)
+                .body(error(HttpStatus.CONFLICT,
+                        "Profile was modified elsewhere. Refresh and try again.",
+                        "OPTIMISTIC_LOCK_CONFLICT",
                         req));
     }
 

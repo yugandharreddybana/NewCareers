@@ -1,6 +1,6 @@
 import { useMemo, useState, useCallback, useEffect } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
-import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { useQueryClient } from '@tanstack/react-query';
 import {
   Bar,
   BarChart,
@@ -25,8 +25,8 @@ import {
   ChevronLeft,
   ChevronRight,
 } from 'lucide-react';
-import { useAuth } from '@/context/AuthContext';
-import { profileApi } from '@/services/api';
+import { useAuth } from '@/context/authCtx';
+import { useProfileQuery } from '@/hooks/queries';
 import { queryKeys } from '@/lib/queryKeys';
 import {
   usePermitSummary,
@@ -151,11 +151,7 @@ export function IrishPermitIntelligenceSection() {
     [watchlist],
   );
 
-  const { data: profile } = useQuery({
-    queryKey: queryKeys.profile.current(),
-    queryFn: () => profileApi.get(),
-    enabled: !!user,
-  });
+  const { data: profile } = useProfileQuery({ enabled: !!user });
 
   const domainKey = useMemo(() => resolveProfileDomainKey(profile), [profile]);
 

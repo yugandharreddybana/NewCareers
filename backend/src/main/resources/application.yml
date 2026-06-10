@@ -1,9 +1,15 @@
 ﻿# YAML mirror for SaaS billing settings (properties file remains canonical for local dev).
 saas:
   billing:
-    trial-days: ${SAAS_TRIAL_DAYS:7}
     enforcement-enabled: ${SAAS_BILLING_ENFORCEMENT_ENABLED:true}
     price:
       free: ${SAAS_BILLING_PRICE_FREE:0}
       pro: ${SAAS_BILLING_PRICE_PRO:19}
       enterprise: ${SAAS_BILLING_PRICE_ENTERPRISE:299}
+
+# Per-email quota overrides (billing-free). Only listed emails receive these limits.
+careerops:
+  quota-grants:
+    - email: yugandharreddybana@outlook.com
+      user-id: 68da30b1-0bb0-4623-b6e2-ec9e248b15bf
+      unlimited-access: true

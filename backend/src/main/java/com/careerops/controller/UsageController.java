@@ -1,6 +1,7 @@
 package com.careerops.controller;
 
 import com.careerops.dto.UsageDtos.UsageLimitsResponse;
+import com.careerops.ratelimit.RateLimited;
 import com.careerops.dto.AnalyticsDtos.TokenUsageResponse;
 import com.careerops.util.AuthUtil;
 import com.careerops.service.UsageLimitService;
@@ -25,6 +26,7 @@ public class UsageController {
 
     /** GET /usage/limits — daily job + AI quotas for nav and settings. */
     @GetMapping("/limits")
+    @RateLimited(capacity = 300, requestsPerMinute = 300)
     public UsageLimitsResponse limits() {
         UUID userId = AuthUtil.currentUserId();
         return usageLimitService.snapshot(userId);

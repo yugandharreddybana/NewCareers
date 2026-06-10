@@ -11,14 +11,17 @@ import {
   parseJobDescriptionBlocks,
   type JobDescBlock,
 } from '@/lib/jobDescriptionFormat';
+import { stripPostingMetaFromDescription } from '@/lib/jobPostingMeta';
 import { plainJobDescription } from '@/lib/plainJobDescription';
-
 type Props = {
   description: string;
   title?: string;
   profile?: Profile | null;
   matchedSkills?: string[];
   unmatchedSkills?: string[];
+  salary?: string;
+  location?: string;
+  workModel?: string;
 };
 
 function inlineHighlighted(text: string, keywords: string[], keyPrefix: string): ReactNode[] {
@@ -68,10 +71,22 @@ export function JobDescriptionView({
   profile,
   matchedSkills,
   unmatchedSkills,
+  salary,
+  location,
+  workModel,
 }: Props) {
   const [expanded, setExpanded] = useState(false);
 
   const plainDescription = useMemo(() => plainJobDescription(description), [description]);
+  const bodyText = useMemo(
+    () => stripPostingMetaFromDescription(plainDescription, {
+      jobTitle: title,
+      salaryLabel: salary,
+      locationLabel: location,
+      workArrangement: workModel,
+    }),
+    [plainDescription, title, salary, location, workModel],
+  );
   const keywords = useMemo(() => buildAtsKeywords(profile), [profile]);
 
   const { matched, unmatched } = useMemo(() => {
@@ -81,12 +96,12 @@ export function JobDescriptionView({
         unmatched: unmatchedSkills ?? [],
       };
     }
-    const haystack = `${title ?? ''}\n${plainDescription}`;
+    const haystack = `${title ?? ''}\n${bodyText}`;
     return partitionAtsKeywords(haystack, keywords);
-  }, [plainDescription, title, keywords, matchedSkills, unmatchedSkills]);
+  }, [bodyText, title, keywords, matchedSkills, unmatchedSkills]);
 
-  const allBlocks = useMemo(() => parseJobDescriptionBlocks(plainDescription), [plainDescription]);
-  const canCollapse = useMemo(() => descriptionExceedsCollapseLimit(plainDescription), [plainDescription]);
+  const allBlocks = useMemo(() => parseJobDescriptionBlocks(bodyText), [bodyText]);
+  const canCollapse = useMemo(() => descriptionExceedsCollapseLimit(bodyText), [bodyText]);
   const visibleBlocks = useMemo(() => {
     if (!canCollapse || expanded) return allBlocks;
     return blocksForCollapsedView(allBlocks);

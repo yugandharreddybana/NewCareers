@@ -13,6 +13,7 @@ import com.careerops.repository.UserProfileRepository;
 import com.careerops.repository.UserRepository;
 import com.careerops.model.RefreshToken;
 import com.careerops.repository.RefreshTokenRepository;
+import com.careerops.security.AesFieldEncryptor;
 import com.careerops.security.JwtService;
 import com.careerops.security.OtpHashService;
 import com.careerops.security.TrustedProxyIpResolver;
@@ -91,7 +92,8 @@ public class AuthService {
     private final SignupIntentService signupIntentService;
     private final OtpHashService otpHashService;
     private final Environment environment;
-    private final TrialProvisioningService trialProvisioningService;
+    private final OrgProvisioningService orgProvisioningService;
+    private final AesFieldEncryptor fieldEncryptor;
     private final TwoFactorService twoFactor;
 
     public AuthService(UserRepository users,
@@ -112,7 +114,8 @@ public class AuthService {
             SignupIntentService signupIntentService,
             OtpHashService otpHashService,
             Environment environment,
-            TrialProvisioningService trialProvisioningService,
+            OrgProvisioningService orgProvisioningService,
+            AesFieldEncryptor fieldEncryptor,
             TwoFactorService twoFactor) {
         this.users = users;
         this.profiles = profiles;
@@ -132,7 +135,8 @@ public class AuthService {
         this.signupIntentService = signupIntentService;
         this.otpHashService = otpHashService;
         this.environment = environment;
-        this.trialProvisioningService = trialProvisioningService;
+        this.orgProvisioningService = orgProvisioningService;
+        this.fieldEncryptor = fieldEncryptor;
         this.twoFactor = twoFactor;
     }
 
@@ -143,6 +147,10 @@ public class AuthService {
         String email = normalizeEmail(req.email());
         SignupConsentsRequest consents = req.consents();
         String passwordHash;
+
+        if (req.signupIntentId() == null) {
+            requireRecaptchaWhenConfigured(req.captchaToken());
+        }
 
         if (req.signupIntentId() != null) {
             SignupIntentService.ConsumedSignupIntent consumed =
@@ -196,11 +204,11 @@ public class AuthService {
                     .refereeName(u.getName())
                     .build());
 
-            consentService.recordSignupConsents(u.getId(), req.consents(), request);
+            consentService.recordSignupConsents(u.getId(), consents, request);
 
             audit.log(u.getId(), "SIGNUP", request);
 
-            provisionTrialSafely(u);
+            provisionDefaultOrgOrThrow(u);
 
             String rawRefresh = issueRefreshToken(u, null, false);
             return new AuthResponse(jwt.issue(u.getId().toString(), u.getEmail()), rawRefresh, toDto(u, false));
@@ -253,6 +261,9 @@ public class AuthService {
         }
 
         assertAccountActive(u);
+        if (u.getPrimaryBillingOrganizationId() == null) {
+            provisionDefaultOrgOrThrow(u);
+        }
         users.resetFailedAttempts(u.getEmail());
         u.setLastLoginAt(Instant.now());
         users.save(u);
@@ -273,6 +284,7 @@ public class AuthService {
                 || (u.getGoogleSub() != null && !u.getGoogleSub().equals(identity.sub()))) {
             throw new ApiException(HttpStatus.UNAUTHORIZED, GENERIC_LOGIN_FAILURE);
         }
+        assertAccountNotLockedForLogin(u);
         if (!encoder.matches(req.password(), u.getPasswordHash())) {
             throw new ApiException(HttpStatus.UNAUTHORIZED, GENERIC_LOGIN_FAILURE);
         }
@@ -334,7 +346,7 @@ public class AuthService {
 
             audit.log(u.getId(), "GOOGLE_SIGNUP", httpRequest);
 
-            provisionTrialSafely(u);
+            provisionDefaultOrgOrThrow(u);
 
             return u;
         } catch (org.springframework.dao.DataIntegrityViolationException e) {
@@ -345,6 +357,9 @@ public class AuthService {
             if (consents != null && !consentService.hasConsent(existing.getId(),
                     com.careerops.model.UserConsent.ConsentType.ESSENTIAL)) {
                 consentService.recordSignupConsents(existing.getId(), consents, httpRequest);
+            }
+            if (existing.getPrimaryBillingOrganizationId() == null) {
+                provisionDefaultOrgOrThrow(existing);
             }
             return existing;
         }
@@ -682,7 +697,7 @@ public class AuthService {
 
     /** H-13/H-14 — reCAPTCHA required when secret configured (prod/staging). */
     public void requireRecaptchaWhenConfigured(String captchaToken) {
-        if (!captcha.isConfigured()) {
+        if (!captcha.isEnforcementActive()) {
             return;
         }
         if (captchaToken == null || captchaToken.isBlank() || !captcha.verify(captchaToken)) {
@@ -767,6 +782,10 @@ public class AuthService {
         checkPwnedPassword(newPassword, null, false);
     }
 
+    private String displayName(User u) {
+        return fieldEncryptor.decrypt(u.getName(), u.getId());
+    }
+
     private UserDto toDto(User u, boolean onboarded) {
         // Pass 6 #6.005: expose role so the frontend AdminRoute guard works.
         // Defensive fallback: if a row pre-dates the role enum migration the
@@ -775,7 +794,7 @@ public class AuthService {
         boolean passwordLoginEnabled = u.getPasswordHash() != null && !u.getPasswordHash().isBlank();
         return new UserDto(
                 u.getId(),
-                u.getName(),
+                displayName(u),
                 u.getUsername(),
                 u.getEmail(),
                 role,
@@ -869,11 +888,15 @@ public class AuthService {
         }
     }
 
-    private void provisionTrialSafely(User user) {
+    private void provisionDefaultOrgOrThrow(User user) {
         try {
-            trialProvisioningService.provisionForNewUser(user);
+            orgProvisioningService.provisionForNewUser(user);
+        } catch (ApiException ex) {
+            throw ex;
         } catch (Exception ex) {
-            log.warn("Trial provisioning failed for user {}: {}", user.getId(), ex.getMessage());
+            log.error("Org provisioning failed for user {}: {}", user.getId(), ex.getMessage());
+            throw new ApiException(HttpStatus.INTERNAL_SERVER_ERROR,
+                    "Account setup could not be completed. Please try again.");
         }
     }
 

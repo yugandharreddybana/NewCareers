@@ -21,7 +21,7 @@ public interface SkillHandler {
      *
      * @param userId    Authenticated user's UUID
      * @param userJobId The UserJob UUID (may be null for job-agnostic skills)
-     * @return Structured JSON output ready to be stored in skill_runs.output
+     * @return Structured JSON output and token usage for persistence
      */
-    JsonNode execute(UUID userId, UUID userJobId);
+    SkillHandlerResult execute(UUID userId, UUID userJobId);
 }

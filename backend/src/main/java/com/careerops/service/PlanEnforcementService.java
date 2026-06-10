@@ -10,7 +10,6 @@ import com.careerops.model.SubscriptionStatus;
 import com.careerops.repository.OrgRepository;
 import com.careerops.repository.SubscriptionRepository;
 import org.springframework.core.env.Environment;
-import org.springframework.core.env.Profiles;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -26,8 +25,10 @@ public class PlanEnforcementService {
     private final SubscriptionRepository subscriptionRepository;
     private final OrgRepository orgRepository;
     private final OrgUsageCounter usageCounter;
+    private final BillingPeriodService billingPeriodService;
     private final SaasLifecycleTelemetry lifecycleTelemetry;
     private final OrganizationPlanSyncService organizationPlanSyncService;
+    private final UserQuotaGrantService quotaGrantService;
 
     public PlanEnforcementService(
             Environment environment,
@@ -36,16 +37,20 @@ public class PlanEnforcementService {
             SubscriptionRepository subscriptionRepository,
             OrgRepository orgRepository,
             OrgUsageCounter usageCounter,
+            BillingPeriodService billingPeriodService,
             SaasLifecycleTelemetry lifecycleTelemetry,
-            OrganizationPlanSyncService organizationPlanSyncService) {
+            OrganizationPlanSyncService organizationPlanSyncService,
+            UserQuotaGrantService quotaGrantService) {
         this.environment = environment;
         this.saasBillingProperties = saasBillingProperties;
         this.resolver = resolver;
         this.subscriptionRepository = subscriptionRepository;
         this.orgRepository = orgRepository;
         this.usageCounter = usageCounter;
+        this.billingPeriodService = billingPeriodService;
         this.lifecycleTelemetry = lifecycleTelemetry;
         this.organizationPlanSyncService = organizationPlanSyncService;
+        this.quotaGrantService = quotaGrantService;
     }
 
     @Transactional
@@ -58,14 +63,20 @@ public class PlanEnforcementService {
         if (!enforcementEnabled()) {
             return;
         }
+        if (bypassPlanLimits(userId)) {
+            return;
+        }
         SubscriptionContext ctx = lockContextForUser(userId);
-        assertSubscriptionActive(ctx);
+        assertSubscriptionActive(ctx, userId);
         SubscriptionPlan plan = effectivePlan(ctx);
         PlanLimit limits = PlanLimit.forPlan(plan);
         if (limits.isUnlimited(limits.aiSkillRunsPerMonth())) {
             return;
         }
-        long used = usageCounter.aiSkillRunsThisMonth(ctx.orgId());
+        Subscription subscription = subscriptionRepository.findByOrganizationId(ctx.orgId())
+                .orElseThrow(() -> new IllegalStateException("Subscription missing for org " + ctx.orgId()));
+        Instant periodStart = billingPeriodService.resolvePeriodStart(subscription);
+        long used = usageCounter.aiSkillRunsSince(ctx.orgId(), periodStart);
         if (used + cost > limits.aiSkillRunsPerMonth()) {
             lifecycleTelemetry.trackLimitHit(userId, "ai_skill_run");
             throw PlanLimitExceededException.of("ai_skill_run", plan);
@@ -77,8 +88,11 @@ public class PlanEnforcementService {
         if (!enforcementEnabled()) {
             return;
         }
+        if (bypassPlanLimits(userId)) {
+            return;
+        }
         SubscriptionContext ctx = lockContextForUser(userId);
-        assertSubscriptionActive(ctx);
+        assertSubscriptionActive(ctx, userId);
         SubscriptionPlan plan = effectivePlan(ctx);
         PlanLimit limits = PlanLimit.forPlan(plan);
         if (limits.isUnlimited(limits.jobApplicationsPerMonth())) {
@@ -96,8 +110,11 @@ public class PlanEnforcementService {
         if (!enforcementEnabled()) {
             return;
         }
+        if (bypassPlanLimits(userId)) {
+            return;
+        }
         SubscriptionContext ctx = lockContextForUser(userId);
-        assertSubscriptionActive(ctx);
+        assertSubscriptionActive(ctx, userId);
         SubscriptionPlan plan = effectivePlan(ctx);
         PlanLimit limits = PlanLimit.forPlan(plan);
         if (limits.isUnlimited(limits.cvUploads())) {
@@ -120,6 +137,9 @@ public class PlanEnforcementService {
         if (!enforcementEnabled()) {
             return;
         }
+        if (bypassPlanLimits(userId)) {
+            return;
+        }
         SubscriptionContext ctx = lockContextForUser(userId);
         assertTeamMemberCapacity(ctx, userId, pendingInvitations);
     }
@@ -129,12 +149,15 @@ public class PlanEnforcementService {
         if (!enforcementEnabled()) {
             return;
         }
+        if (bypassPlanLimits(actorUserId)) {
+            return;
+        }
         SubscriptionContext ctx = lockContextForOrg(orgId);
         assertTeamMemberCapacity(ctx, actorUserId, pendingInvitations);
     }
 
     private void assertTeamMemberCapacity(SubscriptionContext ctx, UUID actorUserId, int pendingInvitations) {
-        assertSubscriptionActive(ctx);
+        assertSubscriptionActive(ctx, actorUserId);
         SubscriptionPlan plan = effectivePlan(ctx);
         PlanLimit limits = PlanLimit.forPlan(plan);
         int effectiveCap = effectiveTeamMemberCap(limits, resolveOrgSeatLimit(ctx.orgId()));
@@ -164,11 +187,6 @@ public class PlanEnforcementService {
     }
 
     public static SubscriptionPlan effectivePlan(SubscriptionContext ctx) {
-        if (ctx.status() == SubscriptionStatus.TRIALING
-                && ctx.trialEndsAt() != null
-                && ctx.trialEndsAt().isAfter(Instant.now())) {
-            return SubscriptionPlan.PRO;
-        }
         return ctx.plan();
     }
 
@@ -193,41 +211,23 @@ public class PlanEnforcementService {
                 .orElseThrow(() -> new IllegalStateException("Subscription missing for org " + orgId));
     }
 
-    private void assertSubscriptionActive(SubscriptionContext ctx) {
+    private void assertSubscriptionActive(SubscriptionContext ctx, UUID userId) {
+        if (bypassPlanLimits(userId)) {
+            return;
+        }
         SubscriptionPlan plan = effectivePlan(ctx);
         if (ctx.status() == SubscriptionStatus.PAST_DUE || ctx.status() == SubscriptionStatus.CANCELLED) {
             lifecycleTelemetry.findOrgOwnerUserId(ctx.orgId())
-                    .ifPresent(userId -> lifecycleTelemetry.trackLimitHit(userId, "subscription_inactive"));
+                    .ifPresent(ownerUserId -> lifecycleTelemetry.trackLimitHit(ownerUserId, "subscription_inactive"));
             throw PlanLimitExceededException.of("subscription_inactive", plan);
         }
-        if (ctx.status() == SubscriptionStatus.TRIALING
-                && ctx.trialEndsAt() != null
-                && ctx.trialEndsAt().isBefore(Instant.now())) {
-            downgradeExpiredTrial(ctx.orgId());
-            lifecycleTelemetry.findOrgOwnerUserId(ctx.orgId())
-                    .ifPresent(userId -> lifecycleTelemetry.trackLimitHit(userId, "trial_expired"));
-            throw PlanLimitExceededException.of("trial_expired", SubscriptionPlan.FREE);
-        }
-    }
-
-    private void downgradeExpiredTrial(UUID orgId) {
-        subscriptionRepository.findByOrganizationId(orgId).ifPresent(subscription -> {
-            if (subscription.getStatus() == SubscriptionStatus.TRIALING
-                    && subscription.getTrialEndsAt() != null
-                    && subscription.getTrialEndsAt().isBefore(Instant.now())) {
-                subscription.setStatus(SubscriptionStatus.ACTIVE);
-                subscription.setPlan(SubscriptionPlan.FREE);
-                subscription.setTrialEndsAt(null);
-                subscriptionRepository.save(subscription);
-                organizationPlanSyncService.syncFromSubscription(orgId, SubscriptionPlan.FREE);
-            }
-        });
     }
 
     boolean enforcementEnabled() {
-        if (!saasBillingProperties.isEnforcementEnabled()) {
-            return false;
-        }
-        return !environment.acceptsProfiles(Profiles.of("dev", "test"));
+        return saasBillingProperties.isEnforcementEnabled();
+    }
+
+    private boolean bypassPlanLimits(UUID userId) {
+        return quotaGrantService.unlimitedAccess(userId);
     }
 }

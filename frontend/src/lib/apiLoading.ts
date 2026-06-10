@@ -43,6 +43,9 @@ function isSilentPath(url?: string): boolean {
   if (path === '/public/stats') return true;
   if (path === '/notifications' || path.startsWith('/notifications/')) return true;
   if (path.startsWith('/onboarding/delivery')) return true;
+  if (path.startsWith('/account/sessions')) return true;
+  if (path.startsWith('/account/security/')) return true;
+  if (path.startsWith('/account/two-factor/')) return true;
   return false;
 }
 
@@ -66,6 +69,9 @@ function messageFor(config: InternalAxiosRequestConfig): string {
   }
   if (path.includes('/onboarding/delivery')) {
     return 'Preparing your career package…';
+  }
+  if (path.includes('/auth/onboarding/parse-cv')) {
+    return 'Reading your CV…';
   }
   if (path.includes('/skills/apply/answer')) {
     return 'Writing your application answer…';

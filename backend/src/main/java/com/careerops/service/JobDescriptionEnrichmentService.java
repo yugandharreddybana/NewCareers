@@ -14,6 +14,11 @@ import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.util.Map;
+import java.util.Set;
+import java.util.UUID;
+import java.util.concurrent.ConcurrentHashMap;
+
 /**
  * Best-effort fetch of job posting text when sources (e.g. LinkedIn search cards)
  * only provide title, company, and URL.
@@ -29,6 +34,7 @@ public class JobDescriptionEnrichmentService {
 
     private final JobRepository jobs;
     private final ObjectMapper mapper;
+    private final Set<UUID> salaryFetchAttempted = ConcurrentHashMap.newKeySet();
 
     public JobDescriptionEnrichmentService(JobRepository jobs, ObjectMapper mapper) {
         this.jobs = jobs;
@@ -42,8 +48,13 @@ public class JobDescriptionEnrichmentService {
     @Transactional
     public Job enrichIfMissing(Job job) {
         if (job == null) return null;
+        stripLegacySalaryScanMarker(job);
+        backfillSalaryFromDescription(job);
         if (needsLongerDescription(job)) {
-            return enrich(job, hasDescription(job));
+            job = enrich(job, hasDescription(job));
+        }
+        if (needsSalaryFromSource(job) && hasDescription(job) && !salaryFetchAttempted.contains(job.getId())) {
+            job = enrichSalaryFromSource(job);
         }
         return job;
     }
@@ -54,28 +65,108 @@ public class JobDescriptionEnrichmentService {
     @Transactional
     public Job enrich(Job job, boolean force) {
         if (job == null) return null;
+        if (force) {
+            salaryFetchAttempted.remove(job.getId());
+            stripLegacySalaryScanMarker(job);
+        }
         if (!force && hasDescription(job)) return job;
 
         String url = job.getSourceUrl();
         if (url == null || url.isBlank()) return job;
 
-        String fetched;
+        PageFetchResult fetched;
         try {
-            fetched = fetchDescription(url.trim());
+            fetched = fetchPage(url.trim());
         } catch (IllegalArgumentException e) {
             log.debug("Skipped job description fetch for {}: {}", url, e.getMessage());
             return job;
         }
-        if (fetched == null || fetched.length() < MIN_USEFUL_LENGTH) return job;
-
-        if (fetched.length() > MAX_DESC) {
-            fetched = fetched.substring(0, MAX_DESC) + "\n…";
+        if (fetched == null || fetched.description() == null || fetched.description().length() < MIN_USEFUL_LENGTH) {
+            applySalary(job, fetched != null ? fetched.salary() : null);
+            if (job.getSalaryMin() != null || job.getSalaryMax() != null) {
+                jobs.save(job);
+            }
+            return job;
         }
-        job.setDescription(fetched);
+
+        String description = fetched.description();
+        if (description.length() > MAX_DESC) {
+            description = description.substring(0, MAX_DESC) + "\n…";
+        }
+        description = JobDescriptionNormalizer.normalize(description);
+        job.setDescription(description);
+        applySalary(job, fetched.salary());
         jobs.save(job);
-        log.info("Enriched job description for {} at {} ({} chars)", job.getTitle(), job.getCompany(), fetched.length());
+        log.info("Enriched job description for {} at {} ({} chars)", job.getTitle(), job.getCompany(), description.length());
         return job;
     }
+
+    @Transactional
+    public Job enrichSalaryFromSource(Job job) {
+        if (job == null || !needsSalaryFromSource(job) || salaryFetchAttempted.contains(job.getId())) {
+            return job;
+        }
+        salaryFetchAttempted.add(job.getId());
+        String url = job.getSourceUrl();
+        if (url == null || url.isBlank()) return job;
+        JobSalaryExtractor.SalaryInfo extracted = null;
+        try {
+            PageFetchResult fetched = fetchPage(url.trim());
+            if (fetched != null) {
+                extracted = fetched.salary();
+                applySalary(job, extracted);
+            }
+        } catch (IllegalArgumentException e) {
+            log.debug("Skipped salary fetch for {}: {}", url, e.getMessage());
+        }
+        jobs.save(job);
+
+        if (job.getSalaryMin() != null || job.getSalaryMax() != null) {
+            log.info("Backfilled salary for {} at {} ({}-{})",
+                    job.getTitle(), job.getCompany(), job.getSalaryMin(), job.getSalaryMax());
+        }
+        return job;
+    }
+
+    private void stripLegacySalaryScanMarker(Job job) {
+        if (job == null || job.getDescription() == null) return;
+        if (!job.getDescription().contains(JobDescriptionNormalizer.SALARY_SCAN_MARKER)) return;
+        job.setDescription(JobDescriptionNormalizer.normalize(job.getDescription()));
+        jobs.save(job);
+    }
+
+    private static String urlHost(String url) {
+        try {
+            return java.net.URI.create(url.trim()).getHost();
+        } catch (Exception e) {
+            return "unknown";
+        }
+    }
+
+    private void backfillSalaryFromDescription(Job job) {
+        if (job == null || !needsSalaryFromSource(job)) return;
+        JobSalaryExtractor.SalaryInfo parsed = JobSalaryExtractor.parse(job.getDescription());
+        if (!parsed.hasStructured()) return;
+        applySalary(job, parsed);
+        jobs.save(job);
+        log.debug("Parsed salary from description for {} at {} ({}-{})",
+                job.getTitle(), job.getCompany(), job.getSalaryMin(), job.getSalaryMax());
+    }
+
+    private static boolean needsSalaryFromSource(Job job) {
+        return job.getSalaryMin() == null && job.getSalaryMax() == null;
+    }
+
+    private static void applySalary(Job job, JobSalaryExtractor.SalaryInfo salary) {
+        if (job == null || salary == null) return;
+        if (salary.min() != null) job.setSalaryMin(salary.min());
+        if (salary.max() != null) job.setSalaryMax(salary.max());
+        if (salary.currency() != null && !salary.currency().isBlank()) {
+            job.setCurrency(salary.currency());
+        }
+    }
+
+    private record PageFetchResult(String description, JobSalaryExtractor.SalaryInfo salary) {}
 
     private static boolean hasDescription(Job job) {
         String d = job.getDescription();
@@ -91,9 +182,17 @@ public class JobDescriptionEnrichmentService {
     }
 
     String fetchDescription(String url) {
+        PageFetchResult result = fetchPage(url);
+        return result != null ? result.description() : null;
+    }
+
+    private PageFetchResult fetchPage(String url) {
         if (LinkedInDescriptionHelper.isLinkedInJobUrl(url)) {
             String guest = LinkedInDescriptionHelper.fetchGuestDescription(url, mapper);
-            if (guest != null) return guest;
+            if (guest != null) {
+                JobSalaryExtractor.SalaryInfo salary = JobSalaryExtractor.parse(guest);
+                return new PageFetchResult(guest, salary);
+            }
         }
         try {
             String safeUrl = SafeUrlFetcher.validateFetchUrl(url).toString();
@@ -114,16 +213,30 @@ public class JobDescriptionEnrichmentService {
             }
 
             String html = doc.outerHtml();
+            JobSalaryExtractor.SalaryInfo salary = JobSalaryExtractor.parseFromHtml(html);
+            String description = null;
             if (StepstoneDescriptionHelper.isStepstoneJobUrl(url)) {
-                String stepstone = StepstoneDescriptionHelper.extractFromHtml(html);
-                if (stepstone != null) return stepstone;
+                description = StepstoneDescriptionHelper.extractFromHtml(html);
             }
-
-            return parseDescriptionFromDocument(doc, url);
+            if (description == null) {
+                description = parseDescriptionFromDocument(doc, url);
+            }
+            description = prependSalaryLine(description, salary);
+            return new PageFetchResult(description, salary);
         } catch (Exception e) {
             log.debug("Could not fetch description from {}: {}", url, e.getMessage());
         }
         return null;
+    }
+
+    private static String prependSalaryLine(String description, JobSalaryExtractor.SalaryInfo salary) {
+        if (description == null || salary == null) return description;
+        if (!salary.hasStructured() && !salary.hasDisplay()) return description;
+        if (description.toLowerCase().contains("salary:")) return description;
+        String label = salary.displayLabel();
+        if (label == null || label.isBlank()) return description;
+        if (label.toLowerCase().contains("competitive") && !label.contains("€")) return description;
+        return "Salary: " + label.trim() + "\n\n" + description;
     }
 
     /** Package-visible for unit tests (HTML already fetched). */

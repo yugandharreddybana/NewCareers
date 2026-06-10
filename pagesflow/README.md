@@ -30,7 +30,8 @@ When you change a page or its direct components, update the matching `pagesflow/
 | `backend/.../service/SkillService.java` | `pagesflow/skills/`, `pagesflow/job-detail/` |
 | `backend/.../UserConsentController.java` | `pagesflow/account-settings/`, `docs/GDPR.md` |
 | `frontend/src/components/auth/*` | Auth pages (`login`, `signup`, `forgot-password`) |
-| `frontend/src/components/onboarding/*` | `pagesflow/onboarding/` |
+| `frontend/src/components/onboarding/*` | `pagesflow/onboarding/` + `pagesflow/signup-onboarding/` pipeline doc |
+| `frontend/src/pages/Signup.tsx` + `Onboarding.tsx` | `pagesflow/signup-onboarding/` pipeline doc |
 
 Full route → folder mapping is in the index below. Env var changes also require [`mandatory-fields.md`](./mandatory-fields.md).
 
@@ -59,7 +60,8 @@ Cursor rule: [`.cursor/rules/pagesflow-sync.mdc`](../.cursor/rules/pagesflow-syn
 |--------|-------|-------|---------|
 | [login](./login/PAGE.md) | `/login` | `GuestRoute` | Email/password + Google; jumbled word CAPTCHA below password; Remember Me |
 | [signup](./signup/PAGE.md) | `/signup` | `GuestRoute` | Deferred signup — stores pending credentials, no account yet |
-| [onboarding](./onboarding/PAGE.md) | `/onboarding` | `OnboardingRoute` | 3-step profile setup, email OTP, CV parse, job delivery |
+| [onboarding](./onboarding/PAGE.md) | `/onboarding` | `OnboardingRoute` | 3-step profile setup, AI CV parse + prefill (steps 1–3), email OTP, job delivery on finish |
+| [signup-onboarding](./signup-onboarding/README.md) | — | — | **Combined pipeline DOCX** — full signup → onboarding → dashboard reference with phased diagrams |
 | [forgot-password](./forgot-password/PAGE.md) | `/forgot-password` | `GuestRoute` | Email → OTP → new password |
 | [reset-password](./reset-password/PAGE.md) | `/reset-password` | `GuestRoute` | Legacy redirect → `/forgot-password` |
 | [welcome](./welcome/PAGE.md) | `/welcome` | `ProtectedRoute` | Legacy redirect → `/dashboard?welcome=1` |

@@ -221,7 +221,7 @@ const AddAnswerForm = ({ onAdd }: { onAdd: (answer: AutoApplyAnswer) => void }) 
           title="Add answer"
           onClick={handleAdd}
           disabled={saving}
-          className="px-4 py-2 bg-indigo-500 hover:bg-indigo-600 disabled:opacity-60 text-white text-xs font-bold rounded-lg transition-colors"
+          className="px-4 py-2 bg-brand-500 hover:bg-brand-600 disabled:opacity-60 text-white text-xs font-bold rounded-lg transition-colors"
         >
           {saving ? '...' : <Plus size={14} />}
         </button>

@@ -6,10 +6,12 @@ import com.careerops.model.SkillRun;
 import com.careerops.repository.SkillRunRepository;
 import com.careerops.service.SkillLocalFallbackService;
 import com.careerops.service.SkillRunCachePolicy;
+import com.careerops.service.SkillRunVersionPolicy;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.data.domain.PageRequest;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.support.TransactionTemplate;
@@ -92,8 +94,11 @@ public class SkillHandlerRegistry {
         }
 
         JsonNode output;
+        int totalTokens = 0;
         try {
-            output = handler.execute(userId, userJobId);
+            SkillHandlerResult result = handler.execute(userId, userJobId);
+            output = result.output();
+            totalTokens = result.totalTokens();
         } catch (Exception e) {
             log.warn("Handler failed for skill={}, trying local fallback: {}", skillName, e.getMessage());
             output = localFallback.tryFallback(skillName, userId, userJobId, null)
@@ -110,16 +115,41 @@ public class SkillHandlerRegistry {
             return SkillRunResponse.error(skillName, output.path("error").asText());
         }
 
+        final JsonNode persistedOutput = output;
+        final int persistedTokens = totalTokens > 0
+                ? totalTokens
+                : output.path("tokensUsed").asInt(0);
+
         SkillRun run = new SkillRun();
         run.setUserId(userId);
         run.setUserJobId(userJobId);
         run.setSkill(skillName);
-        run.setOutput(output);
+        run.setOutput(persistedOutput);
         run.setExpiresAt(SkillRunCachePolicy.computeExpiry(skillName));
-        writeTx.executeWithoutResult(status -> skillRuns.save(run));
+        if (persistedTokens > 0) {
+            run.setTotalTokens(persistedTokens);
+        }
 
-        log.info("Phase 2 skill={} completed and persisted for userId={}", skillName, userId);
-        return SkillRunResponse.result(skillName, output);
+        writeTx.executeWithoutResult(status -> {
+            skillRuns.save(run);
+            if (SkillRunVersionPolicy.isVersioned(skillName) && userJobId != null) {
+                pruneOldVersions(userId, userJobId, skillName);
+            }
+        });
+
+        log.info("Phase 2 skill={} completed and persisted for userId={} tokens={}",
+                skillName, userId, persistedTokens);
+        return SkillRunResponse.result(skillName, persistedOutput);
+    }
+
+    private void pruneOldVersions(UUID userId, UUID userJobId, String skill) {
+        List<SkillRun> runs = skillRuns.findByUserIdAndUserJobIdAndSkillOrderByCreatedAtDesc(
+                userId, userJobId, skill,
+                PageRequest.of(0, SkillRunVersionPolicy.MAX_VERSIONS + 5));
+        if (runs.size() <= SkillRunVersionPolicy.MAX_VERSIONS) {
+            return;
+        }
+        runs.subList(SkillRunVersionPolicy.MAX_VERSIONS, runs.size()).forEach(skillRuns::delete);
     }
 
     private JsonNode parseFallbackJson(AgentResult.Done done) {

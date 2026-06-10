@@ -1,6 +1,7 @@
 package com.careerops.controller;
 
 import com.careerops.annotation.PlanGated;
+import com.careerops.ratelimit.RateLimited;
 import com.careerops.dto.ProfileDtos.*;
 import com.careerops.exception.ApiException;
 import com.careerops.model.UserProfile;
@@ -48,6 +49,7 @@ public class ProfileController {
     // ── Core profile ─────────────────────────────────────────────────────
 
     @GetMapping
+    @RateLimited(capacity = 300, requestsPerMinute = 300)
     public ProfileResponse get() {
         return profile.get(AuthUtil.currentUserId());
     }
@@ -64,8 +66,9 @@ public class ProfileController {
 
     @PostMapping(value = "/cv", consumes = "multipart/form-data")
     @PlanGated("cv_upload")
+    @RateLimited(capacity = 30, requestsPerMinute = 30)
     public Map<String, Object> uploadCv(
-            @RequestPart("file") MultipartFile file) {
+            @RequestParam("file") MultipartFile file) {
         scanner.scan(file);
         try {
             var cvDoc = cv.upload(AuthUtil.currentUserId(), file);

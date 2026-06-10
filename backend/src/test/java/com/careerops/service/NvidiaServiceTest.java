@@ -55,7 +55,7 @@ class NvidiaServiceTest {
     @Test
     void buildPlainBody_knownSkill_usesMap() {
         assertThat(maxTokensForSkill("evaluate")).isEqualTo(1200);
-        assertThat(maxTokensForSkill("tailor-resume")).isEqualTo(5000);
+        assertThat(maxTokensForSkill("tailor-resume")).isEqualTo(8192);
     }
 
     @Test

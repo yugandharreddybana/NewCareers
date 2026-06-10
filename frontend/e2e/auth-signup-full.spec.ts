@@ -116,11 +116,14 @@ test.describe('Signup — live API registration', () => {
     expect(verificationId.length).toBeGreaterThan(10);
   });
 
-  test('SU-25: signup-intent API returns conflict for registered email', async ({ request }) => {
+  test('SU-25: signup-intent API returns decoy success for registered email (anti-enumeration)', async ({ request }) => {
     await ensureTestUser(request);
     const { createSignupIntentViaApi } = await import('./helpers/stack');
-    const conflict = await createSignupIntentViaApi(request, TEST_USER);
-    expect(conflict.status).toBe(409);
+    const res = await createSignupIntentViaApi(request, TEST_USER);
+    expect(res.status).toBe(200);
+    const body = res.body as { signupIntentId?: string; expiresAt?: string };
+    expect(body.signupIntentId).toBeTruthy();
+    expect(body.expiresAt).toBeTruthy();
   });
 
   test('duplicate email via API is rejected', async ({ request }) => {

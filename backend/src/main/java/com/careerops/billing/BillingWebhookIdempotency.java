@@ -13,11 +13,17 @@ import java.util.UUID;
 @Service
 public class BillingWebhookIdempotency {
 
-    /** Reserved scope — never used for user Idempotency-Key headers. */
+    /** Reserved scope, never used for user Idempotency-Key headers. */
     static final UUID WEBHOOK_SCOPE = UUID.fromString("00000000-0000-0000-0000-000000000001");
 
     /** Namespace prefix so Stripe event IDs cannot collide with HTTP idempotency keys. */
     public static final String STORAGE_KEY_PREFIX = "stripe:webhook:";
+
+    /** In-flight webhook — handler has not completed yet. */
+    public static final int STATUS_PROCESSING = 102;
+
+    /** Handler completed successfully. */
+    public static final int STATUS_COMPLETED = 200;
 
     private final IdempotencyRepository repository;
 
@@ -32,28 +38,36 @@ public class BillingWebhookIdempotency {
         return STORAGE_KEY_PREFIX + stripeEventId;
     }
 
-    @Transactional(readOnly = true)
-    public boolean isProcessed(String stripeEventId) {
-        return repository.findByIdempotencyKey(toStorageKey(stripeEventId)).isPresent();
-    }
-
     @Transactional
-    public void markProcessed(String stripeEventId) {
+    public boolean tryAcquire(String stripeEventId) {
         String storageKey = toStorageKey(stripeEventId);
-        if (isProcessed(stripeEventId)) {
-            return;
-        }
         try {
-            repository.save(IdempotencyKey.builder()
+            repository.saveAndFlush(IdempotencyKey.builder()
                     .idempotencyKey(storageKey)
                     .userId(WEBHOOK_SCOPE)
                     .requestPath("/billing/webhook")
-                    .responseStatus(200)
-                    .responseBody("processed")
+                    .responseStatus(STATUS_PROCESSING)
+                    .responseBody("processing")
                     .expiresAt(Instant.now().plus(90, ChronoUnit.DAYS))
                     .build());
+            return true;
         } catch (DataIntegrityViolationException ex) {
-            // concurrent duplicate — safe to ignore
+            return false;
         }
+    }
+
+    @Transactional
+    public void markCompleted(String stripeEventId) {
+        String storageKey = toStorageKey(stripeEventId);
+        IdempotencyKey key = repository.findByIdempotencyKey(storageKey)
+                .orElseThrow(() -> new IllegalStateException("Missing webhook idempotency row for " + stripeEventId));
+        key.setResponseStatus(STATUS_COMPLETED);
+        key.setResponseBody("processed");
+        repository.save(key);
+    }
+
+    @Transactional
+    public void release(String stripeEventId) {
+        repository.deleteByIdempotencyKey(toStorageKey(stripeEventId));
     }
 }

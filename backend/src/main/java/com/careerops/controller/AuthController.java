@@ -6,11 +6,13 @@ import com.careerops.service.AuthService;
 import com.careerops.service.OnboardingCvParseService;
 import com.careerops.service.OnboardingEmailVerificationService;
 import com.careerops.service.SignupIntentService;
+import com.careerops.ratelimit.RateLimited;
 import com.careerops.service.WordCaptchaService;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
 import org.springframework.core.env.Environment;
 import org.springframework.core.env.Profiles;
+import org.springframework.http.MediaType;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
 
@@ -60,11 +62,6 @@ public class AuthController {
     @PostMapping("/signup-intent")
     public SignupIntentResponse signupIntent(@RequestBody @Valid SignupIntentRequest req) {
         return signupIntentService.create(req);
-    }
-
-    @GetMapping("/signup-intent/{id}/exists")
-    public SignupIntentExistsResponse signupIntentExists(@PathVariable UUID id) {
-        return signupIntentService.exists(id);
     }
 
     @PostMapping("/register")
@@ -147,9 +144,9 @@ public class AuthController {
      * POST /auth/onboarding/parse-cv — stateless CV parse for onboarding step 0.
      * Extracts work experience, education, projects, and a markdown preview.
      */
-    @PostMapping("/onboarding/parse-cv")
+    @PostMapping(value = "/onboarding/parse-cv", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
     public OnboardingCvParseResponse parseOnboardingCv(
-            @RequestPart("file") MultipartFile file,
+            @RequestParam("file") MultipartFile file,
             @RequestParam(value = "signupIntentId", required = false) UUID signupIntentId,
             @RequestParam(value = "email", required = false) String email,
             @RequestParam(value = "captchaToken", required = false) String captchaToken)
@@ -166,14 +163,18 @@ public class AuthController {
             }
             auth.requireRecaptchaWhenConfigured(captchaToken);
         }
+        boolean aiAllowed = false;
         if (signupIntentId != null) {
             if (email == null || email.isBlank()) {
                 throw new com.careerops.exception.ApiException(
                         org.springframework.http.HttpStatus.BAD_REQUEST, "Email is required with sign-up session.");
             }
             signupIntentService.assertEligibleForCvParse(signupIntentId, email);
+            aiAllowed = true;
         }
-        return onboardingCvParse.parse(file);
+        return onboardingCvParse.parse(file, aiAllowed
+            ? OnboardingCvParseService.ParseOptions.withAi()
+            : OnboardingCvParseService.ParseOptions.regexOnly());
     }
 
     /**
@@ -221,6 +222,7 @@ public class AuthController {
      * trust filter, so userId is read from {@link com.careerops.util.AuthUtil}.
      */
     @GetMapping("/me")
+    @RateLimited(capacity = 300, requestsPerMinute = 300)
     public UserDto me() {
         return auth.me(com.careerops.util.AuthUtil.currentUserId());
     }

@@ -257,10 +257,11 @@ public class SkillsController {
     public byte[] downloadSkillPdf(
             @PathVariable UUID userJobId,
             @PathVariable String skillName,
+            @org.springframework.web.bind.annotation.RequestParam(required = false) UUID runId,
             jakarta.servlet.http.HttpServletResponse response) {
 
         UUID userId = AuthUtil.currentUserId();
-        byte[] pdf = pdfService.generateSkillPdf(userId, userJobId, skillName);
+        byte[] pdf = pdfService.generateSkillPdf(userId, userJobId, skillName, runId);
         pdfResponse(pdf, skillName + "-report.pdf", response);
         return pdf;
     }

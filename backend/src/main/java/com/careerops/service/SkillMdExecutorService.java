@@ -39,6 +39,8 @@ public class SkillMdExecutorService {
         return nvidia.isConfigured();
     }
 
+    public record SkillMdExecuteResult(JsonNode output, int totalTokens) {}
+
     /**
      * Run skill per SKILL.md. Returns parsed JSON ready for persistence.
      */
@@ -52,6 +54,23 @@ public class SkillMdExecutorService {
             UUID userJobId,
             SkillStartRequest req,
             String supplementalUserContext) {
+        return executeWithUsage(skill, userId, userJobId, req, supplementalUserContext).output();
+    }
+
+    public SkillMdExecuteResult executeWithUsage(
+            String skill,
+            UUID userId,
+            UUID userJobId,
+            SkillStartRequest req) {
+        return executeWithUsage(skill, userId, userJobId, req, null);
+    }
+
+    public SkillMdExecuteResult executeWithUsage(
+            String skill,
+            UUID userId,
+            UUID userJobId,
+            SkillStartRequest req,
+            String supplementalUserContext) {
         String system = prompts.buildBackendSkillSystemPrompt(skill, userId);
         String user = contextBuilder.buildUserMessage(skill, userId, userJobId, req);
         if (supplementalUserContext != null && !supplementalUserContext.isBlank()) {
@@ -59,7 +78,8 @@ public class SkillMdExecutorService {
         }
         log.info("SkillMdExecutor: skill={} userId={} userJobId={} systemChars={} userChars={}",
             skill, userId, userJobId, system.length(), user.length());
-        JsonNode raw = nvidia.generateJson(system, user, userId, "skill-" + skill);
+        var llm = nvidia.generateJsonWithUsage(system, user, userId, "skill-" + skill);
+        JsonNode raw = llm.json();
         ObjectNode out = raw != null && raw.isObject()
             ? (ObjectNode) raw.deepCopy()
             : mapper.createObjectNode();
@@ -68,6 +88,9 @@ public class SkillMdExecutorService {
         }
         out.put("mode", "skill_md");
         out.put("skill", skill);
-        return out;
+        if (llm.totalTokens() > 0) {
+            out.put("tokensUsed", llm.totalTokens());
+        }
+        return new SkillMdExecuteResult(out, llm.totalTokens());
     }
 }

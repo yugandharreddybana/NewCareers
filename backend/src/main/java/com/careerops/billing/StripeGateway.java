@@ -31,6 +31,8 @@ public interface StripeGateway {
 
     Optional<Long> retrieveSubscriptionCurrentPeriodEnd(String stripeSubscriptionId);
 
+    Optional<Long> retrieveSubscriptionCurrentPeriodStart(String stripeSubscriptionId);
+
     Optional<SubscriptionPlanResolution> resolveSubscriptionPlan(String stripeSubscriptionId);
 
     Event constructWebhookEvent(String payload, String signatureHeader) throws SignatureVerificationException;

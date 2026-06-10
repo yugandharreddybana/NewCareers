@@ -129,18 +129,19 @@ When the system scrapes job boards for a user profile, each source returns up to
 
 ## Billing
 
-Stripe billing and `GET /api/billing/usage` are **not implemented** (returns **501**). Usage in the nav comes from **`GET /api/v1/usage/limits`**.
+Subscription billing is served by `GET /api/v1/billing/subscription` and `GET /api/v1/billing/usage`. Nav usage pills come from **`GET /api/v1/usage/limits`**.
 
 ---
 
 ## UI: usage in the navbar
 
-When logged in, the top nav shows two pills (from `GET /api/v1/usage/limits`):
+When logged in, `DashboardTopNav` shows three pills (from `GET /api/v1/usage/limits`):
 
-- **Jobs today** — `remaining / limit` (e.g. `18 / 25`); resets at midnight Ireland time.
-- **AI tokens** — `remaining / limit` (e.g. `340k / 500k`); same reset.
+- **Jobs** — daily new job deliveries (`remaining / limit`); resets at midnight Ireland time.
+- **Tokens** — daily AI token budget (`remaining / limit`); same midnight reset.
+- **Skills** — AI skill runs in the current **billing period** (`remaining / limit`); resets every 30 days from checkout/renewal (FREE users: from subscription creation).
 
-Colors: green → amber → red as you approach zero. Hover a pill for the exact reset time.
+Limits follow the user’s package (`FREE` / `PRO` / `ENTERPRISE`). Colors: green → amber → red as you approach zero. Hover a pill for the reset time.
 
 If the backend or middleware is not running the `/usage` route, you will see “Usage unavailable” with a retry button.
 

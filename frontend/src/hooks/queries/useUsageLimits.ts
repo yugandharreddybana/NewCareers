@@ -1,16 +1,20 @@
 import { useQuery } from '@tanstack/react-query';
-import { useAuth } from '@/context/AuthContext';
+
+import { isCompleteUsageLimits } from '@/lib/usageLimitsUtils';
 import { queryKeys } from '@/lib/queryKeys';
 import { usageApi } from '@/services/api';
 
 export function useUsageLimits() {
-  const { user } = useAuth();
-
   return useQuery({
     queryKey: queryKeys.usage.limits(),
-    queryFn: () => usageApi.limits(),
-    enabled: Boolean(user),
-    staleTime: 30_000,
-    refetchInterval: 60_000,
+    queryFn: async () => {
+      const data = await usageApi.limits();
+      if (!isCompleteUsageLimits(data)) {
+        throw new Error('Usage limits response is missing required quota fields');
+      }
+      return data;
+    },
+    staleTime: 60_000,
+    refetchOnWindowFocus: true,
   });
 }

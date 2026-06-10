@@ -1,0 +1,48 @@
+sequenceDiagram
+    participant User
+    participant Login as Login.tsx
+    participant GoogleBtn as LoginGoogleButton
+    participant Consent as GoogleConsentSheet
+    participant AuthContext
+    participant Axios
+    participant Middleware
+    participant Auth as AuthService
+    participant Google as GoogleOAuthService
+
+    User->>GoogleBtn: Google credential (idToken)
+    GoogleBtn->>Login: onCredential(idToken)
+    Login->>Login: resolveGoogleLoginConsent(sessionStorage)
+
+    alt stale/missing consents
+        Login->>Consent: open sheet
+        User->>Consent: accept terms + AI + optional marketing/analytics
+        Consent->>Login: consents + reCAPTCHA (if CAPTCHA_ENABLED)
+        Login->>AuthContext: signInWithGoogle(idToken, rememberMe, consents, captchaToken)
+    else consents cached
+        Login->>AuthContext: signInWithGoogle(idToken, rememberMe, consents)
+    end
+
+    AuthContext->>Axios: POST /auth/google
+    Middleware->>Auth: authenticateWithGoogle
+    Auth->>Google: verifyIdToken(idToken)
+
+    alt user by googleSub exists
+        Auth->>Auth: assert active, reset failures
+    else email exists with password, no googleSub
+        Auth-->>Login: 409 LINK_REQUIRES_VERIFICATION
+        Login->>Login: show password link form (Phase 5)
+    else email exists, linkable
+        Auth->>Auth: set googleSub, save
+    else new Google user
+        alt missing terms/AI consent
+            Auth-->>Login: 400 must accept terms
+            Login->>Consent: open sheet
+        else
+            Auth->>Auth: createGoogleUser + default org provision
+        end
+    end
+
+    Auth->>Auth: createAuthResponse
+    Middleware->>Middleware: issueAuthCookies
+    AuthContext->>AuthContext: setUser
+    GuestRoute-->>User: redirect into app

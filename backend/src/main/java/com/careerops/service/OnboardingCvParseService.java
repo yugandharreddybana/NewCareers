@@ -10,6 +10,7 @@ import com.careerops.model.UserProfile.EducationEntry;
 import com.careerops.model.UserProfile.WorkExperienceEntry;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.web.multipart.MultipartFile;
@@ -18,9 +19,13 @@ import java.io.IOException;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
+import java.util.Optional;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 
 /**
- * Stateless CV parse for onboarding step 0 → prefill work, education, and markdown preview.
+ * Stateless CV parse for onboarding step 0 → prefill work, education, projects, tech stack, and markdown preview.
  */
 @Service
 @RequiredArgsConstructor
@@ -28,11 +33,50 @@ import java.util.Locale;
 public class OnboardingCvParseService {
 
     private static final long MAX_BYTES = 5L * 1024 * 1024;
+    private static final String PARSE_SOURCE_AI = "ai";
+    private static final String PARSE_SOURCE_REGEX = "regex";
+    private static final String AI_FALLBACK_WARNING = "AI parse unavailable; used standard parser";
+    private static final String AI_TIMEOUT_WARNING = "AI parse timed out; used standard parser";
+
+    public record ParseOptions(boolean aiAllowed) {
+        public static ParseOptions regexOnly() {
+            return new ParseOptions(false);
+        }
+
+        public static ParseOptions withAi() {
+            return new ParseOptions(true);
+        }
+    }
+
+    private record RegexParseResult(
+        String cvMarkdown,
+        String headline,
+        List<OnboardingCvParseWorkEntry> workExperience,
+        List<OnboardingCvParseEducationEntry> education,
+        List<OnboardingCvParseProjectEntry> projects,
+        String linkedInUrl,
+        String githubUrl,
+        String websiteUrl
+    ) {}
 
     private final CvParserService parser;
     private final com.careerops.util.FileUtil fileUtil;
+    private final OnboardingCvAiParseService aiParseService;
+    private final OnboardingCvParseResultValidator parseValidator;
+    private final CvSkillExtractionService skillExtraction;
+
+    @Value("${onboarding.cv.ai-parse.enabled:true}")
+    private boolean aiParseEnabled;
+
+    /** Max wait for NVIDIA AI enrich before returning regex prefill (avoids multi-minute onboarding stalls). */
+    @Value("${onboarding.cv.ai-parse.timeout.ms:60000}")
+    private long aiParseTimeoutMs;
 
     public OnboardingCvParseResponse parse(MultipartFile file) throws IOException {
+        return parse(file, ParseOptions.regexOnly());
+    }
+
+    public OnboardingCvParseResponse parse(MultipartFile file, ParseOptions options) throws IOException {
         if (file == null || file.isEmpty()) {
             throw new ApiException(HttpStatus.BAD_REQUEST, "Upload your CV to continue");
         }
@@ -45,8 +89,9 @@ public class OnboardingCvParseService {
         if (!(lc.endsWith(".pdf") || lc.endsWith(".docx"))) {
             throw new ApiException(HttpStatus.UNSUPPORTED_MEDIA_TYPE, "Only PDF or DOCX");
         }
-
         byte[] bytes = file.getBytes();
+        validateMagicBytes(bytes, name, file.getContentType());
+
         String parsedText = parser.extract(
             new java.io.ByteArrayInputStream(bytes),
             file.getContentType(),
@@ -57,6 +102,88 @@ public class OnboardingCvParseService {
             throw new ApiException(HttpStatus.UNPROCESSABLE_ENTITY, "Could not read text from your CV file");
         }
 
+        RegexParseResult regex = parseWithRegex(parsedText);
+        List<String> warnings = new ArrayList<>();
+        String parseSource = PARSE_SOURCE_REGEX;
+
+        List<OnboardingCvParseWorkEntry> work = regex.workExperience();
+        List<OnboardingCvParseEducationEntry> education = regex.education();
+        List<OnboardingCvParseProjectEntry> projects = regex.projects();
+        String headline = regex.headline();
+        String markdown = regex.cvMarkdown();
+        String linkedIn = regex.linkedInUrl();
+        String github = regex.githubUrl();
+        String website = regex.websiteUrl();
+        List<String> aiTech = List.of();
+        List<String> extractedTargetRoles = List.of();
+
+        boolean tryAi = options != null && options.aiAllowed() && aiParseEnabled;
+        if (tryAi) {
+            AiParseAttempt aiAttempt = awaitAiParse(parsedText);
+            Optional<OnboardingCvParseResultValidator.ValidatedAiParse> aiOpt = aiAttempt.result();
+            if (aiOpt.isPresent()) {
+                OnboardingCvParseResultValidator.ValidatedAiParse ai = aiOpt.get();
+                parseSource = PARSE_SOURCE_AI;
+                work = pickList(ai.workExperience(), regex.workExperience());
+                education = pickList(ai.education(), regex.education());
+                projects = pickList(ai.projects(), regex.projects());
+                headline = coalesce(ai.headline(), regex.headline());
+                markdown = coalesce(ai.cvMarkdown(), regex.cvMarkdown());
+                linkedIn = coalesceUrl(ai.linkedInUrl(), regex.linkedInUrl());
+                github = coalesceUrl(ai.githubUrl(), regex.githubUrl());
+                website = coalesceUrl(ai.websiteUrl(), regex.websiteUrl());
+                aiTech = ai.techStack();
+                extractedTargetRoles = ai.targetRoles();
+            } else {
+                warnings.add(aiAttempt.timedOut() ? AI_TIMEOUT_WARNING : AI_FALLBACK_WARNING);
+                log.warn("Onboarding CV parse: AI {}, using regex fallback",
+                        aiAttempt.timedOut() ? "timed out after " + aiParseTimeoutMs + "ms" : "failed");
+            }
+        }
+
+        List<String> dictionaryTech = skillExtraction.extractFromSkillsSection(parsedText);
+        List<String> extractedTechStack = parseValidator.mergeTechStack(aiTech, dictionaryTech);
+
+        log.info("Onboarding CV parse: source={} roles={} education={} projects={} tech={} targetRoles={}",
+            parseSource, work.size(), education.size(), projects.size(),
+            extractedTechStack.size(), extractedTargetRoles.size());
+
+        return new OnboardingCvParseResponse(
+            markdown,
+            headline,
+            work,
+            education,
+            projects,
+            work.size(),
+            education.size(),
+            projects.size(),
+            blankToNull(linkedIn),
+            blankToNull(github),
+            blankToNull(website),
+            extractedTechStack,
+            extractedTargetRoles,
+            parseSource,
+            List.copyOf(warnings)
+        );
+    }
+
+    private record AiParseAttempt(Optional<OnboardingCvParseResultValidator.ValidatedAiParse> result, boolean timedOut) {}
+
+    private AiParseAttempt awaitAiParse(String parsedText) {
+        CompletableFuture<Optional<OnboardingCvParseResultValidator.ValidatedAiParse>> future =
+                CompletableFuture.supplyAsync(() -> aiParseService.parse(parsedText));
+        try {
+            return new AiParseAttempt(future.get(aiParseTimeoutMs, TimeUnit.MILLISECONDS), false);
+        } catch (TimeoutException e) {
+            future.cancel(true);
+            return new AiParseAttempt(Optional.empty(), true);
+        } catch (Exception e) {
+            log.warn("Onboarding CV parse: AI error: {}", e.getMessage());
+            return new AiParseAttempt(Optional.empty(), false);
+        }
+    }
+
+    RegexParseResult parseWithRegex(String parsedText) {
         List<CvMarkdownSections.Section> sections = CvMarkdownSections.parse(parsedText);
         String experienceBody = sectionBody(sections, "Professional experience");
         String educationBody = sectionBody(sections, "Education");
@@ -79,21 +206,36 @@ public class OnboardingCvParseService {
         UserProfile profile = buildTempProfile(work, education);
         String markdown = buildMarkdown(parsedText, profile, projects);
 
-        log.info("Onboarding CV parse: roles={} education={} projects={}", work.size(), education.size(), projects.size());
-
-        return new OnboardingCvParseResponse(
+        return new RegexParseResult(
             markdown,
             headline,
             work,
             education,
             projects,
-            work.size(),
-            education.size(),
-            projects.size(),
             blankToNull(headerLinks.linkedInUrl()),
             blankToNull(headerLinks.githubUrl()),
             blankToNull(headerLinks.portfolioUrl())
         );
+    }
+
+    private static <T> List<T> pickList(List<T> primary, List<T> fallback) {
+        if (primary != null && !primary.isEmpty()) {
+            return primary;
+        }
+        return fallback != null ? fallback : List.of();
+    }
+
+    private static String coalesce(String primary, String fallback) {
+        if (primary != null && !primary.isBlank()) {
+            return primary.trim();
+        }
+        return fallback != null ? fallback.trim() : "";
+    }
+
+    private static String coalesceUrl(String primary, String fallback) {
+        String p = coalesce(primary, "");
+        if (!p.isBlank()) return p;
+        return fallback != null ? fallback : "";
     }
 
     private static String sectionBody(List<CvMarkdownSections.Section> sections, String name) {
@@ -137,6 +279,8 @@ public class OnboardingCvParseService {
                 e.schoolName(),
                 e.degree(),
                 e.fieldOfStudy(),
+                e.startYear(),
+                e.endYear(),
                 e.graduationYear(),
                 e.location()
             ));
@@ -192,6 +336,8 @@ public class OnboardingCvParseService {
                 .schoolName(e.schoolName())
                 .degree(e.degree())
                 .fieldOfStudy(e.fieldOfStudy())
+                .startYear(e.startYear())
+                .endYear(e.endYear())
                 .graduationYear(e.graduationYear())
                 .location(e.location())
                 .build())
@@ -233,5 +379,34 @@ public class OnboardingCvParseService {
             return null;
         }
         return value.trim();
+    }
+
+    private void validateMagicBytes(byte[] bytes, String name, String contentType) {
+        if (name == null || contentType == null) {
+            throw new ApiException(HttpStatus.BAD_REQUEST, "Invalid file metadata");
+        }
+        if (bytes == null || bytes.length < 4) {
+            throw new ApiException(HttpStatus.BAD_REQUEST, "File too small or invalid");
+        }
+
+        boolean magicPdf = (bytes[0] == 0x25 && bytes[1] == 0x50 && bytes[2] == 0x44 && bytes[3] == 0x46);
+        boolean magicZip = (bytes[0] == 0x50 && bytes[1] == 0x4B && bytes[2] == 0x03 && bytes[3] == 0x04);
+
+        String ext = name.substring(name.lastIndexOf('.') + 1).toLowerCase(Locale.ROOT);
+        boolean extPdf = "pdf".equals(ext);
+        boolean extDocx = "docx".equals(ext);
+        boolean ctPdf = "application/pdf".equals(contentType);
+        boolean ctDocx = "application/vnd.openxmlformats-officedocument.wordprocessingml.document".equals(contentType);
+        boolean loose = "application/octet-stream".equals(contentType);
+
+        boolean validPdf = magicPdf && extPdf && (ctPdf || loose);
+        boolean validDocx = magicZip && extDocx && (ctDocx || loose);
+
+        if (!validPdf && !validDocx) {
+            log.error("Onboarding CV validation failed: magicPdf={} extPdf={} ctPdf={} magicZip={} extDocx={} ctDocx={}",
+                    magicPdf, extPdf, ctPdf, magicZip, extDocx, ctDocx);
+            throw new ApiException(HttpStatus.UNSUPPORTED_MEDIA_TYPE,
+                    "Security violation: File content, extension, and type do not match (Expected PDF or DOCX).");
+        }
     }
 }

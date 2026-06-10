@@ -61,7 +61,7 @@ final class ProjectsSectionParser {
                 continue;
             }
             String stripped = line.replaceFirst("^#+\\s*", "").replaceFirst("^[•\\-*▪►#]+\\s*", "").trim();
-            if (looksLikeNewProjectHeader(stripped, !current.isEmpty())) {
+            if (looksLikeNewProjectHeader(stripped, current)) {
                 blocks.add(String.join("\n", current).trim());
                 current = new ArrayList<>();
             }
@@ -73,21 +73,35 @@ final class ProjectsSectionParser {
         return blocks.isEmpty() ? List.of(body.trim()) : blocks;
     }
 
-    private static boolean looksLikeNewProjectHeader(String stripped, boolean hasCurrent) {
-        if (!hasCurrent) {
+    private static boolean looksLikeNewProjectHeader(String stripped, List<String> current) {
+        if (current.isEmpty()) {
             return false;
         }
         if (BULLET_LINE.matcher(stripped).find()) {
             return false;
         }
+        if (GENERIC_HEADER.matcher(stripped).find()) {
+            return false;
+        }
         if (stripped.endsWith(":")) {
-            return true;
+            return currentLooksLikeProjectStarted(current);
         }
         if (CvPipeFields.looksLikeProjectPipeTitle(stripped)) {
-            return true;
+            return currentLooksLikeProjectStarted(current);
         }
-        if (looksLikeProjectTitle(stripped) && !isCommaSeparatedTech(stripped)) {
-            return true;
+        return false;
+    }
+
+    private static boolean currentLooksLikeProjectStarted(List<String> current) {
+        for (String raw : current) {
+            String line = raw.strip().replaceFirst("^#+\\s*", "").replaceFirst("^[â€¢\\-*â–ªâ–º#]+\\s*", "").trim();
+            if (line.isBlank() || GENERIC_HEADER.matcher(line).find() || TECH_LABEL_LINE.matcher(line).find()
+                || isCommaSeparatedTech(line)) {
+                continue;
+            }
+            if (looksLikeProjectTitle(line)) {
+                return true;
+            }
         }
         return false;
     }
@@ -141,7 +155,7 @@ final class ProjectsSectionParser {
 
             Matcher lineUrl = URL_PATTERN.matcher(line);
             if (url.isBlank() && lineUrl.find()) {
-                url = normalizeUrl(lineUrl.group(1));
+                url = ProjectLinkExtractor.normalizeUrl(lineUrl.group(1));
                 line = line.replace(lineUrl.group(1), "").trim();
             }
             if (location.isBlank()) {
@@ -172,9 +186,20 @@ final class ProjectsSectionParser {
             }
         }
 
+        String description = String.join("\n", descLines).trim();
+        if (url.isBlank()) {
+            ProjectLinkExtractor.ResolvedLink resolved = ProjectLinkExtractor.extractAndStrip(block);
+            if (!resolved.url().isBlank()) {
+                url = resolved.url();
+                description = resolved.cleanedText();
+            }
+        } else if (!description.isBlank()) {
+            description = ProjectLinkExtractor.stripUrls(description);
+        }
+
         return new ParsedProject(
             titleLine,
-            String.join("\n", descLines).trim(),
+            description,
             url,
             location,
             techTags
@@ -182,7 +207,8 @@ final class ProjectsSectionParser {
     }
 
     private static final Pattern URL_PATTERN = Pattern.compile(
-        "(?i)(https?://\\S+|(?:www\\.)?github\\.com/\\S+)"
+        "(?i)(https?://[^\\s<>\"']+|(?:www\\.)?github\\.com/[\\w.\\-/%]+|"
+            + "(?:www\\.)?gitlab\\.com/[\\w.\\-/%]+|(?:www\\.)?bitbucket\\.org/[\\w.\\-/%]+)"
     );
 
     private static boolean looksLikeProjectTitle(String line) {
@@ -224,20 +250,6 @@ final class ProjectsSectionParser {
             .map(String::trim)
             .filter(s -> !s.isBlank() && !s.equalsIgnoreCase("link"))
             .collect(Collectors.toList());
-    }
-
-    private static String normalizeUrl(String raw) {
-        if (raw == null || raw.isBlank()) {
-            return "";
-        }
-        String t = raw.strip();
-        if (t.startsWith("http://") || t.startsWith("https://")) {
-            return t;
-        }
-        if (t.startsWith("www.")) {
-            return "https://" + t;
-        }
-        return "https://" + t;
     }
 
     private static String extractLocation(String text) {

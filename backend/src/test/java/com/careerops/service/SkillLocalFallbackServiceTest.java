@@ -42,9 +42,10 @@ class SkillLocalFallbackServiceTest {
 
     @Test
     void tailorResume_returnsStructuredOutputWithoutAi() throws Exception {
+        ProfileReadableFields profileFields = org.mockito.Mockito.mock(ProfileReadableFields.class);
         StructuredJobEvaluationBuilder evaluationBuilder = new StructuredJobEvaluationBuilder(
             skillExtraction, new UserJobSkillMatchService(skillExtraction, null, null, null, null, jobMatcher),
-            jobMatcher, evaluationValidator, mapper);
+            jobMatcher, evaluationValidator, profileFields, mapper);
         TailorResumeHtmlRenderer htmlRenderer = new TailorResumeHtmlRenderer();
         TailorResumeAiService tailorAi = org.mockito.Mockito.mock(TailorResumeAiService.class);
         when(tailorAi.tryBuild(any(), any(), any(), any(), any())).thenReturn(Optional.empty());

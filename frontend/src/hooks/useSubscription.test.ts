@@ -15,7 +15,7 @@ vi.mock('@/services/billingApi', () => ({
 const mockUser = { id: 'user-1', email: 'user@example.com' };
 let authUser: typeof mockUser | null = mockUser;
 
-vi.mock('@/context/AuthContext', () => ({
+vi.mock('@/context/authCtx', () => ({
   useAuth: () => ({ user: authUser }),
 }));
 
@@ -43,39 +43,14 @@ describe('useSubscription', () => {
 
     expect(result.current.isLoading).toBe(false);
     expect(mockGetSubscription).not.toHaveBeenCalled();
+    expect(result.current.subscription).toBeNull();
   });
 
-  it('normalizes CANCELED to CANCELLED and computes trialing state', async () => {
-    const trialEnd = new Date(Date.now() + 5 * 86_400_000).toISOString();
+  it('ignores stale subscription cache when user is absent', async () => {
     mockGetSubscription.mockResolvedValueOnce({
       plan: 'FREE',
-      effectivePlan: 'PRO',
-      status: 'CANCELED',
-      trialEndsAt: trialEnd,
-      daysRemaining: 5,
-      hasBillingAccount: false,
-      canManageBilling: true,
-      usageThisMonth: { aiRuns: 1, applications: 2 },
-      limits: { aiRunsPerMonth: 5, applicationsPerMonth: 10, cvUploads: 1, teamMembers: 1 },
-      cvUploadsTotal: 0,
-      organizationId: 'org-1',
-      currentPeriodEnd: null,
-    });
-
-    const { result } = renderHook(() => useSubscription(), { wrapper });
-
-    await waitFor(() => expect(result.current.status).toBe('CANCELLED'));
-    expect(result.current.isTrialing).toBe(false);
-    expect(result.current.plan).toBe('FREE');
-  });
-
-  it('marks trialing when status TRIALING and days remain', async () => {
-    mockGetSubscription.mockResolvedValueOnce({
-      plan: 'FREE',
-      effectivePlan: 'PRO',
-      status: 'TRIALING',
-      trialEndsAt: new Date(Date.now() + 3 * 86_400_000).toISOString(),
-      daysRemaining: 3,
+      effectivePlan: 'FREE',
+      status: 'ACTIVE',
       hasBillingAccount: false,
       canManageBilling: true,
       usageThisMonth: { aiRuns: 0, applications: 0 },
@@ -83,11 +58,47 @@ describe('useSubscription', () => {
       cvUploadsTotal: 0,
       organizationId: 'org-1',
       currentPeriodEnd: null,
+      cancelAtPeriodEnd: false,
+      trialEndsAt: null,
+      daysRemaining: 0,
+    });
+
+    const client = new QueryClient({
+      defaultOptions: { queries: { retry: false } },
+    });
+    const { result, rerender } = renderHook(() => useSubscription(), {
+      wrapper: ({ children }) =>
+        createElement(QueryClientProvider, { client }, children),
+    });
+
+    await waitFor(() => expect(result.current.plan).toBe('FREE'));
+
+    authUser = null;
+    rerender();
+
+    expect(result.current.subscription).toBeNull();
+  });
+
+  it('normalizes CANCELED to CANCELLED', async () => {
+    mockGetSubscription.mockResolvedValueOnce({
+      plan: 'FREE',
+      effectivePlan: 'FREE',
+      status: 'CANCELED',
+      hasBillingAccount: false,
+      canManageBilling: true,
+      usageThisMonth: { aiRuns: 1, applications: 2 },
+      limits: { aiRunsPerMonth: 5, applicationsPerMonth: 10, cvUploads: 1, teamMembers: 1 },
+      cvUploadsTotal: 0,
+      organizationId: 'org-1',
+      currentPeriodEnd: null,
+      cancelAtPeriodEnd: false,
+      trialEndsAt: null,
+      daysRemaining: 0,
     });
 
     const { result } = renderHook(() => useSubscription(), { wrapper });
 
-    await waitFor(() => expect(result.current.isTrialing).toBe(true));
-    expect(result.current.daysRemaining).toBeGreaterThan(0);
+    await waitFor(() => expect(result.current.status).toBe('CANCELLED'));
+    expect(result.current.plan).toBe('FREE');
   });
 });

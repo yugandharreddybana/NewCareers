@@ -167,7 +167,7 @@ const CreateCampaignModal = ({
           <button
             onClick={handleSubmit}
             disabled={saving}
-            className="flex-1 py-2.5 bg-indigo-500 hover:bg-indigo-600 disabled:opacity-60 text-white text-sm font-semibold rounded-lg transition-colors"
+            className="flex-1 py-2.5 bg-brand-500 hover:bg-brand-600 disabled:opacity-60 text-white text-sm font-semibold rounded-lg transition-colors"
           >
             {saving ? 'Creating...' : 'Create'}
           </button>
@@ -223,7 +223,7 @@ const CampaignCard = ({
       </div>
       <div className="flex items-center gap-1 shrink-0">
         {campaign.status === 'draft' && (
-          <button onClick={() => onLaunch(campaign.id)} className="flex items-center gap-1.5 px-3 py-1.5 bg-indigo-500 hover:bg-indigo-600 text-white text-xs font-bold rounded-lg transition-colors">
+          <button onClick={() => onLaunch(campaign.id)} className="flex items-center gap-1.5 px-3 py-1.5 bg-brand-500 hover:bg-brand-600 text-white text-xs font-bold rounded-lg transition-colors">
             <Play size={11} /> Launch
           </button>
         )}
@@ -311,7 +311,7 @@ const OutreachPage = () => {
             <h1 className="text-2xl font-semibold text-gray-900">Outreach</h1>
             <p className="text-sm text-gray-500 mt-1">Run targeted campaigns to recruiters and hiring managers.</p>
           </div>
-          <button onClick={() => setShowModal(true)} className="flex items-center gap-2 px-4 py-2.5 bg-indigo-500 hover:bg-indigo-600 text-white text-sm font-semibold rounded-lg transition-colors">
+          <button onClick={() => setShowModal(true)} className="flex items-center gap-2 px-4 py-2.5 bg-brand-500 hover:bg-brand-600 text-white text-sm font-semibold rounded-lg transition-colors">
             <Plus size={15} /> New Campaign
           </button>
         </div>

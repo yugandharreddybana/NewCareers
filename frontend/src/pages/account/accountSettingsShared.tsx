@@ -11,7 +11,13 @@ import { MinMatchPercentField } from '@/components/onboarding/MinMatchPercentFie
 import { MonthYearField } from '@/components/onboarding/MonthYearField';
 import { DegreeCombobox } from '@/components/onboarding/DegreeCombobox';
 import type { DegreeLevel } from '@/lib/degreeNormalization';
+import type { PortfolioItem } from '@/types';
 import type { SettingsFormState } from '@/lib/settingsProfileForm';
+import { readableDisplayName } from '@/lib/readableDisplayName';
+import {
+  formatEducationYearRange,
+  formatWorkDateRange,
+} from '@/lib/profileDisplayFormat';
 
 export const EXPERIENCE_OPTIONS = [
   { value: '0-2', label: '0–2 years' },
@@ -42,9 +48,42 @@ export function SectionHeader({
   );
 }
 
-export function SettingsSavedSnapshot({ form }: { form: SettingsFormState }) {
+function SnapshotChip({ children }: { children: string }) {
+  return <span className="settings-snapshot-chip">{children}</span>;
+}
+
+function SnapshotField({
+  label,
+  value,
+  fullWidth,
+}: {
+  label: string;
+  value: string;
+  fullWidth?: boolean;
+}) {
+  const display = value.trim() || '—';
+  return (
+    <div className={`settings-snapshot-field${fullWidth ? ' settings-snapshot-field--full' : ''}`}>
+      <dt className="settings-snapshot-field__label">{label}</dt>
+      <dd className="settings-snapshot-field__value" title={display.length > 48 ? display : undefined}>
+        {display}
+      </dd>
+    </div>
+  );
+}
+
+export function SettingsSavedSnapshot({
+  form,
+  onViewCv,
+}: {
+  form: SettingsFormState;
+  onViewCv?: () => void;
+}) {
   const workRows = form.workExperience.filter(w => w.jobTitle.trim() || w.companyName.trim());
-  const eduRows = form.education.filter(e => e.schoolName.trim());
+  const eduRows = form.education.filter(
+    e => e.schoolName.trim() || e.degree.trim() || (e.degreeTitle ?? '').trim(),
+  );
+  const projectRows = form.portfolioItems.filter(p => p.title.trim());
   const workSettingLabel = [
     form.workSettings.remote && 'Remote',
     form.workSettings.onsite && 'On-site',
@@ -53,59 +92,192 @@ export function SettingsSavedSnapshot({ form }: { form: SettingsFormState }) {
     .filter(Boolean)
     .join(', ');
 
-  const items: { label: string; value: string }[] = [
-    { label: 'Name', value: form.name || '—' },
-    { label: 'Headline', value: form.goalTitle || '—' },
-    { label: 'Location', value: form.location || '—' },
-    { label: 'Preferred job location', value: form.goalLocation || '—' },
-    { label: 'Experience', value: form.experienceYears || '—' },
-    {
-      label: 'Target roles',
-      value: form.selectedRoles.length ? form.selectedRoles.join(', ') : '—',
-    },
-    {
-      label: 'Tech stack',
-      value: form.selectedTech.length ? form.selectedTech.join(', ') : '—',
-    },
-    { label: 'Work types', value: form.workTypes.join(', ') || '—' },
-    { label: 'Work setting', value: workSettingLabel || '—' },
-    {
-      label: 'Salary',
-      value: `${form.salaryCurrency} ${form.salaryMinK}k – ${form.salaryMaxK}k`,
-    },
-    { label: 'Availability', value: form.availability || '—' },
-    { label: 'Visa sponsorship', value: form.sponsorship ? 'Required' : 'Not required' },
-    { label: 'Minimum match to show jobs', value: `${form.minMatchPercent}%` },
-    { label: 'CV on file', value: form.activeCvFileName ?? 'None uploaded' },
-    {
-      label: 'Work history',
-      value: workRows.length
-        ? workRows.map(w => `${w.jobTitle} @ ${w.companyName}`.trim()).join(' · ')
-        : '—',
-    },
-    {
-      label: 'Education',
-      value: eduRows.length
-        ? eduRows.map(e => `${e.degree} — ${e.schoolName}`.trim()).join(' · ')
-        : '—',
-    },
-  ];
+  const name = readableDisplayName(form.name) || form.name.trim() || 'Your profile';
+  const headline = readableDisplayName(form.goalTitle);
+  const location = readableDisplayName(form.location);
+  const goalLocation = readableDisplayName(form.goalLocation);
+  const experienceLabel =
+    EXPERIENCE_OPTIONS.find(o => o.value === form.experienceYears)?.label ?? form.experienceYears;
 
   return (
-    <section className="glass-panel rounded p-gutter" aria-label="Saved profile summary">
+    <section className="glass-panel settings-snapshot-panel rounded p-gutter" aria-label="Saved profile summary">
       <SectionHeader
         icon="fact_check"
         title="Your saved profile"
-        description="Everything currently stored for job matching and AI skills."
+        description="A quick read-only view of what we use for matching and AI skills."
       />
-      <dl className="settings-snapshot-grid">
-        {items.map(row => (
-          <div key={row.label} className="settings-snapshot-row">
-            <dt className="settings-label mb-0">{row.label}</dt>
-            <dd className="font-body-sm text-on-surface mt-1 break-words">{row.value}</dd>
-          </div>
-        ))}
-      </dl>
+
+      <div className="settings-snapshot-hero">
+        <p className="settings-snapshot-hero__name">{name}</p>
+        {headline ? (
+          <p className="settings-snapshot-hero__headline">{headline}</p>
+        ) : (
+          <p className="settings-snapshot-hero__headline settings-snapshot-hero__headline--muted">
+            Add a professional headline below
+          </p>
+        )}
+        <div className="settings-snapshot-hero__meta">
+          {location ? (
+            <span className="settings-snapshot-meta-item">
+              <span className="material-symbols-outlined" aria-hidden="true">location_on</span>
+              {location}
+            </span>
+          ) : null}
+          {experienceLabel ? (
+            <span className="settings-snapshot-meta-item">
+              <span className="material-symbols-outlined" aria-hidden="true">work_history</span>
+              {experienceLabel}
+            </span>
+          ) : null}
+          {form.activeCvFileName && onViewCv ? (
+            <button
+              type="button"
+              className="settings-snapshot-cv-link"
+              onClick={onViewCv}
+            >
+              <span className="material-symbols-outlined" aria-hidden="true">description</span>
+              View current CV
+            </button>
+          ) : form.activeCvFileName ? (
+            <span className="settings-snapshot-meta-item">
+              <span className="material-symbols-outlined" aria-hidden="true">description</span>
+              CV uploaded
+            </span>
+          ) : null}
+        </div>
+      </div>
+
+      <div className="settings-snapshot-sections">
+        <section className="settings-snapshot-section">
+          <h3 className="settings-snapshot-section__title">Job preferences</h3>
+          <dl className="settings-snapshot-grid">
+            <SnapshotField label="Preferred location" value={goalLocation} />
+            <SnapshotField label="Work setting" value={workSettingLabel} />
+            <SnapshotField label="Availability" value={form.availability} />
+            <SnapshotField
+              label="Salary"
+              value={`${form.salaryCurrency} ${form.salaryMinK}k – ${form.salaryMaxK}k`}
+            />
+            <SnapshotField
+              label="Minimum match"
+              value={`${form.minMatchPercent}%`}
+            />
+            <SnapshotField
+              label="Visa sponsorship"
+              value={form.sponsorship ? 'Required' : 'Not required'}
+            />
+          </dl>
+          {form.selectedRoles.length > 0 && (
+            <div className="settings-snapshot-chip-group">
+              <p className="settings-snapshot-chip-group__label">Target roles</p>
+              <div className="settings-snapshot-chip-row">
+                {form.selectedRoles.map(role => (
+                  <SnapshotChip key={role}>{role}</SnapshotChip>
+                ))}
+              </div>
+            </div>
+          )}
+          {form.selectedTech.length > 0 && (
+            <div className="settings-snapshot-chip-group">
+              <p className="settings-snapshot-chip-group__label">Tech stack</p>
+              <div className="settings-snapshot-chip-row">
+                {form.selectedTech.map(tech => (
+                  <SnapshotChip key={tech}>{tech}</SnapshotChip>
+                ))}
+              </div>
+            </div>
+          )}
+          {form.workTypes.length > 0 && (
+            <div className="settings-snapshot-chip-group">
+              <p className="settings-snapshot-chip-group__label">Work types</p>
+              <div className="settings-snapshot-chip-row">
+                {form.workTypes.map(type => (
+                  <SnapshotChip key={type}>{type}</SnapshotChip>
+                ))}
+              </div>
+            </div>
+          )}
+        </section>
+
+        {(workRows.length > 0 || eduRows.length > 0 || projectRows.length > 0) && (
+          <section className="settings-snapshot-section">
+            <h3 className="settings-snapshot-section__title">Background</h3>
+            {workRows.length > 0 && (
+              <ul className="settings-snapshot-list">
+                {workRows.map((w, i) => {
+                  const dateRange = formatWorkDateRange(w.startDate, w.endDate, w.current);
+                  const meta = [dateRange, w.location?.trim()].filter(Boolean).join(' · ');
+                  return (
+                    <li key={`${w.jobTitle}-${w.companyName}-${i}`}>
+                      <span className="settings-snapshot-list__title">{w.jobTitle || 'Role'}</span>
+                      <span className="settings-snapshot-list__sub">
+                        {w.companyName || 'Company'}
+                      </span>
+                      {meta ? (
+                        <span className="settings-snapshot-list__meta">{meta}</span>
+                      ) : null}
+                      {w.description.trim() ? (
+                        <p className="settings-snapshot-list__body">{w.description.trim()}</p>
+                      ) : null}
+                    </li>
+                  );
+                })}
+              </ul>
+            )}
+            {eduRows.length > 0 && (
+              <ul className="settings-snapshot-list settings-snapshot-list--spaced">
+                {eduRows.map((e, i) => {
+                  const degreeLabel = e.degreeTitle?.trim() || e.degree.trim() || 'Degree';
+                  const yearRange = formatEducationYearRange(
+                    e.startYear,
+                    e.endYear,
+                    e.graduationYear,
+                  );
+                  const meta = [e.fieldOfStudy.trim(), yearRange, e.location?.trim()]
+                    .filter(Boolean)
+                    .join(' · ');
+                  return (
+                    <li key={`${e.schoolName}-${i}`}>
+                      <span className="settings-snapshot-list__title">{degreeLabel}</span>
+                      <span className="settings-snapshot-list__sub">{e.schoolName}</span>
+                      {meta ? (
+                        <span className="settings-snapshot-list__meta">{meta}</span>
+                      ) : null}
+                    </li>
+                  );
+                })}
+              </ul>
+            )}
+            {projectRows.length > 0 && (
+              <ul className="settings-snapshot-list settings-snapshot-list--spaced">
+                {projectRows.map(item => {
+                  const meta = [item.location?.trim(), item.url?.trim()]
+                    .filter(Boolean)
+                    .join(' · ');
+                  return (
+                    <li key={item.id}>
+                      <span className="settings-snapshot-list__title">{item.title}</span>
+                      {meta ? (
+                        <span className="settings-snapshot-list__meta">{meta}</span>
+                      ) : null}
+                      {item.description?.trim() ? (
+                        <p className="settings-snapshot-list__body">{item.description.trim()}</p>
+                      ) : null}
+                      {(item.techTags ?? []).length > 0 ? (
+                        <div className="settings-snapshot-chip-row settings-snapshot-chip-row--tight">
+                          {(item.techTags ?? []).map(tag => (
+                            <SnapshotChip key={tag}>{tag}</SnapshotChip>
+                          ))}
+                        </div>
+                      ) : null}
+                    </li>
+                  );
+                })}
+              </ul>
+            )}
+          </section>
+        )}
+      </div>
     </section>
   );
 }
@@ -307,13 +479,34 @@ export function EducationEntryCard({
           />
         </div>
         <div>
-          <label className="settings-label" htmlFor={id('year')}>Graduation year</label>
+          <label className="settings-label" htmlFor={id('startYear')}>Start year</label>
           <input
-            id={id('year')}
+            id={id('startYear')}
+            type="number"
+            min={1950}
+            max={2100}
             className="settings-input"
-            value={entry.graduationYear}
-            onChange={e => onChange(index, { graduationYear: e.target.value })}
-            placeholder="2024"
+            value={entry.startYear}
+            onChange={e => onChange(index, { startYear: e.target.value })}
+            placeholder="2016"
+          />
+        </div>
+        <div>
+          <label className="settings-label" htmlFor={id('endYear')}>End year</label>
+          <input
+            id={id('endYear')}
+            type="number"
+            min={1950}
+            max={2100}
+            className="settings-input"
+            value={entry.endYear}
+            onChange={e =>
+              onChange(index, {
+                endYear: e.target.value,
+                graduationYear: e.target.value,
+              })
+            }
+            placeholder="2020"
           />
         </div>
         <div>
@@ -574,6 +767,231 @@ export function SettingsPreferencesSection({
           <span className="font-body-md text-body-md text-on-surface">I require visa sponsorship</span>
         </label>
       </div>
+    </div>
+  );
+}
+
+type PortfolioDraft = {
+  title: string;
+  url: string;
+  description: string;
+  location: string;
+  techTags: string;
+};
+
+const emptyPortfolioDraft = (): PortfolioDraft => ({
+  title: '',
+  url: '',
+  description: '',
+  location: '',
+  techTags: '',
+});
+
+export function PortfolioSettingsSection({
+  items,
+  busy,
+  onAdd,
+  onUpdate,
+  onRemove,
+}: {
+  items: PortfolioItem[];
+  busy?: boolean;
+  onAdd: (draft: PortfolioDraft) => Promise<void>;
+  onUpdate: (itemId: string, draft: PortfolioDraft) => Promise<void>;
+  onRemove: (itemId: string) => Promise<void>;
+}) {
+  const [adding, setAdding] = useState(false);
+  const [draft, setDraft] = useState<PortfolioDraft>(emptyPortfolioDraft);
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [editDraft, setEditDraft] = useState<PortfolioDraft>(emptyPortfolioDraft);
+
+  const startEdit = (item: PortfolioItem) => {
+    setEditingId(item.id);
+    setEditDraft({
+      title: item.title,
+      url: item.url ?? '',
+      description: item.description ?? '',
+      location: item.location ?? '',
+      techTags: (item.techTags ?? []).join(', '),
+    });
+    setAdding(false);
+  };
+
+  const cancelEdit = () => {
+    setEditingId(null);
+    setEditDraft(emptyPortfolioDraft());
+  };
+
+  const submitAdd = async () => {
+    if (!draft.title.trim()) return;
+    await onAdd(draft);
+    setDraft(emptyPortfolioDraft());
+    setAdding(false);
+  };
+
+  const submitEdit = async () => {
+    if (!editingId || !editDraft.title.trim()) return;
+    await onUpdate(editingId, editDraft);
+    cancelEdit();
+  };
+
+  const renderDraftFields = (
+    value: PortfolioDraft,
+    onChange: (next: PortfolioDraft) => void,
+    idPrefix: string,
+  ) => (
+    <div className="space-y-3">
+      <input
+        className="settings-input"
+        placeholder="Project title *"
+        value={value.title}
+        onChange={e => onChange({ ...value, title: e.target.value })}
+        id={`${idPrefix}-title`}
+      />
+      <input
+        className="settings-input"
+        placeholder="URL (optional)"
+        value={value.url}
+        onChange={e => onChange({ ...value, url: e.target.value })}
+        id={`${idPrefix}-url`}
+      />
+      <input
+        className="settings-input"
+        placeholder="Location (optional)"
+        value={value.location}
+        onChange={e => onChange({ ...value, location: e.target.value })}
+        id={`${idPrefix}-location`}
+      />
+      <input
+        className="settings-input"
+        placeholder="Tech stack (comma-separated)"
+        value={value.techTags}
+        onChange={e => onChange({ ...value, techTags: e.target.value })}
+        id={`${idPrefix}-tech`}
+      />
+      <textarea
+        className="settings-input resize-none"
+        rows={3}
+        placeholder="Description (optional)"
+        value={value.description}
+        onChange={e => onChange({ ...value, description: e.target.value })}
+        id={`${idPrefix}-desc`}
+      />
+    </div>
+  );
+
+  return (
+    <div className="space-y-4">
+      {items.map(item => (
+        <div key={item.id} className="settings-portfolio-item">
+          {editingId === item.id ? (
+            <>
+              {renderDraftFields(editDraft, setEditDraft, `edit-${item.id}`)}
+              <div className="flex flex-wrap gap-2 mt-3">
+                <button
+                  type="button"
+                  className="settings-btn-primary"
+                  disabled={busy}
+                  onClick={() => void submitEdit()}
+                >
+                  Save project
+                </button>
+                <button type="button" className="settings-btn-outline" onClick={cancelEdit}>
+                  Cancel
+                </button>
+              </div>
+            </>
+          ) : (
+            <div className="flex items-start justify-between gap-3">
+              <div className="min-w-0">
+                <p className="font-body-md text-body-md font-medium text-on-surface">{item.title}</p>
+                {item.url ? (
+                  <a
+                    href={item.url}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="text-sm text-primary hover:underline truncate block"
+                  >
+                    {item.url}
+                  </a>
+                ) : null}
+                {item.location ? (
+                  <p className="text-sm text-on-surface-variant mt-0.5">{item.location}</p>
+                ) : null}
+                {item.description ? (
+                  <p className="text-sm text-on-surface-variant mt-1 whitespace-pre-wrap">
+                    {item.description}
+                  </p>
+                ) : null}
+                {(item.techTags ?? []).length > 0 ? (
+                  <div className="settings-snapshot-chip-row settings-snapshot-chip-row--tight">
+                    {(item.techTags ?? []).map(tag => (
+                      <SnapshotChip key={tag}>{tag}</SnapshotChip>
+                    ))}
+                  </div>
+                ) : null}
+              </div>
+              <div className="flex gap-2 shrink-0">
+                <button
+                  type="button"
+                  className="settings-btn-outline"
+                  onClick={() => startEdit(item)}
+                  aria-label={`Edit ${item.title}`}
+                >
+                  Edit
+                </button>
+                <button
+                  type="button"
+                  className="settings-btn-outline"
+                  disabled={busy}
+                  onClick={() => void onRemove(item.id)}
+                  aria-label={`Remove ${item.title}`}
+                >
+                  Remove
+                </button>
+              </div>
+            </div>
+          )}
+        </div>
+      ))}
+
+      {adding ? (
+        <div className="settings-portfolio-item">
+          {renderDraftFields(draft, setDraft, 'new-portfolio')}
+          <div className="flex flex-wrap gap-2 mt-3">
+            <button
+              type="button"
+              className="settings-btn-primary"
+              disabled={busy}
+              onClick={() => void submitAdd()}
+            >
+              Add project
+            </button>
+            <button
+              type="button"
+              className="settings-btn-outline"
+              onClick={() => {
+                setAdding(false);
+                setDraft(emptyPortfolioDraft());
+              }}
+            >
+              Cancel
+            </button>
+          </div>
+        </div>
+      ) : (
+        <button
+          type="button"
+          className="onboarding-btn-text-add"
+          onClick={() => {
+            setAdding(true);
+            cancelEdit();
+          }}
+        >
+          <span className="material-symbols-outlined" aria-hidden="true">add</span>
+          Add project
+        </button>
+      )}
     </div>
   );
 }

@@ -6,13 +6,12 @@ import { PageMeta } from '@/components/PageMeta';
 import { LoadingSpinner } from '@/components/LoadingSpinner';
 import { KanbanBoard } from '@/components/kanban/KanbanBoard';
 import { PipelineSkillActions } from '@/components/kanban/PipelineSkillActions';
-import { DashboardTopNav } from '@/components/dashboard/DashboardTopNav';
 import {
   useJobsList,
   useKanbanPatchMutation,
 } from '@/hooks/queries/useJobs';
-import { useQuery } from '@tanstack/react-query';
-import { useAuth } from '@/context/AuthContext';
+import { useAuth } from '@/context/authCtx';
+import { useProfileQuery } from '@/hooks/queries';
 import { isApiError, type JobCard } from '@/types';
 import { getUserFacingErrorMessage } from '@/lib/userFacingError';
 import { fetchJobsOrchestrated } from '@/lib/pipelineJobSearch';
@@ -20,7 +19,7 @@ import { JobSourceBadge } from '@/components/ui/JobSourceBadge';
 import { ConfirmModal } from '@/components/ui/ConfirmModal';
 import { sourceLabel } from '@/lib/jobSource';
 import { formatPulledAt } from '@/lib/utils';
-import { jobsApi, profileApi } from '@/services/api';
+import { jobsApi } from '@/services/api';
 import { queryKeys } from '@/lib/queryKeys';
 
 type ViewMode = 'board' | 'list';
@@ -50,19 +49,15 @@ const Kanban: React.FC = () => {
   const { data: jobsData, isLoading: loading, isError, refetch } = useJobsList({
     enabled: Boolean(user),
   });
+
   const jobs = jobsData?.items ?? [];
-  const dailyCount = jobsData?.dailyCount ?? 0;
   const dailyLimit = jobsData?.dailyLimit ?? 25;
   const remaining = jobsData?.remaining ?? dailyLimit;
   const atDailyCap = remaining <= 0;
   const kanbanPatch = useKanbanPatchMutation();
   const [fetchInFlight, setFetchInFlight] = useState(false);
   const [fetchProgress, setFetchProgress] = useState<string | null>(null);
-  const { data: profile } = useQuery({
-    queryKey: queryKeys.profile.current(),
-    queryFn: () => profileApi.get(),
-    enabled: Boolean(user),
-  });
+  const { data: profile } = useProfileQuery({ enabled: Boolean(user) });
   const minMatch = profile?.minMatchPercent ?? 60;
 
   const [viewMode, setViewMode] = useState<ViewMode>('board');
@@ -201,10 +196,8 @@ const Kanban: React.FC = () => {
   return (
     <>
       <PageMeta title="Job Tracker | NewCareers" />
-      <div className="bg-background text-on-background min-h-screen flex flex-col">
-        <DashboardTopNav />
-
-        <main className="flex-grow flex flex-col p-margin-mobile md:p-margin-desktop gap-gutter max-w-container-max mx-auto w-full">
+      <div className="bg-background text-on-background flex flex-col flex-1 min-h-0">
+        <main className="flex-1 flex flex-col app-shell gap-gutter w-full pt-6 md:pt-8 min-h-0">
           <section className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
             <div>
               <h1 className="font-headline-lg text-headline-lg text-on-surface">Application Pipeline</h1>
@@ -250,15 +243,8 @@ const Kanban: React.FC = () => {
                   List
                 </button>
               </div>
-              <div className="flex flex-col items-end gap-1 shrink-0">
-                <span className="text-xs text-on-surface-variant whitespace-nowrap">
-                  {dailyCount} of {dailyLimit} jobs loaded today
-                </span>
-                {atDailyCap ? (
-                  <p className="text-xs text-on-surface-variant max-w-[220px] text-right">
-                    You have reached your daily limit of {dailyLimit} jobs. Come back tomorrow.
-                  </p>
-                ) : (
+              <div className="shrink-0">
+                {!atDailyCap && (
                   <button
                     type="button"
                     onClick={() => void handleFetchJobs()}
@@ -321,10 +307,12 @@ const Kanban: React.FC = () => {
                 </div>
               )}
               {viewMode === 'board' && boardJobs.length > 0 && (
-                <KanbanBoard
-                  jobs={boardJobs}
-                  onJobClick={job => navigate(`/jobs/${job.userJobId}`)}
-                />
+                <div className="flex-1 flex flex-col min-h-0">
+                  <KanbanBoard
+                    jobs={boardJobs}
+                    onJobClick={job => navigate(`/jobs/${job.userJobId}`)}
+                  />
+                </div>
               )}
               {viewMode === 'list' && boardJobs.length > 0 && (
                 <section className="rounded-xl border border-outline-variant bg-surface-container-lowest overflow-hidden">
@@ -473,7 +461,7 @@ const Kanban: React.FC = () => {
         </main>
 
         <footer className="bg-surface-container-lowest border-t border-outline-variant mt-auto">
-          <div className="w-full py-8 px-margin-mobile md:px-margin-desktop flex flex-col md:flex-row justify-between items-center max-w-container-max mx-auto gap-4">
+          <div className="w-full py-8 app-shell flex flex-col md:flex-row justify-between items-center gap-4">
             <div className="flex flex-col items-center md:items-start gap-2">
               <span className="font-label-md text-label-md font-bold text-primary">NewCareers Premium</span>
               <p className="font-body-sm text-body-sm text-on-surface-variant">

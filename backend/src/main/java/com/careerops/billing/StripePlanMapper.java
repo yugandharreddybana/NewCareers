@@ -47,7 +47,7 @@ public class StripePlanMapper {
         }
         return switch (stripeStatus) {
             case "active" -> SubscriptionStatus.ACTIVE;
-            case "trialing" -> SubscriptionStatus.TRIALING;
+            case "trialing" -> SubscriptionStatus.ACTIVE;
             case "past_due", "incomplete", "paused" -> SubscriptionStatus.PAST_DUE;
             case "canceled", "unpaid", "incomplete_expired" -> SubscriptionStatus.CANCELLED;
             default -> {

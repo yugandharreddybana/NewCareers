@@ -36,7 +36,7 @@ final class JobListingMapper {
             return null;
         }
         String url = listing.getUrl() != null ? listing.getUrl() : "";
-        String fp = FingerprintUtil.fingerprint(
+        String fp = JobPostingFingerprint.fingerprint(
                 listing.getTitle(),
                 listing.getCompany(),
                 url);

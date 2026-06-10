@@ -2,7 +2,6 @@ package com.careerops.repository;
 
 import com.careerops.model.UserProfile;
 import org.springframework.cache.annotation.CacheEvict;
-import org.springframework.cache.annotation.Cacheable;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
@@ -13,7 +12,7 @@ import java.util.Optional;
 import java.util.UUID;
 
 public interface UserProfileRepository extends JpaRepository<UserProfile, UUID> {
-    @Cacheable(value = "user-profile", key = "#userId")
+    /** Not @Cacheable — caching JPA entities breaks optimistic locking on profile writes. */
     Optional<UserProfile> findByUserId(UUID userId);
     List<UserProfile> findAllByOnboardedTrue();
 

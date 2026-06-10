@@ -1,0 +1,30 @@
+sequenceDiagram
+    participant User
+    participant GuestRoute
+    participant AuthContext
+    participant Axios
+    participant Middleware
+    participant Java as AuthService
+
+    User->>GuestRoute: GET /login (?reason=session_expired, ?email=)
+    GuestRoute->>AuthContext: loading while refresh()
+    AuthContext->>AuthContext: shouldSkipInitialSessionProbe()?
+    alt guest page and no tokens
+        AuthContext-->>GuestRoute: user=null, skip /auth/me
+        GuestRoute-->>User: render Login.tsx
+    else has co_refresh or access metadata
+        AuthContext->>Axios: ensureFreshSession → POST /auth/refresh
+        Axios->>Middleware: POST /api/v1/auth/refresh
+        Middleware->>Java: POST /auth/refresh (HMAC)
+        Java-->>Middleware: new access + refresh
+        Middleware-->>Axios: Set-Cookie co_session, co_refresh
+        AuthContext->>Axios: GET /auth/me
+        Middleware->>Java: GET /auth/me
+        Java-->>AuthContext: user DTO
+        GuestRoute->>GuestRoute: user present → Navigate
+        alt user.onboarded
+            GuestRoute-->>User: redirect /dashboard or state.from
+        else not onboarded
+            GuestRoute-->>User: redirect /onboarding
+        end
+    end

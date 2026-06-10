@@ -6,11 +6,13 @@ import com.careerops.dto.ProfileDtos.*;
 import com.careerops.exception.ApiException;
 import com.careerops.model.UserCv;
 import com.careerops.model.UserProfile;
+import com.careerops.model.UserProfile.EducationEntry;
 import com.careerops.model.UserProfile.PortfolioItem;
 import com.careerops.repository.UserCvRepository;
 import com.careerops.repository.UserProfileRepository;
 import com.careerops.repository.UserJobRepository;
 import com.careerops.repository.UserRepository;
+import com.careerops.security.AesFieldEncryptor;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.cache.annotation.CacheEvict;
@@ -52,6 +54,7 @@ public class ProfileService {
     private final AuditLogService       audit; // Task 125
     private final CvService             cvService;
     private final CvSkillExtractionService skillExtraction;
+    private final AesFieldEncryptor fieldEncryptor;
 
     public ProfileService(UserProfileRepository profiles,
                           UserCvRepository cvs,
@@ -59,7 +62,8 @@ public class ProfileService {
                           UserRepository users,
                           AuditLogService audit,
                           CvService cvService,
-                          CvSkillExtractionService skillExtraction) {
+                          CvSkillExtractionService skillExtraction,
+                          AesFieldEncryptor fieldEncryptor) {
         this.profiles = profiles;
         this.cvs      = cvs;
         this.userJobs = userJobs;
@@ -67,6 +71,7 @@ public class ProfileService {
         this.audit    = audit;
         this.cvService = cvService;
         this.skillExtraction = skillExtraction;
+        this.fieldEncryptor = fieldEncryptor;
     }
 
     // ─── Get profile ───────────────────────────────────────────────────────────
@@ -79,12 +84,9 @@ public class ProfileService {
     // ─── Upsert profile ────────────────────────────────────────────────────────
 
     @Transactional(timeout = 10)
-    @CacheEvict(value = "user-profile", key = "#userId")
+    @CacheEvict(value = "user-profile", key = "#userId", beforeInvocation = true)
     public ProfileResponse upsert(UUID userId, ProfileRequest req, @Nullable Long ifMatch) {
-        var profile = requireProfile(userId);
-        if (profile.getVersion() == null) {
-            profile.setVersion(0L);
-        }
+        var profile = loadWritableProfile(userId);
         validateVersion(profile, ifMatch);
 
         // 3.037 — Validate salary ranges (min <= max)
@@ -94,20 +96,19 @@ public class ProfileService {
             throw new ApiException(HttpStatus.BAD_REQUEST, "Salary minimum (" + min + ") cannot be greater than maximum (" + max + ")");
         }
 
-        if (req.name() != null && !req.name().isBlank()) {
-            var user = users.findById(userId)
-                .orElseThrow(() -> new ApiException(HttpStatus.NOT_FOUND, "User not found"));
-            user.setName(req.name().trim());
-            users.save(user);
-        }
-
-        if (req.targetRoles()        != null) profile.setTargetRoles(expandRoleAliases(req.targetRoles()));
+        if (req.targetRoles()        != null) profile.setTargetRoles(normalizeTargetRoles(req.targetRoles()));
         if (req.techStack()          != null) profile.setTechStack(req.techStack());
         if (req.location()           != null) profile.setLocation(req.location());
         if (req.salaryMin()          != null) profile.setSalaryMin(req.salaryMin());
         if (req.salaryMax()          != null) profile.setSalaryMax(req.salaryMax());
         if (req.salaryCurrency()     != null) profile.setSalaryCurrency(req.salaryCurrency());
-        if (req.sectors()            != null) profile.setSectors(req.sectors());
+        if (req.workTypes() != null) {
+            profile.setWorkTypes(req.workTypes());
+            profile.setSectors(req.workTypes());
+        } else if (req.sectors() != null) {
+            profile.setSectors(req.sectors());
+            profile.setWorkTypes(req.sectors());
+        }
         if (req.freshnessHours()     != null) profile.setFreshnessHours(req.freshnessHours());
         if (req.minMatchPercent()    != null) profile.setMinMatchPercent(req.minMatchPercent());
         if (req.sponsorshipRequired()!= null) profile.setSponsorshipRequired(req.sponsorshipRequired());
@@ -124,7 +125,7 @@ public class ProfileService {
             profile.setExperienceLevel(level);
         }
         if (req.workExperience()     != null) profile.setWorkExperience(new ArrayList<>(req.workExperience()));
-        if (req.education()          != null) profile.setEducation(new ArrayList<>(req.education()));
+        if (req.education()          != null) profile.setEducation(normalizeEducation(req.education()));
         if (req.remotePolicy()       != null) profile.setRemotePolicy(req.remotePolicy());
         if (req.hybridOnsiteDays()   != null) profile.setHybridOnsiteDays(req.hybridOnsiteDays());
         if (req.availability()       != null) profile.setAvailability(req.availability());
@@ -150,6 +151,15 @@ public class ProfileService {
         }
         boolean completingOnboarding = Boolean.TRUE.equals(req.onboarded()) && !wasOnboarded;
         profiles.save(profile);
+
+        if (req.name() != null && !req.name().isBlank()) {
+            var user = users.findById(userId)
+                .orElseThrow(() -> new ApiException(HttpStatus.NOT_FOUND, "User not found"));
+            user.setName(req.name().trim());
+            users.save(user);
+        }
+
+        profile = reloadProfile(userId);
 
         // Task 125 — audit
         audit.log(userId, "PROFILE_UPDATE", Map.of("action", "upsert"));
@@ -177,9 +187,9 @@ public class ProfileService {
     // ─── Portfolio CRUD ────────────────────────────────────────────────────────
 
     @Transactional(timeout = 10)
-    @CacheEvict(value = "user-profile", key = "#userId")
+    @CacheEvict(value = "user-profile", key = "#userId", beforeInvocation = true)
     public ProfileResponse addPortfolioItem(UUID userId, PortfolioItemRequest req, @Nullable Long ifMatch) {
-        var profile = requireProfile(userId);
+        var profile = loadWritableProfile(userId);
         validateVersion(profile, ifMatch);
 
         List<PortfolioItem> items = ensureList(profile);
@@ -225,10 +235,10 @@ public class ProfileService {
     }
 
     @Transactional(timeout = 10)
-    @CacheEvict(value = "user-profile", key = "#userId")
+    @CacheEvict(value = "user-profile", key = "#userId", beforeInvocation = true)
     public ProfileResponse updatePortfolioItem(UUID userId, String itemId,
                                                PortfolioItemRequest req, @Nullable Long ifMatch) {
-        var profile = requireProfile(userId);
+        var profile = loadWritableProfile(userId);
         validateVersion(profile, ifMatch);
 
         List<PortfolioItem> items = ensureList(profile);
@@ -275,9 +285,9 @@ public class ProfileService {
     }
 
     @Transactional(timeout = 10)
-    @CacheEvict(value = "user-profile", key = "#userId")
+    @CacheEvict(value = "user-profile", key = "#userId", beforeInvocation = true)
     public ProfileResponse deletePortfolioItem(UUID userId, String itemId, @Nullable Long ifMatch) {
-        var profile = requireProfile(userId);
+        var profile = loadWritableProfile(userId);
         validateVersion(profile, ifMatch);
 
         List<PortfolioItem> items = ensureList(profile);
@@ -307,6 +317,15 @@ public class ProfileService {
             });
     }
 
+    /** Fresh managed row for writes — never a cached/detached instance. */
+    private UserProfile loadWritableProfile(UUID userId) {
+        var profile = requireProfile(userId);
+        if (profile.getVersion() != null) {
+            return profile;
+        }
+        return reloadProfile(userId);
+    }
+
     private void validateVersion(UserProfile profile, @Nullable Long ifMatch) {
         if (ifMatch != null && !ifMatch.equals(profile.getVersion())) {
             throw new ApiException(HttpStatus.PRECONDITION_FAILED,
@@ -324,7 +343,21 @@ public class ProfileService {
         return cvs.findFirstByUserIdAndIsActiveTrueOrderByUploadedAtDesc(userId);
     }
 
+    private UserProfile reloadProfile(UUID userId) {
+        return profiles.findByUserId(userId)
+                .orElseThrow(() -> new ApiException(HttpStatus.NOT_FOUND, "Profile not found"));
+    }
+
+    private String displayField(String value, UUID userId) {
+        return fieldEncryptor.decrypt(value, userId);
+    }
+
     private ProfileResponse toResponse(UserProfile p, @Nullable UserCv activeCv) {
+        UUID userId = p.getUserId();
+        String location = displayField(p.getLocation(), userId);
+        String goalTitle = displayField(p.getGoalTitle(), userId);
+        String goalLocation = displayField(p.getGoalLocation(), userId);
+
         int score = computeCompleteness(p);
         String activeCvFileName = activeCv != null ? activeCv.getFileName() : null;
         String activeCvId = activeCv != null && activeCv.getId() != null
@@ -340,15 +373,15 @@ public class ProfileService {
         }
         List<String> atsKeywords = skillExtraction.extractForUser(p.getUserId(), p, cvText);
         return new ProfileResponse(
-            p.getTargetRoles(), p.getTechStack(), p.getLocation(),
+            p.getTargetRoles(), p.getTechStack(), location,
             p.getSalaryMin(), p.getSalaryMax(), p.getSalaryCurrency(), p.getSectors(),
             p.getFreshnessHours(), p.getMinMatchPercent(),
             p.getSponsorshipRequired(), p.getOnboarded(),
             activeCvFileName,
             activeCvId,
             p.getPortfolioItems(),
-            p.getGoalTitle(),
-            p.getGoalLocation(), p.getOpenToRemote(),
+            goalTitle,
+            goalLocation, p.getOpenToRemote(),
             p.getExperienceLevel(),
             p.getWorkExperience() != null ? p.getWorkExperience() : List.of(),
             p.getEducation() != null ? p.getEducation() : List.of(),
@@ -399,10 +432,25 @@ public class ProfileService {
         return Math.min(score, 100);
     }
 
-    private String[] expandRoleAliases(String[] roles) {
+    private List<EducationEntry> normalizeEducation(List<EducationEntry> entries) {
+        List<EducationEntry> normalized = new ArrayList<>();
+        for (EducationEntry entry : entries) {
+            String endYear = entry.getEndYear() != null ? entry.getEndYear().trim() : "";
+            String gradYear = entry.getGraduationYear() != null ? entry.getGraduationYear().trim() : "";
+            if (!endYear.isBlank()) {
+                entry.setGraduationYear(endYear);
+            } else if (!gradYear.isBlank()) {
+                entry.setEndYear(gradYear);
+            }
+            normalized.add(entry);
+        }
+        return normalized;
+    }
+
+    private String[] normalizeTargetRoles(String[] roles) {
         if (roles == null || roles.length == 0) return roles;
 
-        List<String> expanded = new java.util.ArrayList<>();
+        List<String> normalized = new java.util.ArrayList<>();
         java.util.Set<String> seen = new java.util.LinkedHashSet<>();
 
         for (String role : roles) {
@@ -410,21 +458,10 @@ public class ProfileService {
 
             String trimmed = role.trim();
             if (seen.add(trimmed.toLowerCase())) {
-                expanded.add(trimmed);
-            }
-
-            String alias = null;
-            if (trimmed.toLowerCase().contains(" developer")) {
-                alias = trimmed.replaceAll("(?i) developer", " Engineer");
-            } else if (trimmed.toLowerCase().contains(" engineer")) {
-                alias = trimmed.replaceAll("(?i) engineer", " Developer");
-            }
-
-            if (alias != null && seen.add(alias.toLowerCase())) {
-                expanded.add(alias);
+                normalized.add(trimmed);
             }
         }
 
-        return expanded.toArray(new String[0]);
+        return normalized.toArray(new String[0]);
     }
 }

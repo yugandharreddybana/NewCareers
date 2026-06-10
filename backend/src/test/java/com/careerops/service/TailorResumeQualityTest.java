@@ -29,6 +29,26 @@ class TailorResumeQualityTest {
     }
 
     @Test
+    void diagnoseCountsBackfilledSections() {
+        ObjectNode out = mapper.createObjectNode();
+        ArrayNode sections = out.putArray("sections");
+        ObjectNode summary = sections.addObject();
+        summary.put("name", "Professional summary");
+        summary.put("original", "Old.");
+        summary.put("rewritten", "Old.");
+        summary.put("rationale", "Preserved from your CV — AI did not return this section; review for JD keywords.");
+        ObjectNode exp = sections.addObject();
+        exp.put("name", "Professional experience");
+        exp.put("original", "Dev\nAcme\n• Same");
+        exp.put("rewritten", "Dev\nAcme\n• Same");
+
+        TailorResumeQuality.Diagnosis d = TailorResumeQuality.diagnose(out);
+        assertThat(d.backfilledSectionCount()).isEqualTo(1);
+        assertThat(d.summaryChanged()).isFalse();
+        assertThat(d.experienceChanged()).isFalse();
+    }
+
+    @Test
     void rejectsEchoedCv() {
         ObjectNode out = mapper.createObjectNode();
         ArrayNode sections = out.putArray("sections");

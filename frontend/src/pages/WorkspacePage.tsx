@@ -33,7 +33,7 @@ const CreateModal: React.FC<{ onClose: () => void; onCreate: (w: Workspace) => v
         <div><label className="block text-xs font-medium text-gray-600 mb-1.5">Description</label><textarea value={desc} onChange={e => setDesc(e.target.value)} rows={2} placeholder="Optional description" className="w-full px-3 py-2.5 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400 resize-none" /></div>
         <div className="flex gap-3 pt-1">
           <button onClick={onClose} className="flex-1 py-2.5 border border-gray-300 rounded-lg text-sm text-gray-600 hover:bg-gray-50">Cancel</button>
-          <button onClick={handleSubmit} disabled={saving} className="flex-1 py-2.5 bg-indigo-500 hover:bg-indigo-600 disabled:opacity-60 text-white text-sm font-semibold rounded-lg">{saving ? 'Creating…' : 'Create'}</button>
+          <button onClick={handleSubmit} disabled={saving} className="flex-1 py-2.5 bg-brand-500 hover:bg-brand-600 disabled:opacity-60 text-white text-sm font-semibold rounded-lg">{saving ? 'Creating…' : 'Create'}</button>
         </div>
       </div>
     </div>
@@ -88,7 +88,7 @@ const WorkspacePage: React.FC = () => {
       <div className="max-w-3xl mx-auto px-4 sm:px-6 py-8 space-y-6">
         <div className="flex items-center justify-between">
           <div><h1 className="text-2xl font-semibold text-gray-900">Workspaces</h1><p className="text-sm text-gray-500 mt-1">Shared spaces to collaborate with peers or coaches on your job search.</p></div>
-          <button onClick={() => setShowModal(true)} className="flex items-center gap-2 px-4 py-2.5 bg-indigo-500 hover:bg-indigo-600 text-white text-sm font-semibold rounded-lg transition-colors"><Plus size={15} /> New Workspace</button>
+          <button onClick={() => setShowModal(true)} className="flex items-center gap-2 px-4 py-2.5 bg-brand-500 hover:bg-brand-600 text-white text-sm font-semibold rounded-lg transition-colors"><Plus size={15} /> New Workspace</button>
         </div>
 
         {workspaces.length > 0 ? (

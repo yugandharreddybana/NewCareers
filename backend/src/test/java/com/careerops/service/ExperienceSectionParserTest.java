@@ -55,6 +55,41 @@ class ExperienceSectionParserTest {
     assertThat(role.location()).isEqualTo("Hyderabad, India");
   }
 
+  private static final String TWO_LINE_HEADERS = """
+      Full Stack Software Developer                                                                                                                                                      Dublin, Ireland
+      Freelance Developer                                                                                                                                                              April 2024 – Present
+      • Delivered full-stack applications using React.js and Spring Boot.
+      Key Achievements:
+      • Built AI-enabled solutions.
+      Software Engineer                                                                                                                                                                     Hyderabad, India
+      Incedo Technologies Solutions Limited                                                                                                                August 2021 - January 2024
+      • Developed enterprise applications for Verizon.
+      """;
+
+  @Test
+  void splitIntoRoleBlocks_splitsTwoLineTitleAndCompanyHeaders() {
+    var blocks = ExperienceSectionParser.splitIntoRoleBlocks(TWO_LINE_HEADERS);
+    assertThat(blocks).hasSize(2);
+    assertThat(blocks.get(0)).contains("Freelance Developer");
+    assertThat(blocks.get(0)).contains("April 2024 – Present");
+    assertThat(blocks.get(1)).contains("Incedo Technologies");
+    assertThat(blocks.get(1)).contains("August 2021 - January 2024");
+  }
+
+  @Test
+  void parseRoleBlock_parsesTwoLineTitleAndCompanyHeaders() {
+    var role = ExperienceSectionParser.parseRoleBlock("""
+        Full Stack Software Developer Dublin, Ireland
+        Freelance Developer April 2024 – Present
+        • Built SaaS products.
+        """);
+    assertThat(role.title()).isEqualTo("Full Stack Software Developer");
+    assertThat(role.location()).isEqualTo("Dublin, Ireland");
+    assertThat(role.company()).isEqualTo("Freelance Developer");
+    assertThat(role.dates()).isEqualTo("April 2024 – Present");
+    assertThat(role.bullets()).contains("Built SaaS products.");
+  }
+
   @Test
   void needsRepair_detectsSummaryReplacingRoleBlocks() {
     String original = """

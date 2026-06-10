@@ -119,6 +119,7 @@ public class SkillService {
     private final SkillLocalFallbackService   localFallback;
     private final UserProfileRepository       profiles;
     private final UserPlanTierService         planTierService;
+    private final UserQuotaGrantService       quotaGrantService;
     private final EvaluationReportEnrichmentService evaluationEnrichment;
     private final UserJobSkillMatchService       skillMatchService;
     private final TailorResumeBuilderService     tailorResumeBuilder;
@@ -130,6 +131,7 @@ public class SkillService {
     // Prompt 4 — Part A: AiProviderRouter + SkillExecutionContextBuilder
     private final AiProviderRouter               aiProviderRouter;
     private final SkillExecutionContextBuilder   contextBuilder;
+    private final CoverLetterNormalizer            coverLetterNormalizer;
 
     // Prompt 4 — Part B: in-memory dedup guard
     private final ConcurrentHashMap<String, CompletableFuture<SkillRunResponse>> inFlight =
@@ -184,6 +186,7 @@ public class SkillService {
             SkillLocalFallbackService localFallback,
             UserProfileRepository profiles,
             UserPlanTierService planTierService,
+            UserQuotaGrantService quotaGrantService,
             EvaluationReportEnrichmentService evaluationEnrichment,
             UserJobSkillMatchService skillMatchService,
             TailorResumeBuilderService tailorResumeBuilder,
@@ -191,7 +194,8 @@ public class SkillService {
             UserConsentService consentService,
             PlatformTransactionManager transactionManager,
             AiProviderRouter aiProviderRouter,
-            SkillExecutionContextBuilder contextBuilder) {
+            SkillExecutionContextBuilder contextBuilder,
+            CoverLetterNormalizer coverLetterNormalizer) {
         this.nvidia               = nvidia;
         this.prompts              = prompts;
         this.validator            = validator;
@@ -214,6 +218,7 @@ public class SkillService {
         this.localFallback        = localFallback;
         this.profiles             = profiles;
         this.planTierService      = planTierService;
+        this.quotaGrantService    = quotaGrantService;
         this.evaluationEnrichment = evaluationEnrichment;
         this.skillMatchService    = skillMatchService;
         this.tailorResumeBuilder  = tailorResumeBuilder;
@@ -226,6 +231,7 @@ public class SkillService {
         this.writeTx.setTimeout(60);
         this.aiProviderRouter     = aiProviderRouter;
         this.contextBuilder       = contextBuilder;
+        this.coverLetterNormalizer = coverLetterNormalizer;
     }
 
     // ================================================================
@@ -244,7 +250,8 @@ public class SkillService {
         }
 
         clearStaleConversation(userId, skill, userJobId);
-        if (Boolean.TRUE.equals(req.forceRefresh())) {
+        if (Boolean.TRUE.equals(req.forceRefresh())
+                && !SkillRunVersionPolicy.isVersioned(skill)) {
             invalidateSkillCache(userId, userJobId, skill);
         }
 
@@ -290,9 +297,15 @@ public class SkillService {
     private SkillRunResponse executeSkillInternal(
             String skill, UUID userId, UUID userJobId, SkillStartRequest req) {
 
+        // Catalog skills are deterministic helpers; keep them available even
+        // after AI token budget is exhausted.
+        if (catalogSkills.handles(skill)) {
+            return catalogSkills.execute(skill, userId, userJobId);
+        }
+
         // Daily token budget check — skills with deterministic/local fallback still run degraded
         PlanTier tier = planTierService.resolveForUser(userId);
-        long tierBudget = PlanTierLimits.tokenBudget(tier);
+        long tierBudget = quotaGrantService.tokenBudget(userId, tier);
         if (tokenUsageService.hasExceededBudget(userId, tierBudget)) {
             log.warn("Daily token budget exhausted for userId={}", userId);
             notifyBudgetExhausted(userId);
@@ -310,11 +323,6 @@ public class SkillService {
                 log.debug("Profile incomplete for skill={}: {}", skill, missing);
                 return SkillRunResponse.profileIncomplete(skill, missing);
             }
-        }
-
-        // Step 1b: Catalog skills (help, track) — no AI loop
-        if (catalogSkills.handles(skill)) {
-            return catalogSkills.execute(skill, userId, userJobId);
         }
 
         // Step 2: Phase 2 routing — delegate to SkillHandlerRegistry (no router interception)
@@ -587,7 +595,8 @@ public class SkillService {
     public Optional<SkillRunResponse> findLastRun(UUID userId, UUID userJobId, String skillName) {
         return skillRuns
                 .findFirstByUserIdAndUserJobIdAndSkillOrderByCreatedAtDesc(userId, userJobId, skillName)
-                .map(run -> SkillRunResponse.result(skillName, run.getOutput()));
+                .map(run -> SkillRunResponse.result(
+                    skillName, normalizeSkillOutputForRead(userId, userJobId, skillName, run.getOutput())));
     }
 
     public List<String> listCompletedSkills(UUID userId, UUID userJobId) {
@@ -619,12 +628,39 @@ public class SkillService {
     }
 
     public List<SkillRunHistoryItem> listRunHistory(UUID userId, UUID userJobId, String skillName) {
+        int limit = SkillRunVersionPolicy.historyLimit(skillName);
         return skillRuns
                 .findByUserIdAndUserJobIdAndSkillOrderByCreatedAtDesc(
-                        userId, userJobId, skillName, PageRequest.of(0, SKILL_RUN_HISTORY_LIMIT))
+                        userId, userJobId, skillName, PageRequest.of(0, limit))
                 .stream()
-                .map(run -> new SkillRunHistoryItem(run.getId(), run.getCreatedAt(), run.getOutput()))
+                .map(run -> new SkillRunHistoryItem(
+                        run.getId(),
+                        run.getCreatedAt(),
+                        normalizeCoverLetterOutput(userId, skillName, run.getOutput()),
+                        run.getTotalTokens()))
                 .toList();
+    }
+
+    private JsonNode normalizeCoverLetterOutput(UUID userId, String skillName, JsonNode output) {
+        if (!"cover-letter".equals(skillName) || output == null) {
+            return output;
+        }
+        return coverLetterNormalizer.normalizeForUser(userId, output);
+    }
+
+    private JsonNode normalizeSkillOutputForRead(
+            UUID userId, UUID userJobId, String skillName, JsonNode output) {
+        JsonNode normalized = normalizeCoverLetterOutput(userId, skillName, output);
+        if (!"tailor-resume".equals(skillName) || normalized == null || !normalized.isObject()) {
+            return normalized;
+        }
+        ObjectNode copy = normalized.deepCopy();
+        UserProfile profile = loadProfile(userId);
+        Job job = loadJob(userJobId);
+        if (tailorResumeBuilder.repairThinOutputInPlace(copy, profile, job, userId)) {
+            tailorResumeBuilder.attachRenderedPreview(copy, profile, userId, job);
+        }
+        return copy;
     }
 
     /** @deprecated Prefer {@link #findLastRun}; kept for internal callers that expect an exception. */
@@ -1155,8 +1191,15 @@ public class SkillService {
             if (cached.isEmpty()) {
                 return Optional.empty();
             }
+            JsonNode cachedOutput = cached.get().getOutput();
+            if ("tailor-resume".equals(skill)
+                    && TailorResumeDeterministicSupport.needsSectionRepair(cachedOutput)) {
+                log.info("Skipping stale tailor-resume cache for userJobId={} — thin sections or legacy summary",
+                    userJobId);
+                return Optional.empty();
+            }
             log.info("Returning cached result for skill={} userJobId={}", skill, userJobId);
-            return Optional.of(SkillRunResponse.result(skill, cached.get().getOutput()));
+            return Optional.of(SkillRunResponse.result(skill, cachedOutput));
         });
         return txResult != null ? txResult : Optional.empty();
     }

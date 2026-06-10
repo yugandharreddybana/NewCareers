@@ -2,16 +2,9 @@ import { useCallback, useId, useMemo, useState } from 'react';
 import toast from 'react-hot-toast';
 import { SectionLabel } from '@/components/onboarding/RequiredLabel';
 import { MinMatchPercentField } from '@/components/onboarding/MinMatchPercentField';
-export const SUGGESTED_ROLES = [
-  'Senior Product Designer',
-  'UX Lead',
-  'Product Manager',
-  'Frontend Architect',
-  'Software Engineer',
-  'Full Stack Developer',
-  'Backend Engineer',
-  'Data Engineer',
-] as const;
+import { SUGGESTED_ROLES } from '@/lib/onboardingRoleCatalog';
+
+export { SUGGESTED_ROLES };
 
 export const SUGGESTED_TECH = [
   'React',
@@ -78,6 +71,8 @@ export type PreferencesStepValues = {
 type PreferencesStepProps = {
   values: PreferencesStepValues;
   saving: boolean;
+  techAutoFilled?: boolean;
+  rolesAutoFilled?: boolean;
   onChange: (patch: Partial<PreferencesStepValues>) => void;
   onBack: () => void;
   onComplete: () => void;
@@ -409,6 +404,8 @@ function WorkSettingField({
 export function PreferencesStep({
   values,
   saving,
+  techAutoFilled = false,
+  rolesAutoFilled = false,
   onChange,
   onBack,
   onComplete,
@@ -490,7 +487,11 @@ export function PreferencesStep({
         <ChipSection
           title="Desired roles"
           required
-          hint="Pick at least one — we use these to search job boards and rank matches."
+          hint={
+            rolesAutoFilled
+              ? 'Roles suggested from your CV — add or remove any time.'
+              : 'Pick at least one — we use these to search job boards and rank matches.'
+          }
           options={SUGGESTED_ROLES}
           selected={values.selectedRoles}
           onToggle={toggleRole}
@@ -501,7 +502,11 @@ export function PreferencesStep({
         />
         <ChipSection
           title="Tech stack"
-          hint="Skills we look for in job descriptions (optional but improves accuracy)."
+          hint={
+            techAutoFilled
+              ? 'Skills detected from your CV — add or remove any time.'
+              : 'Skills we look for in job descriptions (optional but improves accuracy).'
+          }
           options={SUGGESTED_TECH}
           selected={values.selectedTech}
           onToggle={toggleTech}

@@ -1,6 +1,5 @@
 package com.careerops.service;
 
-import com.careerops.dto.AuthDtos.SignupIntentExistsResponse;
 import com.careerops.dto.AuthDtos.SignupIntentRequest;
 import com.careerops.dto.AuthDtos.SignupIntentResponse;
 import com.careerops.dto.ConsentDtos.SignupConsentsRequest;
@@ -11,6 +10,8 @@ import com.careerops.repository.UserRepository;
 import org.springframework.context.annotation.Lazy;
 import org.springframework.http.HttpStatus;
 import org.springframework.security.crypto.password.PasswordEncoder;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -22,6 +23,7 @@ import java.util.UUID;
 @Service
 public class SignupIntentService {
 
+    private static final Logger log = LoggerFactory.getLogger(SignupIntentService.class);
     private static final long TTL_MINUTES = 30;
 
     private final SignupIntentRepository intents;
@@ -55,12 +57,15 @@ public class SignupIntentService {
         }
         String email = normalizeEmail(req.email());
         if (users.existsByEmail(email)) {
-            throw new ApiException(HttpStatus.CONFLICT, "Unable to create account");
+            log.info("SIGNUP_INTENT_DECOY email={}", email);
+            return new SignupIntentResponse(
+                    UUID.randomUUID(),
+                    Instant.now().plus(TTL_MINUTES, ChronoUnit.MINUTES));
         }
         authService.validateOnboardingPassword(req.password(), email);
 
         SignupConsentsRequest consents = req.consents();
-        SignupIntent intent = intents.save(SignupIntent.builder()
+        SignupIntent intent = intents.saveAndFlush(SignupIntent.builder()
                 .email(email)
                 .passwordHash(encoder.encode(req.password()))
                 .name(trimOrNull(req.name()))
@@ -72,12 +77,6 @@ public class SignupIntentService {
                 .build());
 
         return new SignupIntentResponse(intent.getId(), intent.getExpiresAt());
-    }
-
-    @Transactional(readOnly = true)
-    public SignupIntentExistsResponse exists(UUID signupIntentId) {
-        // Anti-enumeration: opaque response — callers cannot probe UUID validity via exists/active.
-        return new SignupIntentExistsResponse(true, true);
     }
 
     @Transactional(readOnly = true)
@@ -98,7 +97,8 @@ public class SignupIntentService {
 
     private SignupIntent assertActiveIntent(UUID signupIntentId, String rawEmail) {
         String normalized = normalizeEmail(rawEmail);
-        SignupIntent intent = intents.findByIdAndEmail(signupIntentId, normalized)
+        SignupIntent intent = intents.findById(signupIntentId)
+                .filter(candidate -> normalized.equals(candidate.getEmail()))
                 .orElseThrow(() -> new ApiException(HttpStatus.BAD_REQUEST, "Sign-up session expired. Please start again."));
 
         Instant now = Instant.now();
@@ -114,19 +114,14 @@ public class SignupIntentService {
     @Transactional
     public ConsumedSignupIntent consume(UUID signupIntentId, String email) {
         String normalized = normalizeEmail(email);
-        SignupIntent intent = intents.findByIdAndEmail(signupIntentId, normalized)
-                .orElseThrow(() -> new ApiException(HttpStatus.BAD_REQUEST, "Sign-up session expired. Please start again."));
-
         Instant now = Instant.now();
-        if (intent.getConsumedAt() != null) {
-            throw new ApiException(HttpStatus.BAD_REQUEST, "Sign-up session already used. Please start again.");
-        }
-        if (now.isAfter(intent.getExpiresAt())) {
+        int updated = intents.consumeIfActive(signupIntentId, normalized, now, now);
+        if (updated == 0) {
             throw new ApiException(HttpStatus.BAD_REQUEST, "Sign-up session expired. Please start again.");
         }
 
-        intent.setConsumedAt(now);
-        intents.save(intent);
+        SignupIntent intent = intents.findByIdAndEmail(signupIntentId, normalized)
+                .orElseThrow(() -> new ApiException(HttpStatus.BAD_REQUEST, "Sign-up session expired. Please start again."));
 
         return new ConsumedSignupIntent(
                 intent.getPasswordHash(),

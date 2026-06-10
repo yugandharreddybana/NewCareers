@@ -11,6 +11,7 @@ import com.careerops.repository.JobWatchlistRepository;
 import com.careerops.repository.SkillRunRepository;
 import com.careerops.repository.UserJobRepository;
 import com.careerops.repository.UserProfileRepository;
+import com.careerops.repository.UserRepository;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.springframework.stereotype.Service;
@@ -35,30 +36,36 @@ public class SkillExecutionContextBuilder {
     private static final int MAX_INLINE_JD = 3_000;
 
     private final UserProfileRepository profiles;
+    private final UserRepository users;
     private final UserJobRepository userJobs;
     private final JobRepository jobs;
     private final CvService cvService;
     private final SkillRunRepository skillRuns;
     private final JobWatchlistRepository watchlist;
     private final CompanyWebResearchService companyWebResearch;
+    private final ProfileReadableFields profileFields;
     private final ObjectMapper mapper;
 
     public SkillExecutionContextBuilder(
             UserProfileRepository profiles,
+            UserRepository users,
             UserJobRepository userJobs,
             JobRepository jobs,
             CvService cvService,
             SkillRunRepository skillRuns,
             JobWatchlistRepository watchlist,
             CompanyWebResearchService companyWebResearch,
+            ProfileReadableFields profileFields,
             ObjectMapper mapper) {
         this.profiles = profiles;
+        this.users = users;
         this.userJobs = userJobs;
         this.jobs = jobs;
         this.cvService = cvService;
         this.skillRuns = skillRuns;
         this.watchlist = watchlist;
         this.companyWebResearch = companyWebResearch;
+        this.profileFields = profileFields;
         this.mapper = mapper;
     }
 
@@ -128,6 +135,11 @@ public class SkillExecutionContextBuilder {
 
     private void appendProfile(StringBuilder sb, UUID userId) {
         sb.append("## User Profile (data/profile.yml)\n");
+        users.findById(userId).ifPresent(u -> {
+            if (u.getName() != null && !u.getName().isBlank()) {
+                sb.append("Candidate name: ").append(u.getName().trim()).append("\n");
+            }
+        });
         profiles.findByUserId(userId).ifPresentOrElse(p -> {
             sb.append("Target roles: ").append(arr(p.getTargetRoles())).append("\n");
             sb.append("Tech stack: ").append(arr(p.getTechStack())).append("\n");
@@ -140,8 +152,9 @@ public class SkillExecutionContextBuilder {
             if (p.getSalaryMin() != null || p.getSalaryMax() != null) {
                 sb.append("Salary target: €").append(p.getSalaryMin()).append(" – €").append(p.getSalaryMax()).append("\n");
             }
-            if (p.getGoalTitle() != null && !p.getGoalTitle().isBlank()) {
-                sb.append("Career goal: ").append(truncate(p.getGoalTitle(), 200)).append("\n");
+            String goalTitle = profileFields.goalTitle(p);
+            if (goalTitle != null) {
+                sb.append("Career goal: ").append(truncate(goalTitle, 200)).append("\n");
             }
         }, () -> sb.append("Profile not available.\n"));
         sb.append("\n");

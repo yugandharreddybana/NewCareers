@@ -57,6 +57,8 @@ public class BillingController {
         return billingService.getUsageForUser(userId);
     }
 
+    /** Reserved for future multi-workspace billing — no account UI yet. */
+    @Deprecated(forRemoval = false)
     @PutMapping("/organization")
     public ResponseEntity<Void> setBillingOrganization(@Valid @RequestBody SetBillingOrganizationRequest request) {
         UUID userId = AuthUtil.currentUserId();

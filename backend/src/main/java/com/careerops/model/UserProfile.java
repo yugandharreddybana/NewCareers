@@ -197,6 +197,8 @@ public class UserProfile {
         private String degreeLevel;
         private String degreeTitle;
         private String fieldOfStudy;
+        private String startYear;
+        private String endYear;
         private String graduationYear;
         private String location;
     }

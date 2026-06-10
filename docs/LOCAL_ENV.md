@@ -169,7 +169,7 @@ Signup collects terms (required) and optional AI / marketing / analytics checkbo
 
 ## Onboarding: Complete profile → account → job fetch
 
-New candidates use **deferred signup**: `/signup` only stores email/password in the browser tab (`sessionStorage`), then `/onboarding` collects the profile. **Complete profile** (step 3) runs this order:
+New candidates use **deferred signup**: `/signup` stores a server-side signup intent id, email, consents, and client expiry in the browser tab (`sessionStorage`), never the plaintext password. `/onboarding` collects the profile. **Complete profile** (step 3) runs this order:
 
 1. `POST /api/v1/auth/signup` — create account and session (skipped if already logged in)
 2. `PUT /api/v1/profile` with `onboarded: true`

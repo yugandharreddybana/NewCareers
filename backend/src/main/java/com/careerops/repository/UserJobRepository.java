@@ -220,6 +220,16 @@ public interface UserJobRepository extends JpaRepository<UserJob, UUID>, JpaSpec
     @Query("SELECT COUNT(uj) FROM UserJob uj WHERE uj.deliveredAt >= :since")
     long countDeliveredSince(@Param("since") Instant since);
 
+    @Query("""
+            SELECT uj FROM UserJob uj
+            WHERE uj.userId = :userId
+              AND uj.deletedAt IS NULL
+              AND uj.deliveredAt >= :since
+            """)
+    List<UserJob> findActiveDeliveredSince(
+            @Param("userId") UUID userId,
+            @Param("since") Instant since);
+
     // ── Deprecated full-entity list (kept for internal batch/admin only) ──────
     /**
      * @deprecated Use {@link #findCardsByUserId(UUID, Pageable)} for list endpoints.
@@ -252,6 +262,10 @@ public interface UserJobRepository extends JpaRepository<UserJob, UUID>, JpaSpec
 
     Page<UserJob> findByUserIdAndDeletedAtIsNullAndMatchPercentGreaterThanEqualOrderByDeliveredAtDesc(
             UUID userId, int minMatchPercent, Pageable pageable);
+
+    @EntityGraph(attributePaths = {"job"})
+    @Query("SELECT uj FROM UserJob uj WHERE uj.userId = :userId")
+    List<UserJob> findAllActiveWithJobByUserId(@Param("userId") UUID userId);
 
     @Modifying(clearAutomatically = true, flushAutomatically = true)
     @Query("""

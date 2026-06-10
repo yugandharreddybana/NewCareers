@@ -1,0 +1,60 @@
+sequenceDiagram
+    participant User
+    participant Login as Login.tsx
+    participant AuthContext
+    participant Axios
+    participant Middleware
+    participant Java as AuthController
+    participant Auth as AuthService
+    participant Captcha as WordCaptchaService
+    participant TwoFA as TwoFactorService
+    participant JWT as JwtService
+
+    User->>Login: Submit email + password + rememberMe + captchaToken
+    Login->>Login: client validate email, password min 8, captcha present
+    Login->>AuthContext: signIn(email, password, { rememberMe, captchaToken })
+    AuthContext->>Axios: POST /auth/login
+    Axios->>Middleware: POST /api/v1/auth/login + CSRF
+    Middleware->>Middleware: loginLimiter + body validation
+    Middleware->>Java: POST /auth/login (HMAC, client IP)
+
+    Java->>Auth: login(LoginRequest)
+    Auth->>Auth: findByEmail(normalize)
+
+    alt account locked (lockedUntil > now)
+        Auth->>Auth: BCrypt against DUMMY_HASH (timing-safe)
+        Auth-->>Login: 401 generic failure
+    else word captcha required
+        Auth->>Captcha: verifyToken captchaToken
+        alt captcha missing/invalid/expired
+            Captcha-->>Auth: false
+            Auth-->>Login: 401 + captchaRequired flag
+            Login->>Login: refreshCaptcha()
+        end
+    end
+
+    alt Google-only account (no password hash)
+        Auth-->>Login: 401 generic failure
+    else wrong password or unknown email
+        Auth->>Auth: incrementFailedAttempts and lock account 15min
+        Auth-->>Login: 401 generic failure
+    else password OK
+        Auth->>Auth: resetFailedAttempts, assertAccountActive
+        alt 2FA enabled
+            Auth->>TwoFA: issueChallengeToken(userId, rememberMe)
+            Auth-->>Middleware: requiresTwoFactor + challengeToken
+            Middleware->>Middleware: set co_remember if rememberMe
+            Middleware-->>Login: requiresTwoFactor + challengeToken
+            Login->>Login: show OTP step (Phase 3)
+        else no 2FA
+            Auth->>JWT: issue access JWT (15min)
+            Auth->>Auth: issueRefreshToken (SHA-256 at rest, UA binding)
+            Auth-->>Middleware: token, refreshToken, user
+            Middleware->>Middleware: Set-Cookie co_session, co_refresh, co_remember?
+            Middleware-->>Axios: user only (tokens in cookies)
+            Axios->>Axios: completeAuthResponse → applyAuthResponse
+            AuthContext->>AuthContext: setUser, clear pending signup
+            Login->>GuestRoute: user now set
+            GuestRoute-->>User: redirect dashboard or onboarding
+        end
+    end

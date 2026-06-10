@@ -2,6 +2,8 @@ import { useEffect } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { useQueryClient } from '@tanstack/react-query';
 import { queryKeys } from '@/lib/queryKeys';
+import { SUBSCRIPTION_QUERY_KEY } from '@/hooks/useSubscription';
+import { billingApi } from '@/services/billingApi';
 
 type Variant = 'success' | 'cancel';
 
@@ -28,8 +30,29 @@ export default function BillingCheckoutResultPage({ variant }: { variant: Varian
 
   useEffect(() => {
     if (variant === 'success') {
-      void queryClient.invalidateQueries({ queryKey: ['billing', 'subscription'] });
+      void queryClient.invalidateQueries({ queryKey: SUBSCRIPTION_QUERY_KEY });
       void queryClient.invalidateQueries({ queryKey: queryKeys.usage.limits() });
+      void (async () => {
+        const delaysMs = [0, 1_500, 3_000, 6_000, 10_000];
+        let initialPlan: string | null = null;
+        for (const delayMs of delaysMs) {
+          if (delayMs > 0) {
+            await new Promise(resolve => window.setTimeout(resolve, delayMs));
+          }
+          const subscription = await queryClient.fetchQuery({
+            queryKey: SUBSCRIPTION_QUERY_KEY,
+            queryFn: billingApi.getSubscription,
+            staleTime: 0,
+          });
+          if (initialPlan === null) {
+            initialPlan = subscription.effectivePlan ?? subscription.plan;
+          }
+          const currentPlan = subscription.effectivePlan ?? subscription.plan;
+          if (currentPlan !== 'FREE' && currentPlan !== initialPlan) break;
+          if (subscription.status === 'ACTIVE' && currentPlan !== 'FREE') break;
+        }
+        await queryClient.invalidateQueries({ queryKey: queryKeys.usage.limits() });
+      })().catch(() => undefined);
     }
   }, [variant, queryClient]);
 

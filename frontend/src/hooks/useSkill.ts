@@ -4,6 +4,8 @@ import toast from 'react-hot-toast';
 
 import { skillsApi } from '../services/skillsApi';
 import { getUserFacingErrorMessage } from '@/lib/userFacingError';
+import { queryClient } from '@/lib/queryClient';
+import { queryKeys } from '@/lib/queryKeys';
 
 import type {
   SkillName,
@@ -42,6 +44,7 @@ function applySkillResponse(
 ) {
   switch (res.type) {
     case 'RESULT':
+      void queryClient.invalidateQueries({ queryKey: queryKeys.usage.limits() });
       setSkillState(prev => ({
         ...prev,
         state:    'done',

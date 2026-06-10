@@ -91,14 +91,17 @@ public class ApplyAssistService {
     static String inferRoleLabel(Job job, UserProfile profile) {
         String title = job.getTitle() == null ? "" : job.getTitle().toLowerCase(Locale.ROOT);
         String haystack = title + "\n" + (job.getDescription() == null ? "" : job.getDescription()).toLowerCase(Locale.ROOT);
+        if (haystack.contains("full stack") || haystack.contains("fullstack")) {
+            return "Full-stack engineer";
+        }
         if (haystack.contains("backend") || haystack.contains("java") || haystack.contains("spring")) {
             return "Backend engineer";
         }
-        if (haystack.contains("frontend") || haystack.contains("react") || haystack.contains("ui engineer")) {
+        if (haystack.contains("frontend") || haystack.contains("ui engineer")) {
             return "Frontend engineer";
         }
-        if (haystack.contains("full stack") || haystack.contains("fullstack")) {
-            return "Full-stack engineer";
+        if (haystack.contains("react") && !haystack.contains("full stack") && !haystack.contains("fullstack")) {
+            return "Frontend engineer";
         }
         if (haystack.contains("devops") || haystack.contains("sre") || haystack.contains("platform")) {
             return "Platform / DevOps engineer";

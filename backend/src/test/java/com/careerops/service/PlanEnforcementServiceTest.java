@@ -10,7 +10,6 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.core.env.Environment;
-import org.springframework.core.env.Profiles;
 
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
@@ -21,6 +20,7 @@ import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -35,6 +35,8 @@ class PlanEnforcementServiceTest {
     @Mock
     private OrgUsageCounter usageCounter;
     @Mock
+    private BillingPeriodService billingPeriodService;
+    @Mock
     private SaasLifecycleTelemetry lifecycleTelemetry;
     @Mock
     private com.careerops.repository.SubscriptionRepository subscriptionRepository;
@@ -44,6 +46,8 @@ class PlanEnforcementServiceTest {
     private com.careerops.repository.OrgRepository orgRepository;
     @Mock
     private OrganizationPlanSyncService organizationPlanSyncService;
+    @Mock
+    private UserQuotaGrantService quotaGrantService;
 
     private PlanEnforcementService service;
     private final UUID userId = UUID.randomUUID();
@@ -58,14 +62,32 @@ class PlanEnforcementServiceTest {
                 subscriptionRepository,
                 orgRepository,
                 usageCounter,
+                billingPeriodService,
                 lifecycleTelemetry,
-                organizationPlanSyncService);
-        when(saasBillingProperties.isEnforcementEnabled()).thenReturn(true);
+                organizationPlanSyncService,
+                quotaGrantService);
+        lenient().when(saasBillingProperties.isEnforcementEnabled()).thenReturn(true);
+        lenient().when(quotaGrantService.unlimitedAccess(any())).thenReturn(false);
+        lenient().when(quotaGrantService.unlimitedSkills(any())).thenReturn(false);
+        lenient().when(subscriptionRepository.findByOrganizationIdForUpdate(any()))
+                .thenAnswer(invocation -> subscriptionForOrg(invocation.getArgument(0)));
+        lenient().when(subscriptionRepository.findByOrganizationId(any()))
+                .thenAnswer(invocation -> Optional.of(subscriptionForOrg(invocation.getArgument(0))));
+        lenient().when(billingPeriodService.resolvePeriodStart(any()))
+                .thenReturn(Instant.now().minus(10, ChronoUnit.DAYS));
+    }
+
+    private Subscription subscriptionForOrg(UUID organizationId) {
+        Subscription subscription = new Subscription();
+        subscription.setId(UUID.randomUUID());
+        subscription.setOrganizationId(organizationId);
+        subscription.setCreatedAt(Instant.now().minus(30, ChronoUnit.DAYS));
+        return subscription;
     }
 
     @Test
-    void devProfileBypassesChecks() {
-        when(environment.acceptsProfiles(Profiles.of("dev", "test"))).thenReturn(true);
+    void enforcementPropertyFalseBypassesChecks() {
+        when(saasBillingProperties.isEnforcementEnabled()).thenReturn(false);
 
         service.checkAiRunAllowed(userId, 9);
 
@@ -73,48 +95,44 @@ class PlanEnforcementServiceTest {
     }
 
     @Test
-    void prodProfileBlocksAiRunWhenLimitExceeded() {
-        when(environment.acceptsProfiles(Profiles.of("dev", "test"))).thenReturn(false);
+    void enforcementPropertyTrueBlocksAiRunWhenLimitExceeded() {
         when(resolver.resolveForUser(userId)).thenReturn(activeContext(SubscriptionPlan.FREE));
-        when(usageCounter.aiSkillRunsThisMonth(orgId)).thenReturn(5L);
+        when(usageCounter.aiSkillRunsSince(eq(orgId), any())).thenReturn(5L);
 
         assertThrows(PlanLimitExceededException.class, () -> service.checkAiRunAllowed(userId, 1));
     }
 
     @Test
     void prodProfileAllowsAiRunUnderLimit() {
-        when(environment.acceptsProfiles(Profiles.of("dev", "test"))).thenReturn(false);
         when(resolver.resolveForUser(userId)).thenReturn(activeContext(SubscriptionPlan.FREE));
-        when(usageCounter.aiSkillRunsThisMonth(orgId)).thenReturn(4L);
+        when(usageCounter.aiSkillRunsSince(eq(orgId), any())).thenReturn(4L);
 
         assertDoesNotThrow(() -> service.checkAiRunAllowed(userId, 1));
     }
 
     @Test
     void runAllCostBlocksWhenInsufficientHeadroom() {
-        when(environment.acceptsProfiles(Profiles.of("dev", "test"))).thenReturn(false);
         when(resolver.resolveForUser(userId)).thenReturn(activeContext(SubscriptionPlan.FREE));
-        when(usageCounter.aiSkillRunsThisMonth(orgId)).thenReturn(0L);
+        when(usageCounter.aiSkillRunsSince(eq(orgId), any())).thenReturn(0L);
 
         assertThrows(PlanLimitExceededException.class, () -> service.checkAiRunAllowed(userId, 9));
     }
 
     @Test
-    void expiredTrialBlocksUsage() {
-        when(environment.acceptsProfiles(Profiles.of("dev", "test"))).thenReturn(false);
+    void legacyTrialingStatusUsesFreePlanLimits() {
         when(resolver.resolveForUser(userId)).thenReturn(new SubscriptionContext(
                 orgId,
                 UUID.randomUUID(),
                 SubscriptionPlan.FREE,
                 SubscriptionStatus.TRIALING,
                 Instant.now().minus(1, ChronoUnit.DAYS)));
+        when(usageCounter.jobApplicationsThisMonth(orgId)).thenReturn(10L);
 
         assertThrows(PlanLimitExceededException.class, () -> service.checkApplicationAllowed(userId));
     }
 
     @Test
     void cancelledSubscriptionBlocksUsage() {
-        when(environment.acceptsProfiles(Profiles.of("dev", "test"))).thenReturn(false);
         when(resolver.resolveForUser(userId)).thenReturn(new SubscriptionContext(
                 orgId,
                 UUID.randomUUID(),
@@ -127,17 +145,55 @@ class PlanEnforcementServiceTest {
 
     @Test
     void enterprisePlanSkipsAiLimitCheck() {
-        when(environment.acceptsProfiles(Profiles.of("dev", "test"))).thenReturn(false);
         when(resolver.resolveForUser(userId)).thenReturn(activeContext(SubscriptionPlan.ENTERPRISE));
 
         assertDoesNotThrow(() -> service.checkAiRunAllowed(userId, 100));
 
-        verify(usageCounter, never()).aiSkillRunsThisMonth(any());
+        verify(usageCounter, never()).aiSkillRunsSince(any(), any());
+    }
+
+    @Test
+    void quotaGrantSkipsAiLimitCheckWithoutEnterprisePlan() {
+        when(quotaGrantService.unlimitedAccess(userId)).thenReturn(true);
+
+        assertDoesNotThrow(() -> service.checkAiRunAllowed(userId, 100));
+
+        verify(resolver, never()).resolveForUser(any());
+        verify(usageCounter, never()).aiSkillRunsSince(any(), any());
+    }
+
+    @Test
+    void quotaGrantSkipsCvUploadWhenAtCap() {
+        when(quotaGrantService.unlimitedAccess(userId)).thenReturn(true);
+        when(usageCounter.cvUploadsTotal(orgId)).thenReturn(100L);
+
+        assertDoesNotThrow(() -> service.checkCvUploadAllowed(userId));
+
+        verify(resolver, never()).resolveForUser(any());
+        verify(usageCounter, never()).cvUploadsTotal(any());
+    }
+
+    @Test
+    void quotaGrantSkipsApplicationLimit() {
+        when(quotaGrantService.unlimitedAccess(userId)).thenReturn(true);
+
+        assertDoesNotThrow(() -> service.checkApplicationAllowed(userId));
+
+        verify(resolver, never()).resolveForUser(any());
+        verify(usageCounter, never()).jobApplicationsThisMonth(any());
+    }
+
+    @Test
+    void unlimitedAccessBypassesCancelledSubscription() {
+        when(quotaGrantService.unlimitedAccess(userId)).thenReturn(true);
+
+        assertDoesNotThrow(() -> service.checkCvUploadAllowed(userId));
+
+        verify(resolver, never()).resolveForUser(any());
     }
 
     @Test
     void orgWideApplicationLimitUsesSharedCounter() {
-        when(environment.acceptsProfiles(Profiles.of("dev", "test"))).thenReturn(false);
         when(resolver.resolveForUser(userId)).thenReturn(activeContext(SubscriptionPlan.FREE));
         when(usageCounter.jobApplicationsThisMonth(orgId)).thenReturn(10L);
 
@@ -146,7 +202,6 @@ class PlanEnforcementServiceTest {
 
     @Test
     void blocksTeamMemberInviteWhenFreeSeatCapReached() {
-        when(environment.acceptsProfiles(Profiles.of("dev", "test"))).thenReturn(false);
         when(resolver.resolveForUser(userId)).thenReturn(activeContext(SubscriptionPlan.FREE));
         Subscription locked = new Subscription();
         locked.setId(UUID.randomUUID());
@@ -159,7 +214,6 @@ class PlanEnforcementServiceTest {
 
     @Test
     void allowsTeamMemberInviteWhenUnderCap() {
-        when(environment.acceptsProfiles(Profiles.of("dev", "test"))).thenReturn(false);
         when(resolver.resolveForUser(userId)).thenReturn(activeContext(SubscriptionPlan.PRO));
         Subscription locked = new Subscription();
         locked.setId(UUID.randomUUID());
@@ -171,17 +225,16 @@ class PlanEnforcementServiceTest {
     }
 
     @Test
-    void trialingUserGetsProLimits() {
-        when(environment.acceptsProfiles(Profiles.of("dev", "test"))).thenReturn(false);
+    void trialingStatusNoLongerGrantsProLimits() {
         when(resolver.resolveForUser(userId)).thenReturn(new SubscriptionContext(
                 orgId,
                 UUID.randomUUID(),
                 SubscriptionPlan.FREE,
                 SubscriptionStatus.TRIALING,
                 Instant.now().plus(3, ChronoUnit.DAYS)));
-        when(usageCounter.aiSkillRunsThisMonth(orgId)).thenReturn(50L);
+        when(usageCounter.aiSkillRunsSince(eq(orgId), any())).thenReturn(5L);
 
-        assertDoesNotThrow(() -> service.checkAiRunAllowed(userId, 100));
+        assertThrows(PlanLimitExceededException.class, () -> service.checkAiRunAllowed(userId, 1));
     }
 
     private SubscriptionContext activeContext(SubscriptionPlan plan) {

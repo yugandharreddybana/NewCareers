@@ -4,12 +4,10 @@ import { useQueryClient } from '@tanstack/react-query';
 import toast from 'react-hot-toast';
 import { PageMeta } from '@/components/PageMeta';
 import { LoadingSpinner } from '@/components/LoadingSpinner';
-import { DashboardTopNav } from '@/components/dashboard/DashboardTopNav';
 import { sourceLabel } from '@/lib/jobSource';
-import { kanbanApi, profileApi } from '@/services/api';
-import { useQuery } from '@tanstack/react-query';
+import { kanbanApi } from '@/services/api';
 import { JobDescriptionSection } from '@/components/job-detail/JobDescriptionSection';
-import { useJobDetail } from '@/hooks/queries';
+import { useJobDetail, useProfileQuery } from '@/hooks/queries';
 import { hasUsableJobDescription } from '@/lib/plainJobDescription';
 import { jobsApi } from '@/services/api';
 import { queryKeys } from '@/lib/queryKeys';
@@ -23,18 +21,11 @@ import {
   hasActionableCvTips,
   isHeuristicPlaceholderEvaluation,
   resolveJobSkillListsForDisplay,
+  sanitizeHumanSummary,
 } from '@/lib/jobEvaluation';
+import { extractJobPostingMeta, formatSalaryDisplay } from '@/lib/jobPostingMeta';
 import { timeAgo } from '@/lib/utils';
 import '@/styles/job-detail.css';
-
-function formatSalary(min?: number, max?: number, currency?: string): string {
-  if (!min && !max) return 'Competitive';
-  const symbol = currency === 'EUR' ? '€' : currency === 'GBP' ? '£' : '$';
-  const fmt = (n: number) => `${symbol}${Math.round(n / 1000)}k`;
-  if (min && max) return `${fmt(min)} – ${fmt(max)}`;
-  if (min) return `${fmt(min)}+`;
-  return `Up to ${fmt(max!)}`;
-}
 
 function matchRingOffset(percent: number): number {
   const circumference = 2 * Math.PI * 58;
@@ -46,11 +37,8 @@ const JobDetail: React.FC = () => {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const queryClient = useQueryClient();
-  const { data: jobData, isLoading: loading, refetch } = useJobDetail(id);
-  const { data: profile } = useQuery({
-    queryKey: queryKeys.profile.current(),
-    queryFn: () => profileApi.get(),
-  });
+  const { data: jobData, isLoading: loading, isError, error, refetch } = useJobDetail(id);
+  const { data: profile } = useProfileQuery();
   const [saving, setSaving] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [activeTab, setActiveTab] = useState<JobDetailTab>('overview');
@@ -148,7 +136,6 @@ const JobDetail: React.FC = () => {
   if (loading) {
     return (
       <div className="job-detail-page min-h-screen bg-surface-container-low flex flex-col">
-        <DashboardTopNav />
         <div className="flex flex-1 items-center justify-center py-24">
           <LoadingSpinner size="lg" />
         </div>
@@ -157,12 +144,27 @@ const JobDetail: React.FC = () => {
   }
 
   if (!displayJob && !loading) {
+    const httpStatus = (error as { response?: { status?: number } } | null)?.response?.status;
+    const isNotFound = httpStatus === 404;
+    const message = isNotFound
+      ? 'This job is no longer in your pipeline.'
+      : 'We could not load this job right now. Please try again.';
     return (
       <div className="job-detail-page min-h-screen bg-surface-container-low flex flex-col">
-        <DashboardTopNav />
         <div className="flex flex-1 flex-col items-center justify-center gap-3 py-24 text-on-surface-variant">
-          <span className="material-symbols-outlined text-5xl">search_off</span>
-          <p className="text-sm">Job not found.</p>
+          <span className="material-symbols-outlined text-5xl">
+            {isNotFound ? 'search_off' : 'error_outline'}
+          </span>
+          <p className="text-sm">{message}</p>
+          {!isNotFound && isError ? (
+            <button
+              type="button"
+              onClick={() => void refetch()}
+              className="text-primary text-sm font-label-md hover:underline"
+            >
+              Retry
+            </button>
+          ) : null}
           <Link to="/jobs" className="text-primary text-sm font-label-md hover:underline">
             Back to Jobs
           </Link>
@@ -181,6 +183,11 @@ const JobDetail: React.FC = () => {
   const sectorLabel = job.sector ?? '';
   const postedLabel = job.postedAt ? timeAgo(job.postedAt) : 'Recently';
   const isSaved = job.kanbanColumn === 'Saved';
+  const postingMeta = extractJobPostingMeta(job);
+  const displayHumanSummary = sanitizeHumanSummary(job.humanSummary);
+  const salaryLabel = formatSalaryDisplay(job, postingMeta);
+  const locationLabel = postingMeta.locationDetail || job.location || '';
+  const workModelLabel = postingMeta.workArrangement ?? '';
 
   function companyInitials(company: string): string {
     return company
@@ -194,9 +201,8 @@ const JobDetail: React.FC = () => {
   return (
     <div className="job-detail-page min-h-screen bg-surface-container-low flex flex-col">
       <PageMeta title={`${job.title} at ${job.company} | NewCareers`} />
-      <DashboardTopNav />
 
-      <main className="max-w-container-max mx-auto w-full px-margin-mobile md:px-margin-desktop py-base flex-grow">
+      <main className="app-shell w-full py-base flex-grow">
         <nav className="flex flex-wrap items-center gap-2 py-6" aria-label="Breadcrumb">
           <Link
             to="/jobs"
@@ -312,14 +318,14 @@ const JobDetail: React.FC = () => {
               <>
             <JobDescriptionSection job={job} profile={profile ?? null} onDescriptionLoaded={refreshJob} />
 
-            {(job.humanSummary || heuristicEval) && (
+            {(displayHumanSummary || heuristicEval) && (
               <div className="bg-surface-container-lowest p-margin-mobile md:p-margin-desktop rounded-xl border border-primary/20 shadow-sm">
                 <h2 className="font-headline-sm text-headline-sm mb-3 text-on-surface flex items-center gap-2">
                   <span className="material-symbols-outlined text-primary text-[22px]">insights</span>
                   AI match summary
                 </h2>
-                {job.humanSummary && (
-                  <p className="font-body-md text-body-md text-on-surface-variant mb-4">{job.humanSummary}</p>
+                {displayHumanSummary && (
+                  <p className="font-body-md text-body-md text-on-surface-variant mb-4">{displayHumanSummary}</p>
                 )}
                 {heuristicEval && (
                   <div className="flex flex-col sm:flex-row sm:items-center gap-3 pt-2 border-t border-outline-variant">
@@ -374,17 +380,27 @@ const JobDetail: React.FC = () => {
 
           <aside className="col-span-12 lg:col-span-4 flex flex-col gap-6 lg:sticky lg:top-24">
             <div className="bg-surface-container-lowest p-margin-mobile md:p-margin-desktop rounded-xl border border-outline-variant shadow-md">
-              <div className="mb-6">
-                <div className="flex justify-between items-baseline mb-2 gap-4">
-                  <span className="font-label-sm text-label-sm text-secondary uppercase">Salary Range</span>
-                  <span className="font-headline-sm text-headline-sm text-on-surface text-right">
-                    {formatSalary(job.salaryMin, job.salaryMax, job.currency)}
-                  </span>
-                </div>
-                <div className="flex justify-between items-baseline gap-4">
-                  <span className="font-label-sm text-label-sm text-secondary uppercase">Location</span>
-                  <span className="font-body-md text-body-md text-on-surface text-right">{job.location}</span>
-                </div>
+              <div className="mb-6 space-y-2">
+                {salaryLabel ? (
+                  <div className="flex justify-between items-baseline gap-4">
+                    <span className="font-label-sm text-label-sm text-secondary uppercase shrink-0">Salary Range</span>
+                    <span className="font-headline-sm text-headline-sm text-on-surface text-right">
+                      {salaryLabel}
+                    </span>
+                  </div>
+                ) : null}
+                {locationLabel ? (
+                  <div className="flex justify-between items-baseline gap-4">
+                    <span className="font-label-sm text-label-sm text-secondary uppercase shrink-0">Location</span>
+                    <span className="font-body-md text-body-md text-on-surface text-right">{locationLabel}</span>
+                  </div>
+                ) : null}
+                {workModelLabel ? (
+                  <div className="flex justify-between items-start gap-4">
+                    <span className="font-label-sm text-label-sm text-secondary uppercase shrink-0">Work Model</span>
+                    <span className="font-body-md text-body-md text-on-surface text-right">{workModelLabel}</span>
+                  </div>
+                ) : null}
               </div>
               <div className="flex flex-col gap-3">
                 <button
@@ -511,10 +527,10 @@ const JobDetail: React.FC = () => {
                     </div>
                   </div>
                 )}
-                {job.humanSummary && (
+                {displayHumanSummary && (
                   <div className="bg-primary/5 p-4 rounded-lg border border-primary/10">
                     <p className="font-body-sm text-body-sm text-on-surface-variant italic">
-                      &ldquo;{job.humanSummary}&rdquo;
+                      &ldquo;{displayHumanSummary}&rdquo;
                     </p>
                   </div>
                 )}
@@ -540,7 +556,7 @@ const JobDetail: React.FC = () => {
       </main>
 
       <footer className="mt-auto bg-surface-container-low border-t border-outline-variant py-12">
-        <div className="w-full px-margin-mobile md:px-margin-desktop max-w-container-max mx-auto flex flex-col md:flex-row justify-between items-center gap-base">
+        <div className="w-full app-shell flex flex-col md:flex-row justify-between items-center gap-base">
           <div className="flex flex-col items-center md:items-start gap-2">
             <span className="font-headline-sm text-headline-sm font-bold text-on-surface">NewCareers AI</span>
             <p className="font-body-sm text-body-sm text-secondary">© 2024 NewCareers AI. Empowering momentum.</p>

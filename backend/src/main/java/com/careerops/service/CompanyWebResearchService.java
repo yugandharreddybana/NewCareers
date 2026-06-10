@@ -5,8 +5,10 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.http.client.reactive.ReactorClientHttpConnector;
 import org.springframework.stereotype.Service;
 import org.springframework.web.reactive.function.client.WebClient;
+import reactor.netty.http.client.HttpClient;
 
 import java.time.Duration;
 import java.util.ArrayList;
@@ -28,7 +30,11 @@ public class CompanyWebResearchService {
 
     public CompanyWebResearchService(ObjectMapper mapper) {
         this.mapper = mapper;
+        HttpClient httpClient = HttpClient.create()
+                .followRedirect(false)
+                .responseTimeout(Duration.ofSeconds(12));
         this.webClient = WebClient.builder()
+            .clientConnector(new ReactorClientHttpConnector(httpClient))
             .baseUrl("https://serpapi.com/search.json")
             .build();
     }
@@ -71,8 +77,8 @@ public class CompanyWebResearchService {
                     .queryParam("hl", "en")
                     .queryParam("gl", "ie")
                     .queryParam("num", 5)
-                    .queryParam("api_key", serpApiKey)
                     .build())
+                .header("X-SerpAPI-Key", serpApiKey)
                 .retrieve()
                 .bodyToMono(String.class)
                 .timeout(Duration.ofSeconds(12))

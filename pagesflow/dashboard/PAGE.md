@@ -11,7 +11,7 @@ Authenticated home screen after onboarding. `Dashboard.tsx` is a thin wrapper th
 | URL | `/dashboard` |
 | Query params | `welcome=1` — celebration hero after onboarding finish |
 | Guard | `ProtectedRoute` (requires session + `user.onboarded`) |
-| Layout | Full-width standalone (`useFullWidthLayout`); uses `DashboardTopNav`, not `AppShell` sidebar |
+| Layout | `DashboardLayout` (`DashboardTopNav` + page content) |
 | Redirects | Onboarding completion → `/dashboard?welcome=1` when welcome flag is set |
 
 ## Fields and inputs
@@ -50,6 +50,19 @@ Interactive controls are buttons/links only (no form submission on this page).
 | Permit intelligence widget | `GET /analytics/permits/...` | `GET /analytics/permits/**` | `PermitAnalyticsController` |
 | Weekly analytics tiles | `GET /analytics/summary`, `GET /analytics/time-series` | `GET /analytics/summary`, `GET /analytics/time-series` | `AnalyticsController` |
 | Pipeline stats (secondary) | `GET /jobs/stats` | `GET /jobs/stats` | `JobsController` `GET /stats` |
+| Nav usage pills | `GET /usage/limits` | `GET /usage/limits` | `UsageController` `GET /limits` |
+
+## Nav usage pills
+
+`DashboardTopNav` renders `NavUsagePills` (desktop `md+` only):
+
+| Pill | Source field | Reset |
+|------|--------------|-------|
+| Jobs | `jobDelivery.remaining / limit` | Daily midnight (Europe/Dublin) |
+| Tokens | `aiTokens.remaining / limit` | Daily midnight (Europe/Dublin) |
+| Skills | `skillRuns.remaining / limit` | Billing period (30 days from checkout; FREE uses subscription `created_at`) |
+
+Invalidated after job fetch mutations and successful skill runs (`queryKeys.usage.limits()`).
 
 ## File map
 
@@ -59,8 +72,8 @@ Interactive controls are buttons/links only (no form submission on this page).
 |------|------|
 | Page | `frontend/src/pages/Dashboard.tsx` |
 | Main UI | `frontend/src/components/dashboard/CareersHomeDashboard.tsx` |
-| Components | `frontend/src/components/dashboard/DashboardTopNav.tsx`, `TopMatchCard.tsx`, `DashboardUserAnalytics.tsx`, `frontend/src/components/analytics/DomainPermitWidget.tsx` |
-| Hooks / services | `frontend/src/hooks/queries/useJobs.ts`, `useAnalytics.ts`, `usePermitAnalytics.ts`, `frontend/src/services/api.ts`, `permitAnalyticsService.ts`, `analyticsApi.ts` |
+| Components | `frontend/src/components/dashboard/DashboardTopNav.tsx`, `NavUsagePills.tsx`, `TopMatchCard.tsx`, `DashboardUserAnalytics.tsx`, `frontend/src/components/analytics/DomainPermitWidget.tsx` |
+| Hooks / services | `frontend/src/hooks/queries/useJobs.ts`, `useUsageLimits.ts`, `useAnalytics.ts`, `usePermitAnalytics.ts`, `frontend/src/services/api.ts`, `permitAnalyticsService.ts`, `analyticsApi.ts` |
 | Lib | `frontend/src/lib/pipelineJobSearch.ts`, `normalizeJobCard.ts`, `queryKeys.ts`, `utils/domainResolver.ts` |
 
 ### Middleware

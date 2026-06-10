@@ -51,6 +51,7 @@ public final class BillingDtos {
             SubscriptionStatus status,
             Instant trialEndsAt,
             Instant currentPeriodEnd,
+            boolean cancelAtPeriodEnd,
             int daysRemaining,
             boolean hasBillingAccount,
             boolean canManageBilling,

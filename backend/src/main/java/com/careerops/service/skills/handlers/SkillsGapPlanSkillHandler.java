@@ -2,7 +2,7 @@ package com.careerops.service.skills.handlers;
 
 import com.careerops.service.SkillMdExecutorService;
 import com.careerops.service.skills.SkillHandler;
-import com.fasterxml.jackson.databind.JsonNode;
+import com.careerops.service.skills.SkillHandlerResult;
 import org.springframework.stereotype.Service;
 
 import java.util.UUID;
@@ -20,7 +20,8 @@ public class SkillsGapPlanSkillHandler implements SkillHandler {
     public String skillName() { return "skills-gap-plan"; }
 
     @Override
-    public JsonNode execute(UUID userId, UUID userJobId) {
-        return executor.execute(skillName(), userId, userJobId, null);
+    public SkillHandlerResult execute(UUID userId, UUID userJobId) {
+        var result = executor.executeWithUsage(skillName(), userId, userJobId, null);
+        return new SkillHandlerResult(result.output(), result.totalTokens());
     }
 }

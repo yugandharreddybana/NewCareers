@@ -8,12 +8,13 @@
 import { Navigate, Outlet, useLocation } from 'react-router-dom';
 import { useEffect, useRef } from 'react';
 import toast from 'react-hot-toast';
-import { useAuth } from '@/context/AuthContext';
+import { useAuth } from '@/context/authCtx';
+import { consumeSessionExpiredFlag } from '@/lib/onboardingSession';
+import { LOGIN_SESSION_EXPIRED_PATH } from '@/lib/publicRoutes';
 import { hasPendingSignup } from '@/lib/pendingSignup';
 import { readWelcomePendingFlag } from '@/components/dashboard/CareersHomeDashboard';
-import AppShell from '@/components/layout/AppShell';
+import { DashboardLayout } from '@/components/layout/DashboardLayout';
 import { PageLoader } from '@/components/LoadingSpinner';
-
 const PUBLIC_AUTH_PATHS = new Set([
   '/login',
   '/signup',
@@ -21,6 +22,17 @@ const PUBLIC_AUTH_PATHS = new Set([
   '/forgot-password',
   '/reset-password',
 ]);
+
+/** Authenticated users may open these before onboarding completes (billing RBAC). */
+export const ONBOARDING_EXEMPT_PATHS = new Set([
+  '/account/billing',
+  '/billing/success',
+  '/billing/cancel',
+]);
+
+export function isOnboardingExemptPath(pathname: string): boolean {
+  return ONBOARDING_EXEMPT_PATHS.has(pathname);
+}
 
 const SAFE_REDIRECT_RE = /^\/[a-zA-Z0-9/_-]+$/;
 
@@ -41,44 +53,46 @@ function loginRedirectTarget(
   return user.onboarded ? '/dashboard' : '/onboarding';
 }
 
-/** Full-width layouts render without the sidebar shell (onboarding, welcome, job detail). */
-function useFullWidthLayout(): boolean {
+/** Routes that render without DashboardLayout (onboarding, welcome redirect). */
+function useLayoutlessRoute(): boolean {
   const location = useLocation();
-  const fullWidthPaths = ['/onboarding', '/welcome', '/dashboard', '/jobs', '/kanban'];
-  return (
-    fullWidthPaths.includes(location.pathname)
-    || location.pathname.startsWith('/jobs/')
-    || location.pathname.startsWith('/account')
-  );
+  return location.pathname === '/onboarding' || location.pathname === '/welcome';
 }
 
 export function ProtectedRoute() {
   const { user, loading } = useAuth();
   const location = useLocation();
-  const isFullWidth = useFullWidthLayout();
+  const isLayoutless = useLayoutlessRoute();
 
   if (loading) return <PageLoader />;
 
   if (!user) {
+    const loginTarget = consumeSessionExpiredFlag()
+      ? LOGIN_SESSION_EXPIRED_PATH
+      : '/login';
     return (
       <Navigate
-        to="/login"
+        to={loginTarget}
         replace
         state={{ from: location }}
       />
     );
   }
 
-  // Onboarding gate — exempt /onboarding to avoid a redirect loop.
-  if (!user.onboarded && location.pathname !== '/onboarding') {
+  // Onboarding gate — exempt /onboarding (loop) and billing paths (upgrade during setup).
+  if (
+    !user.onboarded
+    && location.pathname !== '/onboarding'
+    && !isOnboardingExemptPath(location.pathname)
+  ) {
     return <Navigate to="/onboarding" replace />;
   }
 
-  if (isFullWidth) {
+  if (isLayoutless) {
     return <Outlet />;
   }
 
-  return <AppShell />;
+  return <DashboardLayout />;
 }
 
 /**
@@ -173,7 +187,7 @@ export function AdminRoute() {
     return <Navigate to="/dashboard" replace />;
   }
 
-  return <AppShell />;
+  return <DashboardLayout />;
 }
 
 export default ProtectedRoute;

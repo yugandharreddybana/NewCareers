@@ -32,10 +32,10 @@ class TailorResumeSkillPromptTest {
     @Test
     void buildFullSystemPrompt_includesBundledTailorSkillMd() {
         String prompt = library.buildFullSystemPrompt("tailor-resume", UUID.randomUUID());
-        assertThat(prompt).contains("Tailor Your Resume");
+        assertThat(prompt).contains("# Tailor CV");
         assertThat(prompt).contains("Professional Summary");
-        assertThat(prompt).contains("Experience Section");
-        assertThat(prompt).contains("Skills Section");
+        assertThat(prompt).contains("WORK EXPERIENCE");
+        assertThat(prompt).contains("skills");
         assertThat(prompt).contains("REFERENCE: ats-rules.md");
     }
 
@@ -51,16 +51,18 @@ class TailorResumeSkillPromptTest {
     @Test
     void tailorAiService_usesSkillLibrary() {
         UserPlanTierService planTierService = org.mockito.Mockito.mock(UserPlanTierService.class);
+        UserQuotaGrantService quotaGrantService = org.mockito.Mockito.mock(UserQuotaGrantService.class);
         TailorResumeAiService ai = new TailorResumeAiService(
             null,
             new CvSkillExtractionService(),
             library,
             new com.fasterxml.jackson.databind.ObjectMapper(),
             tokenUsageService,
-            planTierService);
+            planTierService,
+            quotaGrantService);
         String system = ai.skillSystemPrompt(UUID.randomUUID());
         assertThat(system).contains("BACKEND EXECUTION");
-        assertThat(system).contains("Tailor Your Resume");
+        assertThat(system).contains("# Tailor CV");
         assertThat(system).contains("Step 3");
     }
 }

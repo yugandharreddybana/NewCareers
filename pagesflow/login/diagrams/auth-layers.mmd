@@ -1,0 +1,27 @@
+flowchart TB
+    subgraph Frontend
+        UI[Login.tsx + AuthContext]
+        TokenStore[tokenStore.ts]
+        Axios[api.ts Axios + CSRF + refresh]
+    end
+    subgraph Middleware
+        BFF[auth.routes.ts]
+        Cookies[HttpOnly cookies]
+    end
+    subgraph Backend
+        Controller[AuthController]
+        AuthSvc[AuthService]
+        Captcha[WordCaptchaService]
+        TwoFA[TwoFactorService]
+        Google[GoogleOAuthService]
+        JWT[JwtService]
+    end
+    UI --> Axios
+    Axios --> BFF
+    BFF --> Cookies
+    BFF -->|HMAC + X-Internal-User-Id| Controller
+    Controller --> AuthSvc
+    AuthSvc --> Captcha
+    AuthSvc --> TwoFA
+    AuthSvc --> Google
+    AuthSvc --> JWT

@@ -58,6 +58,7 @@ class JobDeliveryServiceFetchScoreTest {
     @Mock CompanyCareerSource companyPages;
     @Mock LinkedInPublicSource linkedInPublic;
     @Mock JobFetchSettings fetchSettings;
+    @Mock CachedJobPoolService cachedJobPool;
 
     private JobDeliveryService delivery;
     private final UUID userId = UUID.randomUUID();
@@ -91,8 +92,9 @@ class JobDeliveryServiceFetchScoreTest {
             org.mockito.Mockito.mock(StructuredJobEvaluationBuilder.class),
             org.mockito.Mockito.mock(EvaluationReportEnrichmentService.class),
             parallelEval,
+            org.mockito.Mockito.mock(ProfileReadableFields.class),
             adzuna, indeed, irishJobs, jobsIe, jobsIreland, companyPages, linkedInPublic,
-            fetchSettings);
+            fetchSettings, cachedJobPool);
         ReflectionTestUtils.setField(delivery, "preRankPool", 25);
     }
 

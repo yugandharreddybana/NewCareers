@@ -16,6 +16,7 @@ import com.careerops.repository.UserJobRepository;
 import com.careerops.repository.UserProfileRepository;
 import com.careerops.repository.UserRepository;
 import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.openhtmltopdf.pdfboxout.PdfRendererBuilder;
 import lombok.extern.slf4j.Slf4j;
 import org.jsoup.Jsoup;
@@ -41,6 +42,7 @@ public class PdfExportService {
     private final TailorResumeDocxExporter docxExporter;
     private final UserProfileRepository profiles;
     private final UserRepository users;
+    private final CoverLetterNormalizer coverLetterNormalizer;
 
     public PdfExportService(
             InterviewSessionRepository sessionRepo,
@@ -49,7 +51,8 @@ public class PdfExportService {
             SkillRunRepository skillRunRepo,
             TailorResumeDocxExporter docxExporter,
             UserProfileRepository profiles,
-            UserRepository users) {
+            UserRepository users,
+            CoverLetterNormalizer coverLetterNormalizer) {
         this.sessionRepo = sessionRepo;
         this.userJobRepo = userJobRepo;
         this.jobRepo = jobRepo;
@@ -57,6 +60,7 @@ public class PdfExportService {
         this.docxExporter = docxExporter;
         this.profiles = profiles;
         this.users = users;
+        this.coverLetterNormalizer = coverLetterNormalizer;
     }
 
     public byte[] generateInterviewKitPdf(List<InterviewQuestionBank> questions, String userJobId) {
@@ -102,8 +106,15 @@ public class PdfExportService {
     }
 
     public byte[] generateSkillPdf(UUID userId, UUID userJobId, String skillName) {
+        return generateSkillPdf(userId, userJobId, skillName, null);
+    }
+
+    public byte[] generateSkillPdf(UUID userId, UUID userJobId, String skillName, UUID runId) {
         if ("evaluate".equals(skillName)) {
             return generateEvaluatePdf(userId, userJobId);
+        }
+        if ("cover-letter".equals(skillName)) {
+            return generateCoverLetterPdf(userId, userJobId, runId);
         }
         String html = "<!DOCTYPE html><html xmlns=\"http://www.w3.org/1999/xhtml\"><body><h1>"
             + esc(skillName) + "</h1><p>User Job: " + userJobId + "</p></body></html>";
@@ -164,6 +175,45 @@ public class PdfExportService {
             log.error("DOCX export failed for userJobId={}", userJobId, e);
             throw new ApiException(HttpStatus.INTERNAL_SERVER_ERROR, "Could not generate DOCX resume");
         }
+    }
+
+    private byte[] generateCoverLetterPdf(UUID userId, UUID userJobId, UUID runId) {
+        SkillRun run = resolveSkillRun(userId, userJobId, "cover-letter", runId);
+        JsonNode output = run.getOutput();
+        if (output == null) {
+            throw new ApiException(HttpStatus.BAD_REQUEST, "Cover letter data is missing.");
+        }
+        ObjectNode normalized = coverLetterNormalizer.normalizeForUser(userId, output);
+        String letter = normalized.path("letter").asText("");
+        if (letter.isBlank()) {
+            throw new ApiException(
+                    HttpStatus.BAD_REQUEST,
+                    "Cover letter text was not saved. Re-run Cover Letter and wait for completion.");
+        }
+
+        UserJob uj = userJobRepo.findByIdAndUserId(userJobId, userId)
+                .orElseThrow(() -> new ApiException(HttpStatus.NOT_FOUND, "Job not found"));
+        Job job = jobRepo.findById(uj.getJobId())
+                .orElseThrow(() -> new ApiException(HttpStatus.NOT_FOUND, "Job posting missing"));
+
+        String html = CoverLetterPdfHtml.buildDocument(
+                letter,
+                job.getTitle() != null ? job.getTitle() : "",
+                job.getCompany() != null ? job.getCompany() : "");
+        return renderPdfFromHtml(html);
+    }
+
+    private SkillRun resolveSkillRun(UUID userId, UUID userJobId, String skill, UUID runId) {
+        if (runId != null) {
+            return skillRunRepo.findByIdAndUserId(runId, userId)
+                    .filter(r -> skill.equals(r.getSkill()) && userJobId.equals(r.getUserJobId()))
+                    .orElseThrow(() -> new ApiException(HttpStatus.NOT_FOUND, "Skill run not found."));
+        }
+        return skillRunRepo
+                .findFirstByUserIdAndUserJobIdAndSkillOrderByCreatedAtDesc(userId, userJobId, skill)
+                .orElseThrow(() -> new ApiException(
+                        HttpStatus.NOT_FOUND,
+                        "No cover letter found. Run Cover Letter for this job first."));
     }
 
     private byte[] generateEvaluatePdf(UUID userId, UUID userJobId) {

@@ -4,6 +4,7 @@ import type { Request, Response } from 'express';
 import billingRoutes from './billing.routes.js';
 
 type RouteLayer = {
+  handle?: unknown;
   route?: {
     path: string;
     methods: Record<string, boolean>;
@@ -12,21 +13,26 @@ type RouteLayer = {
 };
 
 function postRoute(path: string): RouteLayer | undefined {
-  return (billingRoutes.stack as RouteLayer[]).find(
+  return ((billingRoutes.stack as unknown) as RouteLayer[]).find(
     (layer) => layer.route?.path === path && layer.route.methods.post,
   );
 }
 
 function getRoute(path: string): RouteLayer | undefined {
-  return (billingRoutes.stack as RouteLayer[]).find(
+  return ((billingRoutes.stack as unknown) as RouteLayer[]).find(
     (layer) => layer.route?.path === path && layer.route.methods.get,
   );
 }
 
-test('billing webhook POST is registered without authGuard', () => {
+test('billing webhook is not on the router (registered in server.ts with rate limit)', () => {
   const webhook = postRoute('/webhook');
-  assert.ok(webhook?.route);
-  const middlewareNames = webhook.route!.stack.map((layer) => layer.name || layer.handle?.name || '');
+  assert.equal(webhook, undefined);
+});
+
+test('billing plans GET is registered without authGuard', () => {
+  const plans = getRoute('/plans');
+  assert.ok(plans?.route);
+  const middlewareNames = plans.route!.stack.map((layer) => layer.name || layer.handle?.name || '');
   assert.ok(!middlewareNames.some((name) => name.includes('authGuard')));
 });
 
@@ -46,7 +52,7 @@ test('billing subscription GET requires authGuard', () => {
 });
 
 test('unknown billing route returns 404 JSON', async () => {
-  const catchAll = (billingRoutes.stack as RouteLayer[]).find((layer) => !layer.route);
+  const catchAll = ((billingRoutes.stack as unknown) as RouteLayer[]).find((layer) => !layer.route);
   assert.ok(catchAll?.handle);
 
   const req = { method: 'GET', path: '/unknown-billing-path' } as Request;

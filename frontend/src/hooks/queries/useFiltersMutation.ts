@@ -26,7 +26,10 @@ export function useFiltersMutation() {
   const qc = useQueryClient();
 
   return useMutation({
-    mutationFn: (payload: UpdateProfilePayload) => profileApi.update(payload),
+    mutationFn: (payload: UpdateProfilePayload) => {
+      const cached = qc.getQueryData<Profile>(queryKeys.profile.current());
+      return profileApi.update(payload, cached?.version);
+    },
 
     onMutate: async (payload) => {
       await qc.cancelQueries({ queryKey: queryKeys.profile.current() });
@@ -40,9 +43,13 @@ export function useFiltersMutation() {
       return { prev };
     },
 
-    onError: (_err, _vars, ctx) => {
+    onError: (err, _vars, ctx) => {
       if (ctx?.prev) {
         qc.setQueryData(queryKeys.profile.current(), ctx.prev);
+      }
+      const status = (err as { response?: { status?: number } }).response?.status;
+      if (status === 409) {
+        void qc.invalidateQueries({ queryKey: queryKeys.profile.current() });
       }
     },
 

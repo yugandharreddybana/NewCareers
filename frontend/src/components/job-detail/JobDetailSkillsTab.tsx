@@ -1,10 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { useQuery } from '@tanstack/react-query';
 import toast from 'react-hot-toast';
 import { useSkill } from '@/hooks/useSkill';
-import { useJobsList } from '@/hooks/queries';
-import { profileApi } from '@/services/api';
-import { queryKeys } from '@/lib/queryKeys';
+import { useJobsList, useProfileQuery } from '@/hooks/queries';
 import type { JobCard } from '@/types';
 import {
   SKILL_COUNT,
@@ -72,10 +69,7 @@ export function JobDetailSkillsTab({
 }: Props) {
   const userJobId = job.userJobId;
   const { data: jobsList } = useJobsList();
-  const { data: profile } = useQuery({
-    queryKey: queryKeys.profile.current(),
-    queryFn: () => profileApi.get(),
-  });
+  const { data: profile } = useProfileQuery();
 
   const [activeSkill, setActiveSkill] = useState<SkillName | null>(null);
   const [completedSkills, setCompletedSkills] = useState<Set<SkillName>>(() => {
@@ -260,7 +254,7 @@ export function JobDetailSkillsTab({
         return;
       }
 
-      if (forceRefresh) {
+      if (forceRefresh && entry.id !== 'cover-letter') {
         setHistoryIndex(0);
         setRunHistory([]);
       }

@@ -410,11 +410,15 @@ public class TailorResumeHtmlRenderer {
 
         entry.append("</div>");
 
-        if (!role.company().isBlank()) {
+        String subline = role.company();
+        if (!role.location().isBlank()) {
+            subline = subline.isBlank() ? role.location() : subline + " | " + role.location();
+        }
+        if (!subline.isBlank()) {
 
             entry.append("<div class=\"entry-subline experience-company\">")
 
-                .append(escape(role.company())).append("</div>");
+                .append(escape(subline)).append("</div>");
 
         }
 

@@ -34,4 +34,10 @@ describe('getUserFacingErrorMessage', () => {
     const err = { status: 401, normalizedMessage: 'Account is no longer active' };
     expect(getUserFacingErrorMessage(err)).toContain('session');
   });
+
+  it('maps generic 403 to permission guidance instead of session expiry', () => {
+    const err = { status: 403, normalizedMessage: 'Plan limit reached' };
+    expect(getUserFacingErrorMessage(err)).toContain('permission');
+    expect(getUserFacingErrorMessage(err)).not.toContain('session');
+  });
 });

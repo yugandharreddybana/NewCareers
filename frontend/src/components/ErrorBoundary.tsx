@@ -114,7 +114,7 @@ export class ErrorBoundary extends Component<Props, State> {
             <button
               type="button"
               onClick={this.handleReset}
-              className="px-4 py-2 rounded-lg bg-indigo-600 text-white text-sm hover:bg-indigo-700 transition"
+              className="px-4 py-2 rounded-lg bg-brand-500 text-white text-sm hover:bg-brand-600 transition"
             >
               Try again
             </button>
@@ -171,7 +171,7 @@ export function RouteFallback({
         <button
           type="button"
           onClick={onRetry}
-          className="px-4 py-2 rounded-lg bg-indigo-600 text-white text-sm hover:bg-indigo-700 transition"
+          className="px-4 py-2 rounded-lg bg-brand-500 text-white text-sm hover:bg-brand-600 transition"
         >
           Try again
         </button>

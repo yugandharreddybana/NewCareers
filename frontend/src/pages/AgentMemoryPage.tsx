@@ -289,7 +289,7 @@ const AgentMemoryPage = () => {
             <button
               onClick={handleSearch}
               disabled={searching}
-              className="px-4 py-2 bg-indigo-500 hover:bg-indigo-600 disabled:opacity-60 text-white text-sm font-semibold rounded-lg transition-colors shrink-0"
+              className="px-4 py-2 bg-brand-500 hover:bg-brand-600 disabled:opacity-60 text-white text-sm font-semibold rounded-lg transition-colors shrink-0"
             >
               {searching ? 'Searching...' : 'Search'}
             </button>
@@ -363,7 +363,7 @@ const AgentMemoryPage = () => {
             <button
               onClick={handleAdd}
               disabled={adding}
-              className="flex-1 py-2 bg-indigo-500 hover:bg-indigo-600 disabled:opacity-60 text-white text-sm font-semibold rounded-lg transition-colors"
+              className="flex-1 py-2 bg-brand-500 hover:bg-brand-600 disabled:opacity-60 text-white text-sm font-semibold rounded-lg transition-colors"
             >
               {adding ? 'Adding...' : 'Add Memory'}
             </button>

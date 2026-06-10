@@ -29,12 +29,13 @@ const EXPERIENCE_YEARS_TO_LEVEL: Record<string, string> = {
   '10+': 'lead',
 };
 
+/** Encodes multi-select work settings into {@code remote_policy} (max 32 chars in DB). */
 export function deriveRemotePolicy(settings: WorkSettings): string {
-  const { remote, onsite, hybrid } = settings;
-  if (hybrid || (remote && onsite)) return 'Hybrid';
-  if (remote) return 'Remote';
-  if (onsite) return 'On-site';
-  return 'Hybrid';
+  const parts: string[] = [];
+  if (settings.remote) parts.push('Remote');
+  if (settings.onsite) parts.push('On-site');
+  if (settings.hybrid) parts.push('Hybrid');
+  return parts.length > 0 ? parts.join(', ') : 'Hybrid';
 }
 
 function mapWorkExperience(entries: OnboardingWorkInput[]): OnboardingWorkEntry[] {
@@ -72,11 +73,14 @@ function mapEducation(entries: OnboardingEducationInput[]): OnboardingEducationE
       const degreeTitle = (e.degreeTitle ?? parsed?.title ?? legacySource).trim();
       const legacyDegree =
         degreeTitle || (degreeLevel ? degreeLevelLabel(degreeLevel as DegreeLevel) : legacySource.trim());
+      const endYear = (e.endYear?.trim() || e.graduationYear?.trim()) ?? '';
       const row: OnboardingEducationEntry = {
         schoolName: e.schoolName.trim(),
         degree: legacyDegree,
         fieldOfStudy: e.fieldOfStudy.trim() || parsed?.fieldHint || '',
-        graduationYear: e.graduationYear.trim(),
+        startYear: (e.startYear ?? '').trim(),
+        endYear,
+        graduationYear: endYear,
         location: (e.location ?? '').trim(),
       };
       if (degreeLevel) row.degreeLevel = degreeLevel;
@@ -131,7 +135,7 @@ export function buildOnboardingProfilePayload(
     ...(trimmedHeadline ? { goalTitle: trimmedHeadline } : {}),
     targetRoles,
     techStack: [...preferences.selectedTech],
-    workTypes: [...preferences.workTypes],
+    sectors: [...preferences.workTypes],
     location: trimmedLocation || 'Dublin',
     salaryMin: preferences.salaryMinK * 1000,
     salaryMax: preferences.salaryMaxK * 1000,

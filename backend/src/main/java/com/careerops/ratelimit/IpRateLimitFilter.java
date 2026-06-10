@@ -35,10 +35,12 @@ public class IpRateLimitFilter extends OncePerRequestFilter {
     private static final int WEBHOOK_REQUESTS_PER_MINUTE = 100;
 
     private static final Set<String> AUTH_LIMITED_PATHS = Set.of(
-        "/auth/register",
-        "/auth/signup-intent",
-        "/auth/login",
+            "/auth/register",
+            "/auth/signup-intent",
+            "/auth/login",
             "/auth/google",
+            "/auth/two-factor/verify",
+            "/auth/google/link/confirm",
             "/auth/refresh",
             "/auth/forgot-password",
             "/auth/reset-password",

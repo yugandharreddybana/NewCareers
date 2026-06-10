@@ -1,0 +1,22 @@
+sequenceDiagram
+    participant User
+    participant OnbRoute as OnboardingRoute
+    participant Onb as Onboarding.tsx
+
+    User->>OnbRoute: GET /onboarding
+    alt loading
+        OnbRoute-->>User: PageLoader
+    else user.onboarded
+        OnbRoute-->>User: redirect /dashboard or welcome=1
+    else guest and no pendingSignup
+        OnbRoute-->>User: redirect /signup
+    else deferred signup guest
+        OnbRoute-->>User: render Onboarding pending intent
+    else Google user JWT not onboarded
+        OnbRoute-->>User: render Onboarding no pendingSignup
+    end
+    Onb->>Onb: force light theme lock scroll
+    Onb->>Onb: listen AUTH_LOGGED_OUT_EVENT
+    alt session lost mid-flow
+        Onb-->>User: toast then redirect signup session_expired
+    end

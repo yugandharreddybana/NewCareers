@@ -7,6 +7,7 @@ import org.junit.jupiter.api.Test;
 import org.springframework.mock.web.MockFilterChain;
 import org.springframework.mock.web.MockHttpServletRequest;
 import org.springframework.mock.web.MockHttpServletResponse;
+import org.springframework.web.multipart.support.StandardServletMultipartResolver;
 
 import java.nio.charset.StandardCharsets;
 
@@ -19,7 +20,8 @@ class HmacVerificationFilterTest {
     @BeforeEach
     void setUp() {
         InternalHmacSigner signer = InternalHmacSigner.forTest(InternalRequestHeaders.TEST_SECRET.getBytes(StandardCharsets.UTF_8));
-        filter = new HmacVerificationFilter(signer, new PublicPathPolicy(new MockEnvironment()));
+        filter = new HmacVerificationFilter(
+                signer, new PublicPathPolicy(new MockEnvironment()), new StandardServletMultipartResolver());
     }
 
     @Test
@@ -91,6 +93,76 @@ class HmacVerificationFilterTest {
 
         assertThat(chain.getRequest()).isNull();
         assertThat(response.getStatus()).isEqualTo(401);
+    }
+
+    @Test
+    @DisplayName("POST /auth/signup-intent bypasses HMAC (pre-auth signup)")
+    void signupIntentBypassesHmac() throws Exception {
+        MockHttpServletRequest request = new MockHttpServletRequest("POST", "/auth/signup-intent");
+        request.setServletPath("/auth/signup-intent");
+        MockHttpServletResponse response = new MockHttpServletResponse();
+        MockFilterChain chain = new MockFilterChain();
+
+        filter.doFilter(request, response, chain);
+
+        assertThat(chain.getRequest()).isNotNull();
+        assertThat(response.getStatus()).isEqualTo(200);
+    }
+
+    @Test
+    @DisplayName("POST /profile/cv with binary multipart body verifies when signed with ISO-8859-1")
+    void binaryMultipartCvUpload() throws Exception {
+        byte[] body = new byte[] {
+                0x2d, 0x2d, 0x62, 0x6f, 0x75, 0x6e, 0x64, 0x61, 0x72, 0x79,
+                (byte) 0xFF, (byte) 0xFE, 0x25, 0x50, 0x44, 0x46
+        };
+        long ts = System.currentTimeMillis();
+        InternalHmacSigner signer = InternalHmacSigner.forTest(
+                InternalRequestHeaders.TEST_SECRET.getBytes(StandardCharsets.UTF_8));
+        String sig = signer.sign(ts, "POST", "/profile/cv", body);
+
+        MockHttpServletRequest request = new MockHttpServletRequest("POST", "/profile/cv");
+        request.setServletPath("/profile/cv");
+        request.setContent(body);
+        request.setContentType("multipart/form-data; boundary=----probe");
+        request.addHeader(InternalHmacSigner.TIMESTAMP_HEADER, String.valueOf(ts));
+        request.addHeader(InternalHmacSigner.SIGNATURE_HEADER, sig);
+
+        MockHttpServletResponse response = new MockHttpServletResponse();
+        MockFilterChain chain = new MockFilterChain();
+
+        filter.doFilter(request, response, chain);
+
+        assertThat(chain.getRequest()).isNotNull();
+        assertThat(response.getStatus()).isEqualTo(200);
+    }
+
+    @Test
+    @DisplayName("multipart replay resolves file part for downstream controllers")
+    void multipartReplayExposesFilePart() throws Exception {
+        byte[] body = java.nio.file.Files.readAllBytes(
+                java.nio.file.Path.of("src/test/resources/probe-multipart.bin"));
+        long ts = System.currentTimeMillis();
+        InternalHmacSigner signer = InternalHmacSigner.forTest(
+                InternalRequestHeaders.TEST_SECRET.getBytes(StandardCharsets.UTF_8));
+        String sig = signer.sign(ts, "POST", "/profile/cv", body);
+
+        MockHttpServletRequest request = new MockHttpServletRequest("POST", "/profile/cv");
+        request.setServletPath("/profile/cv");
+        request.setContent(body);
+        request.setContentType("multipart/form-data; boundary=--------------------------8d587913365aae9a34188335");
+        request.addHeader(InternalHmacSigner.TIMESTAMP_HEADER, String.valueOf(ts));
+        request.addHeader(InternalHmacSigner.SIGNATURE_HEADER, sig);
+
+        MockHttpServletResponse response = new MockHttpServletResponse();
+        MockFilterChain chain = new MockFilterChain();
+
+        filter.doFilter(request, response, chain);
+
+        assertThat(chain.getRequest()).isInstanceOf(org.springframework.web.multipart.MultipartHttpServletRequest.class);
+        var multipart = (org.springframework.web.multipart.MultipartHttpServletRequest) chain.getRequest();
+        assertThat(multipart.getFile("file")).isNotNull();
+        assertThat(multipart.getFile("file").getOriginalFilename()).isEqualTo("t.pdf");
     }
 
     @Test

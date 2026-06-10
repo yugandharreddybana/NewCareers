@@ -56,6 +56,7 @@ describe('mapCvParseToOnboarding', () => {
     expect(mapped.educationEntries[0]?.degreeLevel).toBe('bachelors');
     expect(mapped.educationEntries[0]?.degreeTitle).toBe('BSc CS');
     expect(mapped.projectEntries[0]?.projectName).toBe('CareerOps');
+    expect(mapped.projectEntries[0]?.projectLink).toBe('https://github.com/example/careerops');
   });
 
   it('strips field from degree title when fieldOfStudy is separate', () => {
@@ -77,6 +78,25 @@ describe('mapCvParseToOnboarding', () => {
     });
     expect(mapped.educationEntries[0]?.degreeTitle).toBe('M.Sc');
     expect(mapped.educationEntries[0]?.fieldOfStudy).toBe('Computer Science');
+  });
+
+  it('promotes github link from description when url missing', () => {
+    const mapped = mapCvParseToOnboarding({
+      cvMarkdown: '',
+      workExperience: [],
+      education: [],
+      projects: [
+        {
+          title: 'CareerOps Platform',
+          description: 'Built APIs.\ngithub.com/user/careerops',
+        },
+      ],
+      rolesFound: 0,
+      educationFound: 0,
+      projectsFound: 1,
+    });
+    expect(mapped.projectEntries[0]?.projectLink).toBe('https://github.com/user/careerops');
+    expect(mapped.projectEntries[0]?.projectDetails).not.toContain('github.com');
   });
 
   it('maps techTags and salvages pipe title from description', () => {
@@ -124,6 +144,22 @@ describe('mapCvParseToOnboarding', () => {
     });
     expect(mapped.workEntries[0]?.companyName).toBe('Independent Developer');
     expect(mapped.workEntries[0]?.location).toBe('Dublin, Ireland');
+  });
+
+  it('does not map extractedTechStack (handled in Onboarding step 3)', () => {
+    const mapped = mapCvParseToOnboarding({
+      cvMarkdown: '',
+      workExperience: [],
+      education: [],
+      projects: [],
+      rolesFound: 0,
+      educationFound: 0,
+      projectsFound: 0,
+      extractedTechStack: ['Java', 'React'],
+      parseSource: 'ai',
+    });
+    expect(mapped).not.toHaveProperty('selectedTech');
+    expect(mapped.workEntries).toHaveLength(1);
   });
 
   it('returns empty rows when parse finds nothing', () => {

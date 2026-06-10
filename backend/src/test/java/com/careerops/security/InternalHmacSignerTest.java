@@ -5,6 +5,10 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
 import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -52,5 +56,28 @@ class InternalHmacSignerTest {
     void shortSecret() {
         assertThatThrownBy(() -> InternalHmacSigner.forTest("short".getBytes(StandardCharsets.UTF_8)))
                 .isInstanceOf(IllegalArgumentException.class);
+    }
+
+    @Test
+    @DisplayName("Node-generated multipart probe verifies with ISO-8859-1")
+    void nodeGeneratedMultipartProbe() throws Exception {
+        Path resources = Path.of("src/test/resources");
+        byte[] body = Files.readAllBytes(resources.resolve("probe-multipart.bin"));
+        JsonNode meta = new ObjectMapper().readTree(resources.resolve("probe-multipart.meta.json").toFile());
+        long ts = meta.get("timestamp").asLong();
+        String sig = meta.get("signature").asText();
+
+        assertThat(signer.verify(ts, "POST", "/profile/cv", body, sig)).isTrue();
+        assertThat(signer.verifyLegacyUtf8Body(ts, "POST", "/profile/cv", body, sig)).isFalse();
+    }
+
+    @Test
+    @DisplayName("binary multipart body matches middleware latin1 signing")
+    void binaryBodyMatchesMiddlewareLatin1() {
+        long ts = 1_700_000_000_000L;
+        byte[] body = new byte[] {(byte) 0xFF, (byte) 0xFE, 0x61};
+        String sig = signer.sign(ts, "POST", "/profile/cv", body);
+        assertThat(sig).isEqualTo("e35fc74380536ed1b9be9fd7cb6386ccc1cbad3d4f6aad6e561c374002d2c642");
+        assertThat(signer.verify(ts, "POST", "/profile/cv", body, sig)).isTrue();
     }
 }

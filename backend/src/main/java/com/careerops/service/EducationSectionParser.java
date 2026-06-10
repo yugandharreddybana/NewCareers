@@ -30,7 +30,7 @@ final class EducationSectionParser {
             + "B\\.?Eng\\.?|M\\.?Eng\\.?|Associate|HND|LLB|PGDip|PG Dip)\\b"
     );
 
-    private static final Pattern PAREN_LOCATION = Pattern.compile("\\(([^)]+)\\)\\s*$");
+    private static final Pattern PAREN_LOCATION = Pattern.compile("\\(([^)]+)\\)(?=\\s*(?:,|$))");
 
     private static final Pattern TRAILING_DASH_LOCATION = Pattern.compile(
         "\\s+[—–-]\\s+([A-Za-z][A-Za-z .,'-]{1,48})\\s*$"
@@ -52,6 +52,8 @@ final class EducationSectionParser {
         String degree,
         String schoolName,
         String fieldOfStudy,
+        String startYear,
+        String endYear,
         String graduationYear,
         String location
     ) {}
@@ -98,7 +100,7 @@ final class EducationSectionParser {
                 current.add(stripped);
                 continue;
             }
-            if (!current.isEmpty() && looksLikeNewEducationEntry(stripped)) {
+            if (!current.isEmpty() && currentEntryLooksComplete(current) && looksLikeNewEducationEntry(stripped)) {
                 blocks.add(String.join("\n", current).trim());
                 current = new ArrayList<>();
             }
@@ -111,6 +113,13 @@ final class EducationSectionParser {
             return splitPipeLines(body);
         }
         return blocks.isEmpty() ? List.of(body.trim()) : blocks;
+    }
+
+    private static boolean currentEntryLooksComplete(List<String> current) {
+        String joined = String.join("\n", current);
+        return DEGREE_HINT.matcher(joined).find()
+            && INSTITUTION_HINT.matcher(joined).find()
+            && YEAR_IN_LINE.matcher(joined).find();
     }
 
     private static boolean looksLikeNewEducationEntry(String line) {
@@ -246,8 +255,16 @@ final class EducationSectionParser {
         }
         field = inferFieldOfStudy(degree, field);
 
-        return new ParsedEducation(degree, school, field, year, location);
+        YearRange years = extractYearRange(year.isBlank() ? block : year);
+        if (years.startYear().isBlank() && years.endYear().isBlank() && !year.isBlank()) {
+            years = extractYearRange(block);
+        }
+        String endYear = years.endYear();
+        String gradYear = endYear.isBlank() ? year : endYear;
+        return new ParsedEducation(degree, school, field, years.startYear(), endYear, gradYear, location);
     }
+
+    private record YearRange(String startYear, String endYear) {}
 
     private static String extractLocation(String text) {
         if (text == null || text.isBlank()) {
@@ -279,7 +296,9 @@ final class EducationSectionParser {
         if (paren.find()) {
             String inner = paren.group(1).trim();
             if (!inner.matches(".*\\d{4}.*")) {
-                out = out.substring(0, paren.start()).trim();
+                out = (out.substring(0, paren.start()) + out.substring(paren.end()))
+                    .replaceAll("\\s+,", ",")
+                    .trim();
             }
         }
         Matcher dash = TRAILING_DASH_LOCATION.matcher(out);
@@ -311,17 +330,37 @@ final class EducationSectionParser {
         return "";
     }
 
-    private static String extractYear(String text) {
+    private static YearRange extractYearRange(String text) {
         if (text == null || text.isBlank()) {
-            return "";
+            return new YearRange("", "");
         }
         Matcher range = YEAR_RANGE.matcher(text);
         if (range.find()) {
-            String end = range.group(2);
-            if (end != null && !end.matches("(?i)present|current")) {
-                return end;
+            String start = range.group(1);
+            String endRaw = range.group(2);
+            if (endRaw != null && endRaw.matches("(?i)present|current")) {
+                return new YearRange(start, "");
             }
-            return range.group(1);
+            String end = endRaw != null ? endRaw : "";
+            return new YearRange(start, end.isBlank() ? start : end);
+        }
+        return new YearRange("", extractSingleYear(text));
+    }
+
+    private static String extractYear(String text) {
+        YearRange range = extractYearRange(text);
+        if (!range.endYear().isBlank()) {
+            return range.endYear();
+        }
+        if (!range.startYear().isBlank()) {
+            return range.startYear();
+        }
+        return "";
+    }
+
+    private static String extractSingleYear(String text) {
+        if (text == null || text.isBlank()) {
+            return "";
         }
         Matcher trailing = TRAILING_YEAR.matcher(text.trim());
         if (trailing.find()) {
@@ -358,7 +397,9 @@ final class EducationSectionParser {
         }
         boolean hasDegree = DEGREE_HINT.matcher(e.degree()).find();
         boolean hasInstitution = INSTITUTION_HINT.matcher(e.schoolName()).find();
-        boolean hasYear = !e.graduationYear().isBlank();
+        boolean hasYear = !e.graduationYear().isBlank()
+            || !e.startYear().isBlank()
+            || !e.endYear().isBlank();
         boolean hasSchool = !e.schoolName().isBlank();
 
         if (hasDegree && (hasYear || hasSchool || hasInstitution)) {

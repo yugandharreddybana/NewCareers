@@ -182,7 +182,7 @@ export default function TailorCvPanel({
               onClick={() => setPanelView('preview')}
               className={`px-3 h-8 rounded-lg text-xs font-semibold border transition-all ${
                 panelView === 'preview'
-                  ? 'bg-indigo-600 text-white border-transparent'
+                  ? 'bg-brand-500 text-white border-transparent'
                   : 'bg-white text-slate-600 border-slate-200'
               }`}
             >
@@ -193,7 +193,7 @@ export default function TailorCvPanel({
               onClick={() => setPanelView('sections')}
               className={`px-3 h-8 rounded-lg text-xs font-semibold border transition-all ${
                 panelView === 'sections'
-                  ? 'bg-indigo-600 text-white border-transparent'
+                  ? 'bg-brand-500 text-white border-transparent'
                   : 'bg-white text-slate-600 border-slate-200'
               }`}
             >
@@ -262,7 +262,7 @@ export default function TailorCvPanel({
                       onClick={() => setActiveSection(i)}
                       className={`shrink-0 px-3 h-7 rounded-lg text-xs font-semibold border ${
                         i === activeSection
-                          ? 'bg-indigo-600 text-white border-transparent'
+                          ? 'bg-brand-500 text-white border-transparent'
                           : 'bg-white text-slate-500 border-slate-200'
                       }`}
                     >

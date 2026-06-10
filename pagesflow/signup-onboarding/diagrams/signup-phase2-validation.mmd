@@ -1,0 +1,21 @@
+sequenceDiagram
+    participant User
+    participant Signup as Signup.tsx
+
+    User->>Signup: Submit form
+    Signup->>Signup: validate name trim non-empty
+    alt name empty
+        Signup-->>User: Please enter your full name
+    else email invalid regex
+        Signup-->>User: Please enter a valid email address
+    else password not acceptable
+        Signup-->>User: password hint or choose password
+    else terms not accepted
+        Signup-->>User: Must accept Terms and Privacy
+    else AI consent not accepted
+        Signup-->>User: AI processing consent required
+    else CAPTCHA_ENABLED and no token
+        Signup-->>User: Complete the security check
+    else all valid
+        Signup->>Signup: proceed to Phase 3 reCAPTCHA check and API
+    end

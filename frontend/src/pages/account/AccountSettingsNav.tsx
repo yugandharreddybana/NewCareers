@@ -21,9 +21,10 @@ function isActive(pathname: string, to: string): boolean {
 
 export function AccountSettingsNav() {
   const { pathname } = useLocation();
+  const dangerActive = isActive(pathname, '/account/danger-zone');
 
   return (
-    <aside className="w-full md:w-64 flex-shrink-0 flex flex-col gap-stack-sm">
+    <aside className="account-settings-nav w-full md:w-64 shrink-0 flex flex-col gap-stack-sm py-8 md:py-12">
       <h2 className="font-label-sm text-label-sm text-on-surface-variant uppercase tracking-wider mb-stack-sm px-3">
         Account Settings
       </h2>
@@ -56,8 +57,13 @@ export function AccountSettingsNav() {
       <div className="h-px bg-outline-variant my-stack-sm" />
 
       <Link
-        to="/account/profile#danger-zone"
-        className="flex items-center gap-stack-md px-3 py-2 rounded text-error hover:bg-error-container hover:text-on-error-container transition-colors group"
+        to="/account/danger-zone"
+        className={
+          dangerActive
+            ? 'flex items-center gap-stack-md px-3 py-2 rounded bg-error-container text-on-error-container font-label-md text-label-md'
+            : 'flex items-center gap-stack-md px-3 py-2 rounded text-error hover:bg-error-container hover:text-on-error-container transition-colors group'
+        }
+        aria-current={dangerActive ? 'page' : undefined}
       >
         <span className="material-symbols-outlined" aria-hidden="true">warning</span>
         <span className="font-label-md text-label-md">Danger Zone</span>

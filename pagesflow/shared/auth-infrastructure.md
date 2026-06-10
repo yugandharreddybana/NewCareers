@@ -7,7 +7,7 @@ Cross-cutting authentication stack used by Login, Signup, Onboarding, and all pr
 | Layer | Role | Key file |
 |-------|------|----------|
 | UI | Pages call `useAuth()` | `frontend/src/context/AuthContext.tsx` |
-| Token store | Access in memory; refresh in sessionStorage or HttpOnly cookie | `frontend/src/lib/tokenStore.ts` |
+| Token store | Access token metadata in memory; refresh token in HttpOnly cookie only | `frontend/src/lib/tokenStore.ts` |
 | HTTP client | Axios + CSRF + silent refresh | `frontend/src/services/api.ts` |
 | BFF | Cookies, validation, proxy | `middleware/src/routes/auth.routes.ts` |
 | Backend | JWT issue, user lookup | `backend/.../AuthController.java`, `AuthService.java` |
@@ -49,16 +49,16 @@ sequenceDiagram
     end
 ```
 
-Guest pages (`/login`, `/signup`, `/forgot-password`) skip the initial `/auth/me` probe when no tokens exist. Deferred signup stores a server-side **signup intent** (`signupIntentId` + email in `sessionStorage` only — no password).
+Guest pages (`/login`, `/signup`, `/forgot-password`) skip the initial `/auth/me` probe when no tokens exist. Deferred signup stores a server-side **signup intent** plus email, consents, and client expiry in `sessionStorage` only; it never stores the plaintext password in the browser.
 
 ## Signup intent (deferred registration)
 
 | Step | Storage | API |
 |------|---------|-----|
-| Signup form submit | `sessionStorage`: `{ signupIntentId, email, consents }` | `POST /auth/signup-intent` |
+| Signup form submit | `sessionStorage`: `{ signupIntentId, email, consents, expiresAt }` | `POST /auth/signup-intent` |
 | Onboarding finish | consumes intent + email verification | `POST /auth/register` with `signupIntentId` |
 
-Onboarding email verification is bound to the same `signupIntentId` with a 15-minute TTL.
+Signup intent handoff expires after 30 minutes. Onboarding email verification has its own 20-minute client-side handoff TTL and server-side OTP expiry.
 
 ## Silent 401 refresh
 
@@ -77,8 +77,8 @@ Auth and profile API responses are excluded from Workbox runtime cache (`/api/v1
 
 | Mode | Refresh storage | TTL |
 |------|-----------------|-----|
-| Unchecked | `refreshToken` in response JSON → `sessionStorage` | ~1 day (session cookie) |
-| Checked | HttpOnly `co_refresh` cookie only | 30 days |
+| Unchecked | HttpOnly `co_refresh` session cookie | Browser session |
+| Checked | HttpOnly `co_refresh` + `co_remember` cookies | 30 days |
 
 Access token handling is identical in both modes.
 

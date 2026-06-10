@@ -232,6 +232,15 @@ public final class JobDeliveryFilters {
         return filterByDesiredRoles(filtered, profile);
     }
 
+    /**
+     * Same as {@link #applyPipelineFilters} but skips strict desired-role gate — for sparse
+     * profiles with no {@code targetRoles} when serving from the cached job pool.
+     */
+    public static List<Job> applyPipelineFiltersRelaxed(List<Job> jobs, int maxAgeDays, UserProfile profile) {
+        return filterPlausibleJobTitles(
+                filterByLocation(filterByMaxAge(jobs, maxAgeDays), profile));
+    }
+
     public static boolean isLocationMatch(String jobLocation, UserProfile profile) {
         if (jobLocation == null || jobLocation.isBlank()) {
             return true;

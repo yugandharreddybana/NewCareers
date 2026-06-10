@@ -19,7 +19,7 @@ class CaptchaServiceTest {
         when(env.acceptsProfiles(org.springframework.core.env.Profiles.of("prod", "staging", "production")))
                 .thenReturn(true);
 
-        CaptchaService service = new CaptchaService(WebClient.builder(), "", env);
+        CaptchaService service = new CaptchaService(WebClient.builder(), "", false, env);
 
         assertThat(service.verify("token")).isFalse();
     }
@@ -32,7 +32,7 @@ class CaptchaServiceTest {
         when(env.acceptsProfiles(org.springframework.core.env.Profiles.of("prod", "staging", "production")))
                 .thenReturn(true);
 
-        CaptchaService service = new CaptchaService(WebClient.builder(), "", env);
+        CaptchaService service = new CaptchaService(WebClient.builder(), "", false, env);
 
         assertThat(service.verify("token")).isFalse();
     }
@@ -45,8 +45,38 @@ class CaptchaServiceTest {
         when(env.acceptsProfiles(org.springframework.core.env.Profiles.of("prod", "staging", "production")))
                 .thenReturn(false);
 
-        CaptchaService service = new CaptchaService(WebClient.builder(), "", env);
+        CaptchaService service = new CaptchaService(WebClient.builder(), "", false, env);
 
         assertThat(service.verify("token")).isTrue();
+    }
+
+    @Test
+    @DisplayName("dev-mode disables enforcement even when secret is configured")
+    void devModeSkipsEnforcementWithSecret() {
+        Environment env = mock(Environment.class);
+        when(env.getActiveProfiles()).thenReturn(new String[] { "dev" });
+        when(env.acceptsProfiles(org.springframework.core.env.Profiles.of("prod", "staging", "production")))
+                .thenReturn(false);
+
+        CaptchaService service = new CaptchaService(
+                WebClient.builder(), "6LcE-g8tAAAAAI1rCN3Cy7gy20Yj17Fn35KfgKAW", true, env);
+
+        assertThat(service.isConfigured()).isTrue();
+        assertThat(service.isEnforcementActive()).isFalse();
+        assertThat(service.verify("any-token")).isTrue();
+    }
+
+    @Test
+    @DisplayName("staging enforces when secret is configured and dev-mode is off")
+    void stagingEnforcesWithSecret() {
+        Environment env = mock(Environment.class);
+        when(env.getActiveProfiles()).thenReturn(new String[] { "staging" });
+        when(env.acceptsProfiles(org.springframework.core.env.Profiles.of("prod", "staging", "production")))
+                .thenReturn(true);
+
+        CaptchaService service = new CaptchaService(
+                WebClient.builder(), "6LcE-g8tAAAAAI1rCN3Cy7gy20Yj17Fn35KfgKAW", true, env);
+
+        assertThat(service.isEnforcementActive()).isTrue();
     }
 }

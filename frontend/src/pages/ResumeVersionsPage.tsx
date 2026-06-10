@@ -245,7 +245,7 @@ const ResumeVersionsPage = () => {
                 event.target.value = '';
               }}
             />
-            <button onClick={() => fileRef.current?.click()} disabled={uploading} className="flex items-center gap-2 px-4 py-2.5 bg-indigo-500 hover:bg-indigo-600 disabled:opacity-60 text-white text-sm font-semibold rounded-lg transition-colors">
+            <button onClick={() => fileRef.current?.click()} disabled={uploading} className="flex items-center gap-2 px-4 py-2.5 bg-brand-500 hover:bg-brand-600 disabled:opacity-60 text-white text-sm font-semibold rounded-lg transition-colors">
               <Upload size={15} /> Upload Version
             </button>
           </div>
@@ -283,7 +283,7 @@ const ResumeVersionsPage = () => {
                 <option value="">Select version B</option>
                 {versions.filter(version => version.id !== compareA).map(version => <option key={version.id} value={version.id}>{version.name}</option>)}
               </select>
-              <button disabled={!compareA || !compareB || comparing} onClick={() => void handleCompare()} className="px-4 py-2 bg-indigo-500 hover:bg-indigo-600 disabled:opacity-40 text-white text-sm font-semibold rounded-lg transition-colors">
+              <button disabled={!compareA || !compareB || comparing} onClick={() => void handleCompare()} className="px-4 py-2 bg-brand-500 hover:bg-brand-600 disabled:opacity-40 text-white text-sm font-semibold rounded-lg transition-colors">
                 {comparing ? 'Comparing...' : 'Compare'}
               </button>
             </div>

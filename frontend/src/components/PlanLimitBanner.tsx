@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
+import { safeRedirectPath } from '@/components/ProtectedRoute';
 import {
   formatPlanLimitFeature,
 } from '@/lib/subscriptionUtils';
@@ -40,17 +41,18 @@ export function PlanLimitBanner() {
   const featureLabel = formatPlanLimitFeature(payload.feature);
   const planLabel = planDisplayName(payload.currentPlan);
   const upgradeLabel = upgradeCtaLabel(payload.currentPlan);
+  const upgradePath = safeRedirectPath(payload.upgradeUrl) ?? '/pricing';
 
   return (
     <div
       className="w-full bg-amber-50 border-b border-amber-200 text-amber-950 shadow-sm"
       role="alert"
     >
-      <div className="max-w-container-max mx-auto px-margin-mobile md:px-margin-desktop py-3 flex flex-col sm:flex-row sm:items-center gap-3 sm:gap-4">
+      <div className="app-shell py-3 flex flex-col sm:flex-row sm:items-center gap-3 sm:gap-4 w-full">
         <p className="font-body-md text-body-md flex-1">
           You&apos;ve reached your {featureLabel} limit on the {planLabel} plan.{' '}
           <Link
-            to={payload.upgradeUrl.startsWith('/') ? payload.upgradeUrl : '/pricing'}
+            to={upgradePath}
             className="font-label-md text-label-md text-primary underline underline-offset-2 hover:text-primary/80"
           >
             {upgradeLabel}

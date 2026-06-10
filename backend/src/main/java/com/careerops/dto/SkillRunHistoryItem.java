@@ -8,4 +8,5 @@ import java.util.UUID;
 public record SkillRunHistoryItem(
         UUID id,
         Instant createdAt,
-        JsonNode output) {}
+        JsonNode output,
+        Integer totalTokens) {}

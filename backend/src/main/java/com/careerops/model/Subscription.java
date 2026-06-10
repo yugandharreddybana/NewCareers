@@ -24,7 +24,7 @@ public class Subscription extends BaseEntity {
 
     @Enumerated(EnumType.STRING)
     @Column(nullable = false, length = 20)
-    private SubscriptionStatus status = SubscriptionStatus.TRIALING;
+    private SubscriptionStatus status = SubscriptionStatus.ACTIVE;
 
     @Column(name = "stripe_customer_id", length = 255)
     private String stripeCustomerId;
@@ -32,8 +32,14 @@ public class Subscription extends BaseEntity {
     @Column(name = "stripe_subscription_id", length = 255)
     private String stripeSubscriptionId;
 
+    @Column(name = "current_period_start")
+    private Instant currentPeriodStart;
+
     @Column(name = "current_period_end")
     private Instant currentPeriodEnd;
+
+    @Column(name = "cancel_at_period_end", nullable = false)
+    private boolean cancelAtPeriodEnd;
 
     @Column(name = "trial_ends_at")
     private Instant trialEndsAt;

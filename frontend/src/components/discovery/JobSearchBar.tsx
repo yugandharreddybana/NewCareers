@@ -113,7 +113,7 @@ export default function JobSearchBar({ onSearch, loading = false }: Props) {
         <button
           type="submit"
           disabled={loading}
-          className="h-10 px-5 bg-indigo-500 hover:bg-indigo-600 text-white rounded-xl
+          className="h-10 px-5 bg-brand-500 hover:bg-brand-600 text-white rounded-xl
                      font-semibold text-sm transition-all disabled:opacity-50 shrink-0"
         >
           {loading ? 'Searching…' : 'Search'}

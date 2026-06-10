@@ -52,7 +52,7 @@ describe('buildOnboardingProfilePayload', () => {
       goalTitle: 'Senior Product Designer',
       targetRoles: ['Software Engineer'],
       techStack: ['React', 'TypeScript'],
-      workTypes: ['Full-time'],
+      sectors: ['Full-time'],
       location: 'Dublin, Ireland',
       salaryMin: 60_000,
       salaryMax: 120_000,
@@ -144,5 +144,11 @@ describe('deriveRemotePolicy', () => {
     expect(
       deriveRemotePolicy({ remote: false, onsite: false, hybrid: false }),
     ).toBe('Hybrid');
+  });
+
+  it('encodes multi-select work settings as comma-separated policy', () => {
+    expect(
+      deriveRemotePolicy({ remote: true, onsite: true, hybrid: true }),
+    ).toBe('Remote, On-site, Hybrid');
   });
 });

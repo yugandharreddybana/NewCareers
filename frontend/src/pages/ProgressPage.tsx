@@ -71,7 +71,7 @@ const ProgressPage: React.FC = () => {
           <p className="text-sm text-gray-500">{loadError ?? 'Progress data is not available yet.'}</p>
           <button
             onClick={() => { void refresh(); }}
-            className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-indigo-500 text-white text-sm font-semibold hover:bg-indigo-600 transition-colors"
+            className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-indigo-500 text-white text-sm font-semibold hover:bg-brand-600 transition-colors"
           >
             <RefreshCw size={14} />
             Retry

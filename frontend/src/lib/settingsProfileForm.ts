@@ -1,5 +1,5 @@
 import type { OnboardingEducationEntry, OnboardingWorkEntry, UpdateProfilePayload } from '@/context/AuthContext';
-import type { Profile } from '@/types';
+import type { PortfolioItem, Profile } from '@/types';
 import type { User } from '@/types';
 import {
   buildOnboardingProfilePayload,
@@ -10,6 +10,7 @@ import {
 import type { PreferencesStepValues, WorkSettings } from '@/components/onboarding/PreferencesStep';
 import { AVAILABILITY_OPTIONS, WORK_TYPE_OPTIONS } from '@/components/onboarding/PreferencesStep';
 import { normalizeYearMonth } from '@/components/onboarding/MonthYearField';
+import { readableDisplayName } from '@/lib/readableDisplayName';
 
 const LEVEL_TO_YEARS: Record<string, string> = {
   junior: '0-2',
@@ -27,6 +28,7 @@ export type SettingsFormState = {
   experienceYears: string;
   workExperience: OnboardingWorkEntry[];
   education: OnboardingEducationEntry[];
+  portfolioItems: PortfolioItem[];
   selectedRoles: string[];
   selectedTech: string[];
   workTypes: string[];
@@ -60,16 +62,23 @@ export function emptyEducationEntry(): OnboardingEducationEntry {
     schoolName: '',
     degree: '',
     fieldOfStudy: '',
+    startYear: '',
+    endYear: '',
     graduationYear: '',
     location: '',
   };
 }
 
 export function remotePolicyToWorkSettings(policy?: string | null): WorkSettings {
-  const p = (policy ?? '').toLowerCase();
-  if (p.includes('hybrid')) return { remote: false, onsite: false, hybrid: true };
-  if (p.includes('remote')) return { remote: true, onsite: false, hybrid: false };
-  if (p.includes('on-site') || p.includes('onsite')) return { remote: false, onsite: true, hybrid: false };
+  const raw = (policy ?? '').trim();
+  if (!raw) return { remote: true, onsite: false, hybrid: false };
+  const lower = raw.toLowerCase();
+  const remote = /\bremote\b/.test(lower);
+  const onsite = /\bon-?site\b/.test(lower);
+  const hybrid = /\bhybrid\b/.test(lower);
+  if (remote || onsite || hybrid) {
+    return { remote, onsite, hybrid };
+  }
   return { remote: true, onsite: false, hybrid: false };
 }
 
@@ -98,11 +107,14 @@ export function profileToSettingsForm(profile: Profile, user: User | null): Sett
   const edu =
     profile.education && profile.education.length > 0
       ? profile.education.map(e => {
+          const endYear = (e.endYear?.trim() || e.graduationYear?.trim()) ?? '';
           const row: OnboardingEducationEntry = {
             schoolName: e.schoolName ?? '',
             degree: e.degree ?? '',
             fieldOfStudy: e.fieldOfStudy ?? '',
-            graduationYear: e.graduationYear ?? '',
+            startYear: e.startYear ?? '',
+            endYear,
+            graduationYear: endYear,
             location: e.location ?? '',
           };
           if (e.degreeLevel) row.degreeLevel = e.degreeLevel;
@@ -123,14 +135,15 @@ export function profileToSettingsForm(profile: Profile, user: User | null): Sett
       : ['Full-time'];
 
   return {
-    name: user?.name ?? '',
+    name: readableDisplayName(user?.name) || user?.name?.trim() || '',
     email: user?.email ?? '',
-    goalTitle: profile.goalTitle ?? '',
-    goalLocation: profile.goalLocation ?? '',
-    location: profile.location ?? '',
+    goalTitle: readableDisplayName(profile.goalTitle),
+    goalLocation: readableDisplayName(profile.goalLocation),
+    location: readableDisplayName(profile.location),
     experienceYears: LEVEL_TO_YEARS[profile.experienceLevel ?? 'mid'] ?? '3-5',
     workExperience: work,
     education: edu,
+    portfolioItems: profile.portfolioItems ?? [],
     selectedRoles: profile.targetRoles ?? [],
     selectedTech: profile.techStack ?? [],
     workTypes: workTypes.length > 0 ? workTypes : ['Full-time'],

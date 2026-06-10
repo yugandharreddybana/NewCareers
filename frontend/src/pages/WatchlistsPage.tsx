@@ -101,7 +101,7 @@ const CreateModal = ({ onClose, onCreate }: { onClose: () => void; onCreate: (wa
         </div>
         <div className="flex gap-3 pt-2">
           <button onClick={onClose} className="flex-1 py-2.5 border border-gray-300 rounded-lg text-sm text-gray-600 hover:bg-gray-50">Cancel</button>
-          <button onClick={handleSubmit} disabled={saving} className="flex-1 py-2.5 bg-indigo-500 hover:bg-indigo-600 disabled:opacity-60 text-white text-sm font-semibold rounded-lg transition-colors">
+          <button onClick={handleSubmit} disabled={saving} className="flex-1 py-2.5 bg-brand-500 hover:bg-brand-600 disabled:opacity-60 text-white text-sm font-semibold rounded-lg transition-colors">
             {saving ? 'Creating...' : 'Create Watchlist'}
           </button>
         </div>
@@ -241,7 +241,7 @@ const WatchlistsPage = () => {
             <h1 className="text-2xl font-semibold text-gray-900">Watchlists</h1>
             <p className="text-sm text-gray-500 mt-1">Saved searches that auto-deliver new matches to your pipeline.</p>
           </div>
-          <button onClick={() => setShowModal(true)} className="flex items-center gap-2 px-4 py-2.5 bg-indigo-500 hover:bg-indigo-600 text-white text-sm font-semibold rounded-lg transition-colors">
+          <button onClick={() => setShowModal(true)} className="flex items-center gap-2 px-4 py-2.5 bg-brand-500 hover:bg-brand-600 text-white text-sm font-semibold rounded-lg transition-colors">
             <Plus size={15} /> New Watchlist
           </button>
         </div>

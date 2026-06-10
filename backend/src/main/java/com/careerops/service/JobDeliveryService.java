@@ -73,6 +73,7 @@ public class JobDeliveryService {
     private final StructuredJobEvaluationBuilder evaluationBuilder;
     private final EvaluationReportEnrichmentService evaluationEnrichment;
     private final ParallelJobEvaluationService   parallelEval;   // B1-G3
+    private final ProfileReadableFields          profileFields;
     private final AdzunaSource                   adzuna;
     private final IndeedRssSource                indeed;
     private final IrishJobsSource                irishJobs;
@@ -82,9 +83,16 @@ public class JobDeliveryService {
     private final LinkedInPublicSource           linkedInPublic;
 
     private final JobFetchSettings fetchSettings;
+    private final CachedJobPoolService cachedJobPool;
 
     @Value("${jobs.gemini.prerank.pool:25}")
     private int preRankPool;
+
+    @Value("${jobs.onboarding.use-cached-pool:true}")
+    private boolean useCachedPool;
+
+    @Value("${jobs.cached-pool.fetch-cap:500}")
+    private int cachedPoolFetchCap;
 
     @Value("${jobs.onboarding.heuristic-fallback:false}")
     private boolean onboardingHeuristicFallback;
@@ -110,6 +118,7 @@ public class JobDeliveryService {
                               StructuredJobEvaluationBuilder evaluationBuilder,
                               EvaluationReportEnrichmentService evaluationEnrichment,
                               ParallelJobEvaluationService parallelEval,
+                              ProfileReadableFields profileFields,
                               AdzunaSource adzuna,
                               IndeedRssSource indeed,
                               IrishJobsSource irishJobs,
@@ -117,7 +126,8 @@ public class JobDeliveryService {
                               JobsIrelandSource jobsIreland,
                               CompanyCareerSource companyPages,
                               LinkedInPublicSource linkedInPublic,
-                              JobFetchSettings fetchSettings) {
+                              JobFetchSettings fetchSettings,
+                              CachedJobPoolService cachedJobPool) {
         this.scrape              = scrape;    this.dedup    = dedup;    this.nvidia   = nvidia;
         this.prompts             = prompts;   this.profiles = profiles; this.userJobs = userJobs;
         this.jobs                = jobs;
@@ -127,12 +137,27 @@ public class JobDeliveryService {
         this.evaluationBuilder   = evaluationBuilder;
         this.evaluationEnrichment = evaluationEnrichment;
         this.parallelEval        = parallelEval;
+        this.profileFields       = profileFields;
         this.adzuna              = adzuna;   this.indeed   = indeed;
         this.irishJobs           = irishJobs; this.jobsIe   = jobsIe;
         this.jobsIreland         = jobsIreland; this.companyPages = companyPages;
         this.linkedInPublic      = linkedInPublic;
         this.fetchSettings       = fetchSettings;
+        this.cachedJobPool       = cachedJobPool;
         this.transactionTemplate = new TransactionTemplate(transactionManager);
+    }
+
+    /**
+     * Whether first-run onboarding will query {@code careerops.jobs} instead of external boards.
+     * Used by {@link OnboardingDeliveryService} for progress copy.
+     */
+    public boolean willUseCachedPoolForOnboarding(UUID userId) {
+        return useCachedPool && isFirstDelivery(userId);
+    }
+
+    // TODO: users who delete all pipeline jobs also qualify — acceptable for v1.
+    private boolean isFirstDelivery(UUID userId) {
+        return userJobs.countByUserIdAndDeletedAtIsNull(userId) == 0;
     }
 
     private List<Job> applyDeliveryFilters(List<Job> raw, UserProfile profile) {
@@ -438,8 +463,23 @@ public class JobDeliveryService {
         if (cvService.activeCvText(userId).isBlank())
             throw new ApiException(HttpStatus.BAD_REQUEST, "Upload your CV before job matching");
 
-        List<Job> raw = applyDeliveryFilters(scrape.fetchRaw(p), p);
-        logSourceMix(userId, raw);
+        boolean cachedPath = willUseCachedPoolForOnboarding(userId);
+        List<Job> raw;
+        if (cachedPath) {
+            raw = cachedJobPool.loadCandidates(p, cachedPoolFetchCap);
+            log.info("Onboarding user {} cached pool: {} candidates", userId, raw.size());
+        } else {
+            raw = applyDeliveryFilters(scrape.fetchRaw(p), p);
+            logSourceMix(userId, raw);
+        }
+        return deliverForOnboardingFromPool(userId, p, raw, targetCount, minRequired, onProgress, cachedPath);
+    }
+
+    private int deliverForOnboardingFromPool(
+            UUID userId, UserProfile p, List<Job> raw,
+            int targetCount, int minRequired,
+            Consumer<OnboardingDeliveryProgress> onProgress,
+            boolean cachedPath) {
         List<Job> deduped = dedup.dedupForPipelineDelivery(userId, raw);
         log.info("Onboarding user {} dedup pool size: {}", userId, deduped.size());
 
@@ -518,7 +558,9 @@ public class JobDeliveryService {
             } catch (Exception ex) {
                 log.warn("Onboarding scoring failed for job {}: {}", j.getId(), ex.getMessage());
             }
-            try { Thread.sleep(400); } catch (InterruptedException ie) { Thread.currentThread().interrupt(); break; }
+            if (!cachedPath) {
+                try { Thread.sleep(400); } catch (InterruptedException ie) { Thread.currentThread().interrupt(); break; }
+            }
         }
 
         if (!persistedJobs.isEmpty()) dedup.markSeen(userId, persistedJobs);
@@ -649,8 +691,8 @@ public class JobDeliveryService {
     public int batchSize() { return fetchSettings.batchSize(); }
 
     private String buildPrompt(Job j, UserProfile p, @Nullable String cv) {
-        String headline = p.getGoalTitle() != null && !p.getGoalTitle().isBlank()
-                ? p.getGoalTitle().trim() : "—";
+        String headline = profileFields.goalTitle(p);
+        if (headline == null) headline = "—";
         return String.format("""
             USER:
             - Professional headline: %s

@@ -26,15 +26,19 @@ public final class SkillRunCachePolicy {
 
     private SkillRunCachePolicy() {}
 
-    public static boolean isCacheable(String skill) {
-        return CACHEABLE_SKILLS.contains(skill);
+    public static boolean isCacheable(@Nullable String skill) {
+        if (skill == null || skill.isBlank()) {
+            return false;
+        }
+        return CACHEABLE_SKILLS.contains(skill.trim());
     }
 
-    public static @Nullable Instant computeExpiry(String skill) {
+    public static @Nullable Instant computeExpiry(@Nullable String skill) {
         if (!isCacheable(skill)) {
             return null;
         }
-        int hours = "tailor-resume".equals(skill) ? TAILOR_CACHE_TTL_HOURS : DEFAULT_CACHE_TTL_HOURS;
+        String normalized = skill.trim();
+        int hours = "tailor-resume".equals(normalized) ? TAILOR_CACHE_TTL_HOURS : DEFAULT_CACHE_TTL_HOURS;
         return Instant.now().plus(hours, ChronoUnit.HOURS);
     }
 }

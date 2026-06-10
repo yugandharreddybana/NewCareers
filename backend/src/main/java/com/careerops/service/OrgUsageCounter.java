@@ -38,8 +38,12 @@ public class OrgUsageCounter {
         this.orgMemberRepo = orgMemberRepo;
     }
 
+    public long aiSkillRunsSince(UUID orgId, Instant periodStart) {
+        return skillRunRepo.countByOrgIdAndCreatedAtAfter(orgId, periodStart);
+    }
+
     public long aiSkillRunsThisMonth(UUID orgId) {
-        return skillRunRepo.countByOrgIdAndCreatedAtAfter(orgId, monthStart());
+        return aiSkillRunsSince(orgId, monthStart());
     }
 
     public long jobApplicationsThisMonth(UUID orgId) {

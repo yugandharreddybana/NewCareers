@@ -20,6 +20,10 @@ export function profileOptimisticFromPayload(prev: Profile, payload: UpdateProfi
   if (payload.hybridOnsiteDays !== undefined) next.hybridOnsiteDays = payload.hybridOnsiteDays;
   if (payload.experienceLevel !== undefined) next.experienceLevel = payload.experienceLevel;
   if (payload.workTypes !== undefined) next.workTypes = payload.workTypes;
+  if (payload.sectors !== undefined) {
+    next.sectors = payload.sectors;
+    if (payload.workTypes === undefined) next.workTypes = payload.sectors;
+  }
   if (payload.goalTitle !== undefined) next.goalTitle = payload.goalTitle;
   if (payload.workExperience !== undefined) next.workExperience = payload.workExperience;
   if (payload.education !== undefined) next.education = payload.education;

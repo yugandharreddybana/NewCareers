@@ -1,12 +1,16 @@
 package com.careerops.service;
 
 import com.careerops.model.SkillRun;
+import com.careerops.model.UserJob;
 import com.careerops.repository.SkillRunRepository;
+import com.careerops.repository.UserJobRepository;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Propagation;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
@@ -16,51 +20,46 @@ import java.util.UUID;
  * DB-backed AI Evaluation Cache — stores LIGHT_SCORE and DEEP_EVAL results
  * in the skill_runs table via SkillRunRepository.
  *
- * Architecture:
- *   - Core primitives: get / put / isCached / invalidate
- *   - Facade methods: putLight / getLight / putDeep / getDeep / evict / evictAllForUser
- *     All facade methods delegate to core primitives so existing callers
- *     (ParallelJobEvaluationService, CvService) compile unchanged.
+ * Cache keys use {@code user_jobs.id} (not {@code jobs.id}) so rows satisfy the
+ * {@code user_job_id} FK and align with skill-run lookups elsewhere.
  *
- * TTL: 24 hours, enforced in the service layer (expiresAt > Instant.now()).
- * Skill column convention: "LIGHT_SCORE" / "DEEP_EVAL" (distinct from catalog skill names).
- *
- * All cache operations are wrapped in try/catch — a cache failure NEVER
- * propagates to the caller. Callers must handle null / -1 returns gracefully.
+ * Writes run in {@code REQUIRES_NEW} so a constraint/flush failure cannot roll
+ * back the caller's transaction (e.g. GET /jobs/{userJobId}).
  */
 @Service
 @Slf4j
 public class AiEvalCacheService {
 
-    // ── Constants ─────────────────────────────────────────────────────────────
-
     private static final String EVAL_TYPE_LIGHT = "LIGHT_SCORE";
     private static final String EVAL_TYPE_DEEP   = "DEEP_EVAL";
     private static final int    CACHE_TTL_HOURS  = 24;
 
-    // ── Dependencies ──────────────────────────────────────────────────────────
-
     private final SkillRunRepository skillRunRepository;
+    private final UserJobRepository userJobRepository;
     private final ObjectMapper mapper;
 
-    public AiEvalCacheService(SkillRunRepository skillRunRepository, ObjectMapper mapper) {
+    public AiEvalCacheService(
+            SkillRunRepository skillRunRepository,
+            UserJobRepository userJobRepository,
+            ObjectMapper mapper) {
         this.skillRunRepository = skillRunRepository;
+        this.userJobRepository = userJobRepository;
         this.mapper = mapper;
         log.info("[EvalCache] Postgres-backed eval cache initialised (TTL={}h)", CACHE_TTL_HOURS);
     }
 
-    // ════════════════════════════════════════════════════════════════════════
-    // CORE PRIMITIVES
-    // ════════════════════════════════════════════════════════════════════════
-
     /**
-     * Retrieve a cached eval result as a raw JSON string.
-     * Returns null if no valid (non-expired) cache entry exists.
+     * @param jobId {@code jobs.id} — resolved to {@code user_jobs.id} for storage.
      */
+    @Transactional(propagation = Propagation.REQUIRES_NEW, readOnly = true)
     public String get(UUID userId, UUID jobId, String evalType) {
+        UUID userJobId = resolveUserJobId(userId, jobId);
+        if (userJobId == null) {
+            return null;
+        }
         try {
             return skillRunRepository
-                    .findFirstByUserIdAndUserJobIdAndSkillOrderByCreatedAtDesc(userId, jobId, evalType)
+                    .findFirstByUserIdAndUserJobIdAndSkillOrderByCreatedAtDesc(userId, userJobId, evalType)
                     .filter(run -> run.getExpiresAt() != null && run.getExpiresAt().isAfter(Instant.now()))
                     .map(run -> {
                         try {
@@ -80,56 +79,53 @@ public class AiEvalCacheService {
     }
 
     /**
-     * Store an eval result. Always inserts a new row — invalidate/nightly purge handles cleanup.
+     * @param jobId {@code jobs.id} — resolved to {@code user_jobs.id} for storage.
      */
+    @Transactional(propagation = Propagation.REQUIRES_NEW)
     public void put(UUID userId, UUID jobId, String evalType, String json) {
+        UUID userJobId = resolveUserJobId(userId, jobId);
+        if (userJobId == null) {
+            log.debug("[EvalCache] put skipped — no user_jobs row userId={} jobId={}", userId, jobId);
+            return;
+        }
         try {
             JsonNode output = mapper.readTree(json);
             SkillRun run = SkillRun.builder()
                     .userId(userId)
-                    .userJobId(jobId)
+                    .userJobId(userJobId)
                     .skill(evalType)
                     .input(mapper.createObjectNode())
                     .output(output)
                     .expiresAt(Instant.now().plus(CACHE_TTL_HOURS, ChronoUnit.HOURS))
                     .build();
             skillRunRepository.save(run);
-            log.debug("[EvalCache] put userId={} jobId={} evalType={}", userId, jobId, evalType);
+            log.debug("[EvalCache] put userId={} userJobId={} evalType={}", userId, userJobId, evalType);
         } catch (Exception e) {
             log.warn("[EvalCache] put failed userId={} jobId={} evalType={}: {}",
                     userId, jobId, evalType, e.getMessage());
         }
     }
 
-    /**
-     * Returns true if a non-expired cache entry exists for the given key.
-     */
     public boolean isCached(UUID userId, UUID jobId, String evalType) {
         return get(userId, jobId, evalType) != null;
     }
 
-    /**
-     * Evict both LIGHT_SCORE and DEEP_EVAL rows for a (user, job) pair.
-     */
+    @Transactional(propagation = Propagation.REQUIRES_NEW)
     public void invalidate(UUID userId, UUID jobId) {
+        UUID userJobId = resolveUserJobId(userId, jobId);
+        if (userJobId == null) {
+            return;
+        }
         try {
-            skillRunRepository.deleteByUserIdAndUserJobIdAndSkill(userId, jobId, EVAL_TYPE_LIGHT);
-            skillRunRepository.deleteByUserIdAndUserJobIdAndSkill(userId, jobId, EVAL_TYPE_DEEP);
-            log.debug("[EvalCache] invalidated userId={} jobId={}", userId, jobId);
+            skillRunRepository.deleteByUserIdAndUserJobIdAndSkill(userId, userJobId, EVAL_TYPE_LIGHT);
+            skillRunRepository.deleteByUserIdAndUserJobIdAndSkill(userId, userJobId, EVAL_TYPE_DEEP);
+            log.debug("[EvalCache] invalidated userId={} userJobId={}", userId, userJobId);
         } catch (Exception e) {
             log.warn("[EvalCache] invalidate failed userId={} jobId={}: {}",
                     userId, jobId, e.getMessage());
         }
     }
 
-    // ════════════════════════════════════════════════════════════════════════
-    // FACADE API — delegates to core primitives, callers unchanged
-    // ════════════════════════════════════════════════════════════════════════
-
-    /**
-     * Store a LIGHT score (matchPercent only) for the feed.
-     * Keyed as LIGHT_SCORE in skill_runs.
-     */
     public void putLight(UUID userId, UUID jobId, int matchPercent) {
         try {
             ObjectNode node = mapper.createObjectNode();
@@ -140,26 +136,18 @@ public class AiEvalCacheService {
         }
     }
 
-    /**
-     * Get cached light score for feed. Returns -1 if missing or expired.
-     */
     public int getLight(UUID userId, UUID jobId) {
         try {
             String json = get(userId, jobId, EVAL_TYPE_LIGHT);
             if (json == null) return -1;
             JsonNode node = mapper.readTree(json);
-            int score = node.path("matchPercent").asInt(-1);
-            return score;
+            return node.path("matchPercent").asInt(-1);
         } catch (Exception e) {
             log.warn("[EvalCache] getLight parse failed userId={} jobId={}: {}", userId, jobId, e.getMessage());
             return -1;
         }
     }
 
-    /**
-     * Store a full DEEP evaluation report for job-open / PDF path.
-     * Keyed as DEEP_EVAL in skill_runs.
-     */
     public void putDeep(UUID userId, UUID jobId, JsonNode report) {
         try {
             put(userId, jobId, EVAL_TYPE_DEEP, mapper.writeValueAsString(report));
@@ -168,9 +156,6 @@ public class AiEvalCacheService {
         }
     }
 
-    /**
-     * Get cached deep evaluation report. Returns null if missing or expired.
-     */
     public JsonNode getDeep(UUID userId, UUID jobId) {
         try {
             String json = get(userId, jobId, EVAL_TYPE_DEEP);
@@ -182,21 +167,11 @@ public class AiEvalCacheService {
         }
     }
 
-    /**
-     * Invalidate both light and deep entries for a (user, job) pair.
-     * Call this when the user's CV changes or the job is re-evaluated explicitly.
-     */
     public void evict(UUID userId, UUID jobId) {
         invalidate(userId, jobId);
     }
 
-    /**
-     * Evict all LIGHT_SCORE and DEEP_EVAL cache entries for a user.
-     * Called by CvService after a CV update.
-     *
-     * Uses only existing repo methods — does NOT call a bulk deleteAllByUserId
-     * (that would wipe real skill outputs like evaluate, tailor-resume, etc.).
-     */
+    @Transactional(propagation = Propagation.REQUIRES_NEW)
     public void evictAllForUser(UUID userId) {
         try {
             skillRunRepository.findAllByUserIdOrderByCreatedAtDesc(userId).stream()
@@ -214,5 +189,11 @@ public class AiEvalCacheService {
         } catch (Exception e) {
             log.warn("[EvalCache] evictAllForUser failed userId={}: {}", userId, e.getMessage());
         }
+    }
+
+    private UUID resolveUserJobId(UUID userId, UUID jobId) {
+        return userJobRepository.findByUserIdAndJobId(userId, jobId)
+                .map(UserJob::getId)
+                .orElse(null);
     }
 }

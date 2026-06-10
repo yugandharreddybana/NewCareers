@@ -15,12 +15,17 @@ import java.time.Instant;
 import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Set;
 
 @Component
 public class IrishJobsSource implements JobSource {
 
     private static final Logger log = LoggerFactory.getLogger(IrishJobsSource.class);
     private static final String BASE = "https://www.irishjobs.ie/Jobs/";
+    private static final Set<String> COMPANY_ACRONYMS = Set.of(
+        "aib", "aws", "bny", "cpl", "dhl", "esb", "ibm", "ict", "idc", "kbc",
+        "ltd", "mcs", "ntt", "pwc", "rte", "sse", "tsb", "ubs"
+    );
 
     @Override public String name() { return "IrishJobs"; }
 
@@ -70,8 +75,16 @@ public class IrishJobsSource implements JobSource {
         for (String w : words) {
             if (w.isBlank() || w.equals("job") || w.matches("job\\d+")) continue;
             if (!sb.isEmpty()) sb.append(' ');
-            sb.append(Character.toUpperCase(w.charAt(0))).append(w.substring(1));
+            sb.append(formatCompanyWord(w));
         }
         return sb.isEmpty() ? "Unknown" : sb.toString();
+    }
+
+    private static String formatCompanyWord(String word) {
+        String lower = word.toLowerCase();
+        if (COMPANY_ACRONYMS.contains(lower)) {
+            return lower.toUpperCase();
+        }
+        return Character.toUpperCase(lower.charAt(0)) + lower.substring(1);
     }
 }

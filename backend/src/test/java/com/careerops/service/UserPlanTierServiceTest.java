@@ -36,21 +36,20 @@ class UserPlanTierServiceTest {
     @InjectMocks UserPlanTierService service;
 
     @Test
-    void resolveForUser_usesEffectiveTrialPlanAndPersistsProfile() {
+    void resolveForUser_usesSubscriptionPlanAndPersistsProfile() {
         UUID userId = UUID.randomUUID();
         UUID orgId = UUID.randomUUID();
-        Instant trialEnds = Instant.now().plus(7, ChronoUnit.DAYS);
         SubscriptionContext ctx = new SubscriptionContext(
-                orgId, UUID.randomUUID(), SubscriptionPlan.FREE, SubscriptionStatus.TRIALING, trialEnds);
-        UserProfile profile = UserProfile.builder().userId(userId).planTier(PlanTier.FREE).build();
+                orgId, UUID.randomUUID(), SubscriptionPlan.FREE, SubscriptionStatus.ACTIVE, null);
+        UserProfile profile = UserProfile.builder().userId(userId).planTier(PlanTier.PRO).build();
 
         when(subscriptionResolver.resolveForUser(userId)).thenReturn(ctx);
         when(userProfileRepository.findByUserId(userId)).thenReturn(Optional.of(profile));
 
         PlanTier tier = service.resolveForUser(userId);
 
-        assertThat(tier).isEqualTo(PlanTier.PRO);
-        assertThat(profile.getPlanTier()).isEqualTo(PlanTier.PRO);
+        assertThat(tier).isEqualTo(PlanTier.FREE);
+        assertThat(profile.getPlanTier()).isEqualTo(PlanTier.FREE);
         verify(userProfileRepository).save(profile);
     }
 

@@ -43,6 +43,7 @@ Public page — no guard. `useAuth()` gates checkout; `useSubscription()` (React
 
 | User action | Frontend | Middleware | Java |
 |-------------|----------|------------|------|
+| Load plan catalog | `GET /billing/plans` | public proxy | `GET /billing/plans` |
 | Load current plan (signed in) | `GET /billing/subscription` | authGuard → proxy | `GET /billing/subscription` |
 | Upgrade to Pro / Elite (signed in) | `POST /billing/checkout-session` `{ plan }` | authGuard → proxy | `POST /billing/checkout-session` |
 
@@ -57,7 +58,7 @@ Signed-in subscription management lives under account settings (not this public 
 | Load subscription + usage | `GET /billing/subscription` | `authGuard` → proxy | `GET /billing/subscription` |
 | Open Stripe portal | `POST /billing/customer-portal` | `authGuard` → proxy | `POST /customer-portal` — 400 if no Stripe customer |
 | Cancel at period end | `POST /billing/cancel` | `authGuard` → proxy | `POST /cancel` — owner/admin only |
-| List invoices | `GET /billing/invoices` | `authGuard` → proxy | `GET /invoices` |
+| List invoices | `GET /billing/invoices` | `authGuard` → proxy | `GET /invoices` — owner/admin only |
 
 ### Account billing sequence
 
@@ -97,15 +98,17 @@ sequenceDiagram
         Page-->>User: success toast + refreshed subscription
     end
 
-    Page->>API: getInvoices()
-    API->>MW: GET /billing/invoices
-    MW->>Java: GET /invoices
-    Java-->>Page: invoice rows or empty list
+    opt owner/admin with Stripe customer
+        Page->>API: getInvoices()
+        API->>MW: GET /billing/invoices
+        MW->>Java: GET /invoices
+        Java-->>Page: invoice rows or empty list
+    end
 ```
 
 ### Account billing edge cases
 
-- **403 non-admin**: Member role sees subscription read-only; management buttons hidden (`canManageBilling: false`).
+- **403 non-admin**: Member role sees subscription read-only; management and invoice actions are hidden (`canManageBilling: false`).
 - **Portal 400**: No Stripe customer yet — upgrade via checkout first; UI hides portal CTA.
 - **Cancel 502**: Stripe gateway failure — error toast; subscription unchanged.
 - **Invoice errors**: Network/API failure shows banner; no customer returns `[]` not 501.

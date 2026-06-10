@@ -24,6 +24,7 @@ type Props = {
   educationEntries: MappedEducationEntry[];
   projectEntries: MappedProjectEntry[];
   cvParseSummary: CvParseSummary | null;
+  parseSource?: 'ai' | 'regex' | null;
   onWorkChange: (index: number, patch: Partial<MappedWorkEntry>) => void;
   onEducationChange: (index: number, patch: Partial<MappedEducationEntry>) => void;
   onProjectChange: (index: number, patch: Partial<MappedProjectEntry>) => void;
@@ -63,6 +64,7 @@ export function ExperienceStep({
   educationEntries,
   projectEntries,
   cvParseSummary: _cvParseSummary,
+  parseSource,
   onWorkChange,
   onEducationChange,
   onProjectChange,
@@ -87,6 +89,9 @@ export function ExperienceStep({
     onContinue();
   }
 
+  const showImportBanner =
+    parseSource === 'ai' && (workCount > 0 || eduCount > 0 || projectCount > 0);
+
   return (
     <>
       <div className="onboarding-card__title onboarding-card__title--experience">
@@ -95,6 +100,17 @@ export function ExperienceStep({
           Add your work experience, education, and projects so we can match you to the right roles.
         </p>
       </div>
+
+      {showImportBanner && (
+        <div className="onboarding-parse-banner" role="status">
+          <span className="material-symbols-outlined" aria-hidden="true">
+            info
+          </span>
+          <p>
+            We prefilled this from your CV. Please check dates, titles, and descriptions.
+          </p>
+        </div>
+      )}
 
       <form className="onboarding-form" onSubmit={handleSubmit}>
         <CollapsibleOnboardingSection

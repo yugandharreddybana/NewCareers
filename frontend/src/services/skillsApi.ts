@@ -104,19 +104,29 @@ export const skillsApi = {
   },
 
   getRunHistory: async (userJobId: string, skillName: string) => {
-    const r = await api.get<Array<{ id: string; createdAt: string; output: Record<string, unknown> }>>(
-      `/skills/run-history/${userJobId}/${skillName}`,
-      { skipGlobalLoader: true },
-    );
+    const r = await api.get<
+      Array<{
+        id: string;
+        createdAt: string;
+        output: Record<string, unknown>;
+        totalTokens?: number | null;
+      }>
+    >(`/skills/run-history/${userJobId}/${skillName}`, { skipGlobalLoader: true });
     return r.data ?? [];
   },
 
-  downloadSkillPdf: async (userJobId: string, skillName: string): Promise<void> => {
+  downloadSkillPdf: async (
+    userJobId: string,
+    skillName: string,
+    runId?: string,
+  ): Promise<void> => {
+    const params = runId ? { runId } : undefined;
     const response = await withFreshSessionRetry(() =>
-      api.get(
-        `/skills/pdf/${userJobId}/${skillName}`,
-        { responseType: 'blob', timeout: PDF_TIMEOUT_MS },
-      ),
+      api.get(`/skills/pdf/${userJobId}/${skillName}`, {
+        params,
+        responseType: 'blob',
+        timeout: PDF_TIMEOUT_MS,
+      }),
     );
     triggerDownload(asPdfBlob(response.data), `${skillName}-report.pdf`);
   },

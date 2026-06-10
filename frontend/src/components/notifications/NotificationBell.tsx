@@ -9,7 +9,7 @@
  * - Badge animates in/out with Framer Motion scale.
  */
 
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import { Bell } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useNotificationUnreadCount, useInvalidateNotifications } from '@/hooks/queries';
@@ -18,22 +18,8 @@ import { Button } from '@/components/ui';
 
 export default function NotificationBell() {
   const invalidateNotifications = useInvalidateNotifications();
-  const { data: unreadCount = 0, refetch } = useNotificationUnreadCount();
+  const { data: unreadCount = 0 } = useNotificationUnreadCount();
   const [drawerOpen, setDrawerOpen] = useState(false);
-
-  useEffect(() => {
-    const refreshWhenVisible = () => {
-      if (document.visibilityState === 'visible') {
-        void refetch();
-      }
-    };
-    document.addEventListener('visibilitychange', refreshWhenVisible);
-    window.addEventListener('focus', refreshWhenVisible);
-    return () => {
-      document.removeEventListener('visibilitychange', refreshWhenVisible);
-      window.removeEventListener('focus', refreshWhenVisible);
-    };
-  }, [refetch]);
 
   function handleDrawerClose() {
     setDrawerOpen(false);

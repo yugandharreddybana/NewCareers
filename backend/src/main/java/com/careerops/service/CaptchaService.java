@@ -19,13 +19,16 @@ public class CaptchaService {
 
     private final WebClient client;
     private final String secret;
+    private final boolean devMode;
     private final Environment environment;
 
     public CaptchaService(WebClient.Builder b,
                           @Value("${captcha.secret:}") String secret,
+                          @Value("${captcha.dev-mode:false}") boolean devMode,
                           Environment environment) {
         this.client = b.baseUrl("https://www.google.com/recaptcha/api").build();
         this.secret = secret;
+        this.devMode = devMode;
         this.environment = environment;
     }
 
@@ -37,6 +40,22 @@ public class CaptchaService {
         return secret != null && !secret.isBlank() && !secret.startsWith("YOUR_");
     }
 
+    /**
+     * Whether signup/login/onboarding must pass reCAPTCHA verification.
+     * Local dev may set {@code captcha.dev-mode=true} so mismatched VITE_/captcha.secret pairs
+     * do not block the flow (staging/prod always enforce when a secret is configured).
+     */
+    public boolean isEnforcementActive() {
+        if (!isConfigured()) {
+            return false;
+        }
+        if (devMode && !isFailClosedProfile()) {
+            log.debug("captcha.dev-mode=true — skipping reCAPTCHA enforcement in dev");
+            return false;
+        }
+        return true;
+    }
+
     public boolean verify(String token) {
         if (!isConfigured()) {
             if (isFailClosedProfile()) {
@@ -44,6 +63,9 @@ public class CaptchaService {
                 return false;
             }
             log.warn("Captcha secret not configured. Allowing all requests in dev mode.");
+            return true;
+        }
+        if (devMode && !isFailClosedProfile()) {
             return true;
         }
         if (token == null || token.isBlank()) return false;

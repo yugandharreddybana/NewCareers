@@ -15,6 +15,7 @@ import com.careerops.repository.PasswordResetRepository;
 import com.careerops.repository.RefreshTokenRepository;
 import com.careerops.repository.UserProfileRepository;
 import com.careerops.repository.UserRepository;
+import com.careerops.security.AesFieldEncryptor;
 import com.careerops.security.JwtService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -42,6 +43,8 @@ import static org.assertj.core.api.Assertions.within;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.doThrow;
+import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -66,7 +69,8 @@ class AuthServiceTest {
     @Mock SignupIntentService signupIntentService;
     @Mock com.careerops.security.OtpHashService otpHashService;
     @Mock org.springframework.core.env.Environment environment;
-    @Mock TrialProvisioningService trialProvisioningService;
+    @Mock OrgProvisioningService orgProvisioningService;
+    @Mock AesFieldEncryptor fieldEncryptor;
     @Mock HttpServletRequest httpRequest;
 
     @InjectMocks AuthService authService;
@@ -91,6 +95,9 @@ class AuthServiceTest {
                 .passwordHash("hash")
                 .build();
         defaultConsents = new SignupConsentsRequest(true, true, false, false);
+        lenient().when(httpRequest.getHeader("User-Agent")).thenReturn("JUnit");
+        lenient().when(httpRequest.getRemoteAddr()).thenReturn("127.0.0.1");
+        lenient().when(fieldEncryptor.decrypt(any(), any())).thenAnswer(inv -> inv.getArgument(0));
     }
 
     @Test
@@ -105,7 +112,7 @@ class AuthServiceTest {
         when(jwt.issue(any(), any())).thenReturn("access-token");
 
         authService.signup(new SignupRequest(
-                "Test User", "testuser", "signup@example.com", "Secure1Pass", defaultConsents, verificationId, null),
+                "Test User", "testuser", "signup@example.com", "Secure1Pass", defaultConsents, verificationId, null, null),
                 httpRequest);
 
         verify(onboardingVerification).consumeForSignup(verificationId, "signup@example.com");
@@ -121,7 +128,7 @@ class AuthServiceTest {
         SignupConsentsRequest noTerms = new SignupConsentsRequest(false, true, false, false);
 
         assertThatThrownBy(() -> authService.signup(new SignupRequest(
-                "Test User", "testuser", "signup@example.com", "Secure1Pass", noTerms, verificationId, null),
+                "Test User", "testuser", "signup@example.com", "Secure1Pass", noTerms, verificationId, null, null),
                 httpRequest))
                 .isInstanceOf(ApiException.class)
                 .hasMessageContaining("Terms of Service");
@@ -130,10 +137,31 @@ class AuthServiceTest {
     }
 
     @Test
+    @DisplayName("signup fails if org provisioning fails")
+    void signupFailsWhenOrgProvisioningFails() {
+        when(encoder.encode(any())).thenReturn("encoded-hash");
+        when(users.save(any(User.class))).thenAnswer(inv -> {
+            User u = inv.getArgument(0);
+            u.setId(userId);
+            return u;
+        });
+        doThrow(new IllegalStateException("billing unavailable"))
+                .when(orgProvisioningService).provisionForNewUser(any(User.class));
+
+        assertThatThrownBy(() -> authService.signup(new SignupRequest(
+                "Test User", "testuser", "signup@example.com", "Secure1Pass", defaultConsents, verificationId, null, null),
+                httpRequest))
+                .isInstanceOf(ApiException.class)
+                .hasMessageContaining("Account setup could not be completed");
+
+        verify(jwt, never()).issue(any(), any());
+    }
+
+    @Test
     @DisplayName("signup rejects when email verification id missing")
     void signupRejectsMissingVerification() {
         assertThatThrownBy(() -> authService.signup(new SignupRequest(
-                "Test User", "testuser", "signup@example.com", "Secure1Pass", defaultConsents, null, null),
+                "Test User", "testuser", "signup@example.com", "Secure1Pass", defaultConsents, null, null, null),
                 httpRequest))
                 .isInstanceOf(ApiException.class)
                 .hasMessageContaining("Email verification required");
@@ -316,6 +344,7 @@ class AuthServiceTest {
         when(resets.findFirstByUserIdAndUsedFalseOrderByCreatedAtDesc(userId))
                 .thenReturn(Optional.of(pr));
         String newPassword = "N0tPwned!87654321Aa";
+        when(otpHashService.matches(otp, pr.getOtpHash())).thenReturn(true);
         when(encoder.matches(newPassword, "hash")).thenReturn(false);
         when(encoder.encode(newPassword)).thenReturn("new-hash");
 
@@ -424,6 +453,22 @@ class AuthServiceTest {
                 new GoogleLinkConfirmRequest("token", "wrong", null), httpRequest))
                 .isInstanceOf(ApiException.class)
                 .hasMessage("Invalid email or password");
+    }
+
+    @Test
+    @DisplayName("confirmGoogleLink returns generic error when account is locked")
+    void confirmGoogleLinkLockedAccountUsesGenericFailure() {
+        user.setLockedUntil(Instant.now().plus(15, ChronoUnit.MINUTES));
+        var identity = new GoogleOAuthService.GoogleIdentity("sub-1", user.getEmail(), user.getName(), true);
+        when(googleOAuth.verifyIdToken("token")).thenReturn(identity);
+        when(users.findByEmail(user.getEmail())).thenReturn(Optional.of(user));
+
+        assertThatThrownBy(() -> authService.confirmGoogleLink(
+                new GoogleLinkConfirmRequest("token", "Password1!", null), httpRequest))
+                .isInstanceOf(ApiException.class)
+                .hasMessageContaining("Invalid email or password");
+
+        verify(encoder, never()).matches(any(), any());
     }
 
     @Test

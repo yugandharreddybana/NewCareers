@@ -1,0 +1,16 @@
+sequenceDiagram
+    participant User
+    participant Onb as Onboarding.tsx
+    participant Pref as PreferencesStep
+
+    User->>Onb: Step2 Preferences
+    Pref-->>User: role chips tech chips work settings salary
+    alt selectedRoles empty or no cvFile
+        Pref-->>User: Complete profile button disabled
+    else work settings none selected
+        User->>Pref: Complete profile
+        Pref-->>User: Select at least one work setting
+    else valid
+        User->>Pref: Complete profile Find my jobs
+        Pref->>Onb: onComplete handleFinish
+    end

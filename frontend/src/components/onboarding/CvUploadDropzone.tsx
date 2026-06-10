@@ -11,6 +11,7 @@ type Props = {
   variant?: 'compact' | 'hero';
   showLabel?: boolean;
   required?: boolean;
+  disabled?: boolean;
 };
 
 function validateFile(file: File): boolean {
@@ -37,6 +38,7 @@ export function CvUploadDropzone({
   variant = 'hero',
   showLabel = true,
   required = false,
+  disabled = false,
 }: Props) {
   const inputRef = useRef<HTMLInputElement>(null);
   const [dragOver, setDragOver] = useState(false);
@@ -64,6 +66,7 @@ export function CvUploadDropzone({
         <button
           type="button"
           className="onboarding-cv-uploaded__replace"
+          disabled={disabled}
           onClick={() => inputRef.current?.click()}
         >
           Replace
@@ -74,6 +77,7 @@ export function CvUploadDropzone({
           type="file"
           accept={ACCEPT}
           className="sr-only"
+          disabled={disabled}
           onChange={e => {
             acceptFile(e.target.files?.[0] ?? null);
             e.target.value = '';
@@ -85,29 +89,33 @@ export function CvUploadDropzone({
 
   if (variant === 'hero') {
     return (
-      <div>
+      <div className="onboarding-field">
         {showLabel && (
-          <label className="block font-label-md text-label-md text-on-surface mb-[8px]" htmlFor={id}>
+          <label className="onboarding-form-section__title" htmlFor={id}>
             Upload your CV/Resume
-            {required && <span className="text-error"> *</span>}
+            {required && <span className="onboarding-required"> *</span>}
           </label>
         )}
         <div
-          className={`onboarding-cv-zone group${dragOver ? ' onboarding-cv-zone--active' : ''}`}
+          className={`onboarding-cv-zone group${dragOver && !disabled ? ' onboarding-cv-zone--active' : ''}${disabled ? ' onboarding-cv-zone--disabled' : ''}`}
           role="button"
-          tabIndex={0}
+          tabIndex={disabled ? -1 : 0}
+          aria-disabled={disabled || undefined}
           onKeyDown={e => {
+            if (disabled) return;
             if (e.key === 'Enter' || e.key === ' ') {
               e.preventDefault();
               inputRef.current?.click();
             }
           }}
           onDragOver={e => {
+            if (disabled) return;
             e.preventDefault();
             setDragOver(true);
           }}
           onDragLeave={() => setDragOver(false)}
           onDrop={e => {
+            if (disabled) return;
             e.preventDefault();
             setDragOver(false);
             acceptFile(e.dataTransfer.files?.[0] ?? null);
@@ -118,7 +126,8 @@ export function CvUploadDropzone({
             id={id}
             type="file"
             accept={ACCEPT}
-            className="absolute inset-0 w-full h-full opacity-0 cursor-pointer z-10"
+            disabled={disabled}
+            className="absolute inset-0 w-full h-full opacity-0 cursor-pointer z-10 disabled:cursor-not-allowed"
             onChange={e => {
               acceptFile(e.target.files?.[0] ?? null);
               e.target.value = '';

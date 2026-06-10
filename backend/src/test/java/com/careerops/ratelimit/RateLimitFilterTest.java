@@ -69,6 +69,26 @@ class RateLimitFilterTest {
     }
 
     @Test
+    @DisplayName("/v1 servlet paths normalize before public-path policy check")
+    void v1ServletPathsNormalizeBeforePublicPolicyCheck() throws Exception {
+        RateLimitFilter filter = new RateLimitFilter(defaultBandwidth(), objectMapper(), publicPathPolicy);
+        ReflectionTestUtils.setField(filter, "trustHeader", "X-Internal-User-Id");
+
+        when(publicPathPolicy.isPublic("/skills/start")).thenReturn(false);
+
+        MockHttpServletRequest request = new MockHttpServletRequest("POST", "/api/v1/skills/start");
+        request.setServletPath("/v1/skills/start");
+        request.addHeader("X-Internal-User-Id", "00000000-0000-0000-0000-000000000001");
+        MockHttpServletResponse response = new MockHttpServletResponse();
+        MockFilterChain chain = new MockFilterChain();
+
+        filter.doFilter(request, response, chain);
+
+        assertThat(chain.getRequest()).isNotNull();
+        assertThat(response.getStatus()).isEqualTo(200);
+    }
+
+    @Test
     @DisplayName("shared-store mode fails startup when Redis is missing")
     void sharedStoreModeFailsStartupWhenRedisIsMissing() {
         RateLimitFilter filter = new RateLimitFilter(defaultBandwidth(), objectMapper(), publicPathPolicy);

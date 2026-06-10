@@ -123,7 +123,7 @@ export function RunAllSkillsButton({ userJobId, onComplete }: Props) {
           type="button"
           onClick={handleRunAll}
           disabled={status === 'running' || status === 'starting'}
-          className="inline-flex items-center gap-2 px-4 py-2 text-sm font-semibold text-white bg-indigo-600 hover:bg-indigo-700 rounded-lg disabled:opacity-60 transition-colors shadow-sm"
+          className="inline-flex items-center gap-2 px-4 py-2 text-sm font-semibold text-white bg-brand-500 hover:bg-brand-600 rounded-lg disabled:opacity-60 transition-colors shadow-sm"
         >
           {status === 'running' || status === 'starting' ? (
             <>

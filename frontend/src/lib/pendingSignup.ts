@@ -1,6 +1,6 @@
 /**
- * Deferred email signup — credentials stored server-side as signup intent.
- * sessionStorage holds intent id + email only (no password).
+ * Deferred email signup. Credentials are stored server-side as a signup intent.
+ * sessionStorage holds intent id, email, consents, and a short client expiry only.
  */
 export interface SignupConsents {
   termsAccepted: boolean;
@@ -15,9 +15,11 @@ export interface PendingSignup {
   /** Optional prefill from signup form; onboarding full name wins at register time. */
   name?: string;
   consents: SignupConsents;
+  expiresAt: string;
 }
 
 const KEY = 'co_pending_signup_v2';
+const DEFAULT_TTL_MS = 30 * 60 * 1000;
 const UUID_RE =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
@@ -34,12 +36,18 @@ export function readPendingSignup(): PendingSignup | null {
     const raw = sessionStorage.getItem(KEY);
     if (!raw) return null;
     const parsed = JSON.parse(raw) as PendingSignup;
+    const expiresAtMs = Date.parse(parsed.expiresAt);
+    if (!Number.isFinite(expiresAtMs) || expiresAtMs <= Date.now()) {
+      clearPendingSignup();
+      return null;
+    }
     if (
       isValidSignupIntentId(parsed.signupIntentId) &&
       typeof parsed.email === 'string' &&
       parsed.email.length > 0 &&
       parsed.consents &&
-      typeof parsed.consents.termsAccepted === 'boolean'
+      parsed.consents.termsAccepted === true &&
+      parsed.consents.aiProcessingAccepted === true
     ) {
       return parsed;
     }
@@ -49,8 +57,11 @@ export function readPendingSignup(): PendingSignup | null {
   }
 }
 
-export function writePendingSignup(data: PendingSignup): void {
-  sessionStorage.setItem(KEY, JSON.stringify(data));
+export function writePendingSignup(
+  data: Omit<PendingSignup, 'expiresAt'> & { expiresAt?: string },
+): void {
+  const expiresAt = data.expiresAt ?? new Date(Date.now() + DEFAULT_TTL_MS).toISOString();
+  sessionStorage.setItem(KEY, JSON.stringify({ ...data, expiresAt }));
 }
 
 export function clearPendingSignup(): void {

@@ -1,0 +1,17 @@
+sequenceDiagram
+    participant User
+    participant Login as Login.tsx
+    participant Axios
+    participant Middleware
+    participant Auth as AuthService
+
+    Note over Login: After 409 LINK_REQUIRES_VERIFICATION
+    Login->>Login: writePendingGoogleLink(idToken) sessionStorage
+    User->>Login: Enter account password + reCAPTCHA
+    Login->>Axios: POST /auth/google/link/confirm
+    Middleware->>Auth: confirmGoogleLink
+    Auth->>Auth: verify idToken + BCrypt password
+    Auth->>Auth: set googleSub, GOOGLE provider
+    Middleware->>Middleware: issueAuthCookies
+    Login->>Login: setUser(data.user)
+    Note over User: Refresh loses in-memory link token — must Google again

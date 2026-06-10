@@ -1,5 +1,6 @@
 package com.careerops.service;
 
+import com.careerops.debug.DebugSessionLog;
 import com.careerops.model.Job;
 import com.careerops.model.JobListing;
 import com.careerops.model.SeenJob;
@@ -7,6 +8,7 @@ import com.careerops.repository.JobRepository;
 import com.careerops.repository.SeenJobRepository;
 import com.careerops.repository.UserJobRepository;
 import com.careerops.service.sources.FingerprintUtil;
+import com.careerops.service.sources.JobPostingFingerprint;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
@@ -45,7 +47,7 @@ public class DeduplicationService {
         List<JobListing> unique = new ArrayList<>(input.size());
 
         for (JobListing job : input) {
-            String fp = FingerprintUtil.fingerprint(
+            String fp = JobPostingFingerprint.fingerprint(
                     job.getTitle()   != null ? job.getTitle()   : "",
                     job.getCompany() != null ? job.getCompany() : "",
                     job.getUrl()     != null ? job.getUrl()     : "");
@@ -75,22 +77,45 @@ public class DeduplicationService {
     @Transactional(timeout = 10)
     public List<Job> dedupForPipelineDelivery(UUID userId, List<Job> raw) {
         Set<UUID> ownedJobIds = userJobs.findJobIdsByUserId(userId);
+        List<Job> ownedJobs = jobs.findAllOwnedByUser(userId);
         List<Job> result = new ArrayList<>();
         Set<String> batch = new HashSet<>();
+        int semanticSkips = 0;
         for (Job j : raw) {
-            if (j.getFingerprint() == null || j.getCompany() == null || j.getTitle() == null) {
+            if (j.getCompany() == null || j.getTitle() == null) {
                 continue;
             }
-            if (!batch.add(j.getFingerprint())) {
+            String fp = j.getFingerprint() != null && !j.getFingerprint().isBlank()
+                    ? j.getFingerprint()
+                    : JobPostingFingerprint.fingerprint(j.getTitle(), j.getCompany(), j.getSourceUrl());
+            j.setFingerprint(fp);
+            if (!batch.add(fp)) {
                 continue;
             }
-            Job stored = jobs.findByFingerprint(j.getFingerprint()).orElseGet(() -> jobs.save(j));
+            Job stored = jobs.findByFingerprint(fp).orElseGet(() -> jobs.save(j));
             if (ownedJobIds.contains(stored.getId())) {
+                continue;
+            }
+            if (ownedJobs.stream().anyMatch(owned -> JobPostingFingerprint.samePosting(owned, stored))) {
+                semanticSkips++;
+                // #region agent log
+                DebugSessionLog.write(
+                    "DeduplicationService.dedupForPipelineDelivery",
+                    "semantic_duplicate_skipped",
+                    "H-DEDUP",
+                    Map.of(
+                        "userId", userId.toString(),
+                        "title", stored.getTitle() != null ? stored.getTitle() : "",
+                        "company", stored.getCompany() != null ? stored.getCompany() : "",
+                        "sourceUrl", stored.getSourceUrl() != null ? stored.getSourceUrl() : "",
+                        "fingerprint", fp));
+                // #endregion
                 continue;
             }
             result.add(stored);
         }
-        log.info("User {} pipeline dedup: {} new candidates from {} raw", userId, result.size(), raw.size());
+        log.info("User {} pipeline dedup: {} new candidates from {} raw (semantic skips={})",
+                userId, result.size(), raw.size(), semanticSkips);
         return result;
     }
 

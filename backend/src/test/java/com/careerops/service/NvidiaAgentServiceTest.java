@@ -44,6 +44,11 @@ class NvidiaAgentServiceTest {
             tokenUsageService, consentService, contextBuilder,
             new SimpleMeterRegistry());
         ReflectionTestUtils.setField(service, "apiKey", "test-key");
+        ReflectionTestUtils.setField(service, "maxTokens", 16384);
+        ReflectionTestUtils.setField(service, "reasoningBudget", 8192);
+        ReflectionTestUtils.setField(service, "temperature", 1.0);
+        ReflectionTestUtils.setField(service, "topP", 0.95);
+        service.initRestClient();
     }
 
     @Test
@@ -59,8 +64,13 @@ class NvidiaAgentServiceTest {
     }
 
     @Test
-    void resolveMaxTokens_knownSkill_usesMap() {
-        assertThat(NvidiaAgentService.resolveMaxTokens("evaluate", 8192)).isEqualTo(1200);
+    void resolveMaxTokens_thinkingSkill_usesConfiguredDefault() {
+        assertThat(NvidiaAgentService.resolveMaxTokens("evaluate", 16384)).isEqualTo(16384);
+    }
+
+    @Test
+    void resolveMaxTokens_fastSkill_usesMap() {
+        assertThat(NvidiaAgentService.resolveMaxTokens("research", 16384)).isEqualTo(2500);
     }
 
     @Test
@@ -79,20 +89,23 @@ class NvidiaAgentServiceTest {
     }
 
     @Test
-    void resolveModel_evaluate_uses8bOverride() {
-        assertThat(NvidiaAgentService.resolveModel("evaluate", "meta/llama-3.3-70b-instruct"))
-            .isEqualTo("meta/llama-3.1-8b-instruct");
+    void resolveModel_returnsDefaultModel() {
+        assertThat(NvidiaAgentService.resolveModel("evaluate", "nvidia/nemotron-3-ultra-550b-a55b"))
+            .isEqualTo("nvidia/nemotron-3-ultra-550b-a55b");
     }
 
     @Test
-    void buildRequestBody_usesEffectiveTokensAndModel() {
-        ReflectionTestUtils.setField(service, "model", "meta/llama-3.3-70b-instruct");
+    void buildRequestBody_thinkingSkill_includesNemotronOptions() {
         ArrayNode messages = new ObjectMapper().createArrayNode();
         ObjectNode body = ReflectionTestUtils.invokeMethod(
-            service, "buildRequestBody", "SYS", messages, 1200, "meta/llama-3.1-8b-instruct", "evaluate");
+            service, "buildRequestBody", "SYS", messages, 16384,
+            "nvidia/nemotron-3-ultra-550b-a55b", "evaluate");
 
-        assertThat(body.path("max_tokens").asInt()).isEqualTo(1200);
-        assertThat(body.path("model").asText()).isEqualTo("meta/llama-3.1-8b-instruct");
+        assertThat(body.path("max_tokens").asInt()).isEqualTo(16384);
+        assertThat(body.path("model").asText()).isEqualTo("nvidia/nemotron-3-ultra-550b-a55b");
+        assertThat(body.path("reasoning_budget").asInt()).isEqualTo(8192);
+        assertThat(body.path("chat_template_kwargs").path("enable_thinking").asBoolean()).isTrue();
+        assertThat(body.path("chat_template_kwargs").path("force_nonempty_content").asBoolean()).isTrue();
         assertThat(body.path("tools").size()).isEqualTo(1);
         assertThat(body.path("tools").path(0).path("function").path("name").asText()).isEqualTo("ask_user");
     }
@@ -129,11 +142,14 @@ class NvidiaAgentServiceTest {
     }
 
     @Test
-    void buildRequestBody_research_includesWebTools() {
+    void buildRequestBody_fastSkill_noThinkingOptions() {
         ArrayNode messages = new ObjectMapper().createArrayNode();
         ObjectNode body = ReflectionTestUtils.invokeMethod(
-            service, "buildRequestBody", "SYS", messages, 2500, "meta/llama-3.3-70b-instruct", "research");
+            service, "buildRequestBody", "SYS", messages, 2500,
+            "nvidia/nemotron-3-ultra-550b-a55b", "research");
 
+        assertThat(body.has("reasoning_budget")).isFalse();
+        assertThat(body.has("chat_template_kwargs")).isFalse();
         assertThat(body.path("tools").size()).isEqualTo(3);
         List<String> names = StreamSupport.stream(body.path("tools").spliterator(), false)
             .map(t -> t.path("function").path("name").asText())

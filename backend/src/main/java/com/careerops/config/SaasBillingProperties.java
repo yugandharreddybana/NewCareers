@@ -8,9 +8,6 @@ import java.math.BigDecimal;
 @ConfigurationProperties(prefix = "saas.billing")
 public class SaasBillingProperties {
 
-    /** Default Pro trial length for new signups (days). */
-    private int trialDays = 7;
-
     /**
      * When set, overrides profile-based enforcement disable in dev/test.
      * Defaults to true in application.properties for production safety.
@@ -18,14 +15,6 @@ public class SaasBillingProperties {
     private boolean enforcementEnabled = true;
 
     private final Price price = new Price();
-
-    public int getTrialDays() {
-        return trialDays;
-    }
-
-    public void setTrialDays(int trialDays) {
-        this.trialDays = trialDays;
-    }
 
     public boolean isEnforcementEnabled() {
         return enforcementEnabled;

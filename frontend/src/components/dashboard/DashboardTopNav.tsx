@@ -1,7 +1,9 @@
 import { useCallback, useState } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
-import { useAuth } from '@/context/AuthContext';
-import { NavUsageLimits } from '@/components/dashboard/NavUsageLimits';
+import { useAuth } from '@/context/authCtx';
+import NotificationBell from '@/components/notifications/NotificationBell';
+import { NavUsagePills } from '@/components/dashboard/NavUsagePills';
+import { NavJobLimitNotice } from '@/components/dashboard/NavJobLimitNotice';
 
 function firstName(full?: string | null): string {
   if (!full?.trim()) return 'U';
@@ -36,7 +38,7 @@ export function DashboardTopNav() {
 
   return (
     <nav className="w-full sticky top-0 z-50 bg-background border-b border-outline-variant shadow-sm">
-      <div className="flex items-center h-16 px-margin-mobile md:px-margin-desktop max-w-container-max mx-auto gap-2 sm:gap-4">
+      <div className="flex items-center h-16 app-shell gap-2 sm:gap-4">
         <Link
           to="/dashboard"
           className="font-headline-md text-headline-md font-bold text-primary shrink-0"
@@ -50,25 +52,11 @@ export function DashboardTopNav() {
           <Link to="/jobs" className={navLinkClass(location.pathname.startsWith('/jobs') || location.pathname.startsWith('/kanban'))}>
             Jobs
           </Link>
-          <span className="font-body-md text-body-md text-secondary/50 cursor-not-allowed whitespace-nowrap">
-            Messages
-          </span>
-          <Link
-            to="/networking"
-            className={navLinkClass(location.pathname.startsWith('/networking'))}
-          >
-            Network
-          </Link>
         </div>
-        <div className="flex items-center gap-0.5 sm:gap-base shrink-0">
-          <NavUsageLimits />
-          <button
-            type="button"
-            className="p-2 text-secondary hover:text-primary transition-colors"
-            aria-label="Notifications"
-          >
-            <span className="material-symbols-outlined">notifications</span>
-          </button>
+        <div className="flex items-center gap-2 sm:gap-3 shrink-0">
+          <NavUsagePills />
+          <NavJobLimitNotice />
+          <NotificationBell />
           <Link
             to="/account"
             className={`p-2 transition-colors ${isSettings ? 'text-primary' : 'text-secondary hover:text-primary'}`}

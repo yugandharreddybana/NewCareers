@@ -2,7 +2,7 @@
 
 ## Overview
 
-First step of deferred signup: collects name, email, password, and consent checkboxes but does **not** create an account yet. Creates a short-lived **signup intent** server-side, then stores the intent id and consents in `sessionStorage` (`pendingSignup`) and navigates to `/onboarding`. Account registration happens on onboarding finish. Guests only.
+First step of deferred signup: collects name, email, password, and consent checkboxes but does **not** create an account yet. Creates a short-lived **signup intent** server-side, then stores the intent id, email, consents, and client expiry in `sessionStorage` (`pendingSignup`) and navigates to `/onboarding`. The plaintext password stays server-side with the intent. Account registration happens on onboarding finish. Guests only.
 
 ## Route
 
@@ -38,7 +38,7 @@ Password strength labels: Too short (<8), Weak, Fair (not acceptable), Good, Str
 | Action | Trigger | Result |
 |--------|---------|--------|
 | Continue to profile | Form submit | `authApi.createSignupIntent` → `writePendingSignup` → `navigate('/onboarding')` |
-| Duplicate email | 409 on signup-intent | Shows generic inline duplicate-email alert (no login handoff link) |
+| Duplicate email (decoy) | 200 with random UUID (not stored) | UI proceeds to onboarding; register fails later at finish |
 | Sign in (footer) | Link | Navigate to `/login` |
 | Open legal docs | Terms/Privacy links | New tab to `/terms`, `/privacy` |
 
@@ -46,11 +46,12 @@ On submit success, consents are also persisted via `writePendingGoogleConsents` 
 
 ## Auth and session
 
-No account is created on this page. Credentials live in tab-scoped session storage:
+No account is created on this page. Only non-secret handoff state lives in tab-scoped session storage:
 
 | Key | Storage | TTL |
 |-----|---------|-----|
-| `co_pending_signup_v1` | `sessionStorage` | Until onboarding finish, sign-out, or session-expired cleanup |
+| `co_pending_signup_v2` | `sessionStorage` | Signup intent id, email, consents, optional name; 30 min TTL (`expiresAt`) |
+| `co_google_consents_v1` | `sessionStorage` | Consents for Google OAuth path reuse |
 
 `OnboardingRoute` requires `hasPendingSignup()` for guests without a user session.
 
@@ -63,7 +64,7 @@ Session-expired cleanup (`?reason=session_expired`): clears `tokenStore`, `pendi
 | Create signup intent | `authApi.createSignupIntent` | `POST /auth/signup-intent` | `POST /auth/signup-intent` |
 | Logout (session expired cleanup) | `authApi.logout` | `POST /auth/logout` | `POST /auth/logout` |
 
-Signup-intent success: `{ signupIntentId, expiresAt }`. Duplicate email: HTTP 409 with generic message (surfaced as inline duplicate-email UI).
+Signup-intent success: `{ signupIntentId, expiresAt }` (30 min server TTL). Existing email: HTTP **200 decoy** (random UUID never persisted; anti-enumeration). API errors mapped via `mapSignupIntentError` (400 weak password/captcha, 429 rate limit, 503 HIBP unavailable).
 
 Legacy `POST /auth/onboarding/check-email` remains for compatibility but always returns `{ available: true }` to prevent email enumeration.
 
@@ -114,10 +115,11 @@ sequenceDiagram
     Axios->>Middleware: proxy
     Middleware->>Java: POST /auth/signup-intent
 
-    alt email already registered
-        Java-->>Signup: 409 Conflict
-        Signup->>Signup: show generic duplicate-email error alert
-    else email available
+    alt email already registered decoy
+        Java-->>Signup: 200 random signupIntentId not stored
+        Signup->>Storage: writePendingSignup same as new email
+        Signup->>Signup: navigate(/onboarding, replace)
+    else new email
         Java-->>Signup: { signupIntentId, expiresAt }
         Signup->>Storage: writePendingSignup({ signupIntentId, email, consents, name? })
         Signup->>Storage: writePendingGoogleConsents, writeAnalyticsConsent
@@ -128,17 +130,19 @@ sequenceDiagram
 ## Edge cases
 
 - **Deferred account creation**: Closing the tab loses `pendingSignup`; user must restart from signup.
-- **Duplicate email**: Shows a generic inline error; editing the email field clears the message.
-- **Weak password**: Blocked client-side before any API call; server may return 400 with generic weak-password message.
-- **Terms / AI consent not accepted**: Blocked client-side before signup-intent call; server rejects missing AI consent with 400.
-- **Session expired on signup URL**: Wipes all signup handoff state; user re-enters form.
+- **Duplicate email (decoy)**: Server returns 200 with fake intent id; user reaches onboarding but register fails at finish with generic error.
+- **Weak password**: Blocked client-side; server 400 (HIBP pwned) or 503 (HIBP unavailable in prod).
+- **Terms / AI consent not accepted**: Blocked client-side; server 400 if missing.
+- **reCAPTCHA failure**: 400 Security verification failed; widget reset on error.
+- **Rate limits**: Middleware authLimiter 20/15min; Java IP 20/min → 429.
+- **Session expired on signup URL**: Wipes tokens, pending signup, verification; user re-enters form.
 - **Logged-in user**: `GuestRoute` redirects away before form is usable.
-- **reCAPTCHA**: When configured, required on signup-intent submit.
 - **Legacy `/register`**: Permanent redirect to `/signup` in `App.tsx`.
-- **No Google button on signup**: Google OAuth is available on `/login` only; consents collected on signup are reused via `pendingGoogleConsents`.
+- **No Google button on signup**: Google OAuth on `/login` only; consents from signup reused via `pendingGoogleConsents`.
 
 ## Related docs
 
+- [signup-onboarding-pipeline.docx](../signup-onboarding/signup-onboarding-pipeline.docx) — full combined pipeline reference with phased sequence diagrams (DOCX)
 - [shared/auth-infrastructure.md](../shared/auth-infrastructure.md)
 - [shared/route-guards.md](../shared/route-guards.md)
 - [onboarding/PAGE.md](../onboarding/PAGE.md)

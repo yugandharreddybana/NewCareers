@@ -27,8 +27,11 @@ function isSafeUserPhrase(msg: string): boolean {
 }
 
 function statusFallback(status: number | undefined, fallback: string): string {
-  if (status === 401 || status === 403) {
+  if (status === 401) {
     return 'Your session may have expired. Please sign in again.';
+  }
+  if (status === 403) {
+    return 'You do not have permission to perform this action.';
   }
   if (status === 404) {
     return 'This feature is temporarily unavailable. Refresh the page and try again.';

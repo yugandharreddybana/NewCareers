@@ -3,6 +3,7 @@ package com.careerops.service;
 import com.careerops.dto.SkillRunResponse;
 import com.careerops.dto.SkillStartRequest;
 import com.careerops.model.PlanTier;
+import com.careerops.model.PlanTierLimits;
 import com.careerops.model.SkillRun;
 import com.careerops.model.UserProfile;
 import com.careerops.repository.BatchSkillRunRepository;
@@ -46,6 +47,7 @@ import static org.mockito.Mockito.doNothing;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.when;
 
 @ExtendWith(MockitoExtension.class)
@@ -71,6 +73,7 @@ class SkillServiceTest {
     @Mock private SkillLocalFallbackService localFallback;
     @Mock private UserProfileRepository profiles;
     @Mock private UserPlanTierService planTierService;
+    @Mock private UserQuotaGrantService quotaGrantService;
     @Mock private EvaluationReportEnrichmentService evaluationEnrichment;
     @Mock private UserJobSkillMatchService skillMatchService;
     @Mock private TailorResumeBuilderService tailorResumeBuilder;
@@ -78,6 +81,7 @@ class SkillServiceTest {
     @Mock private UserConsentService consentService;
     @Mock private AiProviderRouter aiProviderRouter;                  // Prompt 4
     @Mock private SkillExecutionContextBuilder contextBuilder;        // Prompt 4
+    @Mock private CoverLetterNormalizer coverLetterNormalizer;
 
     private final ObjectMapper mapper = new ObjectMapper();
     private final SimpleMeterRegistry meterRegistry = new SimpleMeterRegistry();
@@ -101,9 +105,12 @@ class SkillServiceTest {
                 conversations, registry, mapper, emailService, notificationService,
                 tokenUsageService, meterRegistry, catalogSkills,
                 evaluationValidator, cvHumanScoreService, cvService, tailorResumePending,
-                localFallback, profiles, planTierService, evaluationEnrichment, skillMatchService,
+                localFallback, profiles, planTierService, quotaGrantService, evaluationEnrichment, skillMatchService,
                 tailorResumeBuilder, skillMdExecutor, consentService, txManager,
-                aiProviderRouter, contextBuilder);  // Prompt 4
+                aiProviderRouter, contextBuilder, coverLetterNormalizer);  // Prompt 4
+
+        lenient().when(quotaGrantService.tokenBudget(any(), any()))
+                .thenAnswer(inv -> PlanTierLimits.tokenBudget(inv.getArgument(1)));
     }
 
     // ================================================================
@@ -361,6 +368,25 @@ class SkillServiceTest {
                 eq(userId), eq(skill), eq(userJobId), eq("pending_answer"));
         when(skillRuns.findValidCachedRun(any(), any(), any(), any())).thenReturn(Optional.empty());
         when(tokenUsageService.hasExceededBudget(userId, 50_000L)).thenReturn(true);
+        when(catalogSkills.handles(skill)).thenReturn(false);
+
+        SkillRunResponse response = skillService.startSkill(
+                new SkillStartRequest(skill, userJobId, null, null, null, null, null, null),
+                userId);
+
+        verify(tokenUsageService).hasExceededBudget(userId, 50_000L);
+        assertThat(response.type()).isEqualTo(SkillRunResponse.Type.ERROR);
+    }
+
+    @Test
+    @DisplayName("executeSkillInternal — catalog skills bypass AI token budget")
+    void catalogSkill_bypassesAiBudget() {
+        UUID userId = UUID.randomUUID();
+        UUID userJobId = UUID.randomUUID();
+        String skill = "help";
+
+        doNothing().when(conversations).deleteByUserIdAndSkillAndUserJobIdAndStatus(
+                eq(userId), eq(skill), eq(userJobId), eq("pending_answer"));
         when(catalogSkills.handles(skill)).thenReturn(true);
         when(catalogSkills.execute(eq(skill), eq(userId), any())).thenReturn(
                 SkillRunResponse.result(skill, mapper.createObjectNode()));
@@ -369,7 +395,7 @@ class SkillServiceTest {
                 new SkillStartRequest(skill, userJobId, null, null, null, null, null, null),
                 userId);
 
-        verify(tokenUsageService).hasExceededBudget(userId, 50_000L);
+        verify(tokenUsageService, never()).hasExceededBudget(any(), any(Long.class));
         assertThat(response.type()).isEqualTo(SkillRunResponse.Type.RESULT);
     }
 }
