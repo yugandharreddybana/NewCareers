@@ -20,8 +20,9 @@ public class OnboardingCvAiParseService {
 
     private static final String SYSTEM_PROMPT = """
         You extract structured data from a CV/résumé for onboarding form prefill.
-        Return a single JSON object only. Do not invent employers, schools, or dates not present in the CV.
-        Use Irish/UK English in cvMarkdown.
+        Return a single JSON object only — no markdown fences, no commentary outside JSON.
+        Do not invent employers, schools, or dates not present in the CV.
+        Use Irish/UK English. Keep cvMarkdown concise (short ## sections); prioritize structured arrays over long prose.
 
         JSON schema:
         {

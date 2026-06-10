@@ -58,7 +58,7 @@ public class NvidiaService {
             "research",              2500,
             "prep-interview",        2500,
             "compare",               1500,
-            "onboarding-cv-parse",   3000,
+            "onboarding-cv-parse",   6144,
             "job-match",             1200,
             "cv-human-score",        800,
             "cv-normalize",          4096,
@@ -305,7 +305,7 @@ public class NvidiaService {
                     }
 
                     String content = resp.path("choices").path(0)
-                               .path("message").path("content").asText("{}");
+                            .path("message").path("content").asText("{}");
                     return new LlmCallResult(content, totalTokens);
 
                 } catch (RestClientResponseException e) {

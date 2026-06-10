@@ -91,12 +91,12 @@ Production frontend on separate origin:
 |----------|------|------------|
 | `GOOGLE_OAUTH_CLIENT_ID` | repo `.env` | [Google Cloud Console](https://console.cloud.google.com/) → Credentials → OAuth 2.0 Web client |
 | `VITE_GOOGLE_CLIENT_ID` | `frontend/.env.local` | **Same value** as `GOOGLE_OAUTH_CLIENT_ID` |
-| `VITE_RECAPTCHA_SITE_KEY` | `frontend/.env.local` | Optional — **onboarding email verify only** (not login) |
-| `captcha.secret` | repo `.env` | Optional — pairs with `VITE_RECAPTCHA_SITE_KEY` for onboarding |
+| `VITE_RECAPTCHA_SITE_KEY` | `frontend/.env.local` | Optional — signup-intent, onboarding CV parse, email OTP (not login word-CAPTCHA) |
+| `captcha.secret` | repo `.env` | Optional — pairs with `VITE_RECAPTCHA_SITE_KEY` for signup + onboarding |
 
 **Login CAPTCHA:** Built-in jumbled word challenge — no third-party keys. Server endpoint `GET /auth/captcha/challenge`; no extra env vars.
 
-**Onboarding Google reCAPTCHA (optional):**
+**Signup + onboarding Google reCAPTCHA (optional):**
 
 ```env
 # frontend/.env.local
@@ -122,9 +122,18 @@ Without Google client ID: email/password auth still works; Google button hidden.
 | Variable | File | How to get |
 |----------|------|------------|
 | `NVIDIA_API_KEY` | repo `.env` | [build.nvidia.com](https://build.nvidia.com) → Get API Key |
-| `NVIDIA_AGENT_MODEL` | repo `.env` | Optional; default `meta/llama-3.3-70b-instruct` |
+| `NVIDIA_MODEL_FAST` | repo `.env` | Optional; default `nvidia/nemotron-3-nano-30b-a3b` — CV parse, job eval, fast skills |
+| `NVIDIA_AGENT_MODEL` | repo `.env` | Optional; agent loop only (not CV parse) |
 
-Without NVIDIA key: jobs still scrape; match scores use heuristic fallback.
+### Onboarding CV parse (optional tuning)
+
+| Variable | File | Default | Purpose |
+|----------|------|---------|---------|
+| `ONBOARDING_CV_AI_PARSE_ENABLED` | repo `.env` | `true` | Enable NVIDIA AI extraction at step 0 Continue |
+| `ONBOARDING_CV_AI_PARSE_TIMEOUT_MS` | repo `.env` | `60000` | Max wait for AI before regex fallback or 422 |
+| `ONBOARDING_CV_REGEX_ENABLED` | repo `.env` | `true` | `false` = AI-only mode (no regex parse or fallback) |
+
+Without NVIDIA key: CV parse uses regex parsers only; job delivery still runs with heuristic match fallback.
 
 ### Job sources (optional — more listings)
 

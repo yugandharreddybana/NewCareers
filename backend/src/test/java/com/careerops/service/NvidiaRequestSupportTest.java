@@ -69,7 +69,7 @@ class NvidiaRequestSupportTest {
     }
 
     @Test
-    void applyNemotronOptions_fastSkill_onlyTemperatureAndTopP() {
+    void applyNemotronOptions_fastSkill_disablesThinkingExplicitly() {
         ObjectNode body = mapper.createObjectNode();
         body.put("max_tokens", 1200);
         var cfg = new NvidiaRequestSupport.NemotronConfig(16384, 8192, 1.0, 0.95);
@@ -79,6 +79,18 @@ class NvidiaRequestSupportTest {
         assertThat(body.path("temperature").asDouble()).isEqualTo(1.0);
         assertThat(body.path("top_p").asDouble()).isEqualTo(0.95);
         assertThat(body.has("reasoning_budget")).isFalse();
-        assertThat(body.has("chat_template_kwargs")).isFalse();
+        assertThat(body.path("chat_template_kwargs").path("enable_thinking").asBoolean()).isFalse();
+    }
+
+    @Test
+    void applyNemotronOptions_onboardingCvParse_disablesThinking() {
+        ObjectNode body = mapper.createObjectNode();
+        body.put("max_tokens", 6144);
+        var cfg = new NvidiaRequestSupport.NemotronConfig(16384, 8192, 1.0, 0.95);
+
+        NvidiaRequestSupport.applyNemotronOptions(body, "onboarding-cv-parse", false, cfg, mapper);
+
+        assertThat(body.path("chat_template_kwargs").path("enable_thinking").asBoolean()).isFalse();
+        assertThat(body.has("reasoning_budget")).isFalse();
     }
 }

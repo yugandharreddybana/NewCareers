@@ -19,6 +19,7 @@ import java.io.IOException;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
@@ -68,6 +69,10 @@ public class OnboardingCvParseService {
     @Value("${onboarding.cv.ai-parse.enabled:true}")
     private boolean aiParseEnabled;
 
+    /** When false, skip regex parsing and regex fallback — AI-only for local testing. */
+    @Value("${onboarding.cv.regex.enabled:true}")
+    private boolean regexEnabled;
+
     /** Max wait for NVIDIA AI enrich before returning regex prefill (avoids multi-minute onboarding stalls). */
     @Value("${onboarding.cv.ai-parse.timeout.ms:60000}")
     private long aiParseTimeoutMs;
@@ -77,6 +82,11 @@ public class OnboardingCvParseService {
     }
 
     public OnboardingCvParseResponse parse(MultipartFile file, ParseOptions options) throws IOException {
+        long parseStartNs = System.nanoTime();
+        long extractMs = 0;
+        long regexMs = 0;
+        long aiMs = 0;
+        boolean aiTimedOut = false;
         if (file == null || file.isEmpty()) {
             throw new ApiException(HttpStatus.BAD_REQUEST, "Upload your CV to continue");
         }
@@ -92,48 +102,88 @@ public class OnboardingCvParseService {
         byte[] bytes = file.getBytes();
         validateMagicBytes(bytes, name, file.getContentType());
 
+        long extractStartNs = System.nanoTime();
         String parsedText = parser.extract(
             new java.io.ByteArrayInputStream(bytes),
             file.getContentType(),
             name
         ).trim();
+        extractMs = (System.nanoTime() - extractStartNs) / 1_000_000;
 
         if (parsedText.isBlank()) {
             throw new ApiException(HttpStatus.UNPROCESSABLE_ENTITY, "Could not read text from your CV file");
         }
 
-        RegexParseResult regex = parseWithRegex(parsedText);
         List<String> warnings = new ArrayList<>();
-        String parseSource = PARSE_SOURCE_REGEX;
+        String parseSource = regexEnabled ? PARSE_SOURCE_REGEX : PARSE_SOURCE_AI;
+        RegexParseResult regex = null;
 
-        List<OnboardingCvParseWorkEntry> work = regex.workExperience();
-        List<OnboardingCvParseEducationEntry> education = regex.education();
-        List<OnboardingCvParseProjectEntry> projects = regex.projects();
-        String headline = regex.headline();
-        String markdown = regex.cvMarkdown();
-        String linkedIn = regex.linkedInUrl();
-        String github = regex.githubUrl();
-        String website = regex.websiteUrl();
+        List<OnboardingCvParseWorkEntry> work = List.of();
+        List<OnboardingCvParseEducationEntry> education = List.of();
+        List<OnboardingCvParseProjectEntry> projects = List.of();
+        String headline = "";
+        String markdown = "";
+        String linkedIn = null;
+        String github = null;
+        String website = null;
         List<String> aiTech = List.of();
         List<String> extractedTargetRoles = List.of();
 
+        if (regexEnabled) {
+            long regexStartNs = System.nanoTime();
+            regex = parseWithRegex(parsedText);
+            regexMs = (System.nanoTime() - regexStartNs) / 1_000_000;
+            work = regex.workExperience();
+            education = regex.education();
+            projects = regex.projects();
+            headline = regex.headline();
+            markdown = regex.cvMarkdown();
+            linkedIn = regex.linkedInUrl();
+            github = regex.githubUrl();
+            website = regex.websiteUrl();
+        }
+
         boolean tryAi = options != null && options.aiAllowed() && aiParseEnabled;
+        if (!regexEnabled && !tryAi) {
+            throw new ApiException(HttpStatus.UNPROCESSABLE_ENTITY,
+                    "CV parse is AI-only (regex disabled); sign-up session required for AI parse.");
+        }
         if (tryAi) {
+            long aiStartNs = System.nanoTime();
             AiParseAttempt aiAttempt = awaitAiParse(parsedText);
+            aiMs = (System.nanoTime() - aiStartNs) / 1_000_000;
+            aiTimedOut = aiAttempt.timedOut();
             Optional<OnboardingCvParseResultValidator.ValidatedAiParse> aiOpt = aiAttempt.result();
             if (aiOpt.isPresent()) {
                 OnboardingCvParseResultValidator.ValidatedAiParse ai = aiOpt.get();
                 parseSource = PARSE_SOURCE_AI;
-                work = pickList(ai.workExperience(), regex.workExperience());
-                education = pickList(ai.education(), regex.education());
-                projects = pickList(ai.projects(), regex.projects());
-                headline = coalesce(ai.headline(), regex.headline());
-                markdown = coalesce(ai.cvMarkdown(), regex.cvMarkdown());
-                linkedIn = coalesceUrl(ai.linkedInUrl(), regex.linkedInUrl());
-                github = coalesceUrl(ai.githubUrl(), regex.githubUrl());
-                website = coalesceUrl(ai.websiteUrl(), regex.websiteUrl());
+                if (regexEnabled) {
+                    work = pickList(ai.workExperience(), regex.workExperience());
+                    education = pickList(ai.education(), regex.education());
+                    projects = pickList(ai.projects(), regex.projects());
+                    headline = coalesce(ai.headline(), regex.headline());
+                    markdown = coalesce(ai.cvMarkdown(), regex.cvMarkdown());
+                    linkedIn = coalesceUrl(ai.linkedInUrl(), regex.linkedInUrl());
+                    github = coalesceUrl(ai.githubUrl(), regex.githubUrl());
+                    website = coalesceUrl(ai.websiteUrl(), regex.websiteUrl());
+                } else {
+                    work = ai.workExperience();
+                    education = ai.education();
+                    projects = ai.projects();
+                    headline = ai.headline();
+                    markdown = ai.cvMarkdown();
+                    linkedIn = ai.linkedInUrl();
+                    github = ai.githubUrl();
+                    website = ai.websiteUrl();
+                }
                 aiTech = ai.techStack();
                 extractedTargetRoles = ai.targetRoles();
+            } else if (!regexEnabled) {
+                String detail = aiAttempt.timedOut()
+                        ? "AI parse timed out after " + aiParseTimeoutMs + "ms"
+                        : "AI parse failed";
+                log.warn("Onboarding CV parse: {} (regex disabled, no fallback)", detail);
+                throw new ApiException(HttpStatus.UNPROCESSABLE_ENTITY, detail);
             } else {
                 warnings.add(aiAttempt.timedOut() ? AI_TIMEOUT_WARNING : AI_FALLBACK_WARNING);
                 log.warn("Onboarding CV parse: AI {}, using regex fallback",
@@ -144,9 +194,12 @@ public class OnboardingCvParseService {
         List<String> dictionaryTech = skillExtraction.extractFromSkillsSection(parsedText);
         List<String> extractedTechStack = parseValidator.mergeTechStack(aiTech, dictionaryTech);
 
-        log.info("Onboarding CV parse: source={} roles={} education={} projects={} tech={} targetRoles={}",
+        long totalMs = (System.nanoTime() - parseStartNs) / 1_000_000;
+        log.info("Onboarding CV parse: source={} roles={} education={} projects={} tech={} targetRoles={} "
+                + "timingMs extract={} regex={} ai={} aiTimedOut={} total={}",
             parseSource, work.size(), education.size(), projects.size(),
-            extractedTechStack.size(), extractedTargetRoles.size());
+            extractedTechStack.size(), extractedTargetRoles.size(),
+            extractMs, regexMs, aiMs, aiTimedOut, totalMs);
 
         return new OnboardingCvParseResponse(
             markdown,

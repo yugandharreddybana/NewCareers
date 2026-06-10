@@ -3,6 +3,8 @@ sequenceDiagram
     participant Onb as Onboarding.tsx
     participant Axios
     participant Java as OnboardingCvParseService
+    participant AI as OnboardingCvAiParseService
+    participant Nvidia as NvidiaService
 
     User->>Onb: Step0 Continue with CV file
     Onb->>Onb: validate fullName headline experienceYears cvFile
@@ -11,25 +13,38 @@ sequenceDiagram
     else CAPTCHA required missing
         Onb-->>User: Complete security check
     else submit parse
-        Onb->>Axios: POST /auth/onboarding/parse-cv multipart
-        Axios->>Java: parse with signupIntentId email
+        Onb->>Axios: POST /auth/onboarding/parse-cv multipart timeout 180s
+        Axios->>Java: parse file signupIntentId email
         alt intent expired or missing prod
             Java-->>Onb: 400 Sign-up session expired
         else AI consent missing
             Java-->>Onb: 400 AI consent required
-        else file invalid type or size
+        else file invalid type size or magic bytes
             Java-->>Onb: 413 415 or 422
-        else parse success
-            alt AI path enabled
-                Java->>Java: OnboardingCvAiParseService
-                alt AI fails
-                    Java->>Java: regex fallback parseWarnings
-                end
-            else regex only
-                Java->>Java: regex parsers
+        else extract text from PDF or DOCX
+            Java->>Java: CvParserService extract
+            alt regex enabled default
+                Java->>Java: regex parsers buildMarkdown
             end
-            Java-->>Onb: work education projects tech roles
-            Onb->>Onb: writeOnboardingCvDraft mapCvParseToOnboarding
-            Onb->>Onb: setStep 1
+            alt aiAllowed consent plus ai-parse enabled plus NVIDIA configured
+                Java->>AI: parse cvText max 14k chars
+                AI->>Nvidia: generateJson onboarding-cv-parse
+                Note over Nvidia: fast model nemotron-3-nano enable_thinking false
+                alt AI success within 60s timeout
+                    AI-->>Java: JSON headline work education projects tech roles cvMarkdown string
+                    Java->>Java: merge AI primary regex fills gaps if regex enabled
+                else AI fails or timeout
+                    alt regex disabled AI-only mode
+                        Java-->>Onb: 422 AI parse failed or timed out
+                    else regex enabled
+                        Java->>Java: regex fallback parseWarnings
+                    end
+                end
+            else regex only dev or Google user
+                Java->>Java: regex parsers only parseSource regex
+            end
+            Java-->>Onb: OnboardingCvParseResponse incl cvMarkdown string
+            Onb->>Onb: writeOnboardingCvDraft sessionStorage not disk file
+            Onb->>Onb: mapCvParseToOnboarding setStep 1
         end
     end

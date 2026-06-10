@@ -12,7 +12,7 @@ Three-step profile setup for new users: basic info + CV upload, work/education b
 | Step 2 — Experience | `ExperienceStep` | `1` |
 | Step 3 — Preferences | `PreferencesStep` | `2` |
 
-Finish (register, upload CV, job delivery) is **out of scope** for the AI CV prefill work — behaviour unchanged.
+Finish (register, org provisioning, upload original CV, job delivery) runs after step 3 preferences.
 
 ## Route
 
@@ -40,13 +40,17 @@ Finish (register, upload CV, job delivery) is **out of scope** for the AI CV pre
 
 Empty link fields may be prefilled from CV header text after parse (user-entered values take precedence).
 
-**CV parse at Continue (Step 1):**
+**CV parse at Continue (Step 0 / Basic Info):**
 
-- `POST /auth/onboarding/parse-cv` with `signupIntentId`, `email`, and optional `captchaToken` (prod/staging).
+- `POST /auth/onboarding/parse-cv` with `signupIntentId`, `email`, and optional `captchaToken` (prod/staging). Frontend Axios timeout **180s**.
+- Server validates **magic bytes** (PDF/DOCX), max 5 MB, extracts text via `CvParserService`.
 - Requires `signupIntent.aiProcessingAccepted` (enforced at signup intent creation and again in `assertEligibleForCvParse`).
-- **AI path** (when consent + `onboarding.cv.ai-parse.enabled` + NVIDIA configured): one slim JSON LLM call extracts work, education, projects, headline, URLs, `techStack`, `targetRoles`, and `cvMarkdown`.
-- **Fallback**: on AI failure or when no signup intent (dev only), regex parsers run; response `parseSource` is `regex` and `parseWarnings` may include a short notice.
-- **Merge**: when AI succeeds, AI fields are primary; regex fills empty sections only.
+- **AI path** (when consent + `onboarding.cv.ai-parse.enabled` + NVIDIA configured): `OnboardingCvAiParseService` → `NvidiaService` feature `onboarding-cv-parse` on **fast tier** (default `nvidia/nemotron-3-nano-30b-a3b`) with **`enable_thinking: false`** (`NvidiaRequestSupport`) so JSON content is not consumed by reasoning tokens.
+- AI prompt: `SYSTEM_PROMPT` JSON schema + user `CV TEXT:\n` (max 14,000 chars). `OnboardingRoleCatalog` hints target role titles.
+- **AI timeout**: `onboarding.cv.ai-parse.timeout.ms` (default 60s). On timeout/failure: regex fallback when `onboarding.cv.regex.enabled=true`; else **422** (AI-only mode).
+- **Regex path** (default): section parsers + `buildMarkdown()`; when AI succeeds, AI fields are primary and regex fills empty sections only.
+- **Google users** (no signup intent): regex-only (`aiAllowed=false`).
+- **`cvMarkdown`**: returned as a **string in the JSON response** — not written as a `.md` file on disk. Stored in `careerops_onboarding_cv_draft` (sessionStorage, truncated 32 KB). Persisted to DB (`user_cv.cv_markdown`) later at delivery stage `normalizing_cv` via `CvNormalizationService.normalizeAndStore`.
 
 **Parse response fields (in addition to existing work/education/projects):**
 
@@ -116,12 +120,12 @@ When roles were auto-filled from the CV (AI parse), helper copy: *"Roles suggest
 
 ### `completeOnboardingFinish` order
 
-1. **Register** (if `pendingSignup`): `signUp` with `emailVerificationId` from session
+1. **Register** (if `pendingSignup`): `signUp` with `emailVerificationId` from session — atomic intent consume, reCAPTCHA when configured, **`OrgProvisioningService.provisionForNewUser`** (personal workspace + free subscription + `primaryBillingOrganizationId`)
 2. **Save profile**: `profileApi.update` with `onboarded: true` (work + education JSONB, including `location`, `degreeLevel`, `degreeTitle`)
-3. **Upload CV**: `profileApi.uploadCv`
+3. **Upload CV**: `profileApi.uploadCv` — **original PDF/DOCX file**, not the step-0 `cvMarkdown` draft
 4. **Save projects**: `profileApi.addPortfolioItem` per onboarding project row
-5. **Start delivery**: `onboardingApi.startDelivery`
-5. Caller polls `onboardingApi.deliveryStatus` until `ready` or `readyPartial`
+5. **Start delivery**: `onboardingApi.startDelivery` (`@PlanGated("ai_skill_run")`)
+6. Caller polls `onboardingApi.deliveryStatus` until `ready` or `readyPartial`; delivery pipeline runs `normalizing_cv` → persists `cv_markdown` to DB
 
 ## Auth and session
 
@@ -129,7 +133,7 @@ When roles were auto-filled from the CV (AI parse), helper copy: *"Roles suggest
 |----------|-----------------|---------|
 | Pending signup | `co_pending_signup_v2` (sessionStorage) | Signup intent id, email, consents, and client expiry until register on finish |
 | Email verification | `co_onboarding_verification_v2` (sessionStorage, 15 min TTL) | `verificationId` after OTP; bound to email + optional `signupIntentId` |
-| CV parse draft | `careerops_onboarding_cv_draft` (sessionStorage) | `cvMarkdown`, counts, `extractedTechStack`, `extractedTargetRoles`, `parseSource` between steps (markdown truncated to 32 KB client-side) |
+| CV parse draft | `careerops_onboarding_cv_draft` (sessionStorage) | In-memory `cvMarkdown` string + counts + `extractedTechStack` + `extractedTargetRoles` + `parseSource` between steps (truncated 32 KB); **not a disk file** |
 | Welcome flag | `nc_welcome_pending` (sessionStorage) | Dashboard celebration after first finish |
 | Tokens | Created at register step inside finish flow | `ensureFreshSession` refreshes before profile save for existing users |
 
@@ -193,7 +197,11 @@ Session expiry during onboarding: toast + `redirectOnSessionExpired('/onboarding
 | CV parse orchestration | `backend/.../OnboardingCvParseService.java` |
 | CV AI parse | `backend/.../OnboardingCvAiParseService.java` |
 | CV AI validation | `backend/.../OnboardingCvParseResultValidator.java` |
+| NVIDIA request opts | `backend/.../NvidiaRequestSupport.java` |
+| Role catalog | `backend/.../OnboardingRoleCatalog.java` |
+| CV normalization | `backend/.../CvNormalizationService.java` |
 | Job delivery | `backend/src/main/java/com/careerops/service/OnboardingDeliveryService.java` |
+| Org provisioning | `backend/src/main/java/com/careerops/service/OrgProvisioningService.java` |
 | Registration | `backend/src/main/java/com/careerops/service/AuthService.java` |
 
 ## Sequence diagram
@@ -246,9 +254,11 @@ sequenceDiagram
 
 ## Edge cases
 
-- **AI parse unavailable**: Regex fallback; user advances with partial data; `parseWarnings` surfaced via toast when present.
+- **AI parse unavailable**: Regex fallback when `ONBOARDING_CV_REGEX_ENABLED=true`; `parseWarnings` toast. When regex disabled (AI-only), AI failure/timeout returns **422** and user cannot advance.
+- **Nemotron thinking tokens**: Fast skills set `enable_thinking: false`; without this, Nemotron 3 Nano exhausts `max_tokens` on reasoning and returns truncated/empty JSON.
 - **Empty tech list**: Step 3 chips unchanged; user selects manually.
 - **Dev without signup intent**: `parse-cv` uses regex only (`aiAllowed=false`); prod/staging require signup session + AI consent.
+- **cvMarkdown not a file**: Step 0 produces a string only; DB markdown is written at delivery `normalizing_cv`, not at parse-cv.
 - **Re-parse on Step 1**: Tech prefill runs only once per session (`techPrefilledRef`); user edits preserved.
 - **No pending signup as guest**: `OnboardingRoute` sends to `/signup`.
 - **Already onboarded**: Redirect to dashboard (with welcome query if flag set).
@@ -258,13 +268,25 @@ sequenceDiagram
 - **Verification TTL**: 15 minutes in sessionStorage (`co_onboarding_verification_v2`); expired → finish fails with "Email verification required."
 - **Delivery timeout**: After 5 minutes polling, toast suggests continuing to dashboard; overlay may stay with partial progress.
 - **Dual progress UI**: HTTP poll (1.5s) + SSE `evaluation-progress`; either `ready` from poll or SSE `COMPLETE` can trigger dashboard redirect.
-- **Plan limit 402**: CV upload or delivery start may return `PLAN_LIMIT_EXCEEDED`; profile may already be saved; billing exempt paths allow upgrade mid-onboarding.
+- **Plan limit 402**: CV upload or delivery start may return `PLAN_LIMIT_EXCEEDED`; `completeOnboardingFinish` surfaces `plan_limit`; Onboarding navigates to `/account/billing`; profile may already be saved.
 - **Delivery failure**: `JobSearchRadarLoader` shows retry or continue to dashboard; profile already saved.
 - **Session expired mid-flow**: `AUTH_LOGGED_OUT_EVENT` or 401 → redirect to signup with expired reason.
 - **Google users**: If already signed in without pending signup, finish skips register and only saves profile.
 - **Username collision on register**: `AuthContext.signUp` retries with random suffix on 409 username conflict.
 - **Eval progress modal**: SSE via `useJobEvaluationProgress`; auto-navigates 1.5s after `COMPLETE`.
 - **Registered email OTP decoy**: Send returns 202 but no email sent (anti-enumeration).
+
+## Environment variables
+
+| Variable | Default | Purpose |
+|----------|---------|---------|
+| `ONBOARDING_CV_AI_PARSE_ENABLED` | `true` | Enable NVIDIA AI at step 0 Continue |
+| `ONBOARDING_CV_AI_PARSE_TIMEOUT_MS` | `60000` | Backend AI wait before fallback/422 |
+| `ONBOARDING_CV_REGEX_ENABLED` | `true` | `false` = AI-only (no regex fallback on failure) |
+| `NVIDIA_API_KEY` | — | Required for AI parse path |
+| `NVIDIA_MODEL_FAST` | `nvidia/nemotron-3-nano-30b-a3b` | Model for `onboarding-cv-parse` |
+
+See also [mandatory-fields.md](../mandatory-fields.md).
 
 ## Related docs
 

@@ -2,19 +2,28 @@ sequenceDiagram
     participant Onb as Onboarding.tsx
     participant Axios
     participant Java as OnboardingDeliveryService
+    participant Norm as CvNormalizationService
     participant Loader as JobSearchRadarLoader
 
     Onb->>Axios: POST /onboarding/delivery/start
     alt plan limit 402
         Java-->>Onb: PLAN_LIMIT_EXCEEDED
-        Onb-->>User: toast upgrade billing
+        Onb-->>User: toast upgrade navigate account billing
     else AI consent missing
         Java-->>Onb: 403 consent required
     else profile not onboarded or no CV
         Java-->>Onb: 400 prerequisite error
     else started
         Java->>Java: async pipeline virtual thread
-        Note over Java: reading_cv normalizing_cv fetching_jobs evaluating_jobs
+        Java->>Java: reading_cv stage
+        Java->>Norm: normalizing_cv normalizeAndStore userId
+        Note over Norm: persists user_cv.cv_markdown to database
+        alt cached job pool available
+            Java->>Java: fetching_jobs Matching roles from todays job pool
+        else live scrape
+            Java->>Java: fetching_jobs Searching job boards
+        end
+        Java->>Java: evaluating_jobs AI evaluate until min 3 jobs
         loop poll every 1.5s max 5 min
             Onb->>Axios: GET /onboarding/delivery/status
             Java-->>Onb: stage progress ready readyPartial failed

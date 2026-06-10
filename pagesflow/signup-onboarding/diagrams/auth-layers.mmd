@@ -2,13 +2,13 @@ flowchart TB
     subgraph Frontend
         SignupUI[Signup.tsx + SignupPageShell]
         OnbUI[Onboarding.tsx + step components]
-        PendingStore[pendingSignup.ts + onboardingVerification.ts]
+        PendingStore[pendingSignup onboardingVerification onboardingCvDraft]
         Axios[api.ts Axios + CSRF]
     end
     subgraph Middleware
         AuthRoutes[auth.routes.ts]
         OnbRoutes[onboarding.routes.ts]
-        Cookies[HttpOnly cookies at finish]
+        Cookies[HttpOnly cookies at register]
     end
     subgraph Backend
         AuthCtrl[AuthController]
@@ -16,7 +16,11 @@ flowchart TB
         SignupIntent[SignupIntentService]
         EmailVerify[OnboardingEmailVerificationService]
         CvParse[OnboardingCvParseService]
+        CvAi[OnboardingCvAiParseService]
+        Nvidia[NvidiaService fast tier]
         Delivery[OnboardingDeliveryService]
+        CvNorm[CvNormalizationService]
+        OrgProv[OrgProvisioningService]
         Captcha[CaptchaService]
         AuthSvc[AuthService.register]
     end
@@ -32,6 +36,10 @@ flowchart TB
     AuthCtrl --> EmailVerify
     AuthCtrl --> CvParse
     AuthCtrl --> AuthSvc
+    CvParse --> CvAi
+    CvAi --> Nvidia
     OnbCtrl --> Delivery
+    Delivery --> CvNorm
+    AuthSvc --> OrgProv
     SignupIntent --> Captcha
     AuthSvc --> Cookies

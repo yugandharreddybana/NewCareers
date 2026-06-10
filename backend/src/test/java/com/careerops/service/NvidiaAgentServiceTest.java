@@ -149,7 +149,7 @@ class NvidiaAgentServiceTest {
             "nvidia/nemotron-3-ultra-550b-a55b", "research");
 
         assertThat(body.has("reasoning_budget")).isFalse();
-        assertThat(body.has("chat_template_kwargs")).isFalse();
+        assertThat(body.path("chat_template_kwargs").path("enable_thinking").asBoolean()).isFalse();
         assertThat(body.path("tools").size()).isEqualTo(3);
         List<String> names = StreamSupport.stream(body.path("tools").spliterator(), false)
             .map(t -> t.path("function").path("name").asText())

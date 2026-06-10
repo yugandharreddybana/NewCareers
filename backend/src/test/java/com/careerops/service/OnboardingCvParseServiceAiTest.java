@@ -12,7 +12,10 @@ import org.springframework.test.util.ReflectionTestUtils;
 import java.util.List;
 import java.util.Optional;
 
+import com.careerops.exception.ApiException;
+
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -33,6 +36,7 @@ class OnboardingCvParseServiceAiTest {
     void setUp() {
         service = new OnboardingCvParseService(parser, fileUtil, aiParseService, validator, skillExtraction);
         ReflectionTestUtils.setField(service, "aiParseEnabled", true);
+        ReflectionTestUtils.setField(service, "regexEnabled", true);
         ReflectionTestUtils.setField(service, "aiParseTimeoutMs", 60_000L);
     }
 
@@ -120,6 +124,23 @@ class OnboardingCvParseServiceAiTest {
         assertThat(response.parseSource()).isEqualTo("regex");
         assertThat(response.parseWarnings()).anyMatch(w -> w.toLowerCase().contains("timed out"));
         assertThat(response.workExperience()).isNotEmpty();
+    }
+
+    @Test
+    void parse_aiOnlyMode_throwsWhenAiFails() throws Exception {
+        ReflectionTestUtils.setField(service, "regexEnabled", false);
+        String cvText = """
+            PROFESSIONAL EXPERIENCE
+            Engineer Jan 2020 – Present
+            Acme Corp
+            """;
+        when(fileUtil.sanitizeFilename(anyString())).thenReturn("cv.pdf");
+        when(parser.extract(org.mockito.ArgumentMatchers.any(), anyString(), anyString())).thenReturn(cvText);
+        when(aiParseService.parse(cvText)).thenReturn(Optional.empty());
+
+        assertThatThrownBy(() -> service.parse(pdfFile(), OnboardingCvParseService.ParseOptions.withAi()))
+                .isInstanceOf(ApiException.class)
+                .hasMessageContaining("AI parse failed");
     }
 
     @Test

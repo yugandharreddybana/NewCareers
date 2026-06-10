@@ -76,7 +76,9 @@ def build() -> None:
         "End-to-end documentation for deferred email signup (/signup) and three-step onboarding "
         "(/onboarding) through first dashboard visit (/dashboard?welcome=1). Covers the Google "
         "shortcut entry path, all validation rules, HTTP errors, sessionStorage handoff, email OTP "
-        "verification, account registration on finish, CV AI parse, and job delivery polling/SSE."
+        "verification, account registration on finish (with org provisioning), CV AI parse "
+        "(Nemotron fast tier, enable_thinking=false), cvMarkdown lifecycle, regex/AI-only modes, "
+        "and job delivery polling/SSE. Updated June 2026."
     )
 
     # ── Part C intro: journey ──
@@ -99,7 +101,9 @@ def build() -> None:
             ["Google new user", "/login", "No", "No (already authed)", "Dashboard after delivery"],
             ["Delivery timeout", "finish", "—", "Profile saved", "Toast + continue to dashboard"],
             ["Plan limit 402", "delivery start", "—", "Profile saved", "Upgrade toast; billing redirect intended"],
-            ["CV parse AI fallback", "step 0", "—", "—", "Regex parse + warning toast"],
+            ["CV parse AI fallback", "step 0", "—", "—", "Regex parse + warning toast (when regex enabled)"],
+            ["CV parse AI-only mode", "step 0", "—", "—", "ONBOARDING_CV_REGEX_ENABLED=false → 422 on AI failure, no fallback"],
+            ["Plan limit at delivery", "finish", "—", "Profile saved", "402 toast + navigate /account/billing"],
         ],
     )
 
@@ -323,8 +327,8 @@ def build() -> None:
         doc,
         [
             "ProtectedRoute allows /account/billing, /billing/success, /billing/cancel without completing onboarding.",
-            "Plan limit 402 on delivery shows upgrade toast; intended redirect to /account/billing.",
-            "Known gap: Onboarding.tsx L402 calls navigate() but hook is nav — billing redirect may not fire.",
+            "Plan limit 402 on CV upload or delivery start: completeOnboardingFinish returns plan_limit reason; Onboarding.tsx navigates to /account/billing.",
+            "Register provisions personal workspace + free subscription via OrgProvisioningService (replaces legacy trial schedulers).",
         ],
     )
     add_diagram(doc, "Diagram: Onboarding Phase 0", "onboarding-phase0-route.png")
@@ -381,10 +385,25 @@ def build() -> None:
     add_bullets(
         doc,
         [
-            "POST /auth/onboarding/parse-cv — multipart file, signupIntentId, email, captchaToken.",
-            "AI path when consent + onboarding.cv.ai-parse.enabled + NVIDIA configured; else regex.",
-            "AI failure → regex fallback with parseWarnings toast.",
-            "writeOnboardingCvDraft (cvMarkdown truncated 32KB client-side).",
+            "POST /auth/onboarding/parse-cv — multipart file, signupIntentId, email, captchaToken. Frontend timeout 180s.",
+            "Server: magic-byte validation (PDF/DOCX), max 5 MB, text extraction via CvParserService.",
+            "AI path when signupIntent + aiProcessingAccepted + onboarding.cv.ai-parse.enabled + NVIDIA configured.",
+            "AI: OnboardingCvAiParseService → NvidiaService feature onboarding-cv-parse; fast model (default nvidia/nemotron-3-nano-30b-a3b); enable_thinking=false (NvidiaRequestSupport) so JSON is not truncated by reasoning tokens.",
+            "AI input: SYSTEM_PROMPT JSON schema + user CV TEXT (max 14,000 chars). Output includes cvMarkdown as a string field in JSON — not a disk file.",
+            "AI timeout: onboarding.cv.ai-parse.timeout.ms (default 60s). On timeout/failure: regex fallback when onboarding.cv.regex.enabled=true; else 422 (AI-only mode).",
+            "Regex path (default): section parsers + buildMarkdown(); merge strategy: AI primary, regex fills empty sections.",
+            "writeOnboardingCvDraft → careerops_onboarding_cv_draft in sessionStorage (cvMarkdown truncated 32KB). No .md file written at step 0.",
+        ],
+    )
+    add_title(doc, "9.1.1 cvMarkdown lifecycle", 2)
+    add_table(
+        doc,
+        ["Stage", "Where cvMarkdown lives", "Notes"],
+        [
+            ["Step 0 parse-cv", "API response string + sessionStorage draft", "In-memory only; aids multi-step prefill metadata"],
+            ["Steps 1–2", "sessionStorage careerops_onboarding_cv_draft", "User form edits are authoritative; draft may lag"],
+            ["Finish upload", "Original PDF/DOCX via POST /profile/cv", "Not the markdown draft"],
+            ["Delivery normalizing_cv", "user_cv.cv_markdown DB column", "CvNormalizationService.normalizeAndStore after register"],
         ],
     )
     add_diagram(doc, "Diagram: Onboarding Phase 1", "onboarding-phase1-cv-parse.png")
@@ -413,9 +432,10 @@ def build() -> None:
         doc,
         [
             "1. signUp (pending) or ensureFreshSession (Google) — Creating your account…",
-            "2. PUT /profile onboarded:true — Saving your profile…",
-            "3. POST /profile/cv + POST /profile/portfolio per project",
-            "4. POST /onboarding/delivery/start — Starting job search…",
+            "   Register: atomic signup-intent consume, email verification consume, reCAPTCHA when configured, OrgProvisioningService.provisionForNewUser (workspace + free subscription + primaryBillingOrganizationId).",
+            "2. PUT /profile onboarded:true — Saving your profile… (work/education JSONB, preferences)",
+            "3. POST /profile/cv (original file) + POST /profile/portfolio per project row",
+            "4. POST /onboarding/delivery/start (@PlanGated ai_skill_run) — Starting job search…",
             "5. clearPendingSignup + clearOnboardingVerification on success",
         ],
     )
@@ -425,7 +445,8 @@ def build() -> None:
     add_bullets(
         doc,
         [
-            "Stages: reading_cv → normalizing_cv → fetching_jobs → evaluating_jobs → ready | ready_partial | failed.",
+            "Stages: reading_cv → normalizing_cv (CvNormalizationService → user_cv.cv_markdown) → fetching_jobs → evaluating_jobs → ready | ready_partial | failed.",
+            "Cached job pool: willUseCachedPoolForOnboarding may show 'Matching roles from today's job pool…' instead of live scrape.",
             "Poll GET /onboarding/delivery/status every 1.5s, max 5 minutes.",
             "JobSearchRadarLoader overlay with per-stage messages.",
             "@PlanGated ai_skill_run → 402 if monthly quota exceeded.",
@@ -479,6 +500,8 @@ def build() -> None:
             ["413", "Max 5 MB"],
             ["415", "Only PDF or DOCX / security violation content mismatch"],
             ["422", "Could not read text from your CV file"],
+            ["422", "AI parse failed or timed out (when ONBOARDING_CV_REGEX_ENABLED=false, no fallback)"],
+            ["422", "CV parse is AI-only; sign-up session required for AI parse"],
         ],
     )
 
@@ -528,7 +551,7 @@ def build() -> None:
         [
             ["co_pending_signup_v2", "sessionStorage", "30 min", "Deferred signup handoff"],
             ["co_onboarding_verification_v2", "sessionStorage", "15 min", "verificationId after OTP"],
-            ["careerops_onboarding_cv_draft", "sessionStorage", "—", "CV parse metadata between steps"],
+            ["careerops_onboarding_cv_draft", "sessionStorage", "—", "cvMarkdown string + parse metadata between steps (not a disk file)"],
             ["nc_welcome_pending", "sessionStorage", "—", "Dashboard welcome modal flag"],
             ["co_google_consents_v1", "sessionStorage", "Session", "Google consent handoff"],
         ],
@@ -578,7 +601,12 @@ def build() -> None:
             ["Email verification", "backend/src/main/java/com/careerops/service/OnboardingEmailVerificationService.java"],
             ["CV parse", "backend/src/main/java/com/careerops/service/OnboardingCvParseService.java"],
             ["CV AI parse", "backend/src/main/java/com/careerops/service/OnboardingCvAiParseService.java"],
+            ["CV AI validation", "backend/src/main/java/com/careerops/service/OnboardingCvParseResultValidator.java"],
+            ["NVIDIA request opts", "backend/src/main/java/com/careerops/service/NvidiaRequestSupport.java"],
+            ["Role catalog hint", "backend/src/main/java/com/careerops/service/OnboardingRoleCatalog.java"],
+            ["CV normalization", "backend/src/main/java/com/careerops/service/CvNormalizationService.java"],
             ["Job delivery", "backend/src/main/java/com/careerops/service/OnboardingDeliveryService.java"],
+            ["Org provisioning", "backend/src/main/java/com/careerops/service/OrgProvisioningService.java"],
             ["Registration", "backend/src/main/java/com/careerops/service/AuthService.java"],
             ["reCAPTCHA", "backend/src/main/java/com/careerops/service/CaptchaService.java"],
         ],
@@ -590,8 +618,10 @@ def build() -> None:
         ["Variable", "Layer", "Purpose"],
         [
             ["VITE_RECAPTCHA_SITE_KEY / RECAPTCHA_SECRET_KEY", "Frontend + Java", "reCAPTCHA on signup-intent, CV parse, OTP"],
-            ["onboarding.cv.ai-parse.enabled", "Java", "Enable NVIDIA AI CV parse"],
-            ["NVIDIA API keys", "Java", "OnboardingCvAiParseService"],
+            ["ONBOARDING_CV_AI_PARSE_ENABLED", "Java", "onboarding.cv.ai-parse.enabled (default true)"],
+            ["ONBOARDING_CV_AI_PARSE_TIMEOUT_MS", "Java", "AI wait before fallback/422 (default 60000)"],
+            ["ONBOARDING_CV_REGEX_ENABLED", "Java", "onboarding.cv.regex.enabled; false = AI-only, no regex fallback"],
+            ["NVIDIA_API_KEY / NVIDIA_MODEL_FAST", "Java", "Fast tier for onboarding-cv-parse (nemotron-3-nano)"],
             ["APP_INTERNAL_SECRET", "Middleware + Java", "HMAC BFF → backend"],
             ["JWT keys", "Middleware + Java", "Session cookies at register"],
         ],

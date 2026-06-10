@@ -3,26 +3,30 @@ sequenceDiagram
     participant Finish as completeOnboardingFinish
     participant AuthContext
     participant Axios
-    participant Java
+    participant Java as AuthService
 
     Onb->>Finish: proceedFinish wizard state
     alt no cvFile
         Finish-->>Onb: missing_cv error
     else pending signup
         Finish->>AuthContext: signUp signupIntentId emailVerificationId
-        AuthContext->>Java: POST /auth/register
-        alt intent expired or decoy
+        AuthContext->>Java: POST /auth/register captchaToken
+        alt intent expired or decoy consumed
             Java-->>Onb: 400 Sign-up session expired
         else no verificationId
             Java-->>Onb: 400 Email verification required
         else success
-            Java-->>AuthContext: user + cookies
+            Java->>Java: consume signup intent atomically
+            Java->>Java: OrgProvisioningService provisionForNewUser
+            Note over Java: personal workspace plus free subscription plus primaryBillingOrgId
+            Java-->>AuthContext: user plus HttpOnly cookies
         end
     else existing Google user
         Finish->>AuthContext: ensureFreshSession
     end
     Finish->>Axios: PUT /profile onboarded true
-    Finish->>Axios: POST /profile/cv
+    Finish->>Axios: POST /profile/cv original PDF or DOCX file
+    Note over Finish: not the step0 cvMarkdown draft
     Finish->>Axios: POST /profile/portfolio per project
-    Finish->>Axios: POST /onboarding/delivery/start
+    Finish->>Axios: POST /onboarding/delivery/start PlanGated ai_skill_run
     Finish->>Finish: clearPendingSignup clearOnboardingVerification

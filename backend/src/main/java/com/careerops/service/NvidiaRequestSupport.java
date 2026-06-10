@@ -65,6 +65,9 @@ public final class NvidiaRequestSupport {
     /**
      * Applies temperature/top_p to every call. Thinking skills also get reasoning_budget
      * and chat_template_kwargs.enable_thinking (plus force_nonempty_content when tools are used).
+     *
+     * Non-thinking fast skills explicitly set enable_thinking=false because Nemotron 3 Nano
+     * enables chain-of-thought by default and can exhaust max_tokens before JSON content.
      */
     public static void applyNemotronOptions(
             ObjectNode body,
@@ -75,7 +78,11 @@ public final class NvidiaRequestSupport {
         body.put("temperature", cfg.temperature());
         body.put("top_p", cfg.topP());
 
+        ObjectNode chatTemplateKwargs = mapper.createObjectNode();
+
         if (!shouldUseThinking(skillOrFeature)) {
+            chatTemplateKwargs.put("enable_thinking", false);
+            body.set("chat_template_kwargs", chatTemplateKwargs);
             return;
         }
 
@@ -89,7 +96,6 @@ public final class NvidiaRequestSupport {
         body.put("max_tokens", maxTokens);
         body.put("reasoning_budget", reasoningBudget);
 
-        ObjectNode chatTemplateKwargs = mapper.createObjectNode();
         chatTemplateKwargs.put("enable_thinking", true);
         if (hasTools) {
             chatTemplateKwargs.put("force_nonempty_content", true);

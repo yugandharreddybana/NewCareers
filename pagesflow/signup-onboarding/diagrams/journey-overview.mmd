@@ -1,22 +1,24 @@
 flowchart TB
     subgraph signupFlow [Signup /signup]
-        S1[Form + consents] --> S2[POST signup-intent]
-        S2 --> S3[co_pending_signup_v2]
+        S1[Form + consents + reCAPTCHA] --> S2[POST signup-intent]
+        S2 --> S3[co_pending_signup_v2 30min TTL]
     end
     subgraph altEntry [Alternate entry]
         G[Google login /login] --> O0
     end
     subgraph onboardingFlow [Onboarding /onboarding]
-        O0[OnboardingRoute] --> O1[Step0 CV parse]
-        O1 --> O2[Step1 Experience]
+        O0[OnboardingRoute] --> O1[Step0 Basic info + CV parse]
+        O1 --> O1b[cvMarkdown string in sessionStorage]
+        O1b --> O2[Step1 Experience review]
         O2 --> O3[Step2 Preferences]
         O3 --> O4{Deferred signup?}
-        O4 -->|yes guest| O5[Email OTP modal]
+        O4 -->|yes guest| O5[Email OTP modal 8 digits]
         O4 -->|Google user| O6[Skip OTP]
-        O5 --> O7[Register + profile + CV]
+        O5 --> O7[Register + org provision + profile + CV file upload]
         O6 --> O7
         O7 --> O8[Job delivery start]
-        O8 --> O9[Poll + SSE progress]
-        O9 --> O10[Dashboard welcome=1]
+        O8 --> O9[normalize CV to DB + scrape + AI eval]
+        O9 --> O10[Poll + SSE progress]
+        O10 --> O11[Dashboard welcome=1]
     end
     signupFlow --> O0

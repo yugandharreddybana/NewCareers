@@ -50,7 +50,7 @@ No account is created on this page. Only non-secret handoff state lives in tab-s
 
 | Key | Storage | TTL |
 |-----|---------|-----|
-| `co_pending_signup_v2` | `sessionStorage` | Signup intent id, email, consents, optional name; 30 min TTL (`expiresAt`) |
+| `co_pending_signup_v2` | `sessionStorage` | Signup intent id, email, consents, optional name; TTL from server `expiresAt` (30 min default); `readPendingSignup` requires `aiProcessingAccepted === true` |
 | `co_google_consents_v1` | `sessionStorage` | Consents for Google OAuth path reuse |
 
 `OnboardingRoute` requires `hasPendingSignup()` for guests without a user session.
@@ -64,11 +64,11 @@ Session-expired cleanup (`?reason=session_expired`): clears `tokenStore`, `pendi
 | Create signup intent | `authApi.createSignupIntent` | `POST /auth/signup-intent` | `POST /auth/signup-intent` |
 | Logout (session expired cleanup) | `authApi.logout` | `POST /auth/logout` | `POST /auth/logout` |
 
-Signup-intent success: `{ signupIntentId, expiresAt }` (30 min server TTL). Existing email: HTTP **200 decoy** (random UUID never persisted; anti-enumeration). API errors mapped via `mapSignupIntentError` (400 weak password/captcha, 429 rate limit, 503 HIBP unavailable).
+Signup-intent success: `{ signupIntentId, expiresAt }` (30 min server TTL). Client stores server `expiresAt` in `writePendingSignup`. Existing email: HTTP **200 decoy** (random UUID never persisted; anti-enumeration). Intent consume at register is atomic (`consumeIfActive`). API errors mapped via `mapSignupIntentError` (400 weak password/captcha, 429 rate limit, 503 HIBP unavailable). reCAPTCHA widget reset on submit failure (`captchaRef.reset()`).
 
-Legacy `POST /auth/onboarding/check-email` remains for compatibility but always returns `{ available: true }` to prevent email enumeration.
+Legacy `POST /auth/onboarding/check-email` remains for compatibility but always returns `{ available: true }` to prevent email enumeration. `GET /auth/signup-intent/{id}/exists` removed.
 
-Actual registration (`POST /auth/signup`) is deferred to onboarding finish — see [onboarding/PAGE.md](../onboarding/PAGE.md).
+Actual registration (`POST /auth/register`) is deferred to onboarding finish — includes reCAPTCHA when configured, email verification consume, and `OrgProvisioningService.provisionForNewUser` — see [onboarding/PAGE.md](../onboarding/PAGE.md).
 
 ## File map
 
@@ -99,6 +99,7 @@ Actual registration (`POST /auth/signup`) is deferred to onboarding finish — s
 | Controller | `backend/src/main/java/com/careerops/controller/AuthController.java` |
 | Signup intent | `backend/src/main/java/com/careerops/service/SignupIntentService.java` |
 | Registration (deferred) | `backend/src/main/java/com/careerops/service/AuthService.java` — `signup` |
+| Org provisioning | `backend/src/main/java/com/careerops/service/OrgProvisioningService.java` |
 
 ## Sequence diagram
 
@@ -121,7 +122,7 @@ sequenceDiagram
         Signup->>Signup: navigate(/onboarding, replace)
     else new email
         Java-->>Signup: { signupIntentId, expiresAt }
-        Signup->>Storage: writePendingSignup({ signupIntentId, email, consents, name? })
+        Signup->>Storage: writePendingSignup({ signupIntentId, email, consents, name?, expiresAt })
         Signup->>Storage: writePendingGoogleConsents, writeAnalyticsConsent
         Signup->>Signup: navigate(/onboarding, replace)
     end
@@ -133,7 +134,7 @@ sequenceDiagram
 - **Duplicate email (decoy)**: Server returns 200 with fake intent id; user reaches onboarding but register fails at finish with generic error.
 - **Weak password**: Blocked client-side; server 400 (HIBP pwned) or 503 (HIBP unavailable in prod).
 - **Terms / AI consent not accepted**: Blocked client-side; server 400 if missing.
-- **reCAPTCHA failure**: 400 Security verification failed; widget reset on error.
+- **reCAPTCHA failure**: 400 Security verification failed; `captchaRef.reset()` on every submit failure.
 - **Rate limits**: Middleware authLimiter 20/15min; Java IP 20/min → 429.
 - **Session expired on signup URL**: Wipes tokens, pending signup, verification; user re-enters form.
 - **Logged-in user**: `GuestRoute` redirects away before form is usable.
