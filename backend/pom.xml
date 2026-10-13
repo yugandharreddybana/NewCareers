@@ -259,6 +259,10 @@
                 <groupId>org.springframework.boot</groupId>
                 <artifactId>spring-boot-maven-plugin</artifactId>
                 <configuration>
+                    <!-- Local default: H2 file DB on :8100 (no Postgres/Redis). Override with -Dspring-boot.run.profiles=dev -->
+                    <profiles>
+                        <profile>test</profile>
+                    </profiles>
                     <jvmArguments>
                         -Xmx1024m -XX:MaxMetaspaceSize=256m
                     </jvmArguments>

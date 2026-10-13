@@ -198,23 +198,70 @@ public class ScraperSidecarLauncher implements ApplicationRunner {
 
     private String resolvePythonCommand() {
         if (pythonCommand != null && !pythonCommand.isBlank()) {
-            return pythonCommand.trim();
+            String configured = pythonCommand.trim();
+            if (commandExists(configured) || Files.isExecutable(Path.of(configured))) {
+                return configured;
+            }
+            log.warn("Configured scraper.python-command '{}' not usable; falling back to discovery", configured);
         }
         List<String> candidates = new ArrayList<>();
+        // Prefer scraper venv when present (local mvn spring-boot:run)
+        Path scraperDir = resolveScraperDirectory();
+        if (scraperDir != null) {
+            Path venvPy = isWindows()
+                ? scraperDir.resolve(".venv/Scripts/python.exe")
+                : scraperDir.resolve(".venv/bin/python");
+            if (Files.isRegularFile(venvPy)) {
+                candidates.add(venvPy.toAbsolutePath().toString());
+            }
+        }
+        String home = System.getProperty("user.home", "");
         if (isWindows()) {
+            // Avoid WindowsApps python.exe stub (opens Store) — prefer real installs
+            if (!home.isBlank()) {
+                candidates.add(Path.of(home, ".local", "bin", "python3.11.exe").toString());
+                candidates.add(Path.of(home, "AppData", "Local", "Programs", "Python", "Python311", "python.exe").toString());
+                candidates.add(Path.of(home, "AppData", "Local", "Programs", "Python", "Python312", "python.exe").toString());
+            }
             candidates.add("py");
-            candidates.add("python");
+            candidates.add("python3.11");
             candidates.add("python3");
+            candidates.add("python");
         } else {
+            candidates.add("python3.11");
             candidates.add("python3");
             candidates.add("python");
         }
         for (String cmd : candidates) {
-            if (commandExists(cmd)) {
+            if (cmd.contains("\\") || cmd.contains("/")) {
+                if (Files.isRegularFile(Path.of(cmd))) {
+                    return cmd;
+                }
+                continue;
+            }
+            if (commandExists(cmd) && !isWindowsStoreStub(cmd)) {
                 return cmd;
             }
         }
         return null;
+    }
+
+    /** Windows Store alias that does not run Python — skip it. */
+    private static boolean isWindowsStoreStub(String cmd) {
+        if (!isWindows()) {
+            return false;
+        }
+        try {
+            ProcessBuilder pb = new ProcessBuilder("where", cmd);
+            Process p = pb.start();
+            if (!p.waitFor(3, TimeUnit.SECONDS) || p.exitValue() != 0) {
+                return false;
+            }
+            String where = new String(p.getInputStream().readAllBytes());
+            return where.toLowerCase().contains("windowsapps");
+        } catch (Exception e) {
+            return false;
+        }
     }
 
     private static boolean commandExists(String cmd) {

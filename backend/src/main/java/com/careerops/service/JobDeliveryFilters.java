@@ -183,6 +183,12 @@ public final class JobDeliveryFilters {
                 addDesiredRoleVariant(out, seen, "Full Stack Developer");
                 addDesiredRoleVariant(out, seen, "Full Stack Engineer");
             }
+            if (roleNorm.contains("backend")) {
+                addDesiredRoleVariant(out, seen, "Software Engineer");
+                addDesiredRoleVariant(out, seen, "Backend Developer");
+                addDesiredRoleVariant(out, seen, "Java Developer");
+                addDesiredRoleVariant(out, seen, "Node.js Developer");
+            }
         }
         return out;
     }

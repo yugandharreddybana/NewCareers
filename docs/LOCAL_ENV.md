@@ -4,25 +4,40 @@
 
 Uses a **file-backed H2** database on Java port **8100** (default path `%USERPROFILE%\.careerops\db\` on Windows, `~/.careerops/db/` on macOS/Linux) so accounts and jobs **survive backend restarts**. One canonical mock job is seeded on first DB creation only.
 
-```bash
-# Terminal 1 — Java (default `test` profile)
-cd backend
-mvn spring-boot:run
-# Tests are skipped by default (backend `run` Maven profile). Run tests explicitly:
-# mvn test -Dmaven.test.skip=false -DskipTests=false
+**Works on a fresh laptop** without Postgres, Redis, or a filled root `.env` — the Maven plugin and `test` profile ship local secrets; blank `.env` keys no longer wipe them.
 
-# Terminal 2 — middleware
+```bash
+# One-time per machine
+# Windows:  .\scripts\bootstrap-local.ps1
+# macOS/Linux: ./scripts/bootstrap-local.sh
+
+# Terminal 1 — Java (H2 test profile on :8100)
+# Windows:  .\scripts\start-backend.ps1
+# Or:       cd backend && mvn spring-boot:run
+# macOS/Linux: ./scripts/start-backend.sh
+
+# Terminal 2 — middleware (JAVA_BACKEND_URL must be http://localhost:8100)
 cd middleware
-cp .env.example .env   # if you do not already have .env
+cp .env.example .env   # first time only (or copy manually on Windows)
 npm install && npm run dev
 
 # Terminal 3 — frontend
 cd frontend
 npm install && npm run dev
-# Or: npm run dev:stack from frontend/ (Vite + middleware together)
 ```
 
-Open http://localhost:5173 — the dashboard should show seeded jobs without calling fetch.
+Open http://localhost:5173 — seed login **`dev@careerops.ie` / `password`**.
+
+### Backend won't start on another PC?
+
+| Symptom | Fix |
+|---------|-----|
+| Connection refused / Postgres errors | Ran without `test` profile. Use `mvn spring-boot:run` (defaults to `test`) or `.\scripts\start-backend.ps1` |
+| `APP_INTERNAL_SECRET` / `APP_MASTER_KEK` / JWT FATAL | Blank values in root `.env` were overriding defaults — fixed for `test`; or remove blank lines / use start script |
+| `Schema "careerops" not found` | Stop Java, delete `%USERPROFILE%\.careerops\db\*.mv.db`, rerun bootstrap + backend |
+| Middleware 401 / HMAC failures | `middleware/.env` `APP_INTERNAL_SECRET` must match Java (see `.env.example`) and `JAVA_BACKEND_URL=http://localhost:8100` |
+| Frontend up, API dead | Middleware still pointed at `:8080` — change to `:8100` |
+| Scraper / Python Store stub | Optional; run bootstrap for `scraper/.venv`, or ignore (Remotive/Jobicy/etc. still work) |
 
 ### Local database persistence
 
@@ -150,6 +165,23 @@ ADZUNA_APP_KEY=your_app_key
 ```
 
 Register at [developer.adzuna.com](https://developer.adzuna.com/). Without these, Adzuna is skipped; IrishJobs, Jobs.ie, LinkedIn public, Remotive, and other sources still run.
+
+## Careerjet (optional, free publisher API)
+
+Careerjet.com is a job aggregator: crawl/index boards + career sites, then expose search. Their **publisher API is free** (click revenue share); it is not an anonymous scrape.
+
+```bash
+CAREERJET_API_KEY=your_publisher_api_key
+CAREERJET_LOCALE=en_IE
+CAREERJET_REFERER=http://localhost:5173/jobs
+```
+
+1. Register at [careerjet.com/partners](https://www.careerjet.com/partners)
+2. Add your site and copy the API key
+3. Whitelist your server’s outbound IP in the dashboard
+4. Restart the backend
+
+Without a key, Careerjet is skipped. **Arbeitnow** and **RemoteOK** (no key) still add large free remote/EU feeds alongside Remotive / Jobicy / WeWorkRemotely.
 
 ## GDPR & consent (local dev)
 

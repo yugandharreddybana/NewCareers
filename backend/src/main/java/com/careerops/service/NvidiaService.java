@@ -304,8 +304,15 @@ public class NvidiaService {
                         }
                     }
 
-                    String content = resp.path("choices").path(0)
-                            .path("message").path("content").asText("{}");
+                    JsonNode message = resp.path("choices").path(0).path("message");
+                    String content = message.path("content").asText("");
+                    // ponytail: GLM-5.x may return null content with only reasoning_content when
+                    // max_tokens is exhausted mid-think; treat as empty so callers fall back cleanly.
+                    if (content == null || content.isBlank() || "null".equalsIgnoreCase(content)) {
+                        log.warn("NvidiaService: empty message.content for feature={} model={} (reasoningPresent={})",
+                                featureName, resolvedModel, message.hasNonNull("reasoning_content"));
+                        content = "{}";
+                    }
                     return new LlmCallResult(content, totalTokens);
 
                 } catch (RestClientResponseException e) {

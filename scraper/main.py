@@ -17,7 +17,14 @@ from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, HttpUrl
 
-from scrapegraphai.graphs import SmartScraperGraph
+# ScrapeGraphAI is optional — company careers use Playwright only. Install with:
+#   pip install scrapegraphai  (needs SCRAPER_LLM_API_KEY for /scrape endpoints)
+try:
+    from scrapegraphai.graphs import SmartScraperGraph
+    _HAS_SCRAPEGRAPH = True
+except ImportError:  # pragma: no cover
+    SmartScraperGraph = None  # type: ignore[misc, assignment]
+    _HAS_SCRAPEGRAPH = False
 
 # ── App setup ─────────────────────────────────────────────────────────────────
 app = FastAPI(
@@ -101,7 +108,20 @@ class PlaywrightJobScrapeResponse(BaseModel):
 # ── Endpoints ─────────────────────────────────────────────────────────────────
 @app.get("/health")
 def health():
-    return {"status": "ok", "service": "scraper"}
+    return {
+        "status": "ok",
+        "service": "scraper",
+        "scrapegraphai": _HAS_SCRAPEGRAPH,
+        "playwright": True,
+    }
+
+
+def _require_scrapegraph():
+    if not _HAS_SCRAPEGRAPH or SmartScraperGraph is None:
+        raise HTTPException(
+            status_code=503,
+            detail="ScrapeGraphAI not installed. pip install scrapegraphai and set SCRAPER_LLM_API_KEY.",
+        )
 
 
 @app.post("/scrape", response_model=ScrapeResponse)
@@ -110,6 +130,7 @@ async def scrape_generic(body: ScrapeRequest):
     Generic scrape endpoint.
     Send any URL and a natural-language prompt describing what to extract.
     """
+    _require_scrapegraph()
     try:
         config = _build_graph_config(timeout=body.timeout)
         graph = SmartScraperGraph(
@@ -142,15 +163,27 @@ async def scrape_jobs_playwright(body: PlaywrightJobScrapeRequest):
             page = await browser.new_page()
             await page.goto(body.url, wait_until="networkidle", timeout=timeout_ms)
 
+            # Wait briefly for SPA career pages to hydrate
+            try:
+                await page.wait_for_timeout(1500)
+            except Exception:
+                pass
+
             selectors = [
                 "a[href*='/job/']",
                 "a[href*='/jobs/']",
                 "a[href*='career']",
                 "a[href*='position']",
                 "a[href*='vacanc']",
+                "a[href*='opening']",
+                "a[href*='requisition']",
                 "[data-automation-id='jobTitle']",
+                "[data-testid*='job'] a",
                 ".job-title a",
                 ".job-listing a",
+                ".opening a",
+                "li.job a",
+                "article a[href]",
             ]
             seen: set[str] = set()
             for sel in selectors:
@@ -162,7 +195,7 @@ async def scrape_jobs_playwright(body: PlaywrightJobScrapeRequest):
                         if not title or len(title) < 4 or len(title) > 160:
                             continue
                         lower = title.lower()
-                        if any(x in lower for x in ("cookie", "privacy", "sign in")):
+                        if any(x in lower for x in ("cookie", "privacy", "sign in", "learn more", "view all")):
                             continue
                         if not href:
                             continue
@@ -172,11 +205,11 @@ async def scrape_jobs_playwright(body: PlaywrightJobScrapeRequest):
                             continue
                         seen.add(key)
                         jobs.append({"title": title, "url": url, "location": body.location or "Remote"})
-                        if len(jobs) >= 25:
+                        if len(jobs) >= 80:
                             break
                     except Exception:
                         continue
-                if len(jobs) >= 25:
+                if len(jobs) >= 80:
                     break
 
             await browser.close()
@@ -192,6 +225,7 @@ async def scrape_jobs(body: JobScrapeRequest):
     Extracts a structured list of job postings from any careers/jobs page.
     Returns a list of jobs with title, company, location, salary, url, and description.
     """
+    _require_scrapegraph()
     job_prompt = (
         "Extract all job listings from this page. "
         "For each job return: title, company, location, salary (if available), "

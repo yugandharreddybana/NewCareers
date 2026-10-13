@@ -1,10 +1,8 @@
-# ScrapeGraphAI and its core dependencies
-scrapegraphai>=1.13.0
-
-# FastAPI + server
+# Core sidecar (company Playwright fetch + health) — enough for local CareerOps
 fastapi>=0.115.0
 uvicorn[standard]>=0.30.0
 python-dotenv>=1.0.0
-
-# Playwright is required by ScrapeGraphAI for fetching dynamic pages
 playwright>=1.44.0
+
+# Optional LLM scraper endpoints (/scrape, /scrape/jobs):
+#   pip install scrapegraphai

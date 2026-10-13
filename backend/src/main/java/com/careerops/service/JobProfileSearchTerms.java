@@ -29,14 +29,40 @@ public final class JobProfileSearchTerms {
         if (profile != null && profile.getTargetRoles() != null) {
             for (String role : profile.getTargetRoles()) {
                 addKeyword(out, seen, role);
+                addRoleVariants(out, seen, role);
             }
         }
         if (profile != null) {
             addKeyword(out, seen, profile.getGoalTitle());
+            addRoleVariants(out, seen, profile.getGoalTitle());
         }
 
         if (out.isEmpty()) out.add(FALLBACK_KEYWORD);
         return out;
+    }
+
+    /** Broaden board queries so free APIs return more listings. */
+    private static void addRoleVariants(List<String> out, Set<String> seen, String raw) {
+        if (raw == null || raw.isBlank()) return;
+        String lower = raw.toLowerCase(Locale.ROOT);
+        if (lower.contains("backend") || lower.contains("back-end") || lower.contains("back end")) {
+            addKeyword(out, seen, "Software Engineer");
+            addKeyword(out, seen, "Backend Developer");
+            addKeyword(out, seen, "Java Developer");
+            addKeyword(out, seen, "Node.js Developer");
+        }
+        if (lower.contains("full stack") || lower.contains("fullstack")) {
+            addKeyword(out, seen, "Full Stack Developer");
+            addKeyword(out, seen, "Software Engineer");
+        }
+        if (lower.contains("software") && (lower.contains("engineer") || lower.contains("developer"))) {
+            addKeyword(out, seen, "Software Developer");
+            addKeyword(out, seen, "Full Stack Engineer");
+        }
+        if (lower.contains("data")) {
+            addKeyword(out, seen, "Data Engineer");
+            addKeyword(out, seen, "Data Analyst");
+        }
     }
 
     /** First keyword for legacy single-query callers. */

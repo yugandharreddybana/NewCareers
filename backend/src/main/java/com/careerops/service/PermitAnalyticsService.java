@@ -305,7 +305,9 @@ public class PermitAnalyticsService {
     // ─── Helpers ─────────────────────────────────────────────────────────────
 
     private PermitSnapshot requireActiveSnapshot(int year) {
+        // Prefer the active row; fall back to any snapshot for that year (historical YOY / local seed).
         return snapshotRepository.findActiveByYear(year)
+                .or(() -> snapshotRepository.findFirstBySourceYearOrderByFetchedAtDesc(year))
                 .orElseThrow(() -> new ResourceNotFoundException("Permit snapshot for year", year));
     }
 

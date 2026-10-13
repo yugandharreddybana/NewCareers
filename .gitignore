@@ -77,11 +77,34 @@ bin/
 
 # IDEs
 .idea/
-.vscode/
+.vscode/*
+!.vscode/launch.json
+!.vscode/extensions.json
 *.swp
 *.swo
 *.swn
 .DS_Store
+
+# Python scraper local venv / caches
+scraper/.venv/
+scraper/__pycache__/
+**/__pycache__/
+*.pyc
+
+# Playwright / local reports
+playwright-report/
+test-results/
+.blob/
+
+# Local debug / personal artifacts
+debug-*.log
+*.pdf
+HomePage/
+
+# Editor / agent local state
+.cursor/
+.serena/
+.kilo/
 
 # Vite
 dist/
@@ -99,3 +122,7 @@ backend/tmp-*.html
 # backend/src/main/resources/application.properties
 middleware/.env
 frontend/.env
+
+# Personal scratch
+/HomePage
+/Yugandhar_Reddy_Bana_India.pdf

@@ -21,4 +21,6 @@ public interface PermitSnapshotRepository extends JpaRepository<PermitSnapshot, 
             ORDER BY ps.sourceYear DESC
             """)
     List<Integer> findAllActiveYears();
+
+    Optional<PermitSnapshot> findFirstBySourceYearOrderByFetchedAtDesc(int year);
 }

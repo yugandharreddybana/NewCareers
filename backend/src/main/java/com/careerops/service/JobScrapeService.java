@@ -34,11 +34,10 @@ public class JobScrapeService {
     private static final Logger log = LoggerFactory.getLogger(JobScrapeService.class);
 
     /**
-     * Hard per-source deadline. Set to 35s so it is always wider than any
-     * internal HTTP read timeout (typically 20-30s), giving the source a
-     * chance to complete normally before we cancel it.
+     * Hard per-source deadline for listing scrapes. Wider than free-API
+     * multi-query fetches (Remotive/Jobicy/WWR) so we do not cut them off early.
      */
-    private static final int SOURCE_TIMEOUT_SECONDS = 35;
+    private static final int SOURCE_TIMEOUT_SECONDS = 50;
 
     private final List<JobSource> sources;
     private final List<JobSource> deliverySources;
@@ -71,7 +70,8 @@ public class JobScrapeService {
         List<CompletableFuture<List<Job>>> futures = deliverySources.stream()
                 .filter(JobSource::hasBudget)
                 .map(s -> {
-                    long timeoutSec = s instanceof com.careerops.service.sources.company.CompanyCareerSource ? 120 : 25;
+                    // Free APIs (Remotive/Jobicy/RSS) need headroom; company Playwright stays at 120s
+                    long timeoutSec = s instanceof com.careerops.service.sources.company.CompanyCareerSource ? 120 : 45;
                     return CompletableFuture.supplyAsync(() -> {
                         try {
                             return s.fetch(profile);

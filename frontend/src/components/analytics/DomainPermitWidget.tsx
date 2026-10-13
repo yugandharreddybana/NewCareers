@@ -203,6 +203,10 @@ export function DomainPermitWidget({ domainKey }: Props) {
         <p className="text-sm text-amber-900 font-medium">
           Permit intelligence is temporarily unavailable.
         </p>
+        <p className="mt-1 text-xs text-amber-800/80 max-w-md mx-auto">
+          Official permit snapshots may still be loading for local development.
+          Wait a few seconds after the backend starts, then refresh.
+        </p>
         <button
           type="button"
           onClick={refresh}

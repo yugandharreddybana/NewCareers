@@ -465,7 +465,7 @@ public class JobDeliveryService {
     private List<Job> fetchSourceWithTimeout(JobSource source, UserProfile profile) {
         try {
             return CompletableFuture.supplyAsync(() -> source.fetch(profile))
-                .orTimeout(15, java.util.concurrent.TimeUnit.SECONDS)
+                .orTimeout(45, java.util.concurrent.TimeUnit.SECONDS)
                 .exceptionally(ex -> { log.warn("Fetch from {} timed out: {}", source.name(), ex.getMessage()); return List.of(); })
                 .join();
         } catch (Exception e) {

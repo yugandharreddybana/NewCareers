@@ -64,6 +64,23 @@ public class JobApiHttpClient {
                 .build());
     }
 
+    /** GET with several extra headers (Careerjet needs Authorization + Referer). */
+    public String getWithHeaders(String url, String userAgent, java.util.Map<String, String> headers) {
+        Request.Builder b = new Request.Builder()
+                .url(url)
+                .header("User-Agent", userAgent == null || userAgent.isBlank() ? DEFAULT_UA : userAgent)
+                .header("Accept", "application/json,*/*")
+                .header("Accept-Encoding", "gzip, deflate");
+        if (headers != null) {
+            headers.forEach((k, v) -> {
+                if (k != null && !k.isBlank() && v != null) {
+                    b.header(k, v);
+                }
+            });
+        }
+        return execute(b.build());
+    }
+
     private String execute(Request request) {
         try (Response response = httpClient.newCall(request).execute()) {
             if (!response.isSuccessful()) {

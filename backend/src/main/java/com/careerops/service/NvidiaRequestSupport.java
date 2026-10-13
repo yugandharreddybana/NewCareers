@@ -81,7 +81,9 @@ public final class NvidiaRequestSupport {
         ObjectNode chatTemplateKwargs = mapper.createObjectNode();
 
         if (!shouldUseThinking(skillOrFeature)) {
+            // GLM-5.x and Nemotron both default to chain-of-thought; force answer into content.
             chatTemplateKwargs.put("enable_thinking", false);
+            chatTemplateKwargs.put("force_nonempty_content", true);
             body.set("chat_template_kwargs", chatTemplateKwargs);
             return;
         }

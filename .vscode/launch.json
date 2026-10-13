@@ -1,0 +1,29 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "type": "java",
+      "name": "CareerOps Backend (H2 test :8100)",
+      "request": "launch",
+      "mainClass": "com.careerops.CareerOpsApplication",
+      "projectName": "careerops-backend",
+      "cwd": "${workspaceFolder}/backend",
+      "env": {
+        "SPRING_PROFILES_ACTIVE": "test"
+      },
+      "vmArgs": "-Xmx1024m"
+    },
+    {
+      "type": "java",
+      "name": "CareerOps Backend (Postgres dev :8080)",
+      "request": "launch",
+      "mainClass": "com.careerops.CareerOpsApplication",
+      "projectName": "careerops-backend",
+      "cwd": "${workspaceFolder}/backend",
+      "env": {
+        "SPRING_PROFILES_ACTIVE": "dev"
+      },
+      "vmArgs": "-Xmx1024m"
+    }
+  ]
+}
